@@ -30,7 +30,8 @@ run = [
 
 [tasks."lgtm:build:gpui"]
 description = "Build the GPUI desktop app (slow first time)"
-run = "cargo build -p lgtm-desktop-gpui"
+# GPUI is a standalone workspace; `-p` from the root workspace can't find it.
+run = "cd apps/lgtm-desktop-gpui && cargo build"
 
 [tasks."lgtm:cli"]
 description = "Run the lgtm CLI (positional args pass through)"
@@ -67,4 +68,4 @@ run = "cd apps/lgtm-desktop-tauri && cargo tauri dev"
 [tasks."lgtm:run:gpui"]
 description = "Run the GPUI desktop app (expects lgtm:serve in another shell)"
 depends = ["lgtm:build:gpui"]
-run = "cargo run -p lgtm-desktop-gpui"
+run = "cd apps/lgtm-desktop-gpui && cargo run"
