@@ -17,6 +17,9 @@ use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
+// Actions dispatched by the composer's key bindings; registered in main.rs.
+actions!(lgtm, [SubmitComposer, CancelComposer]);
+
 use crate::client::LgtmClient;
 use crate::diff::{DiffLineKind, parse_diff};
 use crate::highlight::{Highlighter, lang_for_path};
@@ -702,6 +705,16 @@ impl ReviewView {
             .border_1()
             .border_color(rgb(ACCENT))
             .rounded(px(6.))
+            // Scope Cmd+Enter / Escape to this composer. The TextareaState's
+            // own key bindings still handle plain Enter (newline), typing,
+            // arrows, etc. — the parent only intercepts the two shortcuts.
+            .key_context("Composer")
+            .on_action(cx.listener(|this, _: &SubmitComposer, _window, cx| {
+                this.submit_composer(cx)
+            }))
+            .on_action(cx.listener(|this, _: &CancelComposer, _window, cx| {
+                this.cancel_composer(cx)
+            }))
             .child(
                 div()
                     .flex()
@@ -755,7 +768,7 @@ impl ReviewView {
                 div()
                     .text_size(px(10.))
                     .text_color(rgb(MUTED))
-                    .child("Click Submit to post · Cancel to abort"),
+                    .child("Cmd+Enter: submit · Esc: cancel · Enter: newline"),
             )
     }
 }
