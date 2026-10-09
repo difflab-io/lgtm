@@ -47,6 +47,8 @@ pub struct ReviewView {
     client: Arc<LgtmClient>,
     state: ReviewState,
     composer_focus: FocusHandle,
+    /// Toggles every ~530 ms to drive the composer cursor blink.
+    cursor_on: bool,
 }
 
 impl ReviewView {
@@ -57,9 +59,42 @@ impl ReviewView {
             client: client.clone(),
             state: ReviewState::default(),
             composer_focus: cx.focus_handle(),
+            cursor_on: true,
         };
         this.spawn_initial_load(cx);
+        this.spawn_cursor_blink(cx);
         this
+    }
+
+    /// Background timer that flips `cursor_on` every 530 ms and triggers
+    /// a re-render — but only when there's a composer open, so idle views
+    /// don't repaint. 530 ms matches macOS's default caret blink period.
+    fn spawn_cursor_blink(&mut self, cx: &mut Context<Self>) {
+        use std::time::Duration;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(530))
+                    .await;
+                let keep_going = this
+                    .update(cx, |this, cx| {
+                        if this.state.composer.is_some() {
+                            this.cursor_on = !this.cursor_on;
+                            cx.notify();
+                        } else {
+                            // Reset to "on" so the first keystroke after
+                            // opening the composer shows a stable caret.
+                            this.cursor_on = true;
+                        }
+                        true
+                    })
+                    .is_ok();
+                if !keep_going {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     fn spawn_initial_load(&mut self, cx: &mut Context<Self>) {
@@ -682,11 +717,14 @@ impl ReviewView {
         composer: &Composer,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
+        let caret = if self.cursor_on { "▎" } else { " " };
         let body = SharedString::from(if composer.body.is_empty() {
-            composer.placeholder().to_owned()
+            // Prefix the placeholder with the caret so the user sees focus even
+            // before they start typing.
+            format!("{caret}{}", composer.placeholder())
         } else {
-            // Append a visible block cursor so the user has a focus signal.
-            format!("{}▎", composer.body)
+            // Append a blinking caret at the end of the typed text.
+            format!("{}{caret}", composer.body)
         });
         let is_placeholder = composer.body.is_empty();
         let header = SharedString::from(match composer.target {
