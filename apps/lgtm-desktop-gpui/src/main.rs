@@ -1,11 +1,10 @@
-//! lgtm-desktop-gpui — native Rust review shell on top of Zed's gpui.
+//! lgtm-desktop-gpui — native Rust review shell on top of gpui-kit.
 //!
-//! Boot sequence:
-//! 1. `gpui_platform::application().run(...)` starts the platform event loop.
-//! 2. The callback reads `LGTM_ADDR` / `LGTM_REPO` / `LGTM_BASE` into a
-//!    [`ReviewConfig`], opens one window, and mounts a [`ReviewView`].
-//! 3. The view spawns background requests to the lgtm-server and renders
-//!    changed files + colored, syntax-highlighted diffs + comment threads.
+//! `gpui-kit` is the longbridge-packaged fork of GPUI that ships GPUI itself
+//! (`use gpui_kit::*` IS GPUI) plus the `gpui-component` widget library:
+//! `Input`, `Textarea`, `Button`, etc. Using it in place of Zed's raw gpui
+//! git source lets the composer use a real text input (selection, arrows,
+//! clipboard, IME) instead of a hand-rolled key handler.
 
 mod client;
 mod diff;
@@ -14,11 +13,8 @@ mod proto;
 mod review;
 mod review_state;
 
-use gpui::{
-    App, AppContext, Bounds, Point, TitlebarOptions, WindowBackgroundAppearance, WindowBounds,
-    WindowOptions, point, px, size,
-};
-use gpui_platform::application;
+use gpui_kit::assets::Assets;
+use gpui_kit::*;
 
 use crate::review::ReviewView;
 use crate::review_state::ReviewConfig;
@@ -32,29 +28,27 @@ fn main() {
         config.backend, config.repo_path, config.base_ref
     );
 
-    application().run(move |cx: &mut App| {
+    let app = gpui_kit::application().with_assets(Assets);
+    app.run(move |cx: &mut App| {
+        gpui_kit::init(cx);
+
         let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
+        let window_options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            titlebar: Some(TitlebarOptions {
+                title: Some("lgtm".into()),
+                appears_transparent: true,
+                traffic_light_position: Some(Point { x: px(9.), y: px(9.) }),
+            }),
+            window_background: WindowBackgroundAppearance::Opaque,
+            ..Default::default()
+        };
+
         let config = config.clone();
-        cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                // Appear-transparent titlebar lets the root view's background
-                // bleed into the titlebar region, so the system chrome matches
-                // the rest of the app instead of showing default white/grey.
-                titlebar: Some(TitlebarOptions {
-                    title: Some("lgtm".into()),
-                    appears_transparent: true,
-                    traffic_light_position: Some(Point { x: px(9.), y: px(9.) }),
-                }),
-                window_background: WindowBackgroundAppearance::Opaque,
-                ..Default::default()
-            },
-            move |_, cx| cx.new(|cx| ReviewView::new(config, cx)),
-        )
+        gpui_kit::open_window(window_options, cx, move |window, cx| {
+            cx.new(|cx| ReviewView::new(config, window, cx))
+        })
         .expect("open main window");
         cx.activate(true);
     });
-
-    // `point` is kept imported above for symmetry even if unused elsewhere.
-    let _ = point::<gpui::Pixels>;
 }

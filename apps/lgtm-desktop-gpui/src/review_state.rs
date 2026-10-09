@@ -1,5 +1,6 @@
-//! State owned by `ReviewView`. Pulled into its own module so the GPUI
-//! rendering code in `review.rs` stays about layout, not transport.
+//! State owned by `ReviewView`. The composer now wraps a gpui-kit
+//! `TextareaState` entity (via `review.rs`); only metadata and payload data
+//! live here so this file stays free of UI library concerns.
 
 use crate::proto::{AuthorKind, ChangedFile, Thread, User};
 
@@ -26,26 +27,12 @@ impl ReviewConfig {
 }
 
 /// What the composer is anchored to: a new thread on a diff line, or a reply
-/// to an existing thread.
+/// to an existing thread. Owned by `review::Composer` alongside the
+/// `Entity<TextareaState>` that holds the editable text.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ComposerTarget {
     NewThread { line: i32 },
     Reply { thread_id: i64 },
-}
-
-/// A single active in-GPUI text input. There is at most one open at a time.
-pub struct Composer {
-    pub target: ComposerTarget,
-    pub body: String,
-}
-
-impl Composer {
-    pub fn placeholder(&self) -> &'static str {
-        match self.target {
-            ComposerTarget::NewThread { .. } => "Leave a comment — Enter to submit, Esc to cancel",
-            ComposerTarget::Reply { .. } => "Reply — Enter to submit, Esc to cancel",
-        }
-    }
 }
 
 #[derive(Default)]
@@ -57,7 +44,6 @@ pub struct ReviewState {
     pub user: Option<User>,
     pub error: Option<String>,
     pub loading: bool,
-    pub composer: Option<Composer>,
 }
 
 impl ReviewState {

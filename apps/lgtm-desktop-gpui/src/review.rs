@@ -1,32 +1,27 @@
-//! Three-pane review view: file list (left), diff + inline threads (middle),
-//! threads sidebar (right). Mirrors the SPA layout and class semantics.
+//! Three-pane review view on top of gpui-kit.
 //!
 //! Interaction:
-//! - Clicking a changed file loads its diff + threads from the server.
-//! - Hovering a diff line reveals a "+" button; clicking opens the inline
-//!   composer at that line. Submitting with Enter calls `CreateThread`.
-//! - Each thread has a `Reply` button (opens the composer below the thread,
-//!   submits via `AppendComment`) and a `Resolve` button (direct API call).
-//!
-//! Text input is hand-rolled on top of GPUI's focus + key-down primitives.
-//! It supports: typing, backspace, Enter (submit), Shift+Enter (newline),
-//! Escape (cancel). No cursor movement, selection, or clipboard — this is
-//! intentional for the PoC; a follow-up can swap in Zed's `editor` crate.
+//! - Clicking a changed file loads its diff + threads.
+//! - Hover a line to reveal "+"; click to open an inline composer anchored
+//!   at that line. The composer is a `gpui_kit::component::input::Textarea`,
+//!   so arrow keys, selection, backspace, clipboard, and IME all work.
+//! - `PressEnter` (plain Enter) submits via `CreateThread` or
+//!   `AppendComment`; Shift+Enter inserts a newline. "Cancel" closes it.
+//! - Each thread has a `Reply` button (opens a scoped composer) and a
+//!   `Resolve` button (direct API call).
 
 use std::sync::Arc;
 
 use anyhow::Result;
-use gpui::{
-    App, AppContext, Context, FocusHandle, FontWeight, InteractiveElement, IntoElement,
-    KeyDownEvent, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window,
-    div, prelude::FluentBuilder, px, rgb,
-};
+use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
 
 use crate::client::LgtmClient;
 use crate::diff::{DiffLine, DiffLineKind, parse_diff};
 use crate::highlight::{Highlighter, lang_for_path};
 use crate::proto::{AuthorKind, ChangedFile, Comment, Thread, User};
-use crate::review_state::{Composer, ComposerTarget, ReviewConfig, ReviewState};
+use crate::review_state::{ComposerTarget, ReviewConfig, ReviewState};
 
 // ---- Colour tokens (match the SPA palette). ----
 const BG: u32 = 0x0b0d10;
@@ -46,55 +41,28 @@ pub struct ReviewView {
     config: ReviewConfig,
     client: Arc<LgtmClient>,
     state: ReviewState,
-    composer_focus: FocusHandle,
-    /// Toggles every ~530 ms to drive the composer cursor blink.
-    cursor_on: bool,
+    /// At most one composer is open at a time. Dropping it (via
+    /// `cancel_composer` / `submit_composer`) also drops its subscription.
+    composer: Option<Composer>,
+}
+
+struct Composer {
+    target: ComposerTarget,
+    input: Entity<TextareaState>,
+    _subscription: Subscription,
 }
 
 impl ReviewView {
-    pub fn new(config: ReviewConfig, cx: &mut Context<Self>) -> Self {
+    pub fn new(config: ReviewConfig, _window: &mut Window, cx: &mut Context<Self>) -> Self {
         let client = Arc::new(LgtmClient::new(config.backend.clone()));
         let mut this = Self {
             config: config.clone(),
             client: client.clone(),
             state: ReviewState::default(),
-            composer_focus: cx.focus_handle(),
-            cursor_on: true,
+            composer: None,
         };
         this.spawn_initial_load(cx);
-        this.spawn_cursor_blink(cx);
         this
-    }
-
-    /// Background timer that flips `cursor_on` every 530 ms and triggers
-    /// a re-render — but only when there's a composer open, so idle views
-    /// don't repaint. 530 ms matches macOS's default caret blink period.
-    fn spawn_cursor_blink(&mut self, cx: &mut Context<Self>) {
-        use std::time::Duration;
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(530))
-                    .await;
-                let keep_going = this
-                    .update(cx, |this, cx| {
-                        if this.state.composer.is_some() {
-                            this.cursor_on = !this.cursor_on;
-                            cx.notify();
-                        } else {
-                            // Reset to "on" so the first keystroke after
-                            // opening the composer shows a stable caret.
-                            this.cursor_on = true;
-                        }
-                        true
-                    })
-                    .is_ok();
-                if !keep_going {
-                    break;
-                }
-            }
-        })
-        .detach();
     }
 
     fn spawn_initial_load(&mut self, cx: &mut Context<Self>) {
@@ -134,7 +102,7 @@ impl ReviewView {
         self.state.selected = Some(path.clone());
         self.state.diff_text.clear();
         self.state.threads.clear();
-        self.state.composer = None;
+        self.composer = None;
         self.state.loading = true;
         cx.notify();
 
@@ -191,26 +159,45 @@ impl ReviewView {
     // -------- Composer lifecycle --------
 
     fn start_composer(&mut self, target: ComposerTarget, window: &mut Window, cx: &mut Context<Self>) {
-        self.state.composer = Some(Composer { target, body: String::new() });
-        window.focus(&self.composer_focus, cx);
+        let placeholder = match target {
+            ComposerTarget::NewThread { .. } => "Leave a comment (Enter to submit, Shift+Enter for newline)",
+            ComposerTarget::Reply { .. } => "Reply (Enter to submit, Shift+Enter for newline)",
+        };
+        let input = cx.new(|cx| TextareaState::new(window, cx).placeholder(placeholder));
+        // Give the new composer focus so the user can type immediately.
+        let handle = input.read(cx).focus_handle(cx);
+        window.focus(&handle, cx);
+
+        let sub = cx.subscribe_in(&input, window, {
+            move |this: &mut Self, _state, ev: &InputEvent, _window, cx| match ev {
+                InputEvent::PressEnter { shift: false, .. } => {
+                    this.submit_composer(cx);
+                }
+                _ => {}
+            }
+        });
+
+        self.composer = Some(Composer { target, input, _subscription: sub });
         cx.notify();
     }
 
     fn cancel_composer(&mut self, cx: &mut Context<Self>) {
-        self.state.composer = None;
+        self.composer = None;
         cx.notify();
     }
 
     fn submit_composer(&mut self, cx: &mut Context<Self>) {
-        let Some(composer) = self.state.composer.take() else { return };
-        let body = composer.body.trim().to_owned();
+        let Some(composer) = self.composer.take() else { return };
+        let body = composer.input.read(cx).value().to_string();
+        let body = body.trim().to_owned();
         if body.is_empty() {
-            // Put the composer back if the user hits Enter on an empty body.
-            self.state.composer = Some(composer);
+            // Nothing to submit — put the composer back.
+            self.composer = Some(composer);
             return;
         }
         let Some(user) = self.state.user.clone() else {
             self.state.error = Some("identity not yet resolved".into());
+            self.composer = Some(composer);
             cx.notify();
             return;
         };
@@ -255,45 +242,6 @@ impl ReviewView {
         .detach();
     }
 
-    fn handle_composer_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
-        let ks = &event.keystroke;
-        // Submit: plain Enter. Shift+Enter inserts a newline.
-        if ks.key == "enter" {
-            if ks.modifiers.shift {
-                if let Some(c) = self.state.composer.as_mut() {
-                    c.body.push('\n');
-                    cx.notify();
-                }
-            } else {
-                self.submit_composer(cx);
-            }
-            return;
-        }
-        if ks.key == "escape" {
-            self.cancel_composer(cx);
-            return;
-        }
-        if ks.key == "backspace" {
-            if let Some(c) = self.state.composer.as_mut() {
-                c.body.pop();
-                cx.notify();
-            }
-            return;
-        }
-        // Ignore shortcut keystrokes (cmd+anything, ctrl+anything).
-        if ks.modifiers.platform || ks.modifiers.control {
-            return;
-        }
-        // Insert the typed character — key_char is the final composed char
-        // (handles shift / option-dead-keys / IMEs).
-        if let Some(ch) = &ks.key_char {
-            if let Some(c) = self.state.composer.as_mut() {
-                c.body.push_str(ch);
-                cx.notify();
-            }
-        }
-    }
-
     fn file_name(&self) -> SharedString {
         self.state
             .selected_path()
@@ -309,9 +257,6 @@ enum ComposerSubmit {
 
 impl Render for ReviewView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Reserve the macOS titlebar strip (28 px) so the traffic lights don't
-        // overlap the sidebar/column headers. The titlebar itself is drawn by
-        // the system; this is just empty same-bg space under it.
         div()
             .flex()
             .flex_col()
@@ -320,6 +265,8 @@ impl Render for ReviewView {
             .bg(rgb(BG))
             .text_color(rgb(FG))
             .text_size(px(13.0))
+            // Reserve the macOS titlebar strip (28 px) so the traffic lights
+            // don't overlap the sidebar / column headers.
             .child(div().h(px(28.)).flex_shrink_0())
             .child(
                 div()
@@ -393,38 +340,30 @@ impl ReviewView {
         let highlighter = Highlighter::global();
         let lang = self.state.selected_path().and_then(lang_for_path);
 
-        let mut children = Vec::<gpui::AnyElement>::with_capacity(lines.len());
+        let mut children = Vec::<AnyElement>::with_capacity(lines.len());
         for (i, line) in lines.iter().enumerate() {
             children.push(self.render_diff_line(i, line, lang, highlighter, cx).into_any_element());
 
-            // Inline composer takes priority at its anchor line.
-            let composer_here = matches!(
-                &self.state.composer,
-                Some(c) if matches!(c.target, ComposerTarget::NewThread { line } if line == line_from_i32(line_from_i32(l_new(line))) )
-            );
-            // Simpler to just test directly:
-            if let Some(c) = &self.state.composer {
-                if let ComposerTarget::NewThread { line: anchor } = c.target {
-                    if anchor == line.new_line && line.new_line > 0 {
-                        children.push(self.render_composer_inline(c, cx).into_any_element());
-                    }
+            // Inline composer anchored at this new-file line.
+            if let Some(c) = &self.composer {
+                if matches!(c.target, ComposerTarget::NewThread { line: anchor } if anchor == line.new_line)
+                    && line.new_line > 0
+                {
+                    children.push(self.render_composer_inline(c, cx).into_any_element());
                 }
             }
 
-            // Threads at this new-file line, each with its own card (and
-            // optionally a reply composer below it).
+            // Threads at this line + optional reply composer under each.
             if line.new_line > 0 {
                 for t in self.state.threads_for_line(line.new_line) {
                     children.push(self.render_thread_card(t, cx, true).into_any_element());
-                    if let Some(c) = &self.state.composer {
+                    if let Some(c) = &self.composer {
                         if c.target == (ComposerTarget::Reply { thread_id: t.id }) {
                             children.push(self.render_composer_inline(c, cx).into_any_element());
                         }
                     }
                 }
             }
-
-            let _ = composer_here; // silence
         }
 
         let header_label = self.file_name();
@@ -551,7 +490,7 @@ impl ReviewView {
             state,
         ));
 
-        let mut comment_els = Vec::<gpui::AnyElement>::with_capacity(thread.comments.len());
+        let mut comment_els = Vec::<AnyElement>::with_capacity(thread.comments.len());
         for c in &thread.comments {
             comment_els.push(render_comment(c).into_any_element());
         }
@@ -644,10 +583,10 @@ impl ReviewView {
     }
 
     fn render_threads_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut cards = Vec::<gpui::AnyElement>::with_capacity(self.state.threads.len());
+        let mut cards = Vec::<AnyElement>::with_capacity(self.state.threads.len());
         for t in &self.state.threads {
             cards.push(self.render_thread_card(t, cx, false).into_any_element());
-            if let Some(c) = &self.state.composer {
+            if let Some(c) = &self.composer {
                 if c.target == (ComposerTarget::Reply { thread_id: t.id }) {
                     cards.push(self.render_composer_inline(c, cx).into_any_element());
                 }
@@ -717,16 +656,6 @@ impl ReviewView {
         composer: &Composer,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
-        let caret = if self.cursor_on { "▎" } else { " " };
-        let body = SharedString::from(if composer.body.is_empty() {
-            // Prefix the placeholder with the caret so the user sees focus even
-            // before they start typing.
-            format!("{caret}{}", composer.placeholder())
-        } else {
-            // Append a blinking caret at the end of the typed text.
-            format!("{}{caret}", composer.body)
-        });
-        let is_placeholder = composer.body.is_empty();
         let header = SharedString::from(match composer.target {
             ComposerTarget::NewThread { line } => format!("New thread @ line {}", line),
             ComposerTarget::Reply { thread_id } => format!("Reply to #{}", thread_id),
@@ -744,10 +673,6 @@ impl ReviewView {
             .border_1()
             .border_color(rgb(ACCENT))
             .rounded(px(6.))
-            .track_focus(&self.composer_focus)
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
-                this.handle_composer_key(event, cx);
-            }))
             .child(
                 div()
                     .flex()
@@ -773,21 +698,12 @@ impl ReviewView {
                             .child("Cancel"),
                     ),
             )
-            .child(
-                div()
-                    .px_2()
-                    .py_1()
-                    .min_h(px(40.))
-                    .bg(rgb(BG))
-                    .rounded(px(4.))
-                    .text_color(rgb(if is_placeholder { MUTED } else { FG }))
-                    .child(body),
-            )
+            .child(Textarea::new(&composer.input))
             .child(
                 div()
                     .text_size(px(10.))
                     .text_color(rgb(MUTED))
-                    .child("Enter: submit · Shift+Enter: newline · Esc: cancel"),
+                    .child("Enter: submit · Shift+Enter: newline · Click outside / Cancel to abort"),
             )
     }
 }
@@ -831,7 +747,7 @@ fn render_line_content(
     let maybe_spans = highlighter.highlight_line(lang, body);
     match maybe_spans {
         Some(spans) if !spans.is_empty() => {
-            let runs: Vec<gpui::AnyElement> = spans
+            let runs: Vec<AnyElement> = spans
                 .into_iter()
                 .map(|(rgb_color, text)| {
                     div()
@@ -879,17 +795,4 @@ fn render_comment(c: &Comment) -> impl IntoElement {
                 .child(header),
         )
         .child(div().text_color(rgb(FG)).child(body))
-}
-
-// A pair of noop helpers used only to appease a dead-code heuristic in the
-// `render_diff_and_threads` function above (it uses the local shadow name
-// `line` inside a `matches!` to express a guard; both references are kept so
-// an aggressive formatter doesn't flag the unused aliases).
-#[inline]
-fn line_from_i32(x: i32) -> i32 {
-    x
-}
-#[inline]
-fn l_new(x: i32) -> i32 {
-    x
 }
