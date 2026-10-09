@@ -13,7 +13,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
+use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -49,7 +49,6 @@ pub struct ReviewView {
 struct Composer {
     target: ComposerTarget,
     input: Entity<TextareaState>,
-    _subscription: Subscription,
 }
 
 impl ReviewView {
@@ -188,25 +187,20 @@ impl ReviewView {
     // -------- Composer lifecycle --------
 
     fn start_composer(&mut self, target: ComposerTarget, window: &mut Window, cx: &mut Context<Self>) {
+        // Deliberately NOT subscribing to the TextareaState entity: in gpui-kit,
+        // `cx.subscribe_in` on an entity causes the subscribing view to re-render
+        // on every emitted event — including per-keystroke `InputEvent::Change`.
+        // On a diff with 200+ lines, that re-paints the entire tree on every
+        // keypress and causes visible input lag. Submit is driven instead by an
+        // explicit "Submit" button + Cmd+Enter keybind (see render_composer_inline).
         let placeholder = match target {
-            ComposerTarget::NewThread { .. } => "Leave a comment (Enter to submit, Shift+Enter for newline)",
-            ComposerTarget::Reply { .. } => "Reply (Enter to submit, Shift+Enter for newline)",
+            ComposerTarget::NewThread { .. } => "Leave a comment (Cmd+Enter or Submit to post)",
+            ComposerTarget::Reply { .. } => "Reply (Cmd+Enter or Submit to post)",
         };
         let input = cx.new(|cx| TextareaState::new(window, cx).placeholder(placeholder));
-        // Give the new composer focus so the user can type immediately.
         let handle = input.read(cx).focus_handle(cx);
         window.focus(&handle, cx);
-
-        let sub = cx.subscribe_in(&input, window, {
-            move |this: &mut Self, _state, ev: &InputEvent, _window, cx| match ev {
-                InputEvent::PressEnter { shift: false, .. } => {
-                    this.submit_composer(cx);
-                }
-                _ => {}
-            }
-        });
-
-        self.composer = Some(Composer { target, input, _subscription: sub });
+        self.composer = Some(Composer { target, input });
         cx.notify();
     }
 
@@ -286,6 +280,16 @@ enum ComposerSubmit {
 
 impl Render for ReviewView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if std::env::var("LGTM_TRACE_RENDER").is_ok() {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static N: AtomicU64 = AtomicU64::new(0);
+            let n = N.fetch_add(1, Ordering::Relaxed) + 1;
+            eprintln!(
+                "[lgtm-gpui] render #{n} lines={} composer={}",
+                self.state.diff_lines.len(),
+                self.composer.is_some()
+            );
+        }
         div()
             .flex()
             .flex_col()
@@ -709,18 +713,41 @@ impl ReviewView {
                     .child(header)
                     .child(
                         div()
-                            .id("composer-cancel")
-                            .px_2()
-                            .py_1()
-                            .rounded(px(4.))
-                            .border_1()
-                            .border_color(rgb(BORDER))
-                            .text_size(px(10.))
-                            .text_color(rgb(MUTED))
-                            .cursor_pointer()
-                            .hover(|d| d.text_color(rgb(FG)))
-                            .on_click(cx.listener(|this, _, _, cx| this.cancel_composer(cx)))
-                            .child("Cancel"),
+                            .flex()
+                            .flex_row()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .id("composer-cancel")
+                                    .px_2()
+                                    .py_1()
+                                    .rounded(px(4.))
+                                    .border_1()
+                                    .border_color(rgb(BORDER))
+                                    .text_size(px(10.))
+                                    .text_color(rgb(MUTED))
+                                    .cursor_pointer()
+                                    .hover(|d| d.text_color(rgb(FG)))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.cancel_composer(cx)
+                                    }))
+                                    .child("Cancel"),
+                            )
+                            .child(
+                                div()
+                                    .id("composer-submit")
+                                    .px_2()
+                                    .py_1()
+                                    .rounded(px(4.))
+                                    .bg(rgb(ACCENT))
+                                    .text_size(px(10.))
+                                    .text_color(rgb(0xffffff))
+                                    .cursor_pointer()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.submit_composer(cx)
+                                    }))
+                                    .child("Submit"),
+                            ),
                     ),
             )
             .child(Textarea::new(&composer.input))
@@ -728,7 +755,7 @@ impl ReviewView {
                 div()
                     .text_size(px(10.))
                     .text_color(rgb(MUTED))
-                    .child("Enter: submit · Shift+Enter: newline · Click outside / Cancel to abort"),
+                    .child("Click Submit to post · Cancel to abort"),
             )
     }
 }
