@@ -4,9 +4,15 @@
   "version": "0.1.0",
   "identifier": "io.difflab.lgtm.desktop.tauri",
   "build": {
-    "beforeDevCommand": "bun --cwd ../lgtm-web-tanstack-spa run dev",
+    "beforeDevCommand": {
+      "cwd": "../lgtm-web-tanstack-spa",
+      "script": "bun run dev"
+    },
     "devUrl": "http://localhost:3000",
-    "beforeBuildCommand": "bun --cwd ../lgtm-web-tanstack-spa run build",
+    "beforeBuildCommand": {
+      "cwd": "../lgtm-web-tanstack-spa",
+      "script": "bun run build"
+    },
     "frontendDist": "../lgtm-web-tanstack-spa/dist/client"
   },
   "app": {
@@ -14,8 +20,8 @@
       {
         "label": "main",
         "title": "lgtm-desktop-tauri",
-        "width": 800,
-        "height": 600,
+        "width": 1280,
+        "height": 800,
         "theme": "Dark",
         "titleBarStyle": "Transparent",
         "backgroundColor": "#000000"
