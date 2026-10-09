@@ -1,0 +1,57 @@
+[tools]
+rust = { version = "1.88", components = "rustfmt,clippy,rust-analyzer" }
+
+[tasks.install]
+description = "Resolve and fetch Cargo dependencies"
+run = "cargo fetch"
+
+[tasks.build]
+description = "Build the e2e cli test crate"
+run = "cargo build --tests"
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = "cargo clean"
+
+[tasks.test]
+description = "Run the CLI e2e tests (needs lgtm-server + lgtm binaries built)"
+depends = ["//apps/lgtm-server:build", "//apps/lgtm-cli:build"]
+run = "cargo test"
+
+[tasks.lint]
+description = "Lint with clippy (deny warnings)"
+run = "cargo clippy --all-targets --all-features -- -D warnings"
+
+[tasks."lint:fix"]
+description = "Auto-fix clippy findings"
+run = "cargo clippy --fix --allow-dirty --allow-staged --allow-no-vcs"
+
+[tasks.format]
+description = "Format Rust sources"
+run = "cargo fmt --all"
+
+[tasks."format:check"]
+description = "Check formatting without modifying files"
+run = "cargo fmt --all --check"
+
+[tasks.env-pull]
+run = 'echo "env-pull: nothing to pull"'
+
+[tasks."publish:rc"]
+run = 'echo "publish:rc: not configured"'
+
+[tasks.publish]
+run = 'echo "publish: not configured"'
+
+[tasks.run]
+run = 'echo "run: tests-only crate"'
+
+[tasks.dev]
+run = 'echo "dev: tests-only crate"'
+
+[tasks.deploy]
+run = 'echo "deploy: no deployable surface"'
+
+[tasks.e2e]
+depends = ["//apps/lgtm-server:build", "//apps/lgtm-cli:build"]
+run = "cargo test"

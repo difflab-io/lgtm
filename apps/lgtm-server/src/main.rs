@@ -9,7 +9,7 @@ use lgtm_grpc::{server::build_router, service::DefaultService};
 use tracing_subscriber::EnvFilter;
 
 const DEFAULT_ADDR: &str = "127.0.0.1:50051";
-const DB_PATH: &str = ".tmp/db.sqlite";
+const DEFAULT_DB_PATH: &str = ".tmp/db.sqlite";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -17,10 +17,11 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
 
+    let db_path = std::env::var("LGTM_DB_PATH").unwrap_or_else(|_| DEFAULT_DB_PATH.into());
     let db = Arc::new(
-        Db::open_at(DB_PATH).with_context(|| format!("open sqlite db at {DB_PATH}"))?,
+        Db::open_at(&db_path).with_context(|| format!("open sqlite db at {db_path}"))?,
     );
-    tracing::info!(path = DB_PATH, "sqlite db opened");
+    tracing::info!(path = %db_path, "sqlite db opened");
 
     let addr: std::net::SocketAddr = std::env::var("LGTM_ADDR")
         .unwrap_or_else(|_| DEFAULT_ADDR.into())
@@ -31,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
     let app = build_router(service);
 
     let listener = tokio::net::TcpListener::bind(addr).await.context("bind listener")?;
-    tracing::info!(%addr, "lgtm-grpc listening");
+    tracing::info!(%addr, "lgtm-server listening");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())

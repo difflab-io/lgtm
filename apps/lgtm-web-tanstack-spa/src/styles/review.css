@@ -7,7 +7,8 @@
   --lgtm-muted: #8b94a3;
   --lgtm-accent: #4c9aff;
   --lgtm-border: #1e2228;
-  --lgtm-sidebar-width: 320px;
+  --lgtm-sidebar-width: 280px;
+  --lgtm-threads-width: 340px;
   --lgtm-added: #40c057;
   --lgtm-modified: #4c9aff;
   --lgtm-deleted: #e03131;
@@ -30,8 +31,27 @@ body,
 
 .lgtm-layout {
   display: grid;
-  grid-template-columns: var(--lgtm-sidebar-width) 1fr;
+  grid-template-columns: var(--lgtm-sidebar-width) 1fr var(--lgtm-threads-width);
   height: 100vh;
+}
+.lgtm-threads-sidebar {
+  border-left: 1px solid var(--lgtm-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.lgtm-threads-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.lgtm-check {
+  color: var(--lgtm-muted);
+  font-size: 10px;
+  text-transform: lowercase;
 }
 
 .lgtm-sidebar {
@@ -73,8 +93,9 @@ body,
 .lgtm-fileitem {
   width: 100%;
   display: grid;
-  grid-template-columns: 68px 1fr;
+  grid-template-columns: 68px 1fr auto;
   align-items: center;
+  gap: 8px;
   text-align: left;
   background: transparent;
   border: none;
@@ -82,6 +103,13 @@ body,
   padding: 4px 12px;
   cursor: pointer;
   font: inherit;
+}
+.lgtm-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(76, 154, 255, 0.2);
+  color: var(--lgtm-accent);
 }
 
 .lgtm-fileitem:hover {
@@ -149,22 +177,59 @@ body,
 
 .lgtm-diff-body {
   margin: 0;
-  padding: 12px 16px;
+  padding: 0;
   overflow: auto;
   flex: 1;
-  white-space: pre;
   font-size: 12.5px;
   line-height: 1.5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .lgtm-line {
-  display: block;
+  display: grid;
+  grid-template-columns: 48px 1ch 20px 1fr;
+  align-items: baseline;
+  white-space: pre;
+}
+.lgtm-ln {
+  text-align: right;
+  padding-right: 8px;
+  color: var(--lgtm-muted);
+  user-select: none;
+  opacity: 0.6;
 }
 .lgtm-marker {
   display: inline-block;
-  width: 1ch;
   opacity: 0.6;
   user-select: none;
+}
+.lgtm-addthread {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--lgtm-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  margin: 0 4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.lgtm-addthread-spacer {
+  cursor: default;
+}
+.lgtm-line:hover .lgtm-addthread {
+  opacity: 1;
+  background: var(--lgtm-accent);
+  color: #fff;
+}
+.lgtm-code {
+  overflow: hidden;
 }
 .lgtm-line-added {
   background: rgba(64, 192, 87, 0.12);
@@ -185,6 +250,158 @@ body,
 .lgtm-line-header {
   color: var(--lgtm-muted);
 }
-/* Shiki ships inline-styled spans whose colors are the github-dark theme.
- * We leave their foreground alone and let the diff line background tint
- * added/removed. */
+/* Shiki ships inline-styled spans whose colors are the github-dark theme. */
+
+/* -------- Threads -------- */
+
+.lgtm-inline-thread {
+  padding: 8px 12px 8px 70px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.lgtm-thread {
+  background: #121520;
+  border: 1px solid var(--lgtm-border);
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+}
+.lgtm-thread.is-resolved {
+  opacity: 0.6;
+}
+.lgtm-thread-draft {
+  border-color: var(--lgtm-accent);
+}
+.lgtm-thread-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--lgtm-muted);
+  font-size: 11px;
+}
+.lgtm-thread-state {
+  color: var(--lgtm-fg);
+}
+
+.lgtm-comments {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lgtm-comment {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+.lgtm-comment-author {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  color: var(--lgtm-muted);
+  font-size: 10px;
+}
+.lgtm-author-badge {
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.lgtm-author-user {
+  background: rgba(76, 154, 255, 0.2);
+  color: var(--lgtm-accent);
+}
+.lgtm-author-agent {
+  background: rgba(245, 159, 0, 0.2);
+  color: var(--lgtm-untracked);
+}
+.lgtm-author-name {
+  color: var(--lgtm-fg);
+  font-weight: 600;
+}
+.lgtm-comment-time {
+  margin-left: auto;
+}
+.lgtm-comment-body {
+  margin-top: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--lgtm-fg);
+}
+
+.lgtm-reply {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lgtm-reply-input {
+  background: #0b0d10;
+  border: 1px solid var(--lgtm-border);
+  color: var(--lgtm-fg);
+  padding: 6px;
+  border-radius: 4px;
+  resize: vertical;
+  font: inherit;
+  font-family: system-ui, sans-serif;
+}
+.lgtm-reply-input:focus {
+  outline: 1px solid var(--lgtm-accent);
+}
+
+.lgtm-btn {
+  background: var(--lgtm-accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font: inherit;
+  align-self: flex-end;
+}
+.lgtm-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.lgtm-btn-ghost {
+  background: transparent;
+  color: var(--lgtm-muted);
+  border: 1px solid var(--lgtm-border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+.lgtm-btn-ghost:hover {
+  color: var(--lgtm-fg);
+}
+
+.lgtm-identity {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--lgtm-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--lgtm-muted);
+  font-family: system-ui, sans-serif;
+}
+.lgtm-identity-edit {
+  flex-wrap: wrap;
+}
+.lgtm-input {
+  background: #0b0d10;
+  color: var(--lgtm-fg);
+  border: 1px solid var(--lgtm-border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font: inherit;
+}

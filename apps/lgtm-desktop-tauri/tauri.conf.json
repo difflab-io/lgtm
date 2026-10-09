@@ -4,7 +4,10 @@
   "version": "0.1.0",
   "identifier": "io.difflab.lgtm.desktop.tauri",
   "build": {
-    "frontendDist": "placeholder"
+    "beforeDevCommand": "bun --cwd ../lgtm-web-tanstack-spa run dev",
+    "devUrl": "http://localhost:3000",
+    "beforeBuildCommand": "bun --cwd ../lgtm-web-tanstack-spa run build",
+    "frontendDist": "../lgtm-web-tanstack-spa/dist/client"
   },
   "app": {
     "windows": [

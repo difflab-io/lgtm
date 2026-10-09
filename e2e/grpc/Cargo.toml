@@ -1,0 +1,25 @@
+[package]
+name = "lgtm-e2e-grpc"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "End-to-end tests for the lgtm Connect-JSON server."
+license = "MIT"
+publish = false
+
+# No library or binary — tests only.
+[[test]]
+name = "diff"
+path = "tests/diff.rs"
+
+[[test]]
+name = "comments"
+path = "tests/comments.rs"
+
+[[test]]
+name = "errors"
+path = "tests/errors.rs"
+
+[dev-dependencies]
+anyhow = { workspace = true }
+lgtm-e2e-common = { path = "../common" }

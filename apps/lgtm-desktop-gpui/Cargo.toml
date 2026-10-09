@@ -19,3 +19,13 @@ gpui = { git = "https://github.com/zed-industries/zed", rev = "f0b38ac" }
 # `font-kit` is off by default in gpui_platform; without it, gpui_macos emits
 # "no text will be rendered" at startup. Turn it on.
 gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "f0b38ac", features = ["font-kit"] }
+
+# Blocking HTTP client for talking to lgtm-server. Blocking keeps the client
+# code tiny and avoids a tokio runtime inside the GPUI event loop.
+ureq = { version = "2", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# syntect loads SublimeText syntaxes at startup; good enough for the small set
+# of languages the fixture repo exercises.
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }

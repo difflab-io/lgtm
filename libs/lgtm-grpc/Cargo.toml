@@ -9,18 +9,12 @@ license = "MIT"
 [lib]
 path = "src/lib.rs"
 
-[[bin]]
-name = "lgtm-grpc"
-path = "src/bin/lgtm-grpc.rs"
-
 [dependencies]
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
-tokio = { version = "1.40", features = ["rt-multi-thread", "macros", "signal", "net"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 git2 = { version = "0.19", default-features = false }

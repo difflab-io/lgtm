@@ -2,37 +2,44 @@
 //!
 //! Boot sequence:
 //! 1. `gpui_platform::application().run(...)` starts the platform event loop.
-//! 2. The callback opens one window and creates a [`ReviewView`] root entity.
-//! 3. The view renders a two-pane layout against hard-coded stub data; a
-//!    follow-up pass will swap the stub for live calls to lgtm-grpc.
+//! 2. The callback reads `LGTM_ADDR` / `LGTM_REPO` / `LGTM_BASE` into a
+//!    [`ReviewConfig`], opens one window, and mounts a [`ReviewView`].
+//! 3. The view spawns background requests to the lgtm-server and renders
+//!    changed files + colored, syntax-highlighted diffs + comment threads.
 
+mod client;
+mod diff;
+mod highlight;
+mod proto;
 mod review;
-mod stub;
+mod review_state;
 
 use gpui::{App, AppContext, Bounds, WindowBounds, WindowOptions, px, size};
 use gpui_platform::application;
 
 use crate::review::ReviewView;
+use crate::review_state::ReviewConfig;
 
 fn main() {
-    // Install env_logger so GPUI's internal `log::*` output surfaces when
-    // RUST_LOG=debug (or similar) is set.
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    eprintln!("[lgtm-gpui] starting; stub::files() has {} entries", crate::stub::files().len());
+    let config = ReviewConfig::from_env();
+    eprintln!(
+        "[lgtm-gpui] backend={} repo={} base={}",
+        config.backend, config.repo_path, config.base_ref
+    );
 
-    application().run(|cx: &mut App| {
-        let bounds = Bounds::centered(None, size(px(1100.), px(720.)), cx);
-        eprintln!("[lgtm-gpui] opening window at {:?}", bounds);
+    application().run(move |cx: &mut App| {
+        let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
+        let config = config.clone();
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 ..Default::default()
             },
-            |_, cx| cx.new(ReviewView::new),
+            move |_, cx| cx.new(|cx| ReviewView::new(config, cx)),
         )
         .expect("open main window");
         cx.activate(true);
-        eprintln!("[lgtm-gpui] window opened, activated");
     });
 }

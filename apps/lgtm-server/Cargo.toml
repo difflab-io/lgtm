@@ -1,0 +1,22 @@
+[package]
+name = "lgtm-server"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "HTTP server binary that hosts the lgtm Connect-JSON service."
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "lgtm-server"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+tokio = { version = "1.40", features = ["rt-multi-thread", "macros", "signal", "net"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+lgtm-db-client = { path = "../../libs/lgtm-db-client" }
+lgtm-grpc = { path = "../../libs/lgtm-grpc" }

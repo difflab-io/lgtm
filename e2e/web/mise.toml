@@ -1,0 +1,61 @@
+[tools]
+bun = "1.4.2"
+node = "lts"
+
+[tasks.install]
+description = "Install Playwright + browser"
+run = '''
+bun install
+bun run install:browsers
+'''
+
+[tasks.build]
+description = "Nothing to build for Playwright specs"
+run = 'echo "build: no-op"'
+
+[tasks.clean]
+description = "Remove node_modules / Playwright reports"
+run = "rm -rf node_modules playwright-report test-results"
+
+[tasks.test]
+description = "Run Playwright tests end-to-end"
+depends = ["//apps/lgtm-server:build"]
+run = "bun run test"
+
+[tasks.lint]
+description = "Type-check specs"
+run = "bunx tsc --noEmit"
+
+[tasks."lint:fix"]
+description = "No fixer configured"
+run = 'echo "lint:fix: no-op"'
+
+[tasks.format]
+description = "No formatter configured"
+run = 'echo "format: no-op"'
+
+[tasks."format:check"]
+description = "No formatter configured"
+run = 'echo "format:check: no-op"'
+
+[tasks.env-pull]
+run = 'echo "env-pull: nothing to pull"'
+
+[tasks."publish:rc"]
+run = 'echo "publish:rc: not configured"'
+
+[tasks.publish]
+run = 'echo "publish: not configured"'
+
+[tasks.run]
+run = 'echo "run: tests-only"'
+
+[tasks.dev]
+run = 'echo "dev: tests-only"'
+
+[tasks.deploy]
+run = 'echo "deploy: no deployable surface"'
+
+[tasks.e2e]
+depends = ["//apps/lgtm-server:build"]
+run = "bun run test"

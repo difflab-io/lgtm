@@ -3,6 +3,10 @@ resolver = "3"
 members = [
     "apps/lgtm-cli",
     "apps/lgtm-desktop-tauri",
+    "apps/lgtm-server",
+    "e2e/common",
+    "e2e/grpc",
+    "e2e/cli",
     "libs/lgtm-grpc",
     "libs/lgtm-db-client",
 ]

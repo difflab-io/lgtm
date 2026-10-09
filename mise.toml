@@ -12,7 +12,14 @@ LGTM_BASE = "HEAD~5"
 [monorepo]
 # GPUI is excluded from fan-out tasks until the Metal toolchain is installed;
 # `mise run lgtm:build:gpui` builds it explicitly when the user is ready.
-config_roots = ["apps/lgtm-desktop-tauri", "apps/lgtm-web-tanstack-spa", "libs/*"]
+config_roots = [
+    "apps/lgtm-cli",
+    "apps/lgtm-desktop-tauri",
+    "apps/lgtm-server",
+    "apps/lgtm-web-tanstack-spa",
+    "e2e/*",
+    "libs/*",
+]
 
 [tasks."lgtm:build"]
 description = "Build the Rust workspace and the web app"
@@ -30,21 +37,21 @@ description = "Run the lgtm CLI (positional args pass through)"
 run = "cargo run -q -p lgtm-cli --"
 
 [tasks."lgtm:serve"]
-description = "Run the lgtm-grpc Connect-JSON backend in the foreground"
-run = "cargo run -p lgtm-grpc --bin lgtm-grpc"
+description = "Run the lgtm Connect-JSON server in the foreground"
+run = "cargo run -p lgtm-server"
 
 [tasks."lgtm:run:web"]
 description = "Dev-serve the TanStack SPA (expects lgtm:serve in another shell)"
 run = "cd apps/lgtm-web-tanstack-spa && bun run dev"
 
 [tasks."lgtm:dev:web"]
-description = "Start lgtm-grpc backend + web dev server together; Ctrl-C stops both"
+description = "Start lgtm-server + web dev server together; Ctrl-C stops both"
 run = '''
 set -eu
-# Build backend first so the first launch isn't racing cargo build.
-cargo build -p lgtm-grpc
-# Start backend in background; trap exits so we always clean up.
-RUST_LOG="${RUST_LOG:-info}" ./target/debug/lgtm-grpc &
+# Build server first so the first launch isn't racing cargo build.
+cargo build -p lgtm-server
+# Start server in background; trap exits so we always clean up.
+RUST_LOG="${RUST_LOG:-info}" ./target/debug/lgtm-server &
 backend_pid=$!
 trap 'kill "$backend_pid" 2>/dev/null || true' EXIT INT TERM
 # Give the server a beat to bind the socket.
