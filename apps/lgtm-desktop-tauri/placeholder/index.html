@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>lgtm-desktop-tauri</title>
+    <link rel="stylesheet" href="review.css" />
+  </head>
+  <body>
+    <div class="lgtm-layout">
+      <aside class="lgtm-sidebar">
+        <header class="lgtm-sidebar-header">
+          <span>Changed files</span>
+          <button type="button" id="reload" class="lgtm-reload">Reload</button>
+        </header>
+        <ul id="filelist" class="lgtm-filelist"></ul>
+      </aside>
+      <main class="lgtm-diff">
+        <header class="lgtm-diff-header">
+          <span id="selected">Select a file</span>
+          <span id="loading" class="lgtm-loading" hidden>…</span>
+        </header>
+        <div id="error" class="lgtm-error" hidden></div>
+        <pre id="diff" class="lgtm-diff-body"></pre>
+      </main>
+    </div>
+    <script type="module" src="review.js"></script>
+  </body>
+</html>

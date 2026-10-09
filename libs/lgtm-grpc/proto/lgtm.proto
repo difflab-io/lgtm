@@ -1,0 +1,43 @@
+// Source-of-truth schema for the lgtm review service.
+// For this PoC, matching serde types live in src/proto.rs and are hand-written
+// against this file rather than code-generated. Both sides must stay in sync.
+syntax = "proto3";
+
+package lgtm.v1;
+
+service LgtmService {
+  // List files changed in the given repo relative to base_ref.
+  rpc GetChangedFiles(GetChangedFilesRequest) returns (GetChangedFilesResponse);
+
+  // Return a unified diff for one file relative to base_ref.
+  rpc GetFileDiff(GetFileDiffRequest) returns (GetFileDiffResponse);
+}
+
+message ChangedFile {
+  // Path relative to repo root.
+  string path = 1;
+  // One of: added, modified, deleted, renamed, typechange, unknown.
+  string status = 2;
+}
+
+message GetChangedFilesRequest {
+  // Absolute path to the git worktree root.
+  string repo_path = 1;
+  // Base ref (branch name, tag, or SHA). "HEAD" compares against last commit.
+  string base_ref = 2;
+}
+
+message GetChangedFilesResponse {
+  repeated ChangedFile files = 1;
+}
+
+message GetFileDiffRequest {
+  string repo_path = 1;
+  string path = 2;
+  string base_ref = 3;
+}
+
+message GetFileDiffResponse {
+  // Unified diff as returned by `git diff <base_ref> -- <path>`.
+  string diff_text = 1;
+}

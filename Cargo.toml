@@ -1,0 +1,21 @@
+[workspace]
+resolver = "3"
+members = [
+    "apps/lgtm-desktop-tauri",
+    "libs/lgtm-grpc",
+    "libs/lgtm-db-client",
+]
+# GPUI pulls Zed's crate graph and currently requires a newer `toml` than
+# Tauri's pinned `webkit2gtk → gdk-sys → system-deps` chain allows. Keep the
+# GPUI app in its own workspace to avoid the lockfile conflict. See POC README.
+exclude = ["apps/lgtm-desktop-gpui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+
+[workspace.dependencies]
+anyhow = "1.0.104"
+thiserror = "2.0.20"

@@ -1,0 +1,167 @@
+# Template contract tasks, generated-project Rust toolchain, and native host packages.
+
+[tools]
+rust = { version = "1.88", components = "rustfmt,clippy,rust-analyzer" }
+"cargo:tauri-cli" = "2.11.5"
+
+[bootstrap.packages]
+"apt:libwebkit2gtk-4.1-dev" = "latest"
+"apt:libayatana-appindicator3-dev" = "latest"
+"apt:librsvg2-dev" = "latest"
+"apt:libxdo-dev" = "latest"
+"apt:libssl-dev" = "latest"
+"apt:build-essential" = "latest"
+"apt:curl" = "latest"
+"apt:wget" = "latest"
+"apt:file" = "latest"
+
+[tasks.install]
+description = "Install native packages and fetch Cargo dependencies"
+run = '''
+set -eu
+if command -v apt-get >/dev/null 2>&1; then
+  if command -v sudo >/dev/null 2>&1; then
+    sudo apt-get update
+  else
+    apt-get update
+  fi
+  mise bootstrap packages apply --manager apt
+else
+  echo "install: apt-get unavailable; skipping Debian/Ubuntu native packages"
+fi
+cargo fetch --manifest-path Cargo.toml
+'''
+run_windows = "cargo fetch --manifest-path Cargo.toml"
+
+[tasks.build]
+description = "Compile the Tauri application without bundling"
+depends = ["install"]
+run = "cargo tauri build --debug --no-bundle"
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = "cargo clean --manifest-path Cargo.toml"
+
+[tasks.test]
+description = "Run the Rust test suite"
+depends = ["install"]
+run = "cargo test --manifest-path Cargo.toml"
+
+[tasks.lint]
+description = "Lint with clippy (deny warnings)"
+run = "cargo clippy --manifest-path Cargo.toml --all-targets --all-features -- -D warnings"
+
+[tasks."lint:fix"]
+description = "Auto-fix clippy findings"
+run = "cargo clippy --manifest-path Cargo.toml --fix --allow-dirty --allow-staged --allow-no-vcs"
+
+[tasks.format]
+description = "Format Rust sources"
+run = "cargo fmt --manifest-path Cargo.toml --all"
+
+[tasks."format:check"]
+description = "Check formatting without modifying files"
+run = "cargo fmt --manifest-path Cargo.toml --all --check"
+
+[tasks.env-pull]
+description = "Pull external environment configuration"
+run = 'echo "env-pull: nothing to pull"'
+
+[tasks.release]
+description = "Build native installers and hand them off for the requested mode"
+depends = ["install"]
+usage = 'arg "<mode>" { choices "build" "publish" "publish:rc" }'
+# WiX/MSI rejects the rc.<number> SemVer suffix; RC builds use NSIS only.
+run = [
+  '''{% if env.PREMISE_TEMPLATE_TEST == "1" %}cargo tauri build --debug --no-bundle{% else %}set -eu
+: "${RELEASE_VERSION:?RELEASE_VERSION is required}"
+: "${PREMISE_ARTIFACT_DIR:?PREMISE_ARTIFACT_DIR is required}"
+mkdir -p target
+printf '{"version":"%s"}\n' "$RELEASE_VERSION" > target/premise-release-config.json
+mkdir -p "$PREMISE_ARTIFACT_DIR"{% endif %}''',
+  '''{% if env.PREMISE_TEMPLATE_TEST == "1" %}echo release test mode{% else %}set -eu
+target_dir="$(cargo metadata --manifest-path Cargo.toml --no-deps --format-version 1 | jq -r .target_directory)"
+rm -rf "$target_dir/release/bundle"
+cargo tauri build --bundles {% if os() == "windows" %}{% if usage.mode == "publish:rc" %}nsis{% elif env.PREMISE_RELEASE_CHANNEL == "rc" %}nsis{% else %}msi,nsis{% endif %}{% elif os() == "macos" %}dmg{% else %}deb,appimage{% endif %} --config target/premise-release-config.json{% endif %}''',
+  '''{% if env.PREMISE_TEMPLATE_TEST == "1" %}echo release test mode{% else %}set -eu
+target_dir="$(cargo metadata --manifest-path Cargo.toml --no-deps --format-version 1 | jq -r .target_directory)"
+bundle_dir="$target_dir/release/bundle"
+[ -d "$bundle_dir" ]
+{% if os() == "linux" %}find "$bundle_dir" -type f \( -name '*.deb' -o -name '*.AppImage' \) -size +0c -exec cp "{}" "$PREMISE_ARTIFACT_DIR/" \;{% elif os() == "macos" %}find "$bundle_dir" -type f -name '*.dmg' -size +0c -exec cp "{}" "$PREMISE_ARTIFACT_DIR/" \;{% elif usage.mode == "publish:rc" or env.PREMISE_RELEASE_CHANNEL == "rc" %}find "$bundle_dir" -type f -name '*.exe' -size +0c -exec cp "{}" "$PREMISE_ARTIFACT_DIR/" \;{% else %}find "$bundle_dir" -type f \( -name '*.msi' -o -name '*.exe' \) -size +0c -exec cp "{}" "$PREMISE_ARTIFACT_DIR/" \;{% endif %}
+{% endif %}''',
+]
+# Mise defaults to cmd.exe on Windows. Shebangs select PowerShell for these
+# native scripts instead of running Bash syntax in cmd.exe.
+run_windows = [
+  '''#!/usr/bin/env pwsh
+{% if env.PREMISE_TEMPLATE_TEST == "1" %}cargo tauri build --debug --no-bundle{% else %}$ErrorActionPreference = 'Stop'
+if (-not $env:RELEASE_VERSION) { throw 'RELEASE_VERSION is required' }
+if (-not $env:PREMISE_ARTIFACT_DIR) { throw 'PREMISE_ARTIFACT_DIR is required' }
+New-Item -ItemType Directory -Force -Path target, $env:PREMISE_ARTIFACT_DIR | Out-Null
+'{"version":"' + $env:RELEASE_VERSION + '"}' | Set-Content -Encoding utf8 target/premise-release-config.json{% endif %}''',
+  '''#!/usr/bin/env pwsh
+{% if env.PREMISE_TEMPLATE_TEST == "1" %}Write-Output 'release test mode'{% else %}$ErrorActionPreference = 'Stop'
+$metadata = cargo metadata --manifest-path Cargo.toml --no-deps --format-version 1 | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) { throw 'cargo metadata failed' }
+$bundleDir = Join-Path $metadata.target_directory 'release/bundle'
+if (Test-Path -LiteralPath $bundleDir) { Remove-Item -LiteralPath $bundleDir -Recurse -Force }
+cargo tauri build --bundles {% if usage.mode == "publish:rc" or env.PREMISE_RELEASE_CHANNEL == "rc" %}nsis{% else %}msi,nsis{% endif %} --config target/premise-release-config.json
+if ($LASTEXITCODE -ne 0) { throw 'cargo tauri build failed' }{% endif %}''',
+  '''#!/usr/bin/env pwsh
+{% if env.PREMISE_TEMPLATE_TEST == "1" %}Write-Output 'release test mode'{% else %}$ErrorActionPreference = 'Stop'
+$metadata = cargo metadata --manifest-path Cargo.toml --no-deps --format-version 1 | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) { throw 'cargo metadata failed' }
+$bundleDir = Join-Path $metadata.target_directory 'release/bundle'
+if (-not (Test-Path -LiteralPath $bundleDir)) { throw 'release bundle directory is missing' }
+$extensions = {% if usage.mode == "publish:rc" or env.PREMISE_RELEASE_CHANNEL == "rc" %}@('.exe'){% else %}@('.msi', '.exe'){% endif %}
+$files = @(Get-ChildItem -LiteralPath $bundleDir -Recurse -File | Where-Object { $_.Extension -in $extensions })
+if ($files.Count -eq 0) { throw 'no installers were built' }
+foreach ($file in $files) {
+  if ($file.Length -eq 0) { throw "empty installer: $($file.FullName)" }
+  Copy-Item -LiteralPath $file.FullName -Destination $env:PREMISE_ARTIFACT_DIR
+}{% endif %}''',
+]
+
+[tasks."release:build"]
+description = "Build native installers for a platform release"
+run = "mise run release -- build"
+
+[tasks.publish]
+description = "Build and upload stable installers to the existing GitHub Release"
+run = "mise run release -- publish"
+
+[tasks."publish:rc"]
+description = "Build and upload RC installers to an existing GitHub prerelease"
+run = "mise run release -- publish:rc"
+
+[tasks.run]
+description = "Run the Tauri application"
+depends = ["install"]
+run = '''
+set -eu
+if [ "${PREMISE_TEMPLATE_TEST:-}" = "1" ]; then
+  cargo tauri build --debug --no-bundle
+else
+  cargo tauri dev
+fi
+'''
+
+[tasks.dev]
+description = "Run the Tauri application in development mode"
+depends = ["install"]
+run = '''
+set -eu
+if [ "${PREMISE_TEMPLATE_TEST:-}" = "1" ]; then
+  cargo tauri build --debug --no-bundle
+else
+  cargo tauri dev
+fi
+'''
+
+[tasks.deploy]
+description = "Validate the deploy contract (no deployable surface)"
+run = 'echo "deploy: no deployable surface"'
+
+[tasks.e2e]
+description = "Validate the e2e contract (no end-to-end surface)"
+run = 'echo "e2e: no end-to-end surface"'

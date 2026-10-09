@@ -1,0 +1,21 @@
+[package]
+name = "lgtm-desktop-gpui"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "GPUI desktop shell for the lgtm review PoC."
+license = "MIT"
+publish = false
+
+# Standalone workspace — see root Cargo.toml for the reason.
+[workspace]
+
+[dependencies]
+anyhow = "1"
+env_logger = "0.11"
+# Zed's gpui and gpui_platform are not yet published in the shape the current
+# examples use; pin to a known-good commit on main so the API shape matches.
+gpui = { git = "https://github.com/zed-industries/zed", rev = "f0b38ac" }
+# `font-kit` is off by default in gpui_platform; without it, gpui_macos emits
+# "no text will be rendered" at startup. Turn it on.
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "f0b38ac", features = ["font-kit"] }

@@ -1,0 +1,12 @@
+[package]
+name = "lgtm-db-client"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "SQLite wrapper storing review state for the lgtm PoC."
+license = "MIT"
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+rusqlite = { version = "0.32", features = ["bundled"] }

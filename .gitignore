@@ -1,0 +1,28 @@
+# PoC-local scratch area: SQLite db + fixture repo checkouts.
+.tmp/
+
+# Rust
+/target/
+**/target/
+
+# Node / Bun
+node_modules/
+.pnp.*
+dist/
+.turbo/
+.next/
+.vinxi/
+.output/
+.tanstack/
+
+# Tauri
+src-tauri/target/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp

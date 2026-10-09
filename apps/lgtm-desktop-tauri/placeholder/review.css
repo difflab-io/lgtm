@@ -1,0 +1,157 @@
+/* Mirror of apps/lgtm-web-tanstack-spa/src/styles/review.css so the Tauri
+ * shell visually matches the SPA. Keep the two files in sync when either
+ * side changes. */
+
+:root {
+  --lgtm-bg: #0b0d10;
+  --lgtm-fg: #d7dbe0;
+  --lgtm-muted: #8b94a3;
+  --lgtm-accent: #4c9aff;
+  --lgtm-border: #1e2228;
+  --lgtm-sidebar-width: 320px;
+  --lgtm-added: #40c057;
+  --lgtm-modified: #4c9aff;
+  --lgtm-deleted: #e03131;
+  --lgtm-untracked: #f59f00;
+  color-scheme: dark;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--lgtm-bg);
+  color: var(--lgtm-fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+.lgtm-layout {
+  display: grid;
+  grid-template-columns: var(--lgtm-sidebar-width) 1fr;
+  height: 100vh;
+}
+
+.lgtm-sidebar {
+  border-right: 1px solid var(--lgtm-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.lgtm-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--lgtm-border);
+  color: var(--lgtm-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+}
+
+.lgtm-reload {
+  background: transparent;
+  border: 1px solid var(--lgtm-border);
+  color: var(--lgtm-fg);
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.lgtm-filelist {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.lgtm-fileitem {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 68px 1fr;
+  align-items: center;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--lgtm-fg);
+  padding: 4px 12px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.lgtm-fileitem:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.lgtm-fileitem.is-active {
+  background: rgba(76, 154, 255, 0.12);
+}
+
+.lgtm-status {
+  text-transform: lowercase;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.lgtm-status-added,
+.lgtm-status-untracked {
+  color: var(--lgtm-added);
+}
+.lgtm-status-modified {
+  color: var(--lgtm-modified);
+}
+.lgtm-status-deleted {
+  color: var(--lgtm-deleted);
+}
+
+.lgtm-path {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.lgtm-empty {
+  padding: 12px;
+  color: var(--lgtm-muted);
+}
+
+.lgtm-diff {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.lgtm-diff-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--lgtm-border);
+  color: var(--lgtm-muted);
+  display: flex;
+  gap: 12px;
+}
+
+.lgtm-loading {
+  color: var(--lgtm-accent);
+}
+
+.lgtm-error {
+  background: rgba(224, 49, 49, 0.1);
+  color: var(--lgtm-deleted);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--lgtm-border);
+}
+
+.lgtm-diff-body {
+  margin: 0;
+  padding: 12px 16px;
+  overflow: auto;
+  flex: 1;
+  white-space: pre;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
