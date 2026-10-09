@@ -17,7 +17,9 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
 
-    let _db = Db::open_at(DB_PATH).with_context(|| format!("open sqlite db at {DB_PATH}"))?;
+    let db = Arc::new(
+        Db::open_at(DB_PATH).with_context(|| format!("open sqlite db at {DB_PATH}"))?,
+    );
     tracing::info!(path = DB_PATH, "sqlite db opened");
 
     let addr: std::net::SocketAddr = std::env::var("LGTM_ADDR")
@@ -25,7 +27,7 @@ async fn main() -> anyhow::Result<()> {
         .parse()
         .context("parse LGTM_ADDR")?;
 
-    let service = Arc::new(DefaultService);
+    let service = Arc::new(DefaultService::new(db));
     let app = build_router(service);
 
     let listener = tokio::net::TcpListener::bind(addr).await.context("bind listener")?;

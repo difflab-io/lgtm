@@ -138,6 +138,12 @@ impl ReviewView {
     }
 
     fn render_diff(&self) -> impl IntoElement {
+        let diff_text = self.selected_diff();
+        let lines: Vec<_> = parse_diff(&diff_text)
+            .into_iter()
+            .map(render_diff_line)
+            .collect();
+
         div()
             .flex()
             .flex_col()
@@ -156,11 +162,68 @@ impl ReviewView {
             .child(
                 div()
                     .flex_grow(1.0)
-                    .p_3()
+                    .flex()
+                    .flex_col()
+                    .px_3()
+                    .py_2()
                     .overflow_hidden()
-                    .child(self.selected_diff()),
+                    .children(lines),
             )
     }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum DiffLineKind {
+    Added,
+    Removed,
+    Hunk,
+    Header,
+    Context,
+}
+
+fn parse_diff(diff_text: &str) -> Vec<(DiffLineKind, String)> {
+    diff_text
+        .lines()
+        .map(|line| (classify_diff_line(line), line.to_owned()))
+        .collect()
+}
+
+/// Classification mirror of apps/lgtm-web-tanstack-spa/src/lib/diff-lines.ts.
+fn classify_diff_line(line: &str) -> DiffLineKind {
+    if line.starts_with("diff --git")
+        || line.starts_with("index ")
+        || line.starts_with("--- ")
+        || line.starts_with("+++ ")
+    {
+        DiffLineKind::Header
+    } else if line.starts_with("@@") {
+        DiffLineKind::Hunk
+    } else if line.starts_with('+') {
+        DiffLineKind::Added
+    } else if line.starts_with('-') {
+        DiffLineKind::Removed
+    } else {
+        DiffLineKind::Context
+    }
+}
+
+fn render_diff_line((kind, text): (DiffLineKind, String)) -> impl IntoElement + use<> {
+    // One div per line keeps the layout vertical and lets us tint whole lines
+    // with .bg(..). Empty text uses a single space so the row still has
+    // measurable height.
+    let display = if text.is_empty() { " ".to_owned() } else { text };
+    let (bg, fg) = match kind {
+        DiffLineKind::Added => (Some(0x183321u32), 0xa7e7b4u32),
+        DiffLineKind::Removed => (Some(0x33181au32), 0xf0a9a9u32),
+        DiffLineKind::Hunk => (Some(0x15223au32), 0x4c9affu32),
+        DiffLineKind::Header => (None, 0x8b94a3u32),
+        DiffLineKind::Context => (None, 0xd7dbe0u32),
+    };
+    let mut el = div().w_full().text_color(rgb(fg));
+    if let Some(bg_rgb) = bg {
+        el = el.bg(rgb(bg_rgb));
+    }
+    el.child(SharedString::from(display))
 }
 
 fn status_color(s: Status) -> u32 {

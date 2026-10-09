@@ -109,11 +109,38 @@ async function selectFile(file) {
       base_ref: config.baseRef,
       path: file.path,
     })
-    els.diff.textContent = diff_text
+    renderDiff(diff_text)
   } catch (e) {
     setError(e.message)
   } finally {
     setLoading(false)
+  }
+}
+
+// Mirror of apps/lgtm-web-tanstack-spa/src/lib/diff-lines.ts :: classify.
+function classifyDiffLine(line) {
+  if (
+    line.startsWith('diff --git') ||
+    line.startsWith('index ') ||
+    line.startsWith('--- ') ||
+    line.startsWith('+++ ')
+  ) return 'header'
+  if (line.startsWith('@@')) return 'hunk'
+  if (line.startsWith('+')) return 'added'
+  if (line.startsWith('-')) return 'removed'
+  return 'context'
+}
+
+function renderDiff(diffText) {
+  els.diff.replaceChildren()
+  if (!diffText) return
+  const lines = diffText.split('\n')
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+  for (const text of lines) {
+    const span = document.createElement('span')
+    span.className = `lgtm-line lgtm-line-${classifyDiffLine(text)}`
+    span.textContent = text + '\n'
+    els.diff.appendChild(span)
   }
 }
 

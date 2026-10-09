@@ -25,6 +25,10 @@ run = [
 description = "Build the GPUI desktop app (slow first time)"
 run = "cargo build -p lgtm-desktop-gpui"
 
+[tasks."lgtm:cli"]
+description = "Run the lgtm CLI (positional args pass through)"
+run = "cargo run -q -p lgtm-cli --"
+
 [tasks."lgtm:serve"]
 description = "Run the lgtm-grpc Connect-JSON backend in the foreground"
 run = "cargo run -p lgtm-grpc --bin lgtm-grpc"

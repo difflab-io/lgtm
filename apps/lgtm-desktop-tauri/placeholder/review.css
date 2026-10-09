@@ -155,3 +155,25 @@ body {
   font-size: 12.5px;
   line-height: 1.5;
 }
+
+.lgtm-line {
+  display: block;
+}
+.lgtm-line-added {
+  background: rgba(64, 192, 87, 0.12);
+  color: #a7e7b4;
+}
+.lgtm-line-removed {
+  background: rgba(224, 49, 49, 0.12);
+  color: #f0a9a9;
+}
+.lgtm-line-hunk {
+  color: var(--lgtm-accent);
+  background: rgba(76, 154, 255, 0.08);
+}
+.lgtm-line-header {
+  color: var(--lgtm-muted);
+}
+.lgtm-line-context {
+  color: var(--lgtm-fg);
+}

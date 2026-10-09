@@ -6,24 +6,29 @@ syntax = "proto3";
 package lgtm.v1;
 
 service LgtmService {
-  // List files changed in the given repo relative to base_ref.
+  // --- Diff reading ---
   rpc GetChangedFiles(GetChangedFilesRequest) returns (GetChangedFilesResponse);
-
-  // Return a unified diff for one file relative to base_ref.
   rpc GetFileDiff(GetFileDiffRequest) returns (GetFileDiffResponse);
+
+  // --- User identity (minimal) ---
+  rpc UpsertUser(UpsertUserRequest) returns (UpsertUserResponse);
+
+  // --- Comment threads ---
+  rpc ListThreads(ListThreadsRequest) returns (ListThreadsResponse);
+  rpc CreateThread(CreateThreadRequest) returns (CreateThreadResponse);
+  rpc AppendComment(AppendCommentRequest) returns (AppendCommentResponse);
+  rpc ResolveThread(ResolveThreadRequest) returns (ResolveThreadResponse);
 }
 
+// --- Diff messages ---
+
 message ChangedFile {
-  // Path relative to repo root.
   string path = 1;
-  // One of: added, modified, deleted, renamed, typechange, unknown.
   string status = 2;
 }
 
 message GetChangedFilesRequest {
-  // Absolute path to the git worktree root.
   string repo_path = 1;
-  // Base ref (branch name, tag, or SHA). "HEAD" compares against last commit.
   string base_ref = 2;
 }
 
@@ -38,6 +43,100 @@ message GetFileDiffRequest {
 }
 
 message GetFileDiffResponse {
-  // Unified diff as returned by `git diff <base_ref> -- <path>`.
   string diff_text = 1;
+}
+
+// --- Identity messages ---
+
+// AuthorKind distinguishes human users from agent-authored comments. The CLI
+// defaults to AGENT; the UI (eventually) defaults to USER.
+enum AuthorKind {
+  AUTHOR_KIND_UNSPECIFIED = 0;
+  AUTHOR_KIND_USER = 1;
+  AUTHOR_KIND_AGENT = 2;
+}
+
+message User {
+  int64 id = 1;
+  string name = 2;
+  AuthorKind kind = 3;
+  int64 created_at = 4; // unix seconds
+}
+
+message UpsertUserRequest {
+  string name = 1;
+  AuthorKind kind = 2;
+}
+
+message UpsertUserResponse {
+  User user = 1;
+}
+
+// --- Comment messages ---
+
+// A Thread groups all comments on a given file line (or whole-file when line
+// is 0). Scoped by (repo_path, base_ref) so threads created against one base
+// don't bleed into another.
+message Thread {
+  int64 id = 1;
+  string repo_path = 2;
+  string base_ref = 3;
+  string file_path = 4;
+  // 1-indexed line number in the *new* file. 0 means "whole file".
+  int32 line = 5;
+  bool resolved = 6;
+  int64 created_at = 7;
+  repeated Comment comments = 8;
+}
+
+message Comment {
+  int64 id = 1;
+  int64 thread_id = 2;
+  User author = 3;
+  string body = 4;
+  int64 created_at = 5;
+}
+
+message ListThreadsRequest {
+  string repo_path = 1;
+  string base_ref = 2;
+  // Optional: when set, limits to one file.
+  string file_path = 3;
+  // Default: both resolved and unresolved. When true, only unresolved.
+  bool only_unresolved = 4;
+}
+
+message ListThreadsResponse {
+  repeated Thread threads = 1;
+}
+
+message CreateThreadRequest {
+  string repo_path = 1;
+  string base_ref = 2;
+  string file_path = 3;
+  int32 line = 4;
+  int64 author_id = 5;
+  string body = 6;
+}
+
+message CreateThreadResponse {
+  Thread thread = 1;
+}
+
+message AppendCommentRequest {
+  int64 thread_id = 1;
+  int64 author_id = 2;
+  string body = 3;
+}
+
+message AppendCommentResponse {
+  Comment comment = 1;
+}
+
+message ResolveThreadRequest {
+  int64 thread_id = 1;
+}
+
+message ResolveThreadResponse {
+  Thread thread = 1;
 }

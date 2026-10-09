@@ -1,0 +1,64 @@
+# Template contract tasks and generated-project Rust toolchain.
+
+[tools]
+rust = { version = "1.88", components = "rustfmt,clippy,rust-analyzer" }
+
+[tasks.install]
+description = "Resolve and fetch Cargo dependencies"
+run = "cargo fetch"
+
+[tasks.build]
+description = "Compile the application"
+run = "cargo build"
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = "cargo clean"
+
+[tasks.test]
+description = "Run the test suite"
+run = "cargo test"
+
+[tasks.lint]
+description = "Lint with clippy (deny warnings)"
+run = "cargo clippy --all-targets --all-features -- -D warnings"
+
+[tasks."lint:fix"]
+description = "Auto-fix clippy findings"
+run = "cargo clippy --fix --allow-dirty --allow-staged --allow-no-vcs"
+
+[tasks.format]
+description = "Format Rust sources"
+run = "cargo fmt --all"
+
+[tasks."format:check"]
+description = "Check formatting without modifying files"
+run = "cargo fmt --all --check"
+
+[tasks.env-pull]
+description = "Pull external environment configuration"
+run = 'echo "env-pull: nothing to pull"'
+
+[tasks."publish:rc"]
+description = "Report deferred prerelease publication"
+run = 'echo "publish:rc: not configured"'
+
+[tasks.publish]
+description = "Report deferred stable publication"
+run = 'echo "publish: not configured"'
+
+[tasks.run]
+description = "Run the lgtm CLI"
+run = "cargo run"
+
+[tasks.dev]
+description = "Run the lgtm CLI in development mode"
+run = "cargo run"
+
+[tasks.deploy]
+description = "No deployable surface"
+run = 'echo "deploy: no deployable surface"'
+
+[tasks.e2e]
+description = "No e2e surface"
+run = 'echo "e2e: no e2e surface"'

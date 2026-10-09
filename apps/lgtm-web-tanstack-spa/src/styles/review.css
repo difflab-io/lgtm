@@ -156,3 +156,35 @@ body,
   font-size: 12.5px;
   line-height: 1.5;
 }
+
+.lgtm-line {
+  display: block;
+}
+.lgtm-marker {
+  display: inline-block;
+  width: 1ch;
+  opacity: 0.6;
+  user-select: none;
+}
+.lgtm-line-added {
+  background: rgba(64, 192, 87, 0.12);
+}
+.lgtm-line-removed {
+  background: rgba(224, 49, 49, 0.12);
+}
+.lgtm-line-added .lgtm-marker {
+  color: #40c057;
+}
+.lgtm-line-removed .lgtm-marker {
+  color: #e03131;
+}
+.lgtm-line-hunk {
+  color: var(--lgtm-accent);
+  background: rgba(76, 154, 255, 0.08);
+}
+.lgtm-line-header {
+  color: var(--lgtm-muted);
+}
+/* Shiki ships inline-styled spans whose colors are the github-dark theme.
+ * We leave their foreground alone and let the diff line background tint
+ * added/removed. */

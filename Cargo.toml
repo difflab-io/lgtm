@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "apps/lgtm-cli",
     "apps/lgtm-desktop-tauri",
     "libs/lgtm-grpc",
     "libs/lgtm-db-client",

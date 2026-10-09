@@ -1,0 +1,20 @@
+[package]
+name = "lgtm-cli"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Agent-friendly CLI for the lgtm review service."
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "lgtm"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { version = "4.5", features = ["derive", "env"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+lgtm-grpc = { path = "../../libs/lgtm-grpc" }
