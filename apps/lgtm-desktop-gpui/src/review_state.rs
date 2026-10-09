@@ -35,11 +35,25 @@ pub enum ComposerTarget {
     Reply { thread_id: i64 },
 }
 
+/// One diff row plus its already-computed syntect spans. Caching avoids
+/// re-running the highlighter per line on every unrelated re-render (e.g.
+/// each composer keystroke used to re-highlight the whole file).
+pub struct CachedDiffLine {
+    pub kind: crate::diff::DiffLineKind,
+    pub text: String,
+    pub new_line: i32,
+    /// `Some(spans)` when syntect produced highlighted runs for the code
+    /// body; `None` for header / hunk / unknown-language lines, which the
+    /// view renders as a single uncolored run.
+    pub spans: Option<Vec<(u32, String)>>,
+}
+
 #[derive(Default)]
 pub struct ReviewState {
     pub files: Vec<ChangedFile>,
     pub selected: Option<String>,
     pub diff_text: String,
+    pub diff_lines: Vec<CachedDiffLine>,
     pub threads: Vec<Thread>,
     pub user: Option<User>,
     pub error: Option<String>,

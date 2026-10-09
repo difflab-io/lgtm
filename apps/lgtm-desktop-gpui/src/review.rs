@@ -18,10 +18,10 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::client::LgtmClient;
-use crate::diff::{DiffLine, DiffLineKind, parse_diff};
+use crate::diff::{DiffLineKind, parse_diff};
 use crate::highlight::{Highlighter, lang_for_path};
 use crate::proto::{AuthorKind, ChangedFile, Comment, Thread, User};
-use crate::review_state::{ComposerTarget, ReviewConfig, ReviewState};
+use crate::review_state::{CachedDiffLine, ComposerTarget, ReviewConfig, ReviewState};
 
 // ---- Colour tokens (match the SPA palette). ----
 const BG: u32 = 0x0b0d10;
@@ -101,6 +101,7 @@ impl ReviewView {
     fn select_file(&mut self, path: String, cx: &mut Context<Self>) {
         self.state.selected = Some(path.clone());
         self.state.diff_text.clear();
+        self.state.diff_lines.clear();
         self.state.threads.clear();
         self.composer = None;
         self.state.loading = true;
@@ -111,18 +112,46 @@ impl ReviewView {
         let base = self.config.base_ref.clone();
         let path_for_fetch = path.clone();
         cx.spawn(async move |this, cx| {
-            let result: Result<(String, Vec<Thread>)> = cx
+            // Fetch diff + threads, then pre-highlight every diff line on
+            // the background executor so interactive re-renders (keystrokes
+            // in the composer, thread resolve, etc.) don't repay the
+            // syntect cost.
+            let result: Result<(String, Vec<CachedDiffLine>, Vec<Thread>)> = cx
                 .background_spawn(async move {
                     let diff = client.get_file_diff(&repo, &base, &path_for_fetch)?;
                     let threads = client.list_threads(&repo, &base, Some(&path_for_fetch))?;
-                    Ok((diff, threads))
+                    let lang = lang_for_path(&path_for_fetch);
+                    let highlighter = Highlighter::global();
+                    let cached = parse_diff(&diff)
+                        .into_iter()
+                        .map(|l| {
+                            let spans = match l.kind {
+                                DiffLineKind::Hunk | DiffLineKind::Header => None,
+                                _ => {
+                                    let body = match l.kind {
+                                        DiffLineKind::Added | DiffLineKind::Removed => &l.text[1..],
+                                        _ => l.text.as_str(),
+                                    };
+                                    highlighter.highlight_line(lang, body)
+                                }
+                            };
+                            CachedDiffLine {
+                                kind: l.kind,
+                                text: l.text,
+                                new_line: l.new_line,
+                                spans,
+                            }
+                        })
+                        .collect();
+                    Ok((diff, cached, threads))
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.state.loading = false;
                 match result {
-                    Ok((diff, threads)) => {
+                    Ok((diff, cached, threads)) => {
                         this.state.diff_text = diff;
+                        this.state.diff_lines = cached;
                         this.state.threads = threads;
                     }
                     Err(e) => this.state.error = Some(format!("{e:#}")),
@@ -336,13 +365,11 @@ impl ReviewView {
     }
 
     fn render_diff_and_threads(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let lines = parse_diff(&self.state.diff_text);
-        let highlighter = Highlighter::global();
-        let lang = self.state.selected_path().and_then(lang_for_path);
+        let lines = &self.state.diff_lines;
 
         let mut children = Vec::<AnyElement>::with_capacity(lines.len());
         for (i, line) in lines.iter().enumerate() {
-            children.push(self.render_diff_line(i, line, lang, highlighter, cx).into_any_element());
+            children.push(self.render_diff_line(i, line, cx).into_any_element());
 
             // Inline composer anchored at this new-file line.
             if let Some(c) = &self.composer {
@@ -396,9 +423,7 @@ impl ReviewView {
     fn render_diff_line(
         &self,
         row: usize,
-        line: &DiffLine,
-        lang: Option<&str>,
-        highlighter: &Highlighter,
+        line: &CachedDiffLine,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let (bg, default_fg) = match line.kind {
@@ -420,7 +445,7 @@ impl ReviewView {
             _ => " ",
         };
 
-        let code_body = render_line_content(line, lang, highlighter, default_fg);
+        let code_body = render_line_content(line, default_fg);
 
         let anchorable = matches!(line.kind, DiffLineKind::Added | DiffLineKind::Context)
             && line.new_line > 0;
@@ -731,12 +756,8 @@ fn status_color(status: &str) -> u32 {
     }
 }
 
-fn render_line_content(
-    line: &DiffLine,
-    lang: Option<&str>,
-    highlighter: &Highlighter,
-    default_fg: u32,
-) -> impl IntoElement {
+fn render_line_content(line: &CachedDiffLine, default_fg: u32) -> impl IntoElement {
+    // Hunk + header render as a single uncolored span.
     if matches!(line.kind, DiffLineKind::Hunk | DiffLineKind::Header) {
         return div().child(SharedString::from(line.text.clone())).into_any_element();
     }
@@ -744,15 +765,14 @@ fn render_line_content(
         DiffLineKind::Added | DiffLineKind::Removed => &line.text[1..],
         _ => line.text.as_str(),
     };
-    let maybe_spans = highlighter.highlight_line(lang, body);
-    match maybe_spans {
+    match &line.spans {
         Some(spans) if !spans.is_empty() => {
             let runs: Vec<AnyElement> = spans
-                .into_iter()
+                .iter()
                 .map(|(rgb_color, text)| {
                     div()
-                        .text_color(rgb(rgb_color))
-                        .child(SharedString::from(text))
+                        .text_color(rgb(*rgb_color))
+                        .child(SharedString::from(text.clone()))
                         .into_any_element()
                 })
                 .collect();
