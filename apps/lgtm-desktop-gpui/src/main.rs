@@ -16,7 +16,7 @@ mod review_state;
 use gpui_kit::assets::Assets;
 use gpui_kit::*;
 
-use crate::review::{SubmitComposer, CancelComposer, ReviewView};
+use crate::review::ReviewView;
 use crate::review_state::ReviewConfig;
 
 fn main() {
@@ -31,14 +31,9 @@ fn main() {
     let app = gpui_kit::application().with_assets(Assets);
     app.run(move |cx: &mut App| {
         gpui_kit::init(cx);
-
-        // Keyboard shortcuts for the composer. Scoped to the "Composer"
-        // key_context on the composer div (see review.rs) so they only fire
-        // while a Textarea is focused in a composer, not globally.
-        cx.bind_keys([
-            KeyBinding::new("cmd-enter", SubmitComposer, Some("Composer")),
-            KeyBinding::new("escape", CancelComposer, Some("Composer")),
-        ]);
+        // Composer submit (Cmd+Enter) + cancel (Esc) are driven by Textarea's
+        // own dispatched Enter / Escape actions (see review.rs); no custom
+        // keybindings needed.
 
         let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
         let window_options = WindowOptions {

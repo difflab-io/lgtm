@@ -13,12 +13,9 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use gpui_kit::component::input::{Textarea, TextareaState};
+use gpui_kit::component::input::{Enter, Escape, Textarea, TextareaState};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-
-// Actions dispatched by the composer's key bindings; registered in main.rs.
-actions!(lgtm, [SubmitComposer, CancelComposer]);
 
 use crate::client::LgtmClient;
 use crate::diff::{DiffLineKind, parse_diff};
@@ -708,12 +705,22 @@ impl ReviewView {
             // Scope Cmd+Enter / Escape to this composer. The TextareaState's
             // own key bindings still handle plain Enter (newline), typing,
             // arrows, etc. — the parent only intercepts the two shortcuts.
-            .key_context("Composer")
-            .on_action(cx.listener(|this, _: &SubmitComposer, _window, cx| {
-                this.submit_composer(cx)
+            // Textarea itself dispatches `Enter` (plain / shift / secondary)
+            // and `Escape` actions via its own key bindings; we listen as the
+            // actions bubble up through this composer div. Secondary-enter
+            // (Cmd+Enter on macOS) → submit. Plain Enter is left for Textarea
+            // to insert a newline. Escape → cancel.
+            //
+            // This avoids `cx.subscribe_in` on the Textarea entity, which
+            // caused per-keystroke parent re-renders (visible as composer
+            // input lag).
+            .on_action(cx.listener(|this, action: &Enter, _window, cx| {
+                if action.secondary {
+                    this.submit_composer(cx);
+                }
             }))
-            .on_action(cx.listener(|this, _: &CancelComposer, _window, cx| {
-                this.cancel_composer(cx)
+            .on_action(cx.listener(|this, _action: &Escape, _window, cx| {
+                this.cancel_composer(cx);
             }))
             .child(
                 div()
@@ -768,7 +775,7 @@ impl ReviewView {
                 div()
                     .text_size(px(10.))
                     .text_color(rgb(MUTED))
-                    .child("Cmd+Enter: submit · Esc: cancel · Enter: newline"),
+                    .child("Cmd+Enter: submit · Esc: cancel · Enter: newline · Click Submit to post"),
             )
     }
 }
