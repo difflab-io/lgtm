@@ -14,19 +14,36 @@ impl ReviewConfig {
     pub fn from_env() -> Self {
         Self {
             backend: std::env::var("LGTM_ADDR")
-                .map(|a| {
-                    if a.starts_with("http") {
-                        a
-                    } else {
-                        format!("http://{a}")
-                    }
-                })
+                .map(|a| if a.starts_with("http") { a } else { format!("http://{a}") })
                 .unwrap_or_else(|_| "http://127.0.0.1:50051".into()),
             repo_path: std::env::var("LGTM_REPO").unwrap_or_else(|_| {
                 "/Users/siddharthkapoor/.herdr/worktrees/lgtm/poc-gpui-rpc-sqlite/.tmp/repos/ripgrep"
                     .into()
             }),
             base_ref: std::env::var("LGTM_BASE").unwrap_or_else(|_| "HEAD~5".into()),
+        }
+    }
+}
+
+/// What the composer is anchored to: a new thread on a diff line, or a reply
+/// to an existing thread.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ComposerTarget {
+    NewThread { line: i32 },
+    Reply { thread_id: i64 },
+}
+
+/// A single active in-GPUI text input. There is at most one open at a time.
+pub struct Composer {
+    pub target: ComposerTarget,
+    pub body: String,
+}
+
+impl Composer {
+    pub fn placeholder(&self) -> &'static str {
+        match self.target {
+            ComposerTarget::NewThread { .. } => "Leave a comment — Enter to submit, Esc to cancel",
+            ComposerTarget::Reply { .. } => "Reply — Enter to submit, Esc to cancel",
         }
     }
 }
@@ -40,12 +57,7 @@ pub struct ReviewState {
     pub user: Option<User>,
     pub error: Option<String>,
     pub loading: bool,
-    // Composer: when `Some`, show a draft editor for a new thread at this line.
-    pub composing_line: Option<i32>,
-    pub composer_body: String,
-    // Separate reply composers keyed by thread id.
-    pub replying_to: Option<i64>,
-    pub reply_body: String,
+    pub composer: Option<Composer>,
 }
 
 impl ReviewState {
@@ -57,8 +69,6 @@ impl ReviewState {
         self.threads.iter().filter(move |t| t.line == line)
     }
 
-    /// Default identity shown in the status line and used when nothing is
-    /// configured. Users override by setting `LGTM_AUTHOR` / `LGTM_AUTHOR_KIND`.
     pub fn default_identity() -> (String, AuthorKind) {
         let name = std::env::var("LGTM_AUTHOR")
             .ok()

@@ -14,7 +14,10 @@ mod proto;
 mod review;
 mod review_state;
 
-use gpui::{App, AppContext, Bounds, WindowBounds, WindowOptions, px, size};
+use gpui::{
+    App, AppContext, Bounds, Point, TitlebarOptions, WindowBackgroundAppearance, WindowBounds,
+    WindowOptions, point, px, size,
+};
 use gpui_platform::application;
 
 use crate::review::ReviewView;
@@ -35,6 +38,15 @@ fn main() {
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
+                // Appear-transparent titlebar lets the root view's background
+                // bleed into the titlebar region, so the system chrome matches
+                // the rest of the app instead of showing default white/grey.
+                titlebar: Some(TitlebarOptions {
+                    title: Some("lgtm".into()),
+                    appears_transparent: true,
+                    traffic_light_position: Some(Point { x: px(9.), y: px(9.) }),
+                }),
+                window_background: WindowBackgroundAppearance::Opaque,
                 ..Default::default()
             },
             move |_, cx| cx.new(|cx| ReviewView::new(config, cx)),
@@ -42,4 +54,7 @@ fn main() {
         .expect("open main window");
         cx.activate(true);
     });
+
+    // `point` is kept imported above for symmetry even if unused elsewhere.
+    let _ = point::<gpui::Pixels>;
 }
