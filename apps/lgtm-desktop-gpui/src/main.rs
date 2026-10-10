@@ -8,6 +8,8 @@
 
 mod client;
 mod diff;
+mod diff_view;
+mod file_tree;
 mod highlight;
 mod proto;
 mod review;
