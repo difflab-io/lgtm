@@ -42,6 +42,10 @@ pub struct DiffView {
     user: Option<User>,
     selected: Option<String>,
     diff_lines: Vec<CachedDiffLine>,
+    /// Scroll position + measured row heights for the virtualized diff list.
+    /// One item per entry in `diff_lines`; a row's thread cards and composer
+    /// are part of that row's item, so indices never shift.
+    list_state: ListState,
     threads: Vec<Thread>,
     composer: Option<Composer>,
     loading: bool,
@@ -73,6 +77,7 @@ impl DiffView {
             user: None,
             selected: None,
             diff_lines: Vec::new(),
+            list_state: ListState::new(0, ListAlignment::Top, px(400.)),
             threads: Vec::new(),
             composer: None,
             loading: false,
@@ -99,6 +104,7 @@ impl DiffView {
     pub fn set_selected_file(&mut self, path: String, cx: &mut Context<Self>) {
         self.selected = Some(path.clone());
         self.diff_lines.clear();
+        self.list_state.reset(0);
         self.threads.clear();
         self.composer = None;
         self.loading = true;
@@ -159,6 +165,7 @@ impl DiffView {
                 this.loading = false;
                 match result {
                     Ok((lines, threads)) => {
+                        this.list_state.reset(lines.len());
                         this.diff_lines = lines;
                         this.threads = threads;
                     }
@@ -184,6 +191,7 @@ impl DiffView {
                                 *t = updated.clone();
                             }
                         }
+                        this.remeasure_line(updated.line);
                     }
                     Err(e) => this.error = Some(format!("{e:#}")),
                 }
@@ -206,13 +214,44 @@ impl DiffView {
         let input = cx.new(|cx| TextareaState::new(window, cx).placeholder(placeholder));
         let handle = input.read(cx).focus_handle(cx);
         window.focus(&handle, cx);
+        // Replacing an open composer shrinks the row it was on.
+        if let Some(old) = self.composer.take() {
+            self.remeasure_target(&old.target);
+        }
+        self.remeasure_target(&target);
         self.composer = Some(Composer { target, input });
         cx.notify();
     }
 
     fn cancel_composer(&mut self, cx: &mut Context<Self>) {
-        self.composer = None;
+        if let Some(composer) = self.composer.take() {
+            self.remeasure_target(&composer.target);
+        }
         cx.notify();
+    }
+
+    /// The list re-measures rows that are on screen every frame, but keeps
+    /// the cached height of everything else. Call this when the content
+    /// anchored to `line` changes, in case that row has been scrolled away.
+    fn remeasure_line(&self, line: i32) {
+        if line <= 0 {
+            return;
+        }
+        if let Some(ix) = self.diff_lines.iter().position(|l| l.new_line == line) {
+            self.list_state.remeasure_items(ix..ix + 1);
+        }
+    }
+
+    fn remeasure_target(&self, target: &ComposerTarget) {
+        let line = match target {
+            ComposerTarget::NewThread { line } => Some(*line),
+            ComposerTarget::Reply { thread_id } => {
+                self.threads.iter().find(|t| t.id == *thread_id).map(|t| t.line)
+            }
+        };
+        if let Some(line) = line {
+            self.remeasure_line(line);
+        }
     }
 
     fn submit_composer(&mut self, cx: &mut Context<Self>) {
@@ -234,6 +273,7 @@ impl DiffView {
         let base = self.config.base_ref.clone();
         let selected = self.selected.clone();
         let target = composer.target.clone();
+        self.remeasure_target(&target);
 
         cx.spawn(async move |this, cx| {
             let result: Result<ComposerSubmit> = cx
@@ -256,13 +296,17 @@ impl DiffView {
                 .await;
             let _ = this.update(cx, |this, cx| {
                 match result {
-                    Ok(ComposerSubmit::NewThread(t)) => this.threads.push(t),
+                    Ok(ComposerSubmit::NewThread(t)) => {
+                        this.remeasure_line(t.line);
+                        this.threads.push(t);
+                    }
                     Ok(ComposerSubmit::Reply(tid, c)) => {
                         for t in this.threads.iter_mut() {
                             if t.id == tid {
                                 t.comments.push(c.clone());
                             }
                         }
+                        this.remeasure_target(&ComposerTarget::Reply { thread_id: tid });
                     }
                     Err(e) => this.error = Some(format!("{e:#}")),
                 }
@@ -301,36 +345,6 @@ impl Render for DiffView {
             .map(SharedString::from)
             .unwrap_or_else(|| "Select a file".into());
 
-        let mut children = Vec::<AnyElement>::with_capacity(self.diff_lines.len());
-        for (i, line) in self.diff_lines.iter().enumerate() {
-            children.push(self.render_diff_line(i, line, cx).into_any_element());
-
-            if let Some(c) = &self.composer {
-                if matches!(c.target, ComposerTarget::NewThread { line: a } if a == line.new_line)
-                    && line.new_line > 0
-                {
-                    children.push(self.render_composer_inline(c, cx).into_any_element());
-                }
-            }
-
-            if line.new_line > 0 {
-                let threads: Vec<&Thread> = self
-                    .threads
-                    .iter()
-                    .filter(|t| t.line == line.new_line)
-                    .collect();
-                for t in threads {
-                    children.push(self.render_thread_card(t, cx).into_any_element());
-                    if let Some(c) = &self.composer {
-                        if c.target == (ComposerTarget::Reply { thread_id: t.id }) {
-                            children
-                                .push(self.render_composer_inline(c, cx).into_any_element());
-                        }
-                    }
-                }
-            }
-        }
-
         let error_banner = self.error.clone().map(|msg| {
             div()
                 .px_3()
@@ -357,18 +371,51 @@ impl Render for DiffView {
             )
             .children(error_banner)
             .child(
-                div()
-                    .id("diff-scroller")
-                    .flex_grow(1.0)
-                    .flex()
-                    .flex_col()
-                    .overflow_y_scroll()
-                    .children(children),
+                // Virtualized: only the rows in (or near) the viewport are
+                // built, laid out and painted, so a keystroke in the composer
+                // no longer pays for the whole file.
+                list(
+                    self.list_state.clone(),
+                    cx.processor(|this, ix: usize, _window, cx| this.render_row(ix, cx)),
+                )
+                .flex_grow(1.0),
             )
     }
 }
 
 impl DiffView {
+    /// One list item: the diff line at `ix` plus everything anchored to it
+    /// (an inline new-thread composer, thread cards, reply composers).
+    fn render_row(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+        let Some(line) = self.diff_lines.get(ix) else {
+            return div().into_any_element();
+        };
+        // `w_full` because list items are sized to their content, unlike
+        // children of a flex column; without it row backgrounds stop at the
+        // end of the text.
+        let mut row = div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(self.render_diff_line(ix, line, cx));
+        if line.new_line > 0 {
+            if let Some(c) = &self.composer {
+                if c.target == (ComposerTarget::NewThread { line: line.new_line }) {
+                    row = row.child(self.render_composer_inline(c, cx));
+                }
+            }
+            for t in self.threads.iter().filter(|t| t.line == line.new_line) {
+                row = row.child(self.render_thread_card(t, cx));
+                if let Some(c) = &self.composer {
+                    if c.target == (ComposerTarget::Reply { thread_id: t.id }) {
+                        row = row.child(self.render_composer_inline(c, cx));
+                    }
+                }
+            }
+        }
+        row.into_any_element()
+    }
+
     fn render_diff_line(
         &self,
         row: usize,
