@@ -1,0 +1,10 @@
+%%{init: {"flowchart": {"diagramPadding": 40, "rankSpacing": 30}}}%%
+flowchart TD
+    Proto[Versioned API definitions] --> Rust[Generated Rust service types]
+    Proto --> TS[Generated TypeScript client]
+    Rust --> Handler[Connect service handlers]
+    Handler --> Core[Review core]
+    TS --> Web[Web UI]
+    Web --> Handler
+    Nvim[Neovim plugin or helper] --> Handler
+    Desktop[Rust desktop or TUI] --> Handler

@@ -1,0 +1,11 @@
+%%{init: {"flowchart": {"diagramPadding": 40, "rankSpacing": 30}}}%%
+flowchart TD
+    Local[Local worktree and branch session] --> Review[Review model]
+    PR[PR review by forge and PR ID] --> Review
+    Review --> Revision[Fixed revision: base and head]
+    Review --> Thread[Thread: open or resolved]
+    Revision --> GitSource[Git commit or index]
+    Revision --> Snapshot[Saved working-tree snapshot]
+    Snapshot --> Untracked[Selected untracked content]
+    Thread --> Anchor[Optional revision and line anchor]
+    Thread --> Comments[Comments and drafts]

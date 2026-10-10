@@ -1,0 +1,15 @@
+%%{init: {"flowchart": {"diagramPadding": 40, "rankSpacing": 30}}}%%
+flowchart TD
+    subgraph Clients
+        direction LR
+        Web[Web UI]
+        Desktop[GPUI desktop]
+        Nvim[Neovim plugin]
+        TUI[Rust TUI]
+    end
+    Clients --> API[Review service API]
+    API --> Core[Rust review core]
+    Core --> Git[Git repository and working tree]
+    Core --> Store[Review store and snapshots]
+    API --> Adapter[Forge adapter and outbox]
+    Adapter <--> Forge[GitHub or GitLab]
