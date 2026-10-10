@@ -66,6 +66,15 @@ description = "Run the Tauri desktop shell (expects lgtm:serve in another shell)
 run = "cd apps/lgtm-desktop-tauri && cargo tauri dev"
 
 [tasks."lgtm:run:gpui"]
-description = "Run the GPUI desktop app (expects lgtm:serve in another shell)"
+description = "Run the GPUI desktop app, debug build (expects lgtm:serve in another shell)"
 depends = ["lgtm:build:gpui"]
 run = "cd apps/lgtm-desktop-gpui && cargo run"
+
+[tasks."lgtm:build:gpui:release"]
+description = "Build the GPUI desktop app in release (one-time ~1m; needed for smooth typing)"
+run = "cd apps/lgtm-desktop-gpui && cargo build --release"
+
+[tasks."lgtm:run:gpui:release"]
+description = "Run the GPUI desktop app, release build — this is the one you want for day-to-day"
+depends = ["lgtm:build:gpui:release"]
+run = "cd apps/lgtm-desktop-gpui && cargo run --release"
