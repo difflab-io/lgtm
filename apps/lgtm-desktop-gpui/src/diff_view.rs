@@ -104,6 +104,20 @@ impl DiffView {
         self.loading = true;
         self.error = None;
         cx.notify();
+        // Debug-only: auto-open a composer right after the diff loads so we
+        // can benchmark keystroke-driven re-renders without having to click
+        // "+" manually. Set LGTM_AUTO_COMPOSER=1 to enable.
+        if std::env::var("LGTM_AUTO_COMPOSER").is_ok() {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(400))
+                    .await;
+                let _ = this.update(cx, |_this, _cx| {
+                    // Can't open a composer without a Window; just notify.
+                });
+            })
+            .detach();
+        }
 
         let client = self.client.clone();
         let repo = self.config.repo_path.clone();
@@ -260,7 +274,7 @@ impl DiffView {
 }
 
 impl Render for DiffView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if std::env::var("LGTM_TRACE_RENDER").is_ok() {
             use std::sync::atomic::{AtomicU64, Ordering};
             static N: AtomicU64 = AtomicU64::new(0);
@@ -270,6 +284,15 @@ impl Render for DiffView {
                 self.diff_lines.len(),
                 self.composer.is_some()
             );
+        }
+        // Debug: auto-open a composer anchored at line 1 of the current file
+        // on first render after the diff loads. Lets us benchmark typing lag
+        // without manually clicking "+". Enable with LGTM_AUTO_COMPOSER=1.
+        if std::env::var("LGTM_AUTO_COMPOSER").is_ok()
+            && self.composer.is_none()
+            && !self.diff_lines.is_empty()
+        {
+            self.start_composer(ComposerTarget::NewThread { line: 1 }, window, cx);
         }
 
         let header_label = self
