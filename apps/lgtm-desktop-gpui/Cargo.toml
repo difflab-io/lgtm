@@ -27,3 +27,10 @@ serde_json = "1"
 # syntect loads SublimeText syntaxes at startup; good enough for the small set
 # of languages the fixture repo exercises.
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+
+# GPUI lays out, shapes text for and paints the whole element tree every
+# frame; unoptimized, that (plus syntect) is slow enough to lag on typing and
+# scroll. Optimize dependencies in dev — they compile once and are cached —
+# while our own crate stays unoptimized for fast incremental rebuilds.
+[profile.dev.package."*"]
+opt-level = 3
