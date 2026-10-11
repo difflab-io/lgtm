@@ -1,0 +1,23 @@
+version: 2
+project_name: lgtm-cli
+builds:
+  - id: lgtm-cli
+    builder: rust
+    binary: lgtm-cli
+    dir: .
+    targets:
+      - x86_64-unknown-linux-gnu
+      - aarch64-unknown-linux-gnu
+      - x86_64-apple-darwin
+      - aarch64-apple-darwin
+    flags:
+      - --release
+      - --locked
+      - -p=lgtm-cli
+archives:
+  - id: lgtm-cli
+    ids: [lgtm-cli]
+    formats: [tar.gz]
+    name_template: '{{ .Binary }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}'
+changelog:
+  disable: true

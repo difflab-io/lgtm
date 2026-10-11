@@ -1,0 +1,47 @@
+# Bun dependencies and generated output
+node_modules/
+**/node_modules/
+**/dist/
+.output/
+**/.output/
+.svelte-kit/
+**/.svelte-kit/
+build/
+**/build/
+coverage/
+**/coverage/
+
+# Mise local state
+.mise/
+**/.mise/
+.mise.local.toml
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Agent and editor state
+.claude/
+.codevoyant
+.pi/
+.idea/
+.vscode/
+*.swp
+
+# Operating system files
+.DS_Store
+# Rust build artifacts
+target/
+**/target/
+
+# GoReleaser artifacts
+dist/
+
+# mise local state
+
+# Premise agent harness
+
+# macOS
+
+# Editors

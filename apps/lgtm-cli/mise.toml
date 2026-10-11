@@ -1,0 +1,98 @@
+# Template contract tasks and generated-project Rust toolchain.
+
+[tools]
+rust = { version = "1.88", components = "rustfmt,clippy,rust-analyzer" }
+"cargo:cargo-zigbuild" = "0.23.4"
+zig = "0.16.0"
+
+[tasks.install]
+description = "Resolve and fetch Cargo dependencies"
+run = "cargo fetch"
+
+[tasks.build]
+description = "Compile the CLI"
+run = "cargo build"
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = "cargo clean"
+
+[tasks.test]
+description = "Run the test suite"
+run = "cargo test"
+
+[tasks.lint]
+description = "Lint with clippy (deny warnings)"
+run = "cargo clippy --all-targets --all-features -- -D warnings"
+
+[tasks."lint:fix"]
+description = "Auto-fix clippy findings"
+run = "cargo clippy --fix --allow-dirty --allow-staged --allow-no-vcs"
+
+[tasks.format]
+description = "Format Rust sources"
+run = "cargo fmt --all"
+
+[tasks."format:check"]
+description = "Check formatting without modifying files"
+run = "cargo fmt --all --check"
+
+[tasks.env-pull]
+description = "Pull external environment configuration"
+run = 'echo "env-pull: nothing to pull"'
+
+[tasks."publish:rc"]
+description = "Publish a prerelease (rc) version of the crate"
+run = '''
+set -eu
+if [ "${PREMISE_TEMPLATE_TEST:-}" = "1" ]; then
+  echo "publish:rc (test mode): cargo publish --dry-run --allow-dirty"
+  cargo publish --dry-run --allow-dirty
+  exit 0
+fi
+version="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)"
+case "$version" in
+  *-*) ;;
+  *) echo "error: publish:rc requires a SemVer prerelease version (got $version)" >&2; exit 1 ;;
+esac
+cargo publish --allow-dirty --no-verify
+'''
+
+[tasks.publish]
+description = "Publish a stable version of the crate"
+run = '''
+set -eu
+if [ "${PREMISE_TEMPLATE_TEST:-}" = "1" ]; then
+  echo "publish (test mode): cargo publish --dry-run --allow-dirty"
+  cargo publish --dry-run --allow-dirty
+  exit 0
+fi
+version="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)"
+case "$version" in
+  *-*) echo "error: publish requires a stable version (got $version)" >&2; exit 1 ;;
+esac
+cargo publish --allow-dirty --no-verify
+'''
+
+[tasks.run]
+description = "Run the CLI"
+run = "cargo run"
+
+[tasks.dev]
+description = "Run the CLI in development mode"
+run = '''
+set -eu
+if [ "${PREMISE_TEMPLATE_TEST:-}" = "1" ]; then
+  cargo build
+else
+  cargo run
+fi
+'''
+
+[tasks.deploy]
+description = "Validate the deploy contract (no deployable surface)"
+run = 'echo "deploy: no deployable surface"'
+
+[tasks.e2e]
+description = "Validate the e2e contract (no end-to-end surface)"
+run = 'echo "e2e: no end-to-end surface"'
