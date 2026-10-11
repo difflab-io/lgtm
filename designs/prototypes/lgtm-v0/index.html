@@ -1,0 +1,1833 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LGTM v0 — code review</title>
+    <!-- Match Difflab's pinned, browser-only prototype dependencies. -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/preline@5.0.0/dist/preline.js"
+    ></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.16/dist/purify.min.js"></script>
+    <style type="text/tailwindcss">
+      @theme {
+        --font-sans: Inter, ui-sans-serif, system-ui, sans-serif;
+      }
+    </style>
+    <style>
+      :root {
+        font:
+          11px Inter,
+          ui-sans-serif,
+          system-ui,
+          sans-serif;
+        color: #1e293b;
+        background: #f1f5f9;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+      }
+      button,
+      input,
+      select,
+      textarea {
+        font: inherit;
+      }
+      button,
+      a,
+      input,
+      select,
+      textarea {
+        outline-offset: 3px;
+      }
+      button {
+        cursor: pointer;
+      }
+      button:disabled {
+        cursor: default;
+        opacity: 0.45;
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+      button:focus-visible,
+      a:focus-visible,
+      summary:focus-visible {
+        outline: 2px solid #475569;
+      }
+      button {
+        border: 1px solid #cbd5e1;
+        border-radius: 4px;
+        background: white;
+        color: #334155;
+        padding: 6px 10px;
+        font-weight: 500;
+      }
+      button:hover {
+        background: #f1f5f9;
+      }
+      .primary {
+        background: #334155;
+        color: white;
+        border-color: #334155;
+      }
+      .primary:hover {
+        background: #1e293b;
+      }
+      .quiet {
+        border-color: transparent;
+        background: transparent;
+      }
+      .muted {
+        color: #64748b;
+      }
+      .badge {
+        font-size: 10px;
+        border: 1px solid #e2e8f0;
+        background: #f8fafc;
+        border-radius: 4px;
+        padding: 2px 6px;
+        white-space: nowrap;
+      }
+      .green {
+        color: #15803d;
+      }
+      .red {
+        color: #be123c;
+      }
+      .blue {
+        color: #0369a1;
+      }
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+      h1 {
+        font-size: 19px;
+        font-weight: 600;
+      }
+      h2 {
+        font-size: 12px;
+        font-weight: 600;
+      }
+      h3 {
+        font-size: 11px;
+        font-weight: 600;
+      }
+      p {
+        line-height: 1.6;
+      }
+      input:not([type="radio"]):not([type="checkbox"]),
+      select,
+      textarea {
+        border: 1px solid #cbd5e1;
+        border-radius: 4px;
+        padding: 7px 9px;
+        background: white;
+        color: #334155;
+      }
+      textarea {
+        width: 100%;
+        resize: vertical;
+        line-height: 1.6;
+      }
+      input[type="radio"],
+      input[type="checkbox"] {
+        accent-color: #475569;
+      }
+      label {
+        cursor: pointer;
+      }
+      .shell {
+        height: 100dvh;
+        min-height: 540px;
+        display: flex;
+        flex-direction: column;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+      }
+      .topbar {
+        height: 58px;
+        flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 16px;
+        background: white;
+        border-bottom: 1px solid #e2e8f0;
+        gap: 12px;
+      }
+      .brand {
+        font-size: 17px;
+        font-weight: 750;
+        letter-spacing: -0.8px;
+      }
+      .top-left,
+      .top-right {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .top-left {
+        min-width: 0;
+        flex: 1;
+        gap: 8px;
+      }
+      .top-right {
+        flex: none;
+        gap: 6px;
+      }
+      .divider {
+        height: 17px;
+        width: 1px;
+        background: #e2e8f0;
+      }
+      .start {
+        width: 760px;
+        max-width: calc(100% - 48px);
+        margin: 10px auto;
+      }
+      .eyebrow {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #64748b;
+        margin-bottom: 7px;
+      }
+      .choices {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        margin: 14px 0;
+      }
+      .card {
+        border: 1px solid #e2e8f0;
+        border-radius: 5px;
+        background: white;
+        padding: 16px;
+      }
+      .card h2 {
+        font-size: 14px;
+        margin-bottom: 7px;
+      }
+      .card > p {
+        color: #64748b;
+        margin-bottom: 9px;
+      }
+      .choice {
+        display: flex;
+        gap: 9px;
+        padding: 8px;
+        border: 1px solid #e2e8f0;
+        border-radius: 4px;
+        margin-bottom: 6px;
+      }
+      .choice:has(input:checked) {
+        background: #f1f5f9;
+        border-color: #94a3b8;
+      }
+      .choice small {
+        display: block;
+        color: #64748b;
+        font-size: 10px;
+        margin-top: 3px;
+      }
+      .choice input {
+        margin: 2px 0;
+      }
+      .wide {
+        width: 100%;
+      }
+      .card .primary {
+        margin-top: 12px;
+      }
+      .field {
+        display: block;
+        margin-top: 11px;
+      }
+      .field > span {
+        display: block;
+        margin-bottom: 6px;
+        color: #64748b;
+      }
+      .recent {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 9px 0;
+        border-bottom: 1px solid #e2e8f0;
+      }
+      .recent b {
+        display: block;
+        margin-bottom: 4px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: 208px minmax(0, 1fr) 264px;
+        flex: 1;
+        min-height: 0;
+      }
+      .layout.no-threads {
+        grid-template-columns: 208px minmax(0, 1fr);
+      }
+      .pane {
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        background: white;
+      }
+      .files {
+        border-right: 1px solid #e2e8f0;
+      }
+      .threads {
+        border-left: 1px solid #e2e8f0;
+      }
+      .pane-title {
+        height: 40px;
+        flex: none;
+        border-bottom: 1px solid #e2e8f0;
+        padding: 0 12px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .tools {
+        padding: 10px;
+        border-bottom: 1px solid #e2e8f0;
+      }
+      .scroll {
+        overflow: auto;
+        flex: 1;
+        min-height: 0;
+      }
+      .tree {
+        padding: 8px 6px;
+      }
+      .tree details > summary {
+        list-style: none;
+        padding: 6px 7px;
+        cursor: pointer;
+        font-weight: 500;
+        white-space: nowrap;
+      }
+      .tree details > summary:before {
+        content: "›";
+        display: inline-block;
+        width: 13px;
+        color: #64748b;
+      }
+      .tree details[open] > summary:before {
+        content: "⌄";
+      }
+      .tree details details {
+        margin-left: 12px;
+      }
+      .tree .file {
+        margin-left: 21px;
+        display: flex;
+        width: calc(100% - 21px);
+        padding: 7px 6px;
+        align-items: center;
+        gap: 6px;
+        border: 0;
+        border-radius: 3px;
+        text-align: left;
+        font-size: 10px;
+        font-weight: 400;
+      }
+      .file .name {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .file.active {
+        background: #e2e8f0;
+        font-weight: 600;
+      }
+      .file .status {
+        font:
+          9px ui-monospace,
+          monospace;
+        color: #0369a1;
+      }
+      .tree-root {
+        margin-left: 0 !important;
+        width: 100% !important;
+      }
+      .file-footer {
+        padding: 10px;
+        border-top: 1px solid #e2e8f0;
+        line-height: 1.7;
+        color: #64748b;
+      }
+      .file-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px;
+        border-bottom: 1px solid #e2e8f0;
+        background: #fff;
+      }
+      .file-top b {
+        font-size: 11px;
+        overflow-wrap: anywhere;
+      }
+      .file-top .spacer {
+        flex: 1;
+      }
+      .diff-controls {
+        padding: 8px 12px;
+        background: #f8fafc;
+        border-bottom: 1px solid #e2e8f0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .segments {
+        display: flex;
+        gap: 0;
+      }
+      .segments button {
+        padding: 4px 8px;
+        border-radius: 0;
+        font-size: 10px;
+      }
+      .segments button:first-child {
+        border-radius: 4px 0 0 4px;
+      }
+      .segments button:last-child {
+        border-radius: 0 4px 4px 0;
+      }
+      .segments button.active {
+        background: #e2e8f0;
+        border-color: #94a3b8;
+      }
+      .diff {
+        font:
+          10px/23px ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Consolas,
+          monospace;
+      }
+      .diff-row {
+        display: grid;
+        grid-template-columns: 28px 28px 20px 14px minmax(max-content, 1fr);
+        min-width: 420px;
+        min-height: 23px;
+      }
+      .num {
+        color: #94a3b8;
+        text-align: right;
+        padding-right: 5px;
+        user-select: none;
+      }
+      .diff-row code,
+      .half code {
+        white-space: pre;
+        padding-right: 10px;
+        overflow: visible;
+      }
+      .diff-row.add,
+      .half.add {
+        background: #ecfdf5;
+      }
+      .diff-row.del,
+      .half.del {
+        background: #fff1f2;
+      }
+      .sign {
+        color: #64748b;
+      }
+      .add .sign {
+        color: #15803d;
+      }
+      .del .sign {
+        color: #be123c;
+      }
+      .line-add {
+        padding: 0;
+        border: 0;
+        background: transparent;
+        opacity: 0;
+        color: #475569;
+        line-height: 20px;
+      }
+      .diff-row:hover .line-add,
+      .half:hover .line-add,
+      .line-add:focus-visible {
+        opacity: 1;
+      }
+      .fold {
+        display: block;
+        width: 100%;
+        border: 0;
+        border-top: 1px solid #e2e8f0;
+        border-bottom: 1px solid #e2e8f0;
+        border-radius: 0;
+        background: #f1f5f9;
+        color: #64748b;
+        padding: 5px;
+        font:
+          10px/18px ui-monospace,
+          monospace;
+        text-align: left;
+        padding-left: 18px;
+      }
+      .hunk {
+        background: #f0f9ff;
+        color: #0369a1;
+        padding: 4px 14px;
+        border-bottom: 1px solid #e0f2fe;
+      }
+      .split-label {
+        min-width: 540px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        background: #f8fafc;
+        color: #64748b;
+        font: 10px/25px system-ui;
+      }
+      .split-label span {
+        padding-left: 12px;
+        border-right: 1px solid #e2e8f0;
+      }
+      .split-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        min-width: 540px;
+      }
+      .half code {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        min-width: 0;
+      }
+      .half {
+        display: grid;
+        grid-template-columns: 28px 18px 12px minmax(0, 1fr);
+        border-right: 1px solid #e2e8f0;
+        min-height: 23px;
+      }
+      .annotation {
+        margin: 10px 12px;
+        padding: 12px;
+        border: 1px solid #cbd5e1;
+        border-radius: 4px;
+        font: 11px/1.5 system-ui;
+        background: white;
+      }
+      .annotation .meta {
+        margin-bottom: 8px;
+      }
+      .annotation textarea {
+        min-height: 72px;
+      }
+      .composer-buttons {
+        display: flex;
+        justify-content: flex-end;
+        gap: 6px;
+        margin-top: 8px;
+        align-items: center;
+      }
+      .actor {
+        font-weight: 600;
+      }
+      .avatar {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: #e2e8f0;
+        border-radius: 50%;
+        height: 22px;
+        width: 22px;
+        font-size: 9px;
+        color: #475569;
+        margin-right: 6px;
+      }
+      .thread-list {
+        padding: 10px;
+      }
+      .thread {
+        border: 1px solid #e2e8f0;
+        border-radius: 4px;
+        margin-bottom: 10px;
+        overflow: hidden;
+      }
+      .thread-summary {
+        display: block;
+        width: 100%;
+        text-align: left;
+        padding: 10px;
+        border: 0;
+        border-radius: 0;
+        font-weight: 400;
+      }
+      .thread-summary .anchor {
+        display: block;
+        font:
+          10px ui-monospace,
+          monospace;
+        color: #64748b;
+        margin-bottom: 9px;
+        overflow-wrap: anywhere;
+      }
+      .thread-summary p {
+        margin-top: 7px;
+      }
+      .thread-summary .meta {
+        display: flex;
+        align-items: center;
+        font-size: 10px;
+      }
+      .thread-summary .reply-count {
+        display: block;
+        margin-top: 9px;
+        color: #64748b;
+        font-size: 10px;
+      }
+      .thread.expanded {
+        border-color: #94a3b8;
+      }
+      .thread-body {
+        padding: 0 10px 10px;
+      }
+      .reply {
+        margin-left: 15px;
+        border-left: 2px solid #cbd5e1;
+        padding: 9px 0 9px 12px;
+        background: #f8fafc;
+        margin-bottom: 8px;
+      }
+      .reply p {
+        margin: 5px 0;
+      }
+      .thread-body textarea {
+        min-height: 62px;
+        font-size: 10px;
+      }
+      .thread-body button {
+        font-size: 10px;
+      }
+      .thread.resolved {
+        opacity: 0.7;
+      }
+      .statusbar {
+        height: 26px;
+        padding: 0 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: #f8fafc;
+        border-top: 1px solid #e2e8f0;
+        color: #64748b;
+        font-size: 10px;
+        flex: none;
+      }
+      .thread-filter {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px;
+        border-bottom: 1px solid #e2e8f0;
+        color: #64748b;
+        font-size: 10px;
+      }
+      .identity {
+        padding: 8px 10px;
+        border-bottom: 1px solid #e2e8f0;
+        font-size: 10px;
+        color: #64748b;
+      }
+      .empty {
+        padding: 24px;
+        color: #64748b;
+        line-height: 1.7;
+        text-align: center;
+      }
+      dialog {
+        margin: auto;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        padding: 0;
+        color: #334155;
+        background: white;
+        width: 480px;
+        max-width: calc(100vw - 32px);
+        box-shadow: 0 20px 50px #0f172a25;
+      }
+      dialog::backdrop {
+        background: #0f172a55;
+      }
+      .dialog-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px 20px;
+        border-bottom: 1px solid #e2e8f0;
+      }
+      .dialog-head h2 {
+        font-size: 15px;
+      }
+      .dialog-content {
+        padding: 18px 20px;
+      }
+      .dialog-content > p {
+        color: #64748b;
+        margin-bottom: 14px;
+      }
+      .dialog-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        padding: 12px 20px;
+        border-top: 1px solid #e2e8f0;
+        background: #f8fafc;
+      }
+      .outcome {
+        display: block;
+        padding: 10px;
+        border: 1px solid #e2e8f0;
+        border-radius: 4px;
+        margin-top: 8px;
+      }
+      .outcome:has(input:checked) {
+        background: #f1f5f9;
+        border-color: #94a3b8;
+      }
+      .outcome input {
+        margin-right: 8px;
+      }
+      .outcome small {
+        display: block;
+        color: #64748b;
+        margin: 4px 0 0 25px;
+        font-size: 10px;
+      }
+      .pr-list {
+        max-height: 245px;
+        overflow: auto;
+        margin-top: 10px;
+      }
+      .pr-option {
+        padding: 13px 8px;
+        width: 100%;
+        border: 0;
+        border-bottom: 1px solid #e2e8f0;
+        border-radius: 0;
+        text-align: left;
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .pr-option b {
+        font-size: 11px;
+      }
+      .pr-option small {
+        display: block;
+        color: #64748b;
+        font-size: 10px;
+        margin-top: 5px;
+      }
+      .notice {
+        background: #f0f9ff;
+        border: 1px solid #e0f2fe;
+        border-radius: 4px;
+        padding: 10px;
+        color: #0369a1;
+        font-size: 10px;
+        line-height: 1.6;
+        margin-top: 10px;
+      }
+      .toast {
+        position: fixed;
+        bottom: 40px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #334155;
+        color: white;
+        padding: 10px 18px;
+        border-radius: 5px;
+        z-index: 50;
+      }
+      .prototype {
+        color: #94a3b8;
+        font-size: 10px;
+      }
+      .preview {
+        padding: 10px;
+        min-height: 72px;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        white-space: pre-wrap;
+      }
+      .range {
+        background: #e0f2fe !important;
+      }
+      .screen-links {
+        display: flex;
+        gap: 14px;
+        color: #64748b;
+        font-size: 10px;
+      }
+      .screen-links a:hover {
+        text-decoration: underline;
+      }
+      @media (max-width: 900px) {
+        .layout {
+          grid-template-columns: 180px minmax(0, 1fr);
+        }
+        .threads {
+          position: absolute;
+          right: 0;
+          top: 58px;
+          bottom: 26px;
+          width: 264px;
+          box-shadow: -8px 0 20px #0f172a15;
+          z-index: 5;
+        }
+        .layout.no-threads {
+          grid-template-columns: 180px minmax(0, 1fr);
+        }
+        .top-left .repo-label {
+          display: none;
+        }
+      }
+      @media (max-width: 600px) {
+        .start {
+          margin: 25px auto;
+        }
+        .choices {
+          grid-template-columns: 1fr;
+        }
+        .shell {
+          min-height: 540px;
+        }
+        .topbar {
+          padding: 0 10px;
+        }
+        .top-right {
+          gap: 4px;
+        }
+        .prototype,
+        .top-left .badge {
+          display: none;
+        }
+        .layout,
+        .layout.no-threads {
+          grid-template-columns: 140px minmax(0, 1fr);
+        }
+        .file-top {
+          flex-wrap: wrap;
+        }
+        .threads {
+          top: 58px;
+        }
+        .statusbar span:nth-child(2) {
+          display: none;
+        }
+        .start .screen-links {
+          flex-wrap: wrap;
+        }
+      }
+    </style>
+  </head>
+  <body class="font-sans">
+    <div id="app"></div>
+    <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+    <div id="feedback" role="status" aria-live="polite"></div>
+    <script>
+      // Fixture data follows the standalone web + Neovim PoC's review model.
+      const gitFiles = [
+        { path: "internal/review/anchors.go", status: "M", add: 8, del: 3 },
+        {
+          path: "internal/review/anchors_test.go",
+          status: "A",
+          add: 26,
+          del: 0,
+        },
+        { path: "internal/review/service.go", status: "M", add: 12, del: 4 },
+        {
+          path: "apps/lgtm-web-app/src/routes/+page.svelte",
+          status: "M",
+          add: 19,
+          del: 8,
+        },
+        {
+          path: "libs/lgtm-ui/src/ThreadCard.svelte",
+          status: "M",
+          add: 14,
+          del: 6,
+        },
+        { path: "README.md", status: "M", add: 6, del: 2 },
+      ];
+      const directoryFiles = [
+        { path: "agent-plans/review-workflow.md", status: "I", add: 0, del: 0 },
+        {
+          path: "agent-plans/release-checklist.md",
+          status: "I",
+          add: 0,
+          del: 0,
+        },
+        { path: "notes.md", status: "F", add: 0, del: 0 },
+      ];
+      const ignoredFile = {
+        path: ".plans/review-workflow.md",
+        status: "I",
+        add: 0,
+        del: 0,
+      };
+      let files = gitFiles;
+      const pulls = [
+        {
+          id: 42,
+          title: "Preserve review anchors across renamed files",
+          branch: "fix/rename-anchors",
+          author: "maya",
+          draft: false,
+        },
+        {
+          id: 39,
+          title: "Add file-level review comments",
+          branch: "feature/file-comments",
+          author: "sam",
+          draft: false,
+        },
+        {
+          id: 37,
+          title: "Improve Neovim thread navigation",
+          branch: "feature/nvim-threads",
+          author: "codex",
+          draft: true,
+        },
+      ];
+      const initialThreads = [
+        {
+          id: 1,
+          path: files[0].path,
+          line: 43,
+          side: "RIGHT",
+          author: "Maya",
+          kind: "human",
+          body: "Can we preserve the original path for comments on the deleted side of a rename?",
+          replies: [
+            {
+              author: "Sam",
+              body: "Yes — the old path should only apply to LEFT anchors.",
+            },
+            {
+              author: "Maya",
+              body: "That works. Please add a regression test too.",
+            },
+          ],
+          resolved: false,
+          draft: false,
+        },
+        {
+          id: 2,
+          path: files[1].path,
+          line: null,
+          author: "Sam",
+          kind: "human",
+          body: "Please cover a rename with edits, as well as a rename without edits.",
+          replies: [],
+          resolved: false,
+          draft: true,
+        },
+        {
+          id: 3,
+          path: files[2].path,
+          line: 28,
+          side: "RIGHT",
+          author: "Codex",
+          kind: "agent",
+          body: "The review should keep the same head SHA when retrying a submission.",
+          replies: [{ author: "Sam", body: "Fixed in the latest commit." }],
+          resolved: true,
+          draft: false,
+        },
+      ];
+      const source = [
+        "package review",
+        "",
+        "import (",
+        '  "context"',
+        '  "fmt"',
+        '  "strings"',
+        ")",
+        "",
+        "type githubFile struct {",
+        "  Filename string",
+        "  PreviousFilename string",
+        "  Patch string",
+        "}",
+        "",
+        "// Match comments to their original diff side.",
+        "func inlinePath(c Comment, files []githubFile) string {",
+        "  for _, file := range files {",
+        "    if !matchesPath(c, file) {",
+        "      continue",
+        "    }",
+        "    hunks, err := parseHunks(file.Patch)",
+        "    if err != nil {",
+        "      continue",
+        "    }",
+        "    for _, h := range hunks {",
+        "      start := h.NewStartLine",
+        "      count := h.NewLines",
+        '      if c.Side == "LEFT" {',
+        "        start = h.OrigStartLine",
+        "        count = h.OrigLines",
+        "      }",
+        "      if c.Line >= start && c.Line < start+count {",
+        "        return file.Filename",
+        "      }",
+        "    }",
+        "  }",
+        '  return ""',
+        "}",
+        "",
+        "func matchesPath(c Comment, f githubFile) bool {",
+        "  if c.Path == f.Filename {",
+        "    return true",
+        "  }",
+        '  return c.Side == "LEFT" &&',
+        "    c.Path == f.PreviousFilename",
+        "}",
+        "",
+        "// Notes outside a hunk become summary notes.",
+        "func submissionPayload(r Review) map[string]any {",
+        "  body := attributed(r.Body, r.Actor)",
+        "  return map[string]any{",
+        '    "body": body,',
+        '    "commit_id": r.Head,',
+        "  }",
+        "}",
+      ];
+      const otherSources = {
+        [files[1].path]: [
+          "package review",
+          "",
+          'import "testing"',
+          "",
+          "func TestRenameAnchor(t *testing.T) {",
+          "  file := githubFile{",
+          '    Filename: "new.go",',
+          '    PreviousFilename: "old.go",',
+          "  }",
+          '  comment := Comment{Path: "old.go", Side: "LEFT"}',
+          "  if !matchesPath(comment, file) {",
+          '    t.Fatal("expected original path to match")',
+          "  }",
+          "}",
+        ],
+        [files[2].path]: [
+          "package review",
+          "",
+          'import "context"',
+          "",
+          "func (s *Service) Submit(ctx context.Context, r Review) error {",
+          "  head := r.Head",
+          "  payload := submissionPayload(r)",
+          '  payload["commit_id"] = head',
+          "  return s.github.Submit(ctx, payload)",
+          "}",
+        ],
+        [files[3].path]: [
+          '<script lang="ts">',
+          "  let threads = $state([]);",
+          "  let showThreads = $state(true);",
+          '  let layout = $state("stacked");',
+          "</scr" + "ipt>",
+          "",
+          "<header>",
+          "  <button>Submit review</button>",
+          "</header>",
+          '<main class="review-layout">',
+          "  <FileTree />",
+          "  <DiffView {layout} />",
+          "  {#if showThreads}<ThreadPanel {threads} />{/if}",
+          "</main>",
+        ],
+        [files[4].path]: [
+          '<script lang="ts">',
+          "  let { thread, replies } = $props();",
+          "  let expanded = $state(false);",
+          "</scr" + "ipt>",
+          "",
+          "<article>",
+          "  <button onclick={() => expanded = !expanded}>",
+          "    {thread.body}",
+          "  </button>",
+          "  {#if expanded}",
+          '    <div class="nested">{replies.length} replies</div>',
+          "  {/if}",
+          "</article>",
+        ],
+        [files[5].path]: [
+          "# lgtm",
+          "",
+          "Review code from your browser or Neovim.",
+          "",
+          "## Local review",
+          "",
+          "Choose worktree changes or unstaged changes.",
+          "Save notes locally, then continue the review later.",
+          "",
+          "## Pull requests",
+          "",
+          "Pick an open pull request and submit a review.",
+        ],
+      };
+      const planSource = [
+        "# Review workflow",
+        "",
+        "## Goal",
+        "Review local code and agent plans in one workspace.",
+        "",
+        "## Requirements",
+        "- Open worktree, unstaged, or directory reviews.",
+        "- Include ignored files when selected.",
+        "- Keep web and Neovim review actions equivalent.",
+        "",
+        "## Acceptance",
+        "1. Open this plan without staging it.",
+        "2. Add a file comment and a line comment.",
+        "3. Save the review locally.",
+        "4. Resume it from Neovim.",
+      ];
+      otherSources[directoryFiles[0].path] = planSource;
+      otherSources[directoryFiles[1].path] = [
+        "# Release checklist",
+        "",
+        "- Run web review acceptance cases.",
+        "- Run the same cases in Neovim.",
+        "- Make sure that drafts survive a restart.",
+        "- Make sure that local reviews stay local.",
+      ];
+      otherSources[directoryFiles[2].path] = [
+        "# Review notes",
+        "",
+        "This directory does not need a Git repository.",
+        "Ignored and excluded text files remain available.",
+      ];
+      otherSources[ignoredFile.path] = planSource;
+      const directoryThreads = [
+        {
+          id: 4,
+          path: directoryFiles[0].path,
+          line: 9,
+          side: "RIGHT",
+          author: "Sam",
+          kind: "human",
+          body: "Make Neovim parity a release requirement.",
+          replies: [],
+          resolved: false,
+          draft: true,
+        },
+      ];
+      let state = {
+        screen: "start",
+        local: false,
+        scope: "worktree",
+        includeIgnored: false,
+        closed: false,
+        actor: { id: "human-sam", name: "Sam", kind: "human" },
+        session: "Local worktree · feature/standalone-web",
+        directory: "~/Projects/agent-work",
+        path: files[0].path,
+        mode: "stacked",
+        panel: true,
+        expanded: null,
+        context: false,
+        viewed: new Set(),
+        filter: "",
+        openOnly: true,
+        threads: structuredClone(initialThreads),
+        composer: null,
+        range: null,
+        pr: pulls[0],
+        submitted: false,
+      };
+      const app = document.getElementById("app"),
+        dialog = document.getElementById("dialog");
+      const esc = (v) =>
+        String(v).replace(
+          /[&<>"']/g,
+          (c) =>
+            ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            })[c],
+        );
+      const badge = (s, cls = "") =>
+        `<span class="badge ${cls}">${esc(s)}</span>`;
+      const btn = (s, action, cls = "", attrs = "") =>
+        `<button type="button" class="${cls}" data-action="${action}" ${attrs}>${s}</button>`;
+      const avatar = (n) =>
+        `<span class="avatar" aria-hidden="true">${esc(n.slice(0, 2).toUpperCase())}</span>`;
+      const draftCount = () => state.threads.filter((t) => t.draft).length;
+      function topbar(review = false) {
+        const title = state.local
+          ? state.session
+          : `#${state.pr.id} · ${state.pr.title}`;
+        const status = state.local
+          ? state.closed
+            ? "Closed · local only"
+            : "Active · local only"
+          : state.submitted
+            ? "Submitted"
+            : "Draft review";
+        return `<header class="topbar"><div class="top-left"><a class="brand" href="#start" aria-label="LGTM home">lgtm</a><span class="divider"></span>${review ? `<button class="quiet muted" data-action="${state.local ? "sessions" : "pulls"}" aria-label="Choose ${state.local ? "local session" : "pull request"}">⌄</button><div id="review-heading" style="min-width:0"><h1 style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(title)}</h1><p class="muted" style="font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${state.local ? localDetail() : `maya · ${esc(state.pr.branch)} → main`} · ${state.viewed.size} / ${files.length} files viewed · ${draftCount()} ${state.local ? "notes" : "pending"}</p></div>` : '<span class="repo-label">difflab-io / lgtm</span>'}</div><div class="top-right">${review ? badge(status, state.local ? "blue" : "") + btn(`Threads ${state.threads.filter((t) => !t.resolved).length}`, "panel", "", `aria-expanded="${state.panel}" aria-controls="threads-panel"`) + (state.local ? btn(state.closed ? "New review" : "Close review", state.closed ? "new-local" : "close-local") : "") + btn(state.local ? "Save review" : "Submit review", "submit", "primary", readOnly() ? "disabled" : "") : `<div class="hs-dropdown relative inline-flex prototype"><button type="button" class="hs-dropdown-toggle quiet" aria-haspopup="menu" aria-expanded="false">Design states ⌄</button><div class="hs-dropdown-menu absolute right-0 top-full z-20 mt-1 hidden min-w-40 rounded border border-slate-200 bg-white p-1 shadow-sm" role="menu"><a class="block px-2 py-2 hover:bg-slate-100" href="#split" role="menuitem">Side by side</a><a class="block px-2 py-2 hover:bg-slate-100" href="#local-directory" role="menuitem">Directory review</a><a class="block px-2 py-2 hover:bg-slate-100" href="#local-closed" role="menuitem">Closed local review</a></div></div>${avatar(state.actor.name)}<span>${esc(state.actor.name)}</span>`}</div></header>`;
+      }
+      function start() {
+        return `<div class="shell">${topbar()}<main class="start"><div class="eyebrow">Your checkout · feature/standalone-web</div><h1>What would you like to review?</h1><p class="muted" style="margin-top:7px">Start with local changes or a pull request. Your draft notes stay with the review.</p><div class="choices"><section class="card"><h2>Local review</h2><p>Review changes or files and save notes locally.</p><label class="choice"><input type="radio" name="scope" value="worktree" ${state.scope === "worktree" ? "checked" : ""}><span><b>Worktree changes</b><small>HEAD → worktree · staged + unstaged changes</small></span></label><label class="choice"><input type="radio" name="scope" value="unstaged" ${state.scope === "unstaged" ? "checked" : ""}><span><b>Unstaged changes</b><small>Index → worktree · excludes staged changes</small></span></label><label class="choice"><input type="radio" name="scope" value="directory" ${state.scope === "directory" ? "checked" : ""}><span><b>Local directory</b><small>Any folder · supported files · no Git required</small></span></label><label style="display:block;font-size:10px;margin-top:9px"><input id="include-ignored" type="checkbox" ${state.includeIgnored ? "checked" : ""}> Include ignored files <span class="muted">· Git scopes</span></label><div style="display:flex;gap:6px;margin-top:12px">${btn("Start local review →", "start-local", "primary", 'style="margin-top:0;flex:1"')}${btn("Continue session…", "sessions", "", 'style="font-size:10px"')}</div></section><section class="card"><h2>Open pull requests</h2><p>Review a GitHub pull request from this repository.</p><label class="field"><span>Repository</span><input class="wide" aria-label="GitHub repository" value="difflab-io/lgtm" readonly></label><div style="border:1px solid #e2e8f0;border-radius:4px;padding:12px;margin-top:12px"><b>3 open pull requests</b><p class="muted" style="font-size:10px;margin-top:5px">Choose a pull request to load its changed files and existing discussion.</p></div>${btn("Choose pull request…", "pulls", "primary wide")}</section></div><div class="eyebrow">Continue a review</div><a class="recent" href="#review"><span><b>#42 · Preserve review anchors across renamed files</b><span class="muted">maya · fix/rename-anchors → main</span></span>${badge("Draft · 1 pending")}</a><a class="recent" href="#local-sessions"><span><b>Local worktree · feature/standalone-web</b><span class="muted">6 files · saved 12 minutes ago · only on this machine</span></span>${badge("Active · saved locally")}</a><a href="#local-closed" class="muted" style="display:block;margin-top:6px;font-size:10px">History · 1 closed local review →</a></main><footer class="statusbar" style="margin-top:auto"><span>~/Projects/lgtm</span><span>Commenting as Sam · human</span><span>LGTM v0</span></footer></div>`;
+      }
+      function readOnly() {
+        return state.closed || (state.submitted && !state.local);
+      }
+      function isDirectory() {
+        return state.local && state.scope === "directory";
+      }
+      function localTitle() {
+        return state.scope === "directory"
+          ? "Local directory"
+          : `${state.scope === "unstaged" ? "Unstaged" : "Worktree"} changes`;
+      }
+      function localDetail() {
+        return state.scope === "directory"
+          ? `${esc(state.directory)} · all supported files · includes ignored files`
+          : `${state.scope === "unstaged" ? "Index → worktree" : "HEAD → worktree"} · feature/standalone-web${state.includeIgnored ? " · includes ignored files" : ""}`;
+      }
+      const sessions = [
+        {
+          id: "worktree",
+          title: "Local worktree · feature/standalone-web",
+          source: "HEAD → worktree · ~/Projects/lgtm",
+          status: "Active",
+          hash: "local",
+        },
+        {
+          id: "directory",
+          title: "Agent plans · ~/Projects/agent-work",
+          source: "Directory · includes ignored files",
+          status: "Active",
+          hash: "local-directory",
+        },
+        {
+          id: "closed",
+          title: "Completed review · feature/standalone-web",
+          source: "Closed yesterday · notes and snapshots kept",
+          status: "Closed",
+          hash: "local-closed",
+        },
+      ];
+      function sessionOptions(q) {
+        return (
+          sessions
+            .filter((x) =>
+              (x.title + " " + x.source + " " + x.status)
+                .toLowerCase()
+                .includes(q.toLowerCase()),
+            )
+            .map(
+              (x) =>
+                `<button class="pr-option" data-session="${x.id}"><span><b>${esc(x.title)}</b><small>${esc(x.source)}</small></span>${badge(x.status)}</button>`,
+            )
+            .join("") || '<div class="empty">No matching local sessions.</div>'
+        );
+      }
+      function showSessions() {
+        showDialog(
+          "Continue a local review",
+          '<p>Resume an active session or inspect a closed review. Local sessions never publish to GitHub.</p><input id="session-search" class="wide" aria-label="Search local sessions" placeholder="Search name, directory, or status…"><div id="session-list" class="pr-list">' +
+            sessionOptions("") +
+            "</div>",
+          btn("Cancel", "close-dialog"),
+        );
+      }
+      function showDirectory() {
+        showDialog(
+          "Choose a local directory",
+          '<p>Review supported text files in any directory, including ignored and excluded agent plans. No Git repository is required.</p><label class="field"><span>Directory path</span><input id="directory-path" class="wide" aria-label="Directory path" value="' +
+            esc(state.directory) +
+            '"></label><div class="notice">This prototype opens sample plan files. The production app will use the selected local directory.</div>',
+          btn("Cancel", "close-dialog") +
+            btn("Open directory review", "open-directory", "primary"),
+        );
+      }
+      function tree() {
+        const visible = files.filter((f) =>
+          f.path.toLowerCase().includes(state.filter.toLowerCase()),
+        );
+        const root = {};
+        for (const f of visible) {
+          let n = root;
+          const parts = f.path.split("/");
+          parts.forEach((p, i) => {
+            if (i === parts.length - 1) n[p] = f;
+            else n = n[p] ??= {};
+          });
+        }
+        function nodes(n) {
+          return Object.entries(n)
+            .map(([name, v]) =>
+              v.path
+                ? `<button class="file ${v.path === state.path ? "active" : ""} ${v.path.includes("/") ? "" : "tree-root"}" data-file="${esc(v.path)}" aria-current="${v.path === state.path ? "true" : "false"}"><span class="status">${state.viewed.has(v.path) ? "✓" : v.status}</span><span class="name">${esc(name)}</span>${state.threads.filter((t) => t.path === v.path && !t.resolved).length ? '<span class="blue">' + state.threads.filter((t) => t.path === v.path && !t.resolved).length + "</span>" : ""}</button>`
+                : `<details open><summary>${esc(name)}</summary>${nodes(v)}</details>`,
+            )
+            .join("");
+        }
+        return nodes(root) || '<div class="empty">No matching files.</div>';
+      }
+      function row(old, newN, text, type = "", side = "RIGHT") {
+        return `<div class="diff-row ${type} ${state.range && newN >= state.range[0] && newN <= state.range[1] ? "range" : ""}" data-line-row="${newN || old}"><span class="num">${old || ""}</span><span class="num">${newN || ""}</span><button class="line-add" data-line="${side === "LEFT" ? old : newN}" data-side="${side}" aria-label="Comment on ${side === "LEFT" ? "old" : "new"} line ${side === "LEFT" ? old : newN}">+</button><span class="sign">${type === "add" ? "+" : type === "del" ? "−" : ""}</span><code>${esc(text)}</code></div>`;
+      }
+      function half(n, text, type = "", side = "RIGHT") {
+        return `<div class="half ${type}"><span class="num">${n || ""}</span>${n ? `<button class="line-add" data-line="${n}" data-side="${side}" aria-label="Comment on ${side === "LEFT" ? "old" : "new"} line ${n}">+</button>` : "<span></span>"}<span class="sign">${type === "add" ? "+" : type === "del" ? "−" : ""}</span><code>${esc(text)}</code></div>`;
+      }
+      function diffMarkup() {
+        if (!files.some((f) => f.path === state.path))
+          return `<div class="empty">This file is no longer available.<br>The thread stays in the review with its former location.</div>`;
+        if (isDirectory() || state.path === ignoredFile.path)
+          return (otherSources[state.path] || [])
+            .map((text, i) => row("", i + 1, text))
+            .join("");
+        const lines = otherSources[state.path] || source;
+        const main = state.path === files[0].path;
+        const indices =
+          state.context || state.mode === "file"
+            ? lines.map((_, i) => i)
+            : main
+              ? [38, 39, 40, 41, 42, 43, 44, 45]
+              : lines.map((_, i) => i);
+        let out =
+          state.mode === "split"
+            ? '<div class="split-label"><span>Base · main · a8b29c1</span><span>Head · fix/rename-anchors · e4f8c20</span></div>'
+            : "";
+        if (main && !state.context && state.mode !== "file")
+          out += `<button class="fold" data-action="context" aria-expanded="false">··· Expand 38 unchanged lines above</button><div class="hunk">@@ −39,4 +39,8 @@ · func matchesPath</div>`;
+        for (const i of indices) {
+          let type =
+            i >= 40 && i <= 44 && main
+              ? "add"
+              : !main && i >= 6 && i <= 9
+                ? "add"
+                : "";
+          if (main && i === 40 && state.mode !== "file") {
+            const old = "  return c.Path == f.Filename";
+            if (state.mode === "split") {
+              out += `<div class="split-row">${half(41, old, "del", "LEFT")}${half(41, lines[i], "add")}</div>`;
+              continue;
+            } else out += row(41, "", old, "del", "LEFT");
+          }
+          if (state.mode === "split") {
+            out += `<div class="split-row">${type === "add" ? half("", "") : half(main && i >= 45 ? i - 3 : i + 1, lines[i], "", "LEFT")}${half(i + 1, lines[i], type)}</div>`;
+          } else
+            out += row(
+              type === "add" ? "" : main && i >= 45 ? i - 3 : i + 1,
+              i + 1,
+              lines[i],
+              state.mode === "file" ? "" : type,
+            );
+        }
+        if (main && !state.context && state.mode !== "file")
+          out += `<button class="fold" data-action="context" aria-expanded="false">··· Expand ${lines.length - 46} unchanged lines below</button>`;
+        if (main) {
+          const t = state.threads.find(
+            (t) => t.path === state.path && t.line === 43 && !t.resolved,
+          );
+          if (t)
+            out += `<div style="padding:8px 12px;background:#f8fafc;border-bottom:1px solid #e2e8f0;font:10px system-ui">${btn("◌ Line 43 · Maya · " + t.replies.length + " replies", "inline-thread", "", `data-id="${t.id}"`)}</div>`;
+        }
+        if (state.context && state.mode !== "file")
+          out += btn(
+            "Collapse unchanged lines",
+            "context",
+            "fold",
+            'aria-expanded="true"',
+          );
+        return out;
+      }
+      function composer() {
+        if (!state.composer) return "";
+        const c = state.composer;
+        return `<form class="annotation" id="comment-form"><div class="meta"><b>${c.line ? `New comment · ${c.side === "LEFT" ? "old" : "new"} line ${c.line}${c.end ? "–" + c.end : ""}` : "New file comment"}</b> ${badge(state.local ? "Local note" : "Pending")}</div><div class="segments" style="margin-bottom:8px">${btn("Write", "write", "active")}${btn("Preview", "preview")}</div><textarea name="comment" aria-label="Comment body" placeholder="Leave a comment…" required>${esc(c.body || "")}</textarea><div id="comment-preview" class="preview" hidden></div><p class="muted" style="font-size:10px;margin-top:7px">${c.line ? "Shift-click another line to select a range." : "Applies to the whole file, without a line anchor."}</p><div class="composer-buttons"><span class="muted" style="margin-right:auto;font-size:10px">Markdown · ⌘/Ctrl Enter to add</span>${btn("Cancel", "cancel-comment")}<button class="primary" type="submit">${state.local ? "Save note" : "Add pending comment"}</button></div></form>`;
+      }
+      function threadMarkup(t) {
+        const expanded = state.expanded === t.id;
+        return `<article class="thread ${expanded ? "expanded" : ""} ${t.resolved ? "resolved" : ""}" id="thread-${t.id}"><button class="thread-summary" data-thread="${t.id}" aria-expanded="${expanded}"><span class="anchor">${t.missing ? "File removed · " : t.formerLine ? "Line unmatched · " : ""}${esc(t.path)}${t.line ? `:${t.line}${t.end ? "–" + t.end : ""} · ${t.side === "LEFT" ? "old" : "new"}` : t.missing ? " · Review thread" : " · File comment"}${t.formerLine ? ` (formerly line ${t.formerLine})` : ""}</span><span class="meta">${avatar(t.author)}<span class="actor">${esc(t.author)}</span><span style="margin-left:auto">${t.kind === "agent" ? badge("Agent") + " " : ""}${t.draft ? badge(state.local ? "Local" : "Pending") : badge(t.resolved ? "Resolved" : "Open")}</span></span><p>${esc(t.body)}</p>${t.kind === "agent" && !state.local && !t.draft ? `<span class="reply-count">Posted to GitHub as Sam · agent author retained</span>` : ""}<span class="reply-count">${t.replies.length ? `${t.replies.length} replies · ` : ""}${expanded ? "Hide thread ↑" : "View thread →"}</span></button>${expanded ? `<div class="thread-body">${t.replies.map((r) => `<div class="reply"><span class="actor">${avatar(r.author)}${esc(r.author)} ${r.kind === "agent" ? badge("Agent") : ""}</span><p>${esc(r.body)}</p></div>`).join("")}<form data-reply="${t.id}"><textarea name="reply" aria-label="Reply to ${esc(t.author)}" placeholder="Reply to this thread…" required ${readOnly() ? "disabled" : ""}></textarea><div class="composer-buttons">${btn(t.resolved ? "Reopen" : "Resolve", "resolve", "", `data-id="${t.id}" ${readOnly() ? "disabled" : ""}`)}<button type="submit" class="primary" ${readOnly() ? "disabled" : ""}>Reply</button></div></form></div>` : ""}</article>`;
+      }
+      function review() {
+        const f = files.find((f) => f.path === state.path) || {
+          path: state.path,
+          status: "missing",
+          add: 0,
+          del: 0,
+        };
+        const threads = state.threads.filter(
+          (t) => !state.openOnly || !t.resolved,
+        );
+        return `<div class="shell">${topbar(true)}<div class="layout ${state.panel ? "" : "no-threads"}"><aside class="pane files" aria-label="Review files"><header class="pane-title"><h2>${isDirectory() ? "Files" : "Changed files"}</h2>${badge(files.length)}</header><div class="tools"><input class="wide" id="file-filter" aria-label="Filter files" placeholder="Filter files…" value="${esc(state.filter)}"></div><nav class="tree scroll" aria-label="File tree">${tree()}</nav><div class="file-footer">${isDirectory() ? "3 supported text files<br>I Ignored / excluded · F File · ✓ Viewed" : `<span class="green">+85</span> <span class="red">−23</span> across 6 files<br>M Modified · A Added · I Ignored · ✓ Viewed`}</div></aside><main class="pane"><div class="file-top"><b>${esc(state.path)}</b><span class="spacer"></span><label style="font-size:10px;white-space:nowrap"><input type="checkbox" id="viewed" ${state.viewed.has(state.path) ? "checked" : ""}> Viewed</label>${btn("＋ File comment", "file-comment", "", readOnly() ? "disabled" : "")}</div><div class="diff-controls"><div>${f.status === "missing" ? `<span class="muted">File unavailable · thread kept in review</span>` : isDirectory() || f.status === "I" ? `<span class="muted">${f.status === "I" ? "Ignored / excluded file" : "Text file"} · snapshot review</span>` : `<span class="green">+${f.add}</span> <span class="red">−${f.del}</span> <span class="muted" style="margin-left:8px">${f.status === "A" ? "Added" : "Modified"}</span>`}</div><div class="segments" role="group" aria-label="Diff layout">${(isDirectory() || f.status === "I" ? ["file"] : ["stacked", "split", "file"]).map((m) => btn(m === "stacked" ? "Stacked" : m === "split" ? "Side by side" : "Full file", "mode", state.mode === m ? "active" : "", `data-mode="${m}" aria-pressed="${state.mode === m}"`)).join("")}</div></div><div class="scroll" id="diff-scroll"><div class="diff">${diffMarkup()}</div>${composer()}${state.threads
+          .filter((t) => t.path === state.path && t.line === null)
+          .map(
+            (t) =>
+              `<div style="padding:12px"><div class="eyebrow">File discussion</div>${threadMarkup(t)}</div>`,
+          )
+          .join(
+            "",
+          )}<div style="padding:16px 12px;color:#64748b;font-size:10px">${state.closed ? "This local review is closed. Start a new review for further changes." : state.submitted && !state.local ? "Review submitted. Comments are read-only in this prototype." : "Use + beside a line to comment. Shift-click to select multiple lines."}</div></div></main>${state.panel ? `<aside id="threads-panel" class="pane threads" aria-label="Threads across all files"><header class="pane-title"><h2>Threads · all files</h2>${btn("‹", "panel", "quiet", 'aria-label="Collapse threads"')}</header><div class="thread-filter"><span>${threads.length} threads across ${new Set(threads.map((t) => t.path)).size} files</span><label><input type="checkbox" id="open-only" ${state.openOnly ? "checked" : ""}> Open only</label></div><div class="identity"><label>Commenting as <select id="actor" aria-label="Review author identity" style="padding:3px;font-size:10px"><option value="human-sam" ${state.actor.kind === "human" ? "selected" : ""}>Sam · Human</option><option value="agent-codex" ${state.actor.kind === "agent" ? "selected" : ""}>Codex · Agent</option></select></label><p style="font-size:9px;margin-top:4px">${state.actor.kind === "agent" && !state.local ? "GitHub posting account: Sam · LGTM keeps agent attribution" : "LGTM keeps the author identity on each comment"}</p></div><div class="thread-list scroll">${threads.map(threadMarkup).join("") || '<div class="empty">No open threads.<br>Turn off Open only to see resolved discussion.</div>'}</div></aside>` : ""}</div><footer class="statusbar"><span>${state.local ? "Local review · never published to GitHub" : "GitHub PR · e4f8c20 · draft comments stay private"}</span><span>${state.local ? "Save review to keep your notes" : "Submit review to publish pending comments"}</span><span>${esc(state.actor.name)} · ${state.actor.kind}</span></footer></div>`;
+      }
+      function render() {
+        app.innerHTML = DOMPurify.sanitize(
+          state.screen === "start" ? start() : review(),
+        );
+        window.HSStaticMethods?.autoInit();
+      }
+      function showDialog(title, body, actions) {
+        dialog.innerHTML = DOMPurify.sanitize(
+          `<header class="dialog-head"><h2 id="dialog-title">${title}</h2>${btn("×", "close-dialog", "quiet", 'aria-label="Close dialog"')}</header><div class="dialog-content">${body}</div><footer class="dialog-actions">${actions}</footer>`,
+        );
+        dialog.showModal();
+      }
+      function showPulls() {
+        showDialog(
+          "Choose a pull request",
+          `<p>Open pull requests in difflab-io/lgtm</p><input id="pr-search" class="wide" aria-label="Search pull requests" placeholder="Search by title or number…"><div class="pr-list" id="pr-list">${pullOptions("")}</div><p class="muted" style="font-size:10px;margin-top:12px">Draft pull requests can be reviewed. This list uses sample data.</p>`,
+          btn("Cancel", "close-dialog"),
+        );
+      }
+      function pullOptions(q) {
+        return (
+          pulls
+            .filter((p) =>
+              `${p.id} ${p.title}`.toLowerCase().includes(q.toLowerCase()),
+            )
+            .map(
+              (p) =>
+                `<button class="pr-option" data-pr="${p.id}"><span><b>#${p.id} · ${esc(p.title)}</b><small>${esc(p.author)} · ${esc(p.branch)}</small></span>${badge(p.draft ? "Draft" : "Open", p.draft ? "" : "green")}</button>`,
+            )
+            .join("") || '<div class="empty">No matching pull requests.</div>'
+        );
+      }
+      function showSubmit() {
+        const local = state.local;
+        showDialog(
+          local ? "Save local review" : "Submit review",
+          `<p>${local ? `${localTitle()} · ${state.scope === "directory" ? esc(state.directory) : "feature/standalone-web"}` : `difflab-io/lgtm #${state.pr.id}`}<br>${draftCount()} ${local ? "local notes to save" : "pending comments to publish"} · ${state.viewed.size} / ${files.length} files viewed</p><label class="field"><span>Overall comment ${local ? "(optional)" : ""}</span><textarea id="summary" rows="3" aria-label="Overall review comment" placeholder="Summarize your review…"></textarea></label>${local ? '<div class="notice"><b>Local review only.</b> Your summary and notes are saved on this machine. You can resume this review later.</div>' : `<fieldset style="border:0;margin:14px 0 0;padding:0"><legend style="margin-bottom:2px;font-weight:600">Review outcome</legend><label class="outcome"><input type="radio" name="outcome" value="comment" checked><b>Comment</b><small>Share feedback without approving or rejecting.</small></label><label class="outcome"><input type="radio" name="outcome" value="approve"><b>Approve</b><small>The changes are ready to merge.</small></label><label class="outcome"><input type="radio" name="outcome" value="reject"><b>Request changes</b><small>Reject until the required changes are addressed.</small></label></fieldset><div class="notice">File comments and notes outside diff hunks are included in the overall review summary.</div>`}<p id="submit-error" role="alert" class="red" style="margin-top:8px"></p>`,
+          btn("Cancel", "close-dialog") +
+            btn(local ? "Save locally" : "Submit review", "finish", "primary"),
+        );
+      }
+      function notify(message) {
+        document.getElementById("feedback").innerHTML =
+          `<div class="toast">${esc(message)}</div>`;
+        setTimeout(
+          () => document.getElementById("feedback").replaceChildren(),
+          3500,
+        );
+      }
+      function addComment(line = null, side = "RIGHT", end = null) {
+        if (readOnly()) return;
+        state.composer = { line, side, end };
+        render();
+        document.querySelector("#comment-form textarea")?.focus();
+        document
+          .getElementById("comment-form")
+          ?.scrollIntoView({ block: "nearest" });
+      }
+      function navigate() {
+        dialog.close();
+        const hash = location.hash.slice(1);
+        state.screen = hash === "start" || !hash ? "start" : "review";
+        state.local = hash.startsWith("local");
+        if (hash.startsWith("local-directory")) state.scope = "directory";
+        else if (state.local && state.scope === "directory")
+          state.scope = "worktree";
+        if (hash === "local-ignored") state.includeIgnored = true;
+        const directory = isDirectory();
+        if (directory && files !== directoryFiles)
+          state.threads = structuredClone(directoryThreads);
+        else if (!directory && files === directoryFiles)
+          state.threads = structuredClone(initialThreads);
+        files = directory
+          ? directoryFiles
+          : state.local && state.includeIgnored
+            ? [...gitFiles, ignoredFile]
+            : gitFiles;
+        state.mode = isDirectory()
+          ? "file"
+          : hash === "split"
+            ? "split"
+            : "stacked";
+        state.panel = hash !== "collapsed";
+        if (hash === "review-agent") {
+          state.actor = { id: "agent-codex", name: "Codex", kind: "agent" };
+          state.openOnly = false;
+        }
+        state.context = hash === "context";
+        state.composer =
+          hash === "file-comment"
+            ? {
+                line: null,
+                body: "Could we document how rename anchors behave for both diff sides?",
+              }
+            : null;
+        state.expanded = hash === "thread" ? 1 : null;
+        state.submitted = false;
+        state.closed = hash === "local-closed";
+        state.path = files[0].path;
+        if (state.local)
+          state.session = isDirectory()
+            ? `Agent plans · ${state.directory}`
+            : `${localTitle()} · feature/standalone-web`;
+        if (hash === "local-orphans") {
+          state.threads = [
+            {
+              id: 5,
+              path: files[0].path,
+              line: null,
+              formerLine: 44,
+              author: "Codex",
+              kind: "agent",
+              body: "The old line could not be matched. Keep this feedback at file level.",
+              replies: [],
+              resolved: false,
+              draft: true,
+            },
+            {
+              id: 6,
+              path: ".plans/retired-plan.md",
+              line: null,
+              missing: true,
+              formerLine: 12,
+              author: "Sam",
+              kind: "human",
+              body: "This plan was removed. Keep the discussion in this review.",
+              replies: [],
+              resolved: false,
+              draft: true,
+            },
+          ];
+        }
+        render();
+        if (state.composer)
+          document
+            .getElementById("comment-form")
+            ?.scrollIntoView({ block: "nearest" });
+        if (hash === "local-sessions") {
+          state.screen = "start";
+          render();
+          showSessions();
+        }
+        if (hash === "directory-picker") {
+          state.screen = "start";
+          state.scope = "directory";
+          render();
+          showDirectory();
+        }
+        if (hash === "pulls") {
+          state.screen = "start";
+          render();
+          showPulls();
+        }
+        if (
+          hash === "submit" ||
+          hash === "local-save" ||
+          hash === "local-directory-save"
+        )
+          showSubmit();
+      }
+      window.addEventListener("hashchange", navigate);
+      document.addEventListener("click", (e) => {
+        const file = e.target.closest("[data-file]");
+        if (file) {
+          state.path = file.dataset.file;
+          state.composer = null;
+          state.context = false;
+          render();
+          return;
+        }
+        const thread = e.target.closest("[data-thread]");
+        if (thread) {
+          const id = Number(thread.dataset.thread);
+          state.expanded = state.expanded === id ? null : id;
+          state.path = state.threads.find((t) => t.id === id).path;
+          state.composer = null;
+          render();
+          return;
+        }
+        const session = e.target.closest("[data-session]");
+        if (session) {
+          const chosen = sessions.find((x) => x.id === session.dataset.session);
+          state.session = chosen.title;
+          dialog.close();
+          if (location.hash === "#" + chosen.hash) navigate();
+          else location.hash = chosen.hash;
+          return;
+        }
+        const pr = e.target.closest("[data-pr]");
+        if (pr) {
+          state.pr = pulls.find((p) => p.id === Number(pr.dataset.pr));
+          dialog.close();
+          location.hash = "review";
+          return;
+        }
+        const line = e.target.closest("[data-line]");
+        if (line) {
+          const n = Number(line.dataset.line);
+          if (
+            e.shiftKey &&
+            state.composer?.line &&
+            state.composer.side === line.dataset.side
+          ) {
+            const start = Math.min(state.composer.line, n),
+              end = Math.max(state.composer.line, n);
+            state.range = [start, end];
+            addComment(start, line.dataset.side, end);
+          } else {
+            state.range = null;
+            addComment(n, line.dataset.side);
+          }
+          return;
+        }
+        const button = e.target.closest("[data-action]");
+        if (!button) return;
+        switch (button.dataset.action) {
+          case "inline-thread":
+            state.expanded = Number(button.dataset.id);
+            state.panel = true;
+            render();
+            document
+              .getElementById("thread-" + state.expanded)
+              ?.scrollIntoView({ block: "nearest" });
+            break;
+          case "start-local":
+            if (state.scope === "directory") showDirectory();
+            else location.hash = "local";
+            break;
+          case "sessions":
+            showSessions();
+            break;
+          case "close-local":
+            showDialog(
+              "Close local review",
+              '<p>Closing marks this review session as complete. Save the notes and overall summary, then keep the review in history.</p><div class="notice">' +
+                state.threads.filter((t) => !t.resolved).length +
+                " open threads remain. Closing preserves them and their discussion. It does not approve changes or publish to GitHub.</div>",
+              btn("Keep reviewing", "close-dialog") +
+                btn("Save and close review", "finish-close", "primary"),
+            );
+            break;
+          case "finish-close":
+            state.closed = true;
+            state.composer = null;
+            dialog.close();
+            render();
+            notify("Local review saved and closed · prototype only");
+            break;
+          case "new-local":
+            location.hash = "start";
+            break;
+          case "open-directory": {
+            const path = document.getElementById("directory-path").value.trim();
+            if (!path) {
+              document.getElementById("directory-path").focus();
+              return;
+            }
+            state.directory = path;
+            dialog.close();
+            location.hash = "local-directory";
+            break;
+          }
+          case "pulls":
+            showPulls();
+            break;
+          case "close-dialog":
+            dialog.close();
+            break;
+          case "panel":
+            state.panel = !state.panel;
+            render();
+            break;
+          case "mode":
+            state.mode = button.dataset.mode;
+            render();
+            break;
+          case "context":
+            state.context = !state.context;
+            render();
+            break;
+          case "file-comment":
+            addComment();
+            break;
+          case "cancel-comment":
+            state.composer = null;
+            state.range = null;
+            render();
+            break;
+          case "submit":
+            showSubmit();
+            break;
+          case "resolve": {
+            const t = state.threads.find(
+              (t) => t.id === Number(button.dataset.id),
+            );
+            t.resolved = !t.resolved;
+            render();
+            break;
+          }
+          case "preview": {
+            const text = document.querySelector("#comment-form textarea");
+            document.getElementById("comment-preview").innerHTML =
+              DOMPurify.sanitize(
+                esc(text.value)
+                  .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+                  .replace(/`([^`]+)`/g, "<code>$1</code>"),
+              );
+            document.getElementById("comment-preview").hidden = false;
+            text.hidden = true;
+            break;
+          }
+          case "write":
+            document.querySelector("#comment-form textarea").hidden = false;
+            document.getElementById("comment-preview").hidden = true;
+            break;
+          case "finish": {
+            const summary = document.getElementById("summary").value.trim();
+            const outcome = document.querySelector(
+              "input[name=outcome]:checked",
+            )?.value;
+            if (
+              !state.local &&
+              (outcome === "reject" ||
+                (outcome === "comment" && !draftCount())) &&
+              !summary
+            ) {
+              document.getElementById("submit-error").textContent =
+                "Add an overall comment before submitting this outcome.";
+              document.getElementById("summary").focus();
+              return;
+            }
+            dialog.close();
+            if (!state.local) {
+              state.submitted = true;
+              state.threads.forEach((t) => (t.draft = false));
+            }
+            render();
+            notify(
+              state.local
+                ? "Local review saved · prototype only"
+                : `Review ${outcome === "approve" ? "approved" : outcome === "reject" ? "submitted with requested changes" : "submitted"} · prototype only`,
+            );
+            break;
+          }
+        }
+      });
+      document.addEventListener("input", (e) => {
+        if (e.target.id === "file-filter") {
+          state.filter = e.target.value;
+          document.querySelector(".tree").innerHTML =
+            DOMPurify.sanitize(tree());
+        }
+        if (e.target.id === "session-search")
+          document.getElementById("session-list").innerHTML =
+            DOMPurify.sanitize(sessionOptions(e.target.value));
+        if (e.target.id === "pr-search")
+          document.getElementById("pr-list").innerHTML = DOMPurify.sanitize(
+            pullOptions(e.target.value),
+          );
+        if (e.target.closest("#comment-form") && e.target.name === "comment")
+          state.composer.body = e.target.value;
+      });
+      document.addEventListener("change", (e) => {
+        if (e.target.name === "scope") state.scope = e.target.value;
+        if (e.target.id === "actor")
+          state.actor =
+            e.target.value === "agent-codex"
+              ? { id: "agent-codex", name: "Codex", kind: "agent" }
+              : { id: "human-sam", name: "Sam", kind: "human" };
+        if (e.target.id === "actor") render();
+        if (e.target.id === "include-ignored")
+          state.includeIgnored = e.target.checked;
+        if (e.target.id === "viewed") {
+          if (e.target.checked) state.viewed.add(state.path);
+          else state.viewed.delete(state.path);
+          render();
+        }
+        if (e.target.id === "open-only") {
+          state.openOnly = e.target.checked;
+          render();
+        }
+      });
+      document.addEventListener("submit", (e) => {
+        e.preventDefault();
+        if (e.target.id === "comment-form") {
+          const body = new FormData(e.target).get("comment").trim();
+          if (!body) return;
+          state.threads.unshift({
+            id: Date.now(),
+            path: state.path,
+            ...state.composer,
+            body,
+            author: state.actor.name,
+            kind: state.actor.kind,
+            actorId: state.actor.id,
+            draft: true,
+            resolved: false,
+            replies: [],
+          });
+          state.composer = null;
+          state.range = null;
+          state.panel = true;
+          render();
+          notify(
+            state.local
+              ? "Local note saved · prototype only"
+              : "Comment added to pending review",
+          );
+        }
+        if (e.target.dataset.reply) {
+          const t = state.threads.find(
+            (t) => t.id === Number(e.target.dataset.reply),
+          );
+          const body = new FormData(e.target).get("reply").trim();
+          if (!body) return;
+          t.replies.push({
+            author: state.actor.name,
+            kind: state.actor.kind,
+            actorId: state.actor.id,
+            body,
+          });
+          render();
+          notify("Reply added · prototype only");
+        }
+      });
+      document.addEventListener("keydown", (e) => {
+        if (
+          (e.metaKey || e.ctrlKey) &&
+          e.key === "Enter" &&
+          e.target.closest("#comment-form")
+        ) {
+          e.preventDefault();
+          e.target.closest("form").requestSubmit();
+        }
+      });
+      navigate();
+    </script>
+  </body>
+</html>
