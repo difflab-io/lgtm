@@ -1,0 +1,85 @@
+[tools]
+go = "1.25.14"
+node = "26.10.0"
+
+[tasks.build]
+run = "npm run build && go build -o bin/lgtm ./apps/lgtm-cli && go build -o bin/lgtm-server ./apps/lgtm-server"
+[tasks.test]
+run = "go test -race ./... && npm run check && nvim --headless -u NONE -l scripts/nvim-smoke.lua"
+[tasks."run:web"]
+run = "go run ./apps/lgtm-cli serve"
+[tasks."run:server"]
+run = "go run ./apps/lgtm-server"
+[tasks."run:nvim"]
+run = "nvim --headless -u NONE -l scripts/nvim-smoke.lua"
+[tasks."run:smoke"]
+run = "go run ./apps/lgtm-cli smoke"
+[tasks."test:browser"]
+depends = ["build", "fixtures:setup"]
+run = "node scripts/browser-smoke.mjs"
+[tasks."test:nvim"]
+depends = ["build", "fixtures:setup"]
+run = 'nvim --headless "+lua dofile(\"scripts/nvim-integration.lua\")"'
+
+[tasks."fixtures:setup"]
+description = "Clone pinned Rust, Go, and TypeScript review fixtures into .tmp"
+run = "node scripts/review-fixtures.mjs setup"
+
+[tasks."fixtures:recreate"]
+description = "Recreate generated fixtures and clear test reviews; refuse additional edits"
+run = "node scripts/review-fixtures.mjs recreate"
+
+[tasks."fixtures:status"]
+description = "Show fixture revisions, changed files, and review lines"
+run = "node scripts/review-fixtures.mjs status"
+
+[tasks."fixtures:web:rust"]
+description = "Serve LGTM against the Rust regex fixture"
+depends = ["fixtures:setup", "build"]
+run = "go run ./apps/lgtm-cli serve --repo .tmp/rust"
+
+[tasks."fixtures:web:go"]
+description = "Serve LGTM against the Go chi fixture"
+depends = ["fixtures:setup", "build"]
+run = "go run ./apps/lgtm-cli serve --repo .tmp/go"
+
+[tasks."fixtures:web:ts"]
+description = "Serve LGTM against the TypeScript type-fest fixture"
+depends = ["fixtures:setup", "build"]
+run = "go run ./apps/lgtm-cli serve --repo .tmp/ts"
+
+[tasks."examples:setup"]
+description = "Clone premise, premise-cargo, and readership into .tmp with local review edits"
+run = "node scripts/project-examples.mjs setup"
+
+[tasks."examples:recreate"]
+description = "Reset managed example edits and reviews; refuse additional changes"
+run = "node scripts/project-examples.mjs recreate"
+
+[tasks."examples:web:premise"]
+depends = ["build", "examples:setup"]
+run = "bin/lgtm serve --repo .tmp/premise"
+
+[tasks."examples:web:premise-cargo"]
+depends = ["build", "examples:setup"]
+run = "bin/lgtm serve --repo .tmp/premise-cargo"
+
+[tasks."examples:web:readership"]
+depends = ["build", "examples:setup"]
+run = "bin/lgtm serve --repo .tmp/readership"
+
+[tasks."proto:generate"]
+description = "Regenerate Go, gRPC, Connect, and TypeScript code from protobuf"
+run = "bash scripts/generate-proto.sh"
+
+[tasks."proto:check"]
+description = "Lint and compile the protobuf API"
+run = ".tmp/proto-tools/buf lint && .tmp/proto-tools/buf build"
+
+[tasks."test:postgres"]
+description = "Run database and service tests against an isolated PostgreSQL cluster"
+run = "bash scripts/test-postgres.sh"
+
+[tasks."run:postgres"]
+description = "Run the server with PostgreSQL using LGTM_DATABASE_URL"
+run = "go run ./apps/lgtm-server --database postgres"

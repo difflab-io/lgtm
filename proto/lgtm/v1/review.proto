@@ -1,0 +1,189 @@
+syntax = "proto3";
+package lgtm.v1;
+
+option go_package = "github.com/difflab-io/lgtm/gen/go/lgtm/v1;lgtmv1";
+
+enum ActorKind {
+  ACTOR_KIND_UNSPECIFIED = 0;
+  ACTOR_KIND_HUMAN = 1;
+  ACTOR_KIND_AGENT = 2;
+}
+enum ReviewKind {
+  REVIEW_KIND_UNSPECIFIED = 0;
+  REVIEW_KIND_LOCAL = 1;
+  REVIEW_KIND_GITHUB = 2;
+}
+enum ReviewStatus {
+  REVIEW_STATUS_UNSPECIFIED = 0;
+  REVIEW_STATUS_DRAFT = 1;
+  REVIEW_STATUS_COMMENT = 2;
+  REVIEW_STATUS_APPROVE = 3;
+  REVIEW_STATUS_REQUEST_CHANGES = 4;
+}
+enum DiffSide {
+  DIFF_SIDE_UNSPECIFIED = 0;
+  DIFF_SIDE_LEFT = 1;
+  DIFF_SIDE_RIGHT = 2;
+}
+enum ReviewEvent {
+  REVIEW_EVENT_UNSPECIFIED = 0;
+  REVIEW_EVENT_COMMENT = 1;
+  REVIEW_EVENT_APPROVE = 2;
+  REVIEW_EVENT_REQUEST_CHANGES = 3;
+}
+message Actor {
+  string name = 1;
+  ActorKind kind = 2;
+}
+message Review {
+  string id = 1;
+  ReviewKind kind = 2;
+  string repo = 3;
+  int32 pr = 4;
+  string head = 5;
+  ReviewStatus status = 6;
+  string body = 7;
+  Actor actor = 8;
+  int64 remote_id = 9;
+}
+message Comment {
+  string id = 1;
+  string thread_id = 2;
+  bool resolved = 3;
+  string path = 4;
+  int32 line = 5;
+  DiffSide side = 6;
+  string body = 7;
+  Actor actor = 8;
+  string review_id = 9;
+}
+message State {
+  repeated Review reviews = 1;
+  repeated Comment comments = 2;
+}
+message Workspace {
+  string repo_path = 1;
+  State state = 2;
+}
+message ChangedFile {
+  string path = 1;
+  string status = 2;
+}
+message PullRequest {
+  int32 number = 1;
+  string title = 2;
+  bool draft = 3;
+}
+
+service ReviewService {
+  rpc GetWorkspace(GetWorkspaceRequest) returns (GetWorkspaceResponse);
+  rpc ListFiles(ListFilesRequest) returns (ListFilesResponse);
+  rpc GetDiff(GetDiffRequest) returns (GetDiffResponse);
+  rpc GetFile(GetFileRequest) returns (GetFileResponse);
+  rpc GetHistory(GetHistoryRequest) returns (GetHistoryResponse);
+  rpc ListPullRequests(ListPullRequestsRequest) returns (ListPullRequestsResponse);
+  rpc CreateReview(CreateReviewRequest) returns (CreateReviewResponse);
+  rpc AddComment(AddCommentRequest) returns (AddCommentResponse);
+  rpc AddReply(AddReplyRequest) returns (AddReplyResponse);
+  rpc SetThreadResolved(SetThreadResolvedRequest) returns (SetThreadResolvedResponse);
+  rpc PromoteThread(PromoteThreadRequest) returns (PromoteThreadResponse);
+  rpc UpdateReview(UpdateReviewRequest) returns (UpdateReviewResponse);
+  rpc SubmitReview(SubmitReviewRequest) returns (SubmitReviewResponse);
+}
+message GetWorkspaceRequest {}
+message GetWorkspaceResponse {
+  Workspace workspace = 1;
+}
+message ListFilesRequest {
+  string review_id = 1;
+  bool include_unchanged = 2;
+}
+message ListFilesResponse {
+  Workspace workspace = 1;
+  repeated ChangedFile files = 2;
+}
+message GetDiffRequest {
+  string review_id = 1;
+  string path = 2;
+}
+message GetDiffResponse {
+  Workspace workspace = 1;
+  string text = 2;
+}
+message GetFileRequest {
+  string path = 1;
+}
+message GetFileResponse {
+  Workspace workspace = 1;
+  string text = 2;
+}
+message GetHistoryRequest {
+  string review_id = 1;
+}
+message GetHistoryResponse {
+  Workspace workspace = 1;
+  string text = 2;
+}
+message ListPullRequestsRequest {}
+message ListPullRequestsResponse {
+  Workspace workspace = 1;
+  string repository = 2;
+  repeated PullRequest pulls = 3;
+}
+message CreateReviewRequest {
+  ReviewKind kind = 1;
+  Actor actor = 2;
+  string body = 3;
+  int32 pr = 4;
+  string repository = 5;
+}
+message CreateReviewResponse {
+  Workspace workspace = 1;
+}
+message AddCommentRequest {
+  string path = 1;
+  int32 line = 2;
+  DiffSide side = 3;
+  string body = 4;
+  Actor actor = 5;
+  string review_id = 6;
+}
+message AddCommentResponse {
+  Workspace workspace = 1;
+}
+message AddReplyRequest {
+  string thread_id = 1;
+  string body = 2;
+  Actor actor = 3;
+}
+message AddReplyResponse {
+  Workspace workspace = 1;
+}
+message SetThreadResolvedRequest {
+  string thread_id = 1;
+  bool resolved = 2;
+}
+message SetThreadResolvedResponse {
+  Workspace workspace = 1;
+}
+message PromoteThreadRequest {
+  string thread_id = 1;
+  string review_id = 2;
+}
+message PromoteThreadResponse {
+  Workspace workspace = 1;
+}
+message UpdateReviewRequest {
+  string review_id = 1;
+  string body = 2;
+}
+message UpdateReviewResponse {
+  Workspace workspace = 1;
+}
+message SubmitReviewRequest {
+  string review_id = 1;
+  ReviewEvent event = 2;
+}
+message SubmitReviewResponse {
+  Workspace workspace = 1;
+}

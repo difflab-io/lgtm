@@ -1,0 +1,18 @@
+{
+  "name": "@lgtm/ui",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./ActorBadge.svelte": "./src/ActorBadge.svelte",
+    "./DiffView.svelte": "./src/DiffView.svelte",
+    "./ThreadCard.svelte": "./src/ThreadCard.svelte",
+    "./review.css": "./src/review.css"
+  },
+  "peerDependencies": {
+    "svelte": "^5.0.0"
+  },
+  "dependencies": {
+    "shiki": "^4.5.0",
+    "@lgtm/client": "*"
+  }
+}

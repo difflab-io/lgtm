@@ -1,0 +1,21 @@
+{
+  "name": "lgtm-poc",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/lgtm-web-app",
+    "apps/lgtm-ts-client",
+    "libs/lgtm-ui"
+  ],
+  "scripts": {
+    "build": "npm run build -w @lgtm/web",
+    "check": "npm run check -w @lgtm/web"
+  },
+  "devDependencies": {
+    "@bufbuild/protoc-gen-es": "^2.9.0",
+    "@playwright/test": "^1.64.0",
+    "prettier": "^3.9.10",
+    "prettier-plugin-svelte": "^4.1.1",
+    "typescript": "^5.9.3"
+  }
+}

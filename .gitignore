@@ -1,0 +1,6 @@
+node_modules/
+.svelte-kit/
+apps/lgtm-web-app/build/
+bin/
+.lgtm/
+.tmp/
