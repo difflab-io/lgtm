@@ -10,6 +10,7 @@ _.path = ["{{config_root}}/bin"]
 config_roots = ["apps/*", "libs/*"]
 
 [tools]
+buf = "1.73.0"
 rust = { version = "1.88", components = "rustfmt,clippy,rust-analyzer" }
 bun = "1.4.2"
 goreleaser = "2.18.1"
@@ -20,6 +21,7 @@ zig = "0.16.0"
 run = ["cargo fetch", "bun install --frozen-lockfile"]
 
 [tasks.build]
+depends = ["//apps/lgtm-web:generate"]
 run = ["cargo build --workspace", "bun run --filter lgtm-web build"]
 
 [tasks.test]
@@ -40,10 +42,10 @@ alias = "dev:cli"
 run = "cargo run -p lgtm-cli --"
 
 [tasks."dev:backend"]
-run = "cargo run -p lgtm-backend"
+run = "mise run //apps/lgtm-backend:dev"
 
 [tasks."dev:web"]
-run = "bun run --cwd apps/lgtm-web dev"
+run = "mise run //apps/lgtm-web:dev"
 
 [tasks."release:check"]
 description = "Validate CLI-only release configuration and Cargo packaging"

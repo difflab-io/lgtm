@@ -12,6 +12,7 @@
     "start": "vite preview"
   },
   "devDependencies": {
+    "@bufbuild/protoc-gen-es": "2.16.0",
     "@sveltejs/adapter-auto": "7.0.1",
     "@sveltejs/kit": "2.70.3",
     "@sveltejs/vite-plugin-svelte": "7.3.0",
@@ -22,5 +23,10 @@
     "svelte-check": "4.7.6",
     "typescript": "7.0.2",
     "vite": "8.3.0"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "2.16.0",
+    "@connectrpc/connect": "2.2.0",
+    "@connectrpc/connect-web": "2.2.0"
   }
 }

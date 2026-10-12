@@ -1,5 +1,6 @@
 [tools]
 bun = "1.4.2"
+buf = "1.73.0"
 
 [tasks.install]
 description = "Install Bun dependencies"
@@ -75,7 +76,7 @@ fi
 
 [tasks.dev]
 description = "Run the application in development mode"
-depends = ["install"]
+depends = ["generate"]
 run = '''
 set -eu
 if [ "${PREMISE_TEMPLATE_TEST:-}" = "1" ]; then
@@ -99,3 +100,8 @@ description = "Run project-specific type checks"
 hide = true
 dir = "{{ config_root }}"
 run = 'bunx --no-install svelte-kit sync && bunx --no-install svelte-check --tsconfig ./tsconfig.json'
+
+[tasks.generate]
+description = "Regenerate the web RPC client from the backend Protobuf schema"
+depends = ["install"]
+run = ["buf lint ../lgtm-backend/proto", "buf generate ../lgtm-backend/proto --template buf.gen.yaml"]
