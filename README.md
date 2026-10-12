@@ -1,115 +1,109 @@
 # lgtm
 
-LGTM code review workspace. This scaffold provides runnable applications; review features and database storage come later.
+LGTM is a local code review tool with a Rust gRPC backend and SvelteKit UI. The current UI demonstrates a hello-world RPC; review features and database storage come later.
 
 | Path | Purpose | Publication |
 | --- | --- | --- |
-| `apps/lgtm-cli` | Rust Clap CLI | crates.io and CLI archives |
-| `apps/lgtm-backend` | Rust library with a Connect RPC server binary | Private |
-| `apps/lgtm-web` | Bun SvelteKit application | Private |
-| `libs/lgtm-db` | Minimal Rust library; no database yet | Private |
+| `apps/lgtm-cli` | The `lgtm` executable, bundled UI, and managed server | crates.io and CLI archives |
+| `apps/lgtm-backend` | Private Rust library and standalone gRPC server | Included inside the CLI; no separate package |
+| `apps/lgtm-web` | Private SvelteKit app and generated RPC client | Static assets included inside the CLI |
+| `libs/lgtm-db` | Minimal private Rust library; no database yet | None |
 
-## Setup and checks
+## Installed CLI
 
-Install [mise](https://mise.jdx.dev/), then run from the repository root:
+```sh
+cargo install lgtm-cli
+lgtm up
+lgtm status
+lgtm down
+```
+
+The executable is named `lgtm`; the Cargo package is `lgtm-cli`. `lgtm up` starts one managed background process serving both the embedded UI and the gRPC API at `http://127.0.0.1:8080`, then opens a browser. The same process serves the web app's `/rpc/*` gRPC-Web calls and native gRPC endpoints. No Bun, Node, Buf, Pitchfork, backend binary, or source checkout is needed at runtime.
+
+Useful options:
+
+```sh
+lgtm up --no-open
+lgtm up --port 9000
+lgtm up --foreground
+lgtm --state-dir /path/to/state up
+```
+
+A repeated `up` reuses the running instance. `down` stops both UI and RPC serving. State and `server.log` live in the platform's local state directory under `lgtm`; `LGTM_STATE_DIR` or `--state-dir` overrides it. In foreground mode, Ctrl-C stops the server. The managed process is bound to loopback.
+
+## Local development
+
+Install [mise](https://mise.jdx.dev/), then run from the checkout:
 
 ```sh
 mise trust
 mise install
 mise run install
+mise run dev
+```
+
+`mise run dev` starts the Rust backend watcher and Vite together. Open `http://127.0.0.1:5173`. Vite forwards `/rpc/*` to the backend at `http://127.0.0.1:8080`. Rust, build-script, and Protobuf changes regenerate the client and restart the backend; Vite updates the UI. Ctrl-C stops both processes.
+
+`LGTM_BACKEND_ADDR` sets the backend listen address, `LGTM_BACKEND_URL` sets Vite's RPC target, and `LGTM_WEB_PORT` changes Vite's port. Individual tasks remain available:
+
+```sh
+mise run //apps/lgtm-backend:dev
+mise run //apps/lgtm-web:dev
+mise run //apps/lgtm-cli:run -- up --no-open
+```
+
+The CLI run task first builds its bundle and then runs the packaged application. Use the combined dev task for live development.
+
+## Builds, generation, and checks
+
+```sh
 mise run build
 mise run test
 mise run lint
 mise run format:check
 ```
 
-Rust 1.88 and Bun 1.4.2 are pinned in `mise.toml`. Commit both root lockfiles when committing the scaffold. Run `mise run format` to format the application sources. Per-project tasks are also available, for example `mise run //apps/lgtm-web:build`.
+Rust 1.88, Bun 1.4.2, and Buf 1.73.0 are pinned. Root Cargo and Bun lockfiles are committed. `mise run format` formats application sources.
 
-## Run
-
-```sh
-mise run run:cli -- --help
-mise run run:cli -- --version
-mise run //apps/lgtm-backend:dev
-```
-
-The backend listens on `127.0.0.1:8080`. Set `LGTM_BACKEND_ADDR` to change it. Ctrl-C marks health as not serving and shuts down gracefully. Its greeting and standard health services accept Connect, gRPC, and gRPC-Web clients.
-
-From another terminal, call the Connect JSON health endpoint:
+`apps/lgtm-backend/proto/lgtm/v1/hello.proto` defines `lgtm.v1.GreeterService/SayHello`. Backend builds and dev restarts regenerate the TypeScript client inside `lgtm-web`; no separate client package is needed. Rust code generation runs in the private backend's `build.rs`.
 
 ```sh
-curl --fail http://127.0.0.1:8080/grpc.health.v1.Health/Check \
-  -H 'Content-Type: application/json' \
-  -H 'Connect-Protocol-Version: 1' \
-  --data '{"service":""}'
-```
-
-Start the web app in another terminal:
-
-```sh
-mise run //apps/lgtm-web:dev
-```
-
-Open the local URL printed by Vite, enter a name, and click **Say hello**. The browser uses the generated gRPC-Web client in `apps/lgtm-web/src/lib/gen`. SvelteKit forwards `/rpc/*` requests to the Rust backend. Set `LGTM_BACKEND_URL` when starting the web app if the backend is not at `http://127.0.0.1:8080`. The browser and proxy share an origin, so no backend CORS configuration or separate TypeScript client package is needed.
-
-To preview the production build:
-
-```sh
-mise exec -- bun run --cwd apps/lgtm-web build
-mise exec -- bun run --cwd apps/lgtm-web start
-```
-
-## Protobuf generation
-
-`apps/lgtm-backend/proto/lgtm/v1/hello.proto` defines `lgtm.v1.GreeterService/SayHello`. Both Rust and TypeScript derive their API from that file. Buf 1.73.0 is pinned in Mise; the Protobuf ES plugin is pinned in the web app. Rust generation runs in `build.rs`, with output in Cargo's build directory. The TypeScript client is generated into the web app and checked in.
-
-```sh
-# Regenerate the web client, then compile the backend.
-mise run //apps/lgtm-backend:build
-
-# Regenerate only the web client.
 mise run //apps/lgtm-web:generate
+mise run //apps/lgtm-backend:build
+mise run //apps/lgtm-cli:bundle
 ```
 
-The aggregate `mise run build` also regenerates the web client first. Both per-project `dev` tasks regenerate the client before startup, as do the root dev shortcuts. After editing the schema during a session, restart the backend dev task to regenerate both clients; Vite reloads the changed TypeScript client. Direct Cargo commands regenerate Rust types when the schema changes; use the Mise backend build to update TypeScript as well. Generated TypeScript files are excluded from formatting and lint fixes.
+The CLI bundle task builds the private backend and static UI, then copies backend implementation source, generated Rust protocol files, and web assets into `apps/lgtm-cli/bundle`. That generated directory is ignored by Git and explicitly included by Cargo's package manifest. The CLI's own build script uses only Rust and those files, so its crates.io archive builds independently of the monorepo. A raw Cargo build from a fresh checkout needs the bundle task first.
 
-The greeting can also be called using Connect JSON:
+Tests cover native gRPC, gRPC-Web, real TypeScript-client calls, daemon startup/reuse/shutdown, and occupied-port failure. Web integration tests start an isolated Rust backend.
+
+Call the service using Connect JSON:
 
 ```sh
 curl --fail http://127.0.0.1:8080/lgtm.v1.GreeterService/SayHello \
   -H 'Content-Type: application/json' \
-  -H 'Connect-Protocol-Version: 1' \
   --data '{"name":"World"}'
 ```
 
-`mise run //apps/lgtm-web:test` compiles and starts an isolated Rust backend to test the generated gRPC-Web client. The Rust integration tests cover native gRPC and gRPC-Web greeting requests.
-
 ## CLI release
 
-Only `lgtm-cli` is publishable. Backend and database manifests set `publish = false`; both Bun manifests set `private: true`. Private Rust publication tasks do nothing. The explicit `.goreleaser.yaml` builds and archives only `lgtm-cli`, for macOS and Linux on arm64 and x86_64.
-
-Validate without uploading:
+Only `lgtm-cli` is publishable. Backend and database manifests set `publish = false`, and Bun manifests set `private: true`. Backend implementation and UI assets ship inside the CLI package and executable. Publication tasks regenerate the bundle before uploading. The explicit `.goreleaser.yaml` selects only the `lgtm` executable for macOS and Linux on arm64 and x86_64. Build the full archive matrix on macOS with Xcode command-line tools installed; macOS targets use Apple's linker and Linux targets use Zig.
 
 ```sh
+# Verify packaging without uploading.
 mise run release:check
+
+# Build one local CLI archive executable without publishing.
 mise exec -- goreleaser build --snapshot --single-target --clean --config .goreleaser.yaml
 ```
 
-For an authorized release, update the CLI version and lockfile, commit and tag that version, then use `mise run release:cli` for GitHub archives and `mise run publish:cli` for crates.io. GitHub requires `GITHUB_TOKEN`; Cargo requires `CARGO_REGISTRY_TOKEN` or `cargo login`. These commands explicitly select the CLI. No backend or web deployment is configured.
+For an RC, put the exact marker `[publish-rc]` in the HEAD commit message and push the feature branch. The Premise on-commit workflow validates the workspace, prepares the RC tag, and publishes eligible packages. Pull request events do not publish. The `CRATES_TOKEN` organization or repository secret must be available to the package job. Verify package publication before claiming an RC is published.
 
-For an RC, put the exact marker `[publish-rc]` in the HEAD commit message and push the feature branch. The Premise `on-commit` GitHub workflow plans the prerelease version, validates the projects, creates the GitHub prerelease, then publishes eligible packages. Pull request events never publish. Configure the repository Actions secret `CRATES_TOKEN` for crates.io; the workflow passes it only to the package job. Check that both the release and package jobs succeed before claiming the RC was published. The Cargo backend sets and restores the prerelease version during publication, so a manual manifest version change is not required for this trigger.
+Use `mise run release:cli` for an authorized GitHub archive release and `mise run publish:cli` for an authorized crates.io release. GitHub requires `GITHUB_TOKEN`; direct Cargo publication requires `CARGO_REGISTRY_TOKEN` or `cargo login`. Premise's current generic artifact selection skips monorepo archive publication, so the explicit archive task handles that path.
 
-Use these explicit release tasks for this scaffold. The locally installed Premise build currently fails `pm release --dry-run` in this linked Git worktree with `read release HEAD: reference not found`; it also derives generic Cargo archive configuration from registry templates rather than this monorepo's project list.
+## Template sources and project documents
 
-## Template sources
-
-Generated with `~/Projects/premise` and the local `premise-cargo` and `premise-bun` registries. The installed Premise binary was updated from local source to support current registry CI fields. `premise.yaml` records the corresponding portable official selectors:
-
-- `cloudvoyant/premise-cargo:premise-clap-cli` for the CLI.
-- `cloudvoyant/premise-cargo:premise-rust-lib` for backend and database. The backend was moved from the generated `libs/` location to `apps/` and its manifest path updated.
-- `cloudvoyant/premise-bun:premise-sveltekit-app` for the web app. Generation used a clean tracked registry snapshot to exclude installed dependencies.
-
-## Project documents
+Generated with `~/Projects/premise` and the local `premise-cargo` and `premise-bun` registries. `premise.yaml` records their portable official selectors. The private backend began with the Rust library template and was moved into `apps/`; the CLI uses the Clap template and the web app uses SvelteKit.
 
 - [Architecture decision records](adr/README.md)
 - [Product requirements documents](prd/README.md)

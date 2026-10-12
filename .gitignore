@@ -45,3 +45,7 @@ dist/
 # macOS
 
 # Editors
+
+# Generated CLI package contents (included explicitly by Cargo)
+/apps/lgtm-cli/bundle/
+/apps/lgtm-cli/.bundle-stage/

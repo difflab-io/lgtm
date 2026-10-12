@@ -1,6 +1,7 @@
 # Template contract tasks and generated-project Rust toolchain.
 
 [tools]
+watchexec = "2.8.0"
 buf = "1.73.0"
 rust = { version = "1.88", components = "rustfmt,clippy,rust-analyzer" }
 "cargo:cargo-zigbuild" = "0.23.4"
@@ -33,11 +34,11 @@ run = "cargo clippy --fix --allow-dirty --allow-staged --allow-no-vcs"
 
 [tasks.format]
 description = "Format Rust sources"
-run = "cargo fmt --all"
+run = "cargo fmt -p lgtm-backend"
 
 [tasks."format:check"]
 description = "Check formatting without modifying files"
-run = "cargo fmt --all --check"
+run = "cargo fmt -p lgtm-backend --check"
 
 [tasks.env-pull]
 description = "Pull external environment configuration"
@@ -57,6 +58,6 @@ depends = ["//apps/lgtm-web:generate"]
 run = "cargo run -p lgtm-backend"
 
 [tasks.dev]
-description = "Start the LGTM backend in development"
+description = "Watch backend and Protobuf sources and restart the server"
 depends = ["//apps/lgtm-web:generate"]
-run = "cargo run -p lgtm-backend"
+run = "watchexec --restart --watch src --watch proto --watch build.rs --watch Cargo.toml -- mise run run"

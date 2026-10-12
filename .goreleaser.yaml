@@ -1,13 +1,24 @@
 version: 2
 project_name: lgtm-cli
 builds:
-  - id: lgtm-cli
+  - id: lgtm-cli-linux
     builder: rust
-    binary: lgtm-cli
+    binary: lgtm
     dir: .
     targets:
       - x86_64-unknown-linux-gnu
       - aarch64-unknown-linux-gnu
+    flags:
+      - --release
+      - --locked
+      - -p=lgtm-cli
+  - id: lgtm-cli-macos
+    builder: rust
+    binary: lgtm
+    dir: .
+    # Use Apple's linker for macOS; Zig rejects some Hyper relocations.
+    command: build
+    targets:
       - x86_64-apple-darwin
       - aarch64-apple-darwin
     flags:
@@ -16,7 +27,7 @@ builds:
       - -p=lgtm-cli
 archives:
   - id: lgtm-cli
-    ids: [lgtm-cli]
+    ids: [lgtm-cli-linux, lgtm-cli-macos]
     formats: [tar.gz]
     name_template: '{{ .Binary }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}'
 changelog:

@@ -22,3 +22,6 @@ RELEASE_NOTES.md
 
 # Generated Protobuf clients
 **/src/lib/gen/
+
+apps/lgtm-cli/bundle/
+apps/lgtm-cli/.bundle-stage/

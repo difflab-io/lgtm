@@ -21,25 +21,30 @@ zig = "0.16.0"
 run = ["cargo fetch", "bun install --frozen-lockfile"]
 
 [tasks.build]
-depends = ["//apps/lgtm-web:generate"]
+depends = ["//apps/lgtm-cli:bundle"]
 run = ["cargo build --workspace", "bun run --filter lgtm-web build"]
 
 [tasks.test]
+depends = ["//apps/lgtm-cli:bundle"]
 run = ["cargo test --workspace", "bun run --filter lgtm-web test"]
 
 [tasks.lint]
+depends = ["//apps/lgtm-cli:bundle"]
 run = ["cargo clippy --workspace --all-targets --all-features -- -D warnings", "mise run //apps/lgtm-web:lint"]
 
 [tasks.format]
+depends = ["//apps/lgtm-cli:bundle"]
 run = ["cargo fmt --all", "mise run //apps/lgtm-web:format"]
 
 [tasks."format:check"]
+depends = ["//apps/lgtm-cli:bundle"]
 run = ["cargo fmt --all --check", "mise run //apps/lgtm-web:format:check"]
 
 [tasks."run:cli"]
+depends = ["//apps/lgtm-cli:bundle"]
 description = "Run the LGTM CLI"
 alias = "dev:cli"
-run = "cargo run -p lgtm-cli --"
+run = "cargo run -p lgtm-cli --bin lgtm --"
 
 [tasks."dev:backend"]
 run = "mise run //apps/lgtm-backend:dev"
@@ -48,13 +53,20 @@ run = "mise run //apps/lgtm-backend:dev"
 run = "mise run //apps/lgtm-web:dev"
 
 [tasks."release:check"]
+depends = ["//apps/lgtm-cli:bundle"]
 description = "Validate CLI-only release configuration and Cargo packaging"
 run = ["goreleaser check --config .goreleaser.yaml", "cargo publish -p lgtm-cli --dry-run --allow-dirty --locked"]
 
 [tasks."release:cli"]
+depends = ["//apps/lgtm-cli:bundle"]
 description = "Publish only lgtm-cli archives from a release tag"
 run = "goreleaser release --config .goreleaser.yaml --clean"
 
 [tasks."publish:cli"]
+depends = ["//apps/lgtm-cli:bundle"]
 description = "Publish only lgtm-cli to crates.io"
 run = "cargo publish -p lgtm-cli --locked"
+
+[tasks.dev]
+description = "Run the backend watcher and web development server together"
+depends = ["//apps/lgtm-backend:dev", "//apps/lgtm-web:dev"]
