@@ -34,6 +34,11 @@ run = ["cargo fmt --all", "mise run //apps/lgtm-web:format"]
 [tasks."format:check"]
 run = ["cargo fmt --all --check", "mise run //apps/lgtm-web:format:check"]
 
+[tasks."run:cli"]
+description = "Run the LGTM CLI"
+alias = "dev:cli"
+run = "cargo run -p lgtm-cli --"
+
 [tasks."dev:backend"]
 run = "cargo run -p lgtm-backend"
 

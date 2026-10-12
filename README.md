@@ -28,8 +28,8 @@ Rust 1.88 and Bun 1.4.2 are pinned in `mise.toml`. Commit both root lockfiles wh
 ## Run
 
 ```sh
-mise exec -- cargo run -p lgtm-cli -- --help
-mise exec -- cargo run -p lgtm-cli -- --version
+mise run run:cli -- --help
+mise run run:cli -- --version
 mise run dev:backend
 ```
 

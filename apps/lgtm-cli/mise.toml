@@ -76,7 +76,7 @@ cargo publish --allow-dirty --no-verify
 
 [tasks.run]
 description = "Run the CLI"
-run = "cargo run"
+run = "cargo run --"
 
 [tasks.dev]
 description = "Run the CLI in development mode"
@@ -85,7 +85,7 @@ set -eu
 if [ "${PREMISE_TEMPLATE_TEST:-}" = "1" ]; then
   cargo build
 else
-  cargo run
+  cargo run --
 fi
 '''
 
