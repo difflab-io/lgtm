@@ -7,8 +7,8 @@ description = "Install Bun dependencies"
 run = "bun install"
 
 [tasks.build]
-description = "Build the application"
-depends = ["install"]
+description = "Build the static web application"
+depends = ["generate"]
 run = "bun run build"
 
 [tasks.clean]

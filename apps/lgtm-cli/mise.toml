@@ -10,6 +10,7 @@ description = "Resolve and fetch Cargo dependencies"
 run = "cargo fetch"
 
 [tasks.build]
+depends = ["bundle"]
 description = "Compile the CLI"
 run = "cargo build"
 
@@ -18,22 +19,27 @@ description = "Remove build artifacts"
 run = "cargo clean"
 
 [tasks.test]
+depends = ["bundle"]
 description = "Run the test suite"
 run = "cargo test"
 
 [tasks.lint]
+depends = ["bundle"]
 description = "Lint with clippy (deny warnings)"
 run = "cargo clippy --all-targets --all-features -- -D warnings"
 
 [tasks."lint:fix"]
+depends = ["bundle"]
 description = "Auto-fix clippy findings"
 run = "cargo clippy --fix --allow-dirty --allow-staged --allow-no-vcs"
 
 [tasks.format]
+depends = ["bundle"]
 description = "Format Rust sources"
 run = "cargo fmt --all"
 
 [tasks."format:check"]
+depends = ["bundle"]
 description = "Check formatting without modifying files"
 run = "cargo fmt --all --check"
 
@@ -42,6 +48,7 @@ description = "Pull external environment configuration"
 run = 'echo "env-pull: nothing to pull"'
 
 [tasks."publish:rc"]
+depends = ["bundle"]
 description = "Publish a prerelease (rc) version of the crate"
 run = '''
 set -eu
@@ -59,6 +66,7 @@ cargo publish --allow-dirty --no-verify
 '''
 
 [tasks.publish]
+depends = ["bundle"]
 description = "Publish a stable version of the crate"
 run = '''
 set -eu
@@ -75,10 +83,12 @@ cargo publish --allow-dirty --no-verify
 '''
 
 [tasks.run]
+depends = ["bundle"]
 description = "Run the CLI"
 run = "cargo run --"
 
 [tasks.dev]
+depends = ["bundle"]
 description = "Run the CLI in development mode"
 run = '''
 set -eu
@@ -96,3 +106,8 @@ run = 'echo "deploy: no deployable surface"'
 [tasks.e2e]
 description = "Validate the e2e contract (no end-to-end surface)"
 run = 'echo "e2e: no end-to-end surface"'
+
+[tasks.bundle]
+description = "Bundle the private backend and web UI into the publishable CLI"
+depends = ["//apps/lgtm-backend:build", "//apps/lgtm-web:build"]
+run = "bun run scripts/bundle.ts"
