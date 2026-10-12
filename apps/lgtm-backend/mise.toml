@@ -1,6 +1,7 @@
 # Template contract tasks and generated-project Rust toolchain.
 
 [tools]
+buf = "1.73.0"
 rust = { version = "1.88", components = "rustfmt,clippy,rust-analyzer" }
 "cargo:cargo-zigbuild" = "0.23.4"
 zig = "0.16.0"
@@ -10,7 +11,8 @@ description = "Resolve and fetch Cargo dependencies"
 run = "cargo fetch"
 
 [tasks.build]
-description = "Compile the library"
+description = "Compile the backend and regenerate the web RPC client"
+depends = ["//apps/lgtm-web:generate"]
 run = "cargo build"
 
 [tasks.clean]
@@ -51,8 +53,10 @@ run = 'echo "Private package; publication disabled"'
 
 [tasks.run]
 description = "Start the LGTM backend"
+depends = ["//apps/lgtm-web:generate"]
 run = "cargo run -p lgtm-backend"
 
 [tasks.dev]
 description = "Start the LGTM backend in development"
+depends = ["//apps/lgtm-web:generate"]
 run = "cargo run -p lgtm-backend"

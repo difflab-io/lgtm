@@ -30,10 +30,10 @@ Rust 1.88 and Bun 1.4.2 are pinned in `mise.toml`. Commit both root lockfiles wh
 ```sh
 mise run run:cli -- --help
 mise run run:cli -- --version
-mise run dev:backend
+mise run //apps/lgtm-backend:dev
 ```
 
-The backend listens on `127.0.0.1:8080`. Set `LGTM_BACKEND_ADDR` to change it. Ctrl-C marks health as not serving and shuts down gracefully. Its standard health service accepts Connect, gRPC, and gRPC-Web clients. No separate protocol generation tool is needed for this initial service.
+The backend listens on `127.0.0.1:8080`. Set `LGTM_BACKEND_ADDR` to change it. Ctrl-C marks health as not serving and shuts down gracefully. Its greeting and standard health services accept Connect, gRPC, and gRPC-Web clients.
 
 From another terminal, call the Connect JSON health endpoint:
 
@@ -47,15 +47,42 @@ curl --fail http://127.0.0.1:8080/grpc.health.v1.Health/Check \
 Start the web app in another terminal:
 
 ```sh
-mise run dev:web
+mise run //apps/lgtm-web:dev
 ```
 
-Open the local URL printed by Vite. To preview the production build:
+Open the local URL printed by Vite, enter a name, and click **Say hello**. The browser uses the generated gRPC-Web client in `apps/lgtm-web/src/lib/gen`. SvelteKit forwards `/rpc/*` requests to the Rust backend. Set `LGTM_BACKEND_URL` when starting the web app if the backend is not at `http://127.0.0.1:8080`. The browser and proxy share an origin, so no backend CORS configuration or separate TypeScript client package is needed.
+
+To preview the production build:
 
 ```sh
 mise exec -- bun run --cwd apps/lgtm-web build
 mise exec -- bun run --cwd apps/lgtm-web start
 ```
+
+## Protobuf generation
+
+`apps/lgtm-backend/proto/lgtm/v1/hello.proto` defines `lgtm.v1.GreeterService/SayHello`. Both Rust and TypeScript derive their API from that file. Buf 1.73.0 is pinned in Mise; the Protobuf ES plugin is pinned in the web app. Rust generation runs in `build.rs`, with output in Cargo's build directory. The TypeScript client is generated into the web app and checked in.
+
+```sh
+# Regenerate the web client, then compile the backend.
+mise run //apps/lgtm-backend:build
+
+# Regenerate only the web client.
+mise run //apps/lgtm-web:generate
+```
+
+The aggregate `mise run build` also regenerates the web client first. Both per-project `dev` tasks regenerate the client before startup, as do the root dev shortcuts. After editing the schema during a session, restart the backend dev task to regenerate both clients; Vite reloads the changed TypeScript client. Direct Cargo commands regenerate Rust types when the schema changes; use the Mise backend build to update TypeScript as well. Generated TypeScript files are excluded from formatting and lint fixes.
+
+The greeting can also be called using Connect JSON:
+
+```sh
+curl --fail http://127.0.0.1:8080/lgtm.v1.GreeterService/SayHello \
+  -H 'Content-Type: application/json' \
+  -H 'Connect-Protocol-Version: 1' \
+  --data '{"name":"World"}'
+```
+
+`mise run //apps/lgtm-web:test` compiles and starts an isolated Rust backend to test the generated gRPC-Web client. The Rust integration tests cover native gRPC and gRPC-Web greeting requests.
 
 ## CLI release
 

@@ -19,3 +19,6 @@ RELEASE_NOTES.md
 .codevoyant/
 .worktrees/
 .tmp/
+
+# Generated Protobuf clients
+**/src/lib/gen/
