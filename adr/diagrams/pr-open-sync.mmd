@@ -1,9 +1,0 @@
-%%{init: {"flowchart": {"diagramPadding": 40, "rankSpacing": 30}}}%%
-flowchart TD
-    Open[Backend opens PR by ID] --> Fetch[Fetch comments, thread state, and user drafts]
-    Fetch -->|No new remote content| Cached[Keep cached PR view and local drafts]
-    Fetch -->|Remote comments, changes, or open drafts| Pull[Import remote entries by forge ID]
-    Pull --> Reconcile[Keep unsent local drafts and reconcile state]
-    Cached --> Ready[Return PR review to client]
-    Reconcile --> Ready
-    Fetch -->|Read fails or drafts unavailable| Stale[Mark stale and block publish]

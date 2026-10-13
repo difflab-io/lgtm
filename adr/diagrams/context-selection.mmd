@@ -1,9 +1,0 @@
-%%{init: {"flowchart": {"diagramPadding": 40, "rankSpacing": 30}}}%%
-flowchart TD
-    Clients[Web, desktop, Neovim, TUI] --> Backend[Rust review service]
-    Backend --> Target{Open target}
-    Target -->|Local| LocalKey[Repository + worktree + branch or commit]
-    LocalKey --> LocalStore[Resume persistent local session]
-    Target -->|PR identifier| PRKey[Forge + repository + PR ID]
-    PRKey --> Sync[Check remote discussion first]
-    Sync --> PRStore[Open separate PR review]

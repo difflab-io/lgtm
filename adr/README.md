@@ -4,8 +4,7 @@ Records follow the [MADR](https://adr.github.io/madr/) format. Start from [templ
 
 | ADR | Status | Summary |
 | --- | --- | --- |
-| [0001](0001-initial-architecture.md) | proposed | Rust review core and service for local, remote, and forge-linked reviews |
-| [0002](0002-service-rpc-framework.md) | proposed | Connect RPC versus `jsonrpsee` for the service API |
+| [0001](0001-initial-architecture.md) | accepted | Local web app and Neovim plugin for code and document review, with CLI access for agents |
 
 ## References
 
