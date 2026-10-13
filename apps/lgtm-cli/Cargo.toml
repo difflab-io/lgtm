@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Run LGTM code reviews with a bundled web UI and gRPC server."
-license = "MIT"
 repository = "https://github.com/difflab-io/lgtm"
 publish = ["crates-io"]
 include = ["src/**", "tests/**", "build.rs", "bundle/**", "Cargo.toml", "Cargo.lock", "README.md"]
