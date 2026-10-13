@@ -1,10 +1,16 @@
 <script lang="ts">
   import { sayHello } from '$lib/rpc'
+  import { onMount } from 'svelte'
 
   let name = $state('World')
   let greeting = $state('')
   let error = $state('')
   let pending = $state(false)
+  let path = $state('')
+
+  onMount(() => {
+    path = new URL(window.location.href).searchParams.get('path') ?? ''
+  })
 
   async function submit(event: SubmitEvent) {
     event.preventDefault()
@@ -28,6 +34,9 @@
 
 <main>
   <h1>LGTM Hello World</h1>
+  {#if path}
+    <p>Review path: <code>{path}</code></p>
+  {/if}
   <form onsubmit={submit}>
     <label for="name">Your name</label>
     <input id="name" bind:value={name} />

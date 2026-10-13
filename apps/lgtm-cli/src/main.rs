@@ -24,11 +24,26 @@ enum Command {
     /// Stop the background server.
     Down,
     /// Show whether the server is running.
-    Status,
+    Status {
+        /// Print server discovery information as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Open the current directory in the web interface.
+    Review {
+        /// Server port when starting a new instance (0 selects a free port).
+        #[arg(long, default_value_t = 8080)]
+        port: u16,
+        /// Print the review URL without opening a browser.
+        #[arg(long)]
+        no_open: bool,
+    },
     #[command(hide = true)]
     Serve {
         #[arg(long, default_value_t = 8080)]
         port: u16,
+        #[arg(long)]
+        daemonize: bool,
     },
 }
 
@@ -45,15 +60,26 @@ struct Up {
     no_open: bool,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let state_dir = daemon::state_dir(cli.state_dir)?;
-    match cli.command {
-        Command::Up(options) if options.foreground => server::serve(options.port, &state_dir).await,
-        Command::Up(options) => daemon::up(options.port, !options.no_open, &state_dir).await,
-        Command::Down => daemon::down(&state_dir).await,
-        Command::Status => daemon::status(&state_dir).await,
-        Command::Serve { port } => server::serve(port, &state_dir).await,
+    // Fork only in the fresh server process, before starting Tokio threads.
+    if let Command::Serve {
+        daemonize: true, ..
+    } = cli.command
+    {
+        daemon::detach(&state_dir)?;
     }
+    tokio::runtime::Runtime::new()?.block_on(async {
+        match cli.command {
+            Command::Up(options) if options.foreground => {
+                server::serve(options.port, &state_dir, false).await
+            }
+            Command::Up(options) => daemon::up(options.port, !options.no_open, &state_dir).await,
+            Command::Down => daemon::down(&state_dir).await,
+            Command::Status { json } => daemon::status(&state_dir, json).await,
+            Command::Review { port, no_open } => daemon::review(port, !no_open, &state_dir).await,
+            Command::Serve { port, daemonize } => server::serve(port, &state_dir, daemonize).await,
+        }
+    })
 }

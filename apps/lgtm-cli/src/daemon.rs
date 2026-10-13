@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Command,
     time::Duration,
 };
 
@@ -108,77 +108,95 @@ async fn running(client: &reqwest::Client, instance: &Instance) -> bool {
     body["pid"].as_u64() == Some(instance.pid.into())
 }
 
-pub async fn up(port: u16, open_browser: bool, dir: &Path) -> Result<()> {
+#[cfg(unix)]
+pub fn detach(dir: &Path) -> Result<()> {
+    prepare(dir)?;
+    let log = private_file(&dir.join("server.log"))?;
+    daemonize::Daemonize::new()
+        .working_directory(dir)
+        .pid_file(dir.join("server.pid"))
+        .umask(0o077)
+        .stdout(log.try_clone()?)
+        .stderr(log)
+        .start()
+        .context("Daemonize the LGTM server")
+}
+
+#[cfg(not(unix))]
+pub fn detach(_dir: &Path) -> Result<()> {
+    bail!("Background mode requires macOS or Linux; use lgtm up --foreground")
+}
+
+async fn ensure_running(port: u16, dir: &Path) -> Result<Instance> {
     prepare(dir)?;
     let _start_lock = lock(dir, "start.lock")?;
     let client = client()?;
     if let Some(instance) = read(dir) {
         if running(&client, &instance).await {
-            announce(&instance, open_browser, dir);
-            return Ok(());
+            return Ok(instance);
         }
     }
-    let log = private_file(&dir.join("server.log"))?;
-    let mut command = Command::new(std::env::current_exe()?);
-    command
+    let exit = Command::new(std::env::current_exe()?)
         .arg("--state-dir")
         .arg(dir)
         .arg("serve")
+        .arg("--daemonize")
         .arg("--port")
         .arg(port.to_string())
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .stdout(log.try_clone()?)
-        .stderr(log);
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        // SAFETY: the post-fork callback only invokes setsid and reads errno.
-        unsafe {
-            command.pre_exec(|| {
-                if libc::setsid() == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
+        .status()
+        .context("Start the bundled LGTM server")?;
+    if !exit.success() {
+        bail!("Could not daemonize the LGTM server ({exit})");
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x00000008 | 0x00000200); // detached + new process group
-    }
-    let mut child = command.spawn().context("Start the bundled LGTM server")?;
     for _ in 0..50 {
-        if let Some(exit) = child.try_wait()? {
-            bail!(
-                "LGTM server exited ({exit}); check {}",
-                dir.join("server.log").display()
-            );
-        }
         if let Some(instance) = read(dir) {
-            if instance.pid == child.id() && running(&client, &instance).await {
-                announce(&instance, open_browser, dir);
-                return Ok(());
+            if running(&client, &instance).await {
+                return Ok(instance);
             }
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
-    child.kill().ok();
-    child.wait().ok();
     bail!(
         "LGTM did not become ready; check {}",
         dir.join("server.log").display()
     )
 }
 
-fn announce(instance: &Instance, open_browser: bool, dir: &Path) {
-    println!("LGTM is running at {}", instance.url());
-    println!("Logs: {}", dir.join("server.log").display());
+pub async fn up(port: u16, open_browser: bool, dir: &Path) -> Result<()> {
+    let instance = ensure_running(port, dir).await?;
+    announce(&instance, dir);
     if open_browser {
-        if let Err(error) = webbrowser::open(&instance.url()) {
-            eprintln!("Could not open a browser ({error}); open the URL above.");
-        }
+        open(&instance.url());
+    }
+    Ok(())
+}
+
+pub async fn review(port: u16, open_browser: bool, dir: &Path) -> Result<()> {
+    let path = std::env::current_dir()?;
+    let path = path
+        .to_str()
+        .context("The current directory is not valid UTF-8")?;
+    let instance = ensure_running(port, dir).await?;
+    let mut url = reqwest::Url::parse(&instance.url())?;
+    url.query_pairs_mut().append_pair("path", path);
+    println!("{url}");
+    if open_browser {
+        open(url.as_str());
+    }
+    Ok(())
+}
+
+fn announce(instance: &Instance, dir: &Path) {
+    println!("LGTM is running (pid {})", instance.pid);
+    println!("UI: {}", instance.url());
+    println!("Server: {}", instance.url());
+    println!("Browser RPC: {}/rpc", instance.url());
+    println!("Logs: {}", dir.join("server.log").display());
+}
+
+fn open(url: &str) {
+    if let Err(error) = webbrowser::open(url) {
+        eprintln!("Could not open a browser ({error}); open the URL above.");
     }
 }
 
@@ -211,18 +229,31 @@ pub async fn down(dir: &Path) -> Result<()> {
     )
 }
 
-pub async fn status(dir: &Path) -> Result<()> {
+pub async fn status(dir: &Path, json: bool) -> Result<()> {
     let client = client()?;
     if let Some(instance) = read(dir) {
         if running(&client, &instance).await {
-            println!(
-                "LGTM is running at {} (pid {})",
-                instance.url(),
-                instance.pid
-            );
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "running": true,
+                        "pid": instance.pid,
+                        "ui_url": instance.url(),
+                        "server_url": instance.url(),
+                        "rpc_url": format!("{}/rpc", instance.url()),
+                    })
+                );
+            } else {
+                announce(&instance, dir);
+            }
             return Ok(());
         }
     }
-    println!("LGTM is not running");
+    if json {
+        println!("{}", serde_json::json!({"running": false}));
+    } else {
+        println!("LGTM is not running");
+    }
     Ok(())
 }

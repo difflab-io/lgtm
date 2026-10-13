@@ -87,9 +87,14 @@ async fn signal() {
     ctrl_c.await;
 }
 
-pub async fn serve(port: u16, dir: &Path) -> anyhow::Result<()> {
+pub async fn serve(port: u16, dir: &Path, detached: bool) -> anyhow::Result<()> {
     daemon::prepare(dir)?;
-    let _lock = daemon::lock(dir, "server.lock")?;
+    // daemonize owns the PID-file lock in background mode.
+    let _lock = if detached {
+        None
+    } else {
+        Some(daemon::lock(dir, "server.pid")?)
+    };
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await?;
     let instance = Instance {
         pid: std::process::id(),

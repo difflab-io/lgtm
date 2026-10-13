@@ -6,10 +6,13 @@ LGTM includes a web UI and gRPC server in the `lgtm` executable.
 cargo install lgtm-cli
 lgtm up
 lgtm status
+lgtm review
 lgtm down
 ```
 
-`up` starts a managed background process and opens the UI at `http://127.0.0.1:8080`. Use `--no-open` to suppress the browser, `--port` to select a different port, or `--foreground` to run in the terminal. No Node, Bun, Buf, or separate backend installation is needed at runtime.
+`up` uses the embedded `daemonize` library on macOS and Linux to start the UI and backend in one background process. It opens the UI at `http://127.0.0.1:8080`. Use `--no-open` to suppress the browser, `--port` to select a different port, or `--foreground` to run in the terminal. No Node, Bun, Buf, or separate daemon tool is needed at runtime.
+
+`status` shows the UI, server, and browser RPC URLs. `status --json` exposes the same addresses for editor integration. `review` starts or reuses the server and opens `/?path=<encoded current directory>`. Use `review --no-open` to print that URL without opening a browser.
 
 State and logs are stored in the platform's local state directory under `lgtm`. Set `LGTM_STATE_DIR` or pass `--state-dir` to choose another directory. A repeated `up` reuses the running instance. `down` shuts down both UI and RPC serving.
 

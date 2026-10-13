@@ -92,11 +92,48 @@ async fn background_instance_serves_ui_and_rpc_and_stops() {
     let reused: serde_json::Value =
         serde_json::from_slice(&std::fs::read(dir.join("instance.json")).unwrap()).unwrap();
     assert_eq!(state["pid"], reused["pid"]);
-    assert!(command(dir, &["status"]).status.success());
+    let status = command(dir, &["status"]);
+    assert!(status.status.success());
+    let text = String::from_utf8_lossy(&status.stdout);
+    assert!(text.contains(&format!("UI: {url}")));
+    assert!(text.contains(&format!("Server: {url}")));
+    assert!(text.contains(&format!("Browser RPC: {url}/rpc")));
+    let status = command(dir, &["status", "--json"]);
+    let discovery: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(discovery["running"], true);
+    assert_eq!(discovery["pid"], state["pid"]);
+    assert_eq!(discovery["ui_url"], url);
+    assert_eq!(discovery["server_url"], url);
+    assert_eq!(discovery["rpc_url"], format!("{url}/rpc"));
+    assert!(discovery.get("token").is_none());
+
+    let cwd = dir
+        .canonicalize()
+        .unwrap()
+        .join("review space & plus+ café #file");
+    std::fs::create_dir(&cwd).unwrap();
+    let review = Command::new(env!("CARGO_BIN_EXE_lgtm"))
+        .arg("--state-dir")
+        .arg(dir)
+        .args(["review", "--no-open"])
+        .current_dir(&cwd)
+        .output()
+        .unwrap();
+    assert!(review.status.success());
+    let review_url = reqwest::Url::parse(String::from_utf8_lossy(&review.stdout).trim()).unwrap();
+    assert_eq!(review_url.origin().ascii_serialization(), url);
+    let query: Vec<_> = review_url.query_pairs().collect();
+    assert_eq!(query, [("path".into(), cwd.to_str().unwrap().into())]);
+    assert_eq!(client.get(review_url).send().await.unwrap().status(), 200);
     assert!(command(dir, &["down"]).status.success());
     assert!(!dir.join("instance.json").exists());
     let status = command(dir, &["status"]);
     assert!(String::from_utf8_lossy(&status.stdout).contains("not running"));
+    let status = command(dir, &["status", "--json"]);
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&status.stdout).unwrap(),
+        serde_json::json!({"running": false})
+    );
 }
 
 #[test]
@@ -106,6 +143,35 @@ fn occupied_port_fails_without_leaving_an_instance() {
     let dir = tempfile::tempdir().unwrap();
     let result = command(dir.path(), &["up", "--port", &port, "--no-open"]);
     assert!(!result.status.success());
-    assert!(String::from_utf8_lossy(&result.stderr).contains("server exited"));
+    assert!(String::from_utf8_lossy(&result.stderr).contains("did not become ready"));
     assert!(!dir.path().join("instance.json").exists());
+    assert!(
+        std::fs::read_to_string(dir.path().join("server.log"))
+            .unwrap()
+            .contains("Address already in use")
+    );
+}
+
+#[test]
+fn review_starts_a_ready_server_for_the_current_directory() {
+    let instance = Instance(tempfile::tempdir().unwrap());
+    let dir = instance.0.path();
+    let review = command(dir, &["review", "--port", "0", "--no-open"]);
+    assert!(
+        review.status.success(),
+        "{}",
+        String::from_utf8_lossy(&review.stderr)
+    );
+    let url = reqwest::Url::parse(String::from_utf8_lossy(&review.stdout).trim()).unwrap();
+    assert_eq!(
+        url.query_pairs().collect::<Vec<_>>(),
+        [(
+            "path".into(),
+            dir.canonicalize().unwrap().to_str().unwrap().into()
+        )]
+    );
+    let status = command(dir, &["status", "--json"]);
+    let discovery: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(discovery["running"], true);
+    assert_eq!(discovery["ui_url"], url.origin().ascii_serialization());
 }

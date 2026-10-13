@@ -59,6 +59,8 @@ Only the CLI publishes. GoReleaser defines macOS and Linux archives for arm64 an
 
 The backend uses Rust and ConnectRPC. Axum serves the bundled SvelteKit interface and routes its requests to the backend. Protobuf defines the shared service schema and generates Rust and TypeScript code.
 
+The CLI embeds `daemonize` for background startup on macOS and Linux. `status --json` exposes server addresses for editor clients. `review` opens the current directory through the web interface's `path` query parameter.
+
 Mise manages tools and development tasks. Cargo and Bun manage dependencies. Tests cover native gRPC, browser requests, and CLI startup and shutdown.
 
 ## References

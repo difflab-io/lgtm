@@ -61,13 +61,18 @@ The web task needs a running backend for RPC calls. The combined task starts bot
 ```sh
 mise run //apps/lgtm-cli:run -- up --no-open
 mise run //apps/lgtm-cli:run -- status
+mise run //apps/lgtm-cli:run -- review
 mise run //apps/lgtm-cli:run -- down
 mise run //libs/lgtm-db:test
 ```
 
 The Cargo package is named `lgtm-cli`, and its executable is named `lgtm`. Its run task builds the bundle before starting the CLI. The root `mise run run:cli -- up --no-open` task provides the same entry point.
 
-`lgtm up` starts one managed background process for the embedded interface and RPC server. It opens a browser unless you pass `--no-open`. Repeated calls reuse the running instance.
+`lgtm up` uses the embedded `daemonize` library on macOS and Linux. It starts one background process for the interface and RPC server. It opens a browser unless you pass `--no-open`. Repeated calls reuse the running instance.
+
+`lgtm status` shows the UI, server, and browser RPC URLs. The UI and native API share one address. The browser API uses `/rpc` on that address.
+
+`lgtm review` starts or reuses the server and opens `/?path=<encoded current directory>`. The interface displays the selected path. Use `lgtm review --no-open` to print the URL without opening a browser. If you need a different port for a new instance, pass `--port`.
 
 Useful runtime options:
 
@@ -80,6 +85,21 @@ lgtm --state-dir /path/to/state up --no-open
 State and `server.log` live in the platform's local state directory under `lgtm`. `LGTM_STATE_DIR` or `--state-dir` overrides that directory. In foreground mode, Ctrl-C stops the server.
 
 The database library contains starter behavior. No database or storage integration exists yet.
+
+### Neovim connection
+
+The plugin can start the shared server and discover its addresses without opening a browser:
+
+```sh
+lgtm up --no-open
+lgtm status --json
+```
+
+The discovery response contains `running`, `pid`, `ui_url`, `server_url`, and `rpc_url`. When the server is stopped, it returns `{"running":false}`. It does not expose the token for daemon controls.
+
+Use Neovim's `vim.system` to run these commands asynchronously. Call backend methods through `server_url` using Connect JSON, as in the greeting example below. The web interface and plugin then use the same backend instead of separate servers.
+
+The `path` query parameter selects a directory in the browser. It does not grant file access or create a review. The current backend exposes greeting and health services only.
 
 ## 4. Builds and generated code
 
