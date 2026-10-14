@@ -1,8 +1,0 @@
-flowchart TD
-    SCHEMA["Shared Protobuf schema"] --> GEN["Generated Rust protocol code"]
-    SOURCE["Canonical backend source"] --> BUNDLE["CLI bundle"]
-    GEN --> BUNDLE
-    BUNDLE --> ROUTER["backend::router"]
-    ROUTER --> GREETER["Greeting service"]
-    ROUTER --> HEALTH["Health services"]
-    ROUTER --> SERVER["CLI server: shared UI/API process"]

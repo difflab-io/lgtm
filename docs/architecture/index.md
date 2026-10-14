@@ -9,6 +9,7 @@ LGTM runs a browser interface and Rust backend in one local process, managed by 
 ### Functional
 
 - Support reviews through the web interface, Neovim, and the CLI directly.
+- Support multiple reviews at the same time.
 - Persist reviews across application restarts.
 - Synchronize reviews with GitHub.
 - Support notes and annotations without requiring a review.
@@ -43,6 +44,12 @@ lgtm/
 
 ### Data and Control Flow
 
+#### Review flow
+
+Each review has its own path and browser URL. Multiple browser tabs and editor clients share one local server. Opening another review does not replace existing reviews or start another server.
+
+`lgtm review` starts or reuses the server and opens the current directory through the `path` query parameter. The web page reads that parameter. Editor clients discover the server through `lgtm status --json`.
+
 #### Development flow
 
 ![Development](diagrams/development.svg)
@@ -59,7 +66,9 @@ Only the CLI publishes. GoReleaser defines macOS and Linux archives for arm64 an
 
 ### Interfaces and Contracts
 
-The [CLI architecture](cli/index.md) defines commands and server discovery. The [backend module](cli/backend.md) defines the shared service schema and message contracts.
+The [CLI architecture](cli/index.md) defines commands and server discovery. The shared [Protobuf schema](../../apps/lgtm-backend/proto/lgtm/v1/hello.proto) defines `GreeterService/SayHello`.
+
+Native clients call `/lgtm.v1.GreeterService/SayHello`. Browser clients call the same method under `/rpc`. The greeting trims the supplied name and uses `World` when it is blank.
 
 ## Implementation
 
@@ -67,7 +76,7 @@ The backend uses Rust and ConnectRPC. Axum serves the bundled SvelteKit interfac
 
 The CLI embeds `daemonize` for background startup on macOS and Linux. `status --json` exposes server addresses for editor clients. `review` opens the current directory through the web interface's `path` query parameter.
 
-The store module keeps runtime files in `~/.lgtm`. The UI module builds review URLs and opens the browser.
+The web app displays the requested path and calls the greeting service. The shared server serves static assets and backend methods through one loopback listener.
 
 Mise manages tools and development tasks. Cargo and Bun manage dependencies. Tests cover native gRPC, browser requests, and CLI startup and shutdown.
 

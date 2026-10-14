@@ -7,14 +7,14 @@ The main module parses CLI commands and connects them to the daemon, server, sto
 ## Modules
 
 <!-- prettier-ignore -->
-| Module                | Responsibility                         |
-| --------------------- | -------------------------------------- |
-| [Daemon](daemon.md)   | Start, discover, and stop the server   |
-| [Server](server.md)   | Serve web assets and API requests      |
-| [Store](store.md)     | Own runtime paths and PID/port files   |
-| [Log](log.md)         | Configure logging and server output    |
-| [UI](ui.md)           | Build review URLs and open the browser |
-| [Backend](backend.md) | Provide greeting and health services   |
+| Module              | Responsibility                         |
+| ------------------- | -------------------------------------- |
+| [Daemon](daemon.md) | Start, discover, and stop the server   |
+| [Server](server.md) | Serve web assets and API requests      |
+| [Store](store.md)   | Own runtime paths and PID/port files   |
+| [Log](log.md)       | Configure logging and server output    |
+| `ui`                | Build review URLs and open the browser |
+| Bundled backend     | Provide greeting and health services   |
 
 ## Requirement
 
@@ -46,7 +46,9 @@ The main module parses CLI commands and connects them to the daemon, server, sto
 
 The entry point parses arguments and constructs a store. For `serve --daemonize`, it detaches before creating the Tokio runtime. Server commands initialize logging before creating the runtime. The entry point then calls the selected module API inside it.
 
-`review` passes the caller's absolute current directory to the UI module. The server's working directory is the store.
+`review` passes the caller's absolute current directory to `ui::open_review_ui_at_path`. This function obtains a ready server, encodes the path as a query parameter, and opens the browser. The server's working directory is the store.
+
+The daemon uses the store for discovery and the log module for background output. The server uses the same store for PID ownership and its listening port. These modules share one `Store` value from the entry point.
 
 ### Interfaces and Contracts
 
@@ -84,5 +86,4 @@ The `backend` module comes from `bundle/backend.rs`. The bundle task copies the 
 - [Entry point](../../../apps/lgtm-cli/src/main.rs).
 - [Daemon module](daemon.md).
 - [Server module](server.md).
-- [UI module](ui.md).
-- [Backend module](backend.md).
+- [Shared application architecture](../index.md).
