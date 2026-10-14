@@ -1,0 +1,63 @@
+# Template contract tasks and generated-project Rust toolchain.
+
+[tools]
+watchexec = "2.8.0"
+buf = "1.73.0"
+rust = { version = "1.88", components = "rustfmt,clippy,rust-analyzer" }
+"cargo:cargo-zigbuild" = "0.23.4"
+zig = "0.16.0"
+
+[tasks.install]
+description = "Resolve and fetch Cargo dependencies"
+run = "cargo fetch"
+
+[tasks.build]
+description = "Compile the backend and regenerate the web RPC client"
+depends = ["//apps/lgtm-web:generate"]
+run = "cargo build"
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = "cargo clean"
+
+[tasks.test]
+description = "Run the test suite"
+run = "cargo test"
+
+[tasks.lint]
+description = "Lint with clippy (deny warnings)"
+run = "cargo clippy --all-targets --all-features -- -D warnings"
+
+[tasks."lint:fix"]
+description = "Auto-fix clippy findings"
+run = "cargo clippy --fix --allow-dirty --allow-staged --allow-no-vcs"
+
+[tasks.format]
+description = "Format Rust sources"
+run = "cargo fmt -p lgtm-backend"
+
+[tasks."format:check"]
+description = "Check formatting without modifying files"
+run = "cargo fmt -p lgtm-backend --check"
+
+[tasks.env-pull]
+description = "Pull external environment configuration"
+run = 'echo "env-pull: nothing to pull"'
+
+[tasks."publish:rc"]
+description = "Private package; publication disabled"
+run = 'echo "Private package; publication disabled"'
+
+[tasks.publish]
+description = "Private package; publication disabled"
+run = 'echo "Private package; publication disabled"'
+
+[tasks.run]
+description = "Start the LGTM backend"
+depends = ["//apps/lgtm-web:generate"]
+run = "cargo run -p lgtm-backend"
+
+[tasks.dev]
+description = "Watch backend and Protobuf sources and restart the server"
+depends = ["//apps/lgtm-web:generate"]
+run = "watchexec --restart --watch src --watch proto --watch build.rs --watch Cargo.toml -- mise run run"

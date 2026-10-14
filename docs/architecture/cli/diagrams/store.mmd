@@ -1,0 +1,5 @@
+flowchart TD
+    CLI["CLI and server modules"] --> STORE["Store: ~/.lgtm"]
+    STORE --> PID["server.pid: process ownership"]
+    STORE --> PORT["server.port: listener discovery"]
+    STORE --> LOG["server.log: background output"]

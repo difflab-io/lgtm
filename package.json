@@ -1,0 +1,23 @@
+{
+  "name": "lgtm",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.2",
+  "workspaces": [
+    "apps/*",
+    "libs/*"
+  ],
+  "scripts": {
+    "build": "bun run --filter '*' build",
+    "test": "bun run --filter '*' test"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.11.0",
+    "globals": "17.12.0",
+    "prettier": "3.9.8",
+    "prettier-plugin-svelte": "4.1.1",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.70.0"
+  }
+}

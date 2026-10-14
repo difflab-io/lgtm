@@ -1,0 +1,6 @@
+flowchart TD
+    SOURCE["Backend source and generated Rust protocols"] --> BUNDLE["CLI bundle directory"]
+    WEB["SvelteKit static build"] --> BUNDLE
+    BUNDLE --> PACKAGE["lgtm-cli Cargo package"]
+    PACKAGE --> BINARY["lgtm executable"]
+    BINARY --> ARCHIVE["macOS and Linux CLI archives"]
