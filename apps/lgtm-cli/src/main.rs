@@ -1,18 +1,19 @@
 use clap::{Args, Parser, Subcommand};
-use std::path::PathBuf;
 
 #[path = "../bundle/backend.rs"]
 pub mod backend;
 mod daemon;
+mod log;
 mod server;
+mod store;
+mod ui;
+
+// types -----------------------------------------------------------------------
 
 /// Run LGTM with a bundled web UI and gRPC server.
 #[derive(Parser)]
 #[command(name = "lgtm", version, about)]
 struct Cli {
-    /// Directory for daemon state and logs.
-    #[arg(long, global = true, env = "LGTM_STATE_DIR")]
-    state_dir: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -60,26 +61,35 @@ struct Up {
     no_open: bool,
 }
 
+// api -------------------------------------------------------------------------
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let state_dir = daemon::state_dir(cli.state_dir)?;
+    let store = store::Store::new()?;
     // Fork only in the fresh server process, before starting Tokio threads.
     if let Command::Serve {
         daemonize: true, ..
     } = cli.command
     {
-        daemon::detach(&state_dir)?;
+        daemon::detach(&store)?;
+    }
+    if matches!(cli.command, Command::Serve { .. })
+        || matches!(&cli.command, Command::Up(options) if options.foreground)
+    {
+        log::init(&store)?;
     }
     tokio::runtime::Runtime::new()?.block_on(async {
         match cli.command {
             Command::Up(options) if options.foreground => {
-                server::serve(options.port, &state_dir, false).await
+                server::serve(options.port, &store, false).await
             }
-            Command::Up(options) => daemon::up(options.port, !options.no_open, &state_dir).await,
-            Command::Down => daemon::down(&state_dir).await,
-            Command::Status { json } => daemon::status(&state_dir, json).await,
-            Command::Review { port, no_open } => daemon::review(port, !no_open, &state_dir).await,
-            Command::Serve { port, daemonize } => server::serve(port, &state_dir, daemonize).await,
+            Command::Up(options) => daemon::up(options.port, !options.no_open, &store).await,
+            Command::Down => daemon::down(&store).await,
+            Command::Status { json } => daemon::status(&store, json).await,
+            Command::Review { port, no_open } => {
+                ui::open_review_ui_at_path(&std::env::current_dir()?, port, !no_open, &store).await
+            }
+            Command::Serve { port, daemonize } => server::serve(port, &store, daemonize).await,
         }
     })
 }

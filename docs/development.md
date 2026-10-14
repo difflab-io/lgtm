@@ -39,11 +39,14 @@ Vite updates the interface when frontend files change. Rust source, build-script
 
 To change ports, set these environment variables before starting development:
 
-| Variable            | Purpose                      | Default                 |
-| ------------------- | ---------------------------- | ----------------------- |
-| `LGTM_BACKEND_ADDR` | Backend listen address       | `127.0.0.1:8080`        |
-| `LGTM_BACKEND_URL`  | Vite target for RPC requests | `http://127.0.0.1:8080` |
-| `LGTM_WEB_PORT`     | Vite listen port             | `5173`                  |
+<!-- prettier-ignore -->
+| Variable            | Default                 |
+| ------------------- | ----------------------- |
+| `LGTM_BACKEND_ADDR` | `127.0.0.1:8080`        |
+| `LGTM_BACKEND_URL`  | `http://127.0.0.1:8080` |
+| `LGTM_WEB_PORT`     | `5173`                  |
+
+`LGTM_BACKEND_ADDR` sets the backend listen address. `LGTM_BACKEND_URL` sets Vite's RPC target. `LGTM_WEB_PORT` sets Vite's listen port.
 
 If you change the backend address, set the matching Vite target. If another process uses a required port, stop it or choose another port.
 
@@ -79,10 +82,10 @@ Useful runtime options:
 ```sh
 lgtm up --port 9000
 lgtm up --foreground
-lgtm --state-dir /path/to/state up --no-open
+LGTM_HOME=/tmp/lgtm-test lgtm up --port 0 --no-open
 ```
 
-State and `server.log` live in the platform's local state directory under `lgtm`. `LGTM_STATE_DIR` or `--state-dir` overrides that directory. In foreground mode, Ctrl-C stops the server.
+All runtime files live in `~/.lgtm`. The store module owns runtime paths and the PID/port files. The log module writes `server.log` with `tracing` and `tracing-subscriber`. Set `RUST_LOG` to change log filtering. `down` sends SIGTERM to the server, and Ctrl-C stops it in foreground mode. `LGTM_HOME` selects an isolated store for testing.
 
 The database library contains starter behavior. No database or storage integration exists yet.
 
@@ -95,7 +98,7 @@ lgtm up --no-open
 lgtm status --json
 ```
 
-The discovery response contains `running`, `pid`, `ui_url`, `server_url`, and `rpc_url`. When the server is stopped, it returns `{"running":false}`. It does not expose the token for daemon controls.
+The discovery response contains `running`, `pid`, `ui_url`, `server_url`, and `rpc_url`. When the server is stopped, it returns `{"running":false}`. `/health` confirms that the shared UI/API server is ready.
 
 Use Neovim's `vim.system` to run these commands asynchronously. Call backend methods through `server_url` using Connect JSON, as in the greeting example below. The web interface and plugin then use the same backend instead of separate servers.
 

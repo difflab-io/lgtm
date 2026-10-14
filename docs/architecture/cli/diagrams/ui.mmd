@@ -1,0 +1,7 @@
+flowchart TD
+    PATH["CLI current directory"] --> UI["open_review_ui_at_path"]
+    UI --> DAEMON["Ensure shared server is ready"]
+    DAEMON --> URL["Encode path in UI URL"]
+    URL --> PRINT["Print review URL"]
+    URL --> BROWSER["Open browser unless --no-open"]
+    BROWSER --> PAGE["Web page: display decoded path"]

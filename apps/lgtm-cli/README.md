@@ -14,6 +14,6 @@ lgtm down
 
 `status` shows the UI, server, and browser RPC URLs. `status --json` exposes the same addresses for editor integration. `review` starts or reuses the server and opens `/?path=<encoded current directory>`. Use `review --no-open` to print that URL without opening a browser.
 
-State and logs are stored in the platform's local state directory under `lgtm`. Set `LGTM_STATE_DIR` or pass `--state-dir` to choose another directory. A repeated `up` reuses the running instance. `down` shuts down both UI and RPC serving.
+All runtime files live in `~/.lgtm`: `server.pid`, `server.port`, and `server.log`. A repeated `up` reuses the running server. `down` sends SIGTERM to stop both UI and API serving. `LGTM_HOME` selects an isolated store for testing.
 
 From the repository, run `mise run dev` for the backend watcher and Vite, or `mise run //apps/lgtm-cli:bundle` before a raw Cargo build. Only this CLI package is published; the private backend and web app are bundled as implementation code and static assets.
