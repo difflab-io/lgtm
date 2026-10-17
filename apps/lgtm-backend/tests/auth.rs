@@ -49,6 +49,7 @@ async fn requester_resolution_rejects_missing_unknown_and_ambiguous_metadata() {
 struct RequesterEndpoint(AuthService);
 
 impl GreeterService for RequesterEndpoint {
+    #[tracing::instrument(name = "rpc_request", skip_all, fields(rpc.method = "requester"))]
     async fn say_hello<'a>(
         &'a self,
         context: RequestContext,
@@ -69,7 +70,7 @@ impl GreeterService for RequesterEndpoint {
 #[tokio::test]
 async fn grpc_and_grpc_web_handlers_resolve_each_requests_supplied_identity() {
     let database = Database::connect("sqlite::memory:").await.unwrap();
-    let auth = AuthService::new(database.clone(), tracing::Span::current());
+    let auth = AuthService::new(database.clone());
     let alice = auth
         .ensure_identity("Alice", "alice@example.com", None, None)
         .await

@@ -9,19 +9,17 @@ use connectrpc::RequestContext;
 #[derive(Clone)]
 pub struct AuthService {
     database: Database,
-    logger: tracing::Span,
 }
 
 impl AuthService {
-    pub fn new(database: Database, logger: tracing::Span) -> Self {
-        Self { database, logger }
+    pub fn new(database: Database) -> Self {
+        Self { database }
     }
 
     /// Resolve an explicitly supplied identity UUID from gRPC/Connect request metadata.
     /// This identifies the claimed requester; it does not authenticate that claim.
     pub async fn requester(&self, request: &RequestContext) -> Result<Actor> {
-        self.logger
-            .in_scope(|| tracing::debug!("Resolving requester identity"));
+        tracing::debug!("Resolving requester identity");
         let value = request
             .header("x-lgtm-identity")
             .ok_or_else(|| invalid("Request requires x-lgtm-identity metadata"))?;

@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand};
+use tracing::Instrument;
 
 #[path = "../bundle/backend/lib.rs"]
 pub mod backend;
@@ -82,19 +83,32 @@ fn main() -> anyhow::Result<()> {
     {
         log::init(&store)?;
     }
-    tokio::runtime::Runtime::new()?.block_on(async {
-        match cli.command {
-            Command::Up(options) if options.foreground => {
-                server::serve(options.port, &store, false).await
+    let command = match &cli.command {
+        Command::Up(_) => "up",
+        Command::Down => "down",
+        Command::Status { .. } => "status",
+        Command::Review(_) => "review",
+        Command::Session(_) => "session",
+        Command::Sessions(_) => "sessions",
+        Command::Comments(_) => "comments",
+        Command::Serve { .. } => "serve",
+    };
+    tokio::runtime::Runtime::new()?.block_on(
+        async {
+            match cli.command {
+                Command::Up(options) if options.foreground => {
+                    server::serve(options.port, &store, false).await
+                }
+                Command::Up(options) => daemon::up(options.port, !options.no_open, &store).await,
+                Command::Down => daemon::down(&store).await,
+                Command::Status { json } => daemon::status(&store, json).await,
+                Command::Review(args) => reviews::review(args, &store).await,
+                Command::Session(args) => reviews::session(args, &store).await,
+                Command::Sessions(args) => reviews::sessions(args, &store).await,
+                Command::Comments(args) => reviews::comments(args, &store).await,
+                Command::Serve { port, daemonize } => server::serve(port, &store, daemonize).await,
             }
-            Command::Up(options) => daemon::up(options.port, !options.no_open, &store).await,
-            Command::Down => daemon::down(&store).await,
-            Command::Status { json } => daemon::status(&store, json).await,
-            Command::Review(args) => reviews::review(args, &store).await,
-            Command::Session(args) => reviews::session(args, &store).await,
-            Command::Sessions(args) => reviews::sessions(args, &store).await,
-            Command::Comments(args) => reviews::comments(args, &store).await,
-            Command::Serve { port, daemonize } => server::serve(port, &store, daemonize).await,
         }
-    })
+        .instrument(tracing::info_span!("cli_command", command)),
+    )
 }

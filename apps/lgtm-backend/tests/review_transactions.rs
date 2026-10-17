@@ -6,11 +6,7 @@ mod support;
 async fn service_actions_and_client_owned_database_transactions() {
     for (service, _, _) in support::databases().await {
         let db = service.database();
-        let review = ReviewService::new(
-            db.clone(),
-            service.auth().clone(),
-            tracing::info_span!("review_request", request_id = "transaction-test"),
-        );
+        let review = ReviewService::new(db.clone(), service.auth().clone());
         let actor = review
             .auth()
             .ensure_identity("Alice", "alice@example.com", None, None)

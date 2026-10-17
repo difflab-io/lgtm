@@ -38,9 +38,8 @@ pub async fn databases() -> Vec<(ReviewService, String, tempfile::TempDir)> {
 /// Build test dependencies explicitly; the service does not own connection setup.
 pub async fn service(url: &str) -> Result<ReviewService> {
     let client = Database::connect(url).await?;
-    let logger = tracing::Span::current();
-    let auth = AuthService::new(client.clone(), logger.clone());
-    Ok(ReviewService::new(client, auth, logger))
+    let auth = AuthService::new(client.clone());
+    Ok(ReviewService::new(client, auth))
 }
 
 #[allow(dead_code)] // Used only by remote contract tests.

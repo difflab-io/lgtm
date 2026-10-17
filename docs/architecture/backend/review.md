@@ -29,7 +29,7 @@ The backend owns application models, validation, review workflows and Markdown e
 - `services/review.rs` provides `ReviewService`: contexts, sessions, comments, threads, lifecycle rules, listing and exports.
 - Each domain model owns its conversions to and from the exposed SeaORM models. `models/identities.rs` shares batch identity loading between models.
 - `error.rs` defines application errors.
-- Services import `database::Database` directly. `ReviewService::new(client, auth, logger)` accepts a pool-backed client and a tracing span for request logging. Connection setup and shutdown belong to the caller.
+- Services import `database::Database` directly. `ReviewService::new(client, auth)` accepts a pool-backed client and AuthService. Services store no logger or span; tracing events inherit the active caller context. Connection setup and shutdown belong to the caller.
 - Ordinary methods on `ReviewService` reconcile supplied observations and record posting receipts. There are no providers or network calls in the service.
 - `lgtm-db::repositories` owns SQL construction and execution. SeaORM entities stay private inside that library.
 
@@ -49,13 +49,18 @@ use lgtm_backend::{
 };
 
 let client = Database::connect(database_url).await?;
-let logger = tracing::info_span!("review_request", request_id = request_id);
-let auth = AuthService::new(client.clone(), logger.clone());
+let auth = AuthService::new(client.clone());
 let requester = auth.identity(identity_id).await?;
-let review = ReviewService::new(client.clone(), auth, logger);
+let review = ReviewService::new(client.clone(), auth);
 
-let session = review.start_session(&context, &requester, CommitContext::default()).await?;
-review.add_comment(&session.id, &requester, "Check this constraint", Anchor::General).await?;
+use tracing::Instrument;
+
+async {
+    let session = review.start_session(&context, &requester, CommitContext::default()).await?;
+    review.add_comment(&session.id, &requester, "Check this constraint", Anchor::General).await
+}
+.instrument(tracing::info_span!("review_request", request_id))
+.await?;
 
 // The caller owns the shared client's lifecycle.
 client.close().await;
@@ -96,6 +101,10 @@ Use `tx.rollback().await?` for an explicit rollback. Do not call pool-backed ser
 ## Implementation
 
 Service visibility follows the planned endpoint contract, not just today’s CLI callers. Requester validation and context-by-ID loading are private helpers. Session/comment reads, review lifecycle actions and supplied forge observation/posting receipt operations remain public for planned RPCs. No production forge provider is introduced.
+
+### Tracing context
+
+CLI command futures carry a `cli_command` span. The existing greeting RPC handler uses `#[tracing::instrument(skip_all)]`; future review RPC handlers should establish their request span the same way. Services use ordinary `tracing::debug!` events. Instrumenting a future enters its span on each poll, so context survives awaits without leaving a thread-local span entered while another task runs. A service can be reused across requests without retaining an earlier caller's span. Spawned tasks require explicit propagation with `.instrument(tracing::Span::current())`. Payloads and credentials are not recorded by the boundary instrumentation.
 
 ### Requester identity
 

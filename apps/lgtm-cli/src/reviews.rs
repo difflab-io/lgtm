@@ -171,9 +171,8 @@ pub async fn database(store: &Store) -> Result<ReviewService> {
         )
     };
     let client = Database::connect(&url).await?;
-    let logger = tracing::Span::current();
-    let auth = AuthService::new(client.clone(), logger.clone());
-    Ok(ReviewService::new(client, auth, logger))
+    let auth = AuthService::new(client.clone());
+    Ok(ReviewService::new(client, auth))
 }
 async fn context(
     db: &ReviewService,

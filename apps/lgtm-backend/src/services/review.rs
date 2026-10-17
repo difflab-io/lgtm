@@ -1,4 +1,4 @@
-//! Review application actions over an injected database client and request logger.
+//! Review application actions over an injected database client and request tracing context.
 use super::super::database as db;
 use super::super::{
     error::{Error, Result, invalid},
@@ -16,16 +16,11 @@ use std::collections::HashSet;
 pub struct ReviewService {
     database: Database,
     auth: AuthService,
-    logger: tracing::Span,
 }
 
 impl ReviewService {
-    pub fn new(database: Database, auth: AuthService, logger: tracing::Span) -> Self {
-        Self {
-            database,
-            auth,
-            logger,
-        }
+    pub fn new(database: Database, auth: AuthService) -> Self {
+        Self { database, auth }
     }
 
     pub fn auth(&self) -> &AuthService {
@@ -271,8 +266,7 @@ impl ReviewService {
         actor: &Actor,
         commits: CommitContext,
     ) -> Result<Session> {
-        self.logger
-            .in_scope(|| tracing::debug!("Review action: start_session"));
+        tracing::debug!("Review action: start_session");
         let actor = &self.auth.validate_requester(actor).await?;
         let tx = self.database.begin().await?;
         self.lock_context(&tx, &context.id).await?;
@@ -352,8 +346,7 @@ impl ReviewService {
         body: &str,
         anchor: Anchor,
     ) -> Result<Comment> {
-        self.logger
-            .in_scope(|| tracing::debug!("Review action: add_comment"));
+        tracing::debug!("Review action: add_comment");
         let actor = &self.auth.validate_requester(actor).await?;
         Comment::validate_body(body)?;
         anchor.validate()?;
@@ -401,8 +394,7 @@ impl ReviewService {
         actor: &Actor,
         body: &str,
     ) -> Result<Comment> {
-        self.logger
-            .in_scope(|| tracing::debug!("Review action: reply"));
+        tracing::debug!("Review action: reply");
         let actor = &self.auth.validate_requester(actor).await?;
         Comment::validate_body(body)?;
         let seed = self.session(session_id).await?;
@@ -424,8 +416,7 @@ impl ReviewService {
         actor: &Actor,
         resolved: bool,
     ) -> Result<Thread> {
-        self.logger
-            .in_scope(|| tracing::debug!("Review action: resolve"));
+        tracing::debug!("Review action: resolve");
         let actor = &self.auth.validate_requester(actor).await?;
         let seed = self.session(session_id).await?;
         let tx = self.database.begin().await?;
@@ -454,8 +445,7 @@ impl ReviewService {
         input: Completion,
         request_key: &str,
     ) -> Result<Session> {
-        self.logger
-            .in_scope(|| tracing::debug!("Review action: complete"));
+        tracing::debug!("Review action: complete");
         let actor = &self.auth.validate_requester(actor).await?;
         if request_key.trim().is_empty() {
             return Err(invalid("Completion requires a nonempty retry key"));
@@ -532,8 +522,7 @@ impl ReviewService {
     }
 
     pub async fn record_refresh_failure(&self, context: &Context, message: &str) -> Result<()> {
-        self.logger
-            .in_scope(|| tracing::debug!("Review action: record_refresh_failure"));
+        tracing::debug!("Review action: record_refresh_failure");
         let tx = self.database.begin().await?;
         self.lock_context(&tx, &context.id).await?;
         let mut current = self.load_context(&tx, &context.id).await?;
@@ -552,8 +541,7 @@ impl ReviewService {
         snapshot: ForgeSnapshot,
         stub: bool,
     ) -> Result<Context> {
-        self.logger
-            .in_scope(|| tracing::debug!("Review action: apply_remote"));
+        tracing::debug!("Review action: apply_remote");
         if !snapshot.complete || snapshot.head.is_empty() {
             return Err(invalid(
                 "Incomplete forge fetch; all pages and reviewed head are required",
@@ -769,8 +757,7 @@ impl ReviewService {
         expected: &Comment,
         rendered: &str,
     ) -> Result<String> {
-        self.logger
-            .in_scope(|| tracing::debug!("Review action: stage_post"));
+        tracing::debug!("Review action: stage_post");
         if request_key.trim().is_empty() {
             return Err(invalid("Posting requires a retry key"));
         }
@@ -823,8 +810,7 @@ impl ReviewService {
         comment_id: &str,
         message: &str,
     ) -> Result<()> {
-        self.logger
-            .in_scope(|| tracing::debug!("Review action: posting_uncertain"));
+        tracing::debug!("Review action: posting_uncertain");
         let tx = self.database.begin().await?;
         self.lock_context(&tx, context_id).await?;
         let row = tx
@@ -848,8 +834,7 @@ impl ReviewService {
         request_key: &str,
         receipt: PostReceipt,
     ) -> Result<()> {
-        self.logger
-            .in_scope(|| tracing::debug!("Review action: confirm_post"));
+        tracing::debug!("Review action: confirm_post");
         if receipt.comment_id.is_empty()
             || !["review_comment", "conversation_comment", "review"]
                 .contains(&receipt.kind.as_str())

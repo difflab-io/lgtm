@@ -21,6 +21,7 @@ use proto::lgtm::v1::{
 struct Greeter;
 
 impl GreeterService for Greeter {
+    #[tracing::instrument(name = "rpc_request", skip_all, fields(rpc.method = "lgtm.v1.GreeterService/SayHello"))]
     async fn say_hello<'a>(
         &'a self,
         _context: RequestContext,
