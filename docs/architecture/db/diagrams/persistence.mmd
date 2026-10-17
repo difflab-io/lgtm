@@ -1,0 +1,11 @@
+flowchart LR
+    CLI["CLI scaffold"] --> Runtime["Daemon, greeting/health and dummy UI"]
+    CLI -. "future review RPC" .-> RPC["Backend review RPC handlers planned"]
+    RPC -.-> Service["Backend services and pure domain mappings"]
+    Service --> API["DB client repositories"]
+    API --> Private["Private SeaORM entities"]
+    Private --> SQLite["SQLite"]
+    Private --> PostgreSQL["PostgreSQL"]
+    History["One Rust migration history"] --> Builder["SchemaManager and SeaQuery"]
+    Builder --> SQLite
+    Builder --> PostgreSQL

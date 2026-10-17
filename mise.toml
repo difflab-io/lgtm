@@ -11,7 +11,7 @@ config_roots = ["apps/*", "libs/*"]
 
 [tools]
 buf = "1.73.0"
-rust = { version = "1.88", components = "rustfmt,clippy,rust-analyzer" }
+rust = { version = "1.94.0", components = "rustfmt,clippy,rust-analyzer" }
 bun = "1.4.2"
 goreleaser = "2.18.1"
 "cargo:cargo-zigbuild" = "0.23.4"
@@ -70,3 +70,7 @@ run = "cargo publish -p lgtm-cli --locked"
 [tasks.dev]
 description = "Run the backend watcher and web development server together"
 depends = ["//apps/lgtm-backend:dev", "//apps/lgtm-web:dev"]
+
+[tasks."test:postgres"]
+description = "Run database and backend contracts on SQLite and PostgreSQL"
+run = "{{config_root}}/bin/with-postgres cargo test --locked -p lgtm-db -p lgtm-backend --all-features"

@@ -1,19 +1,23 @@
 # lgtm-cli
 
-LGTM includes a web UI and gRPC server in the `lgtm` executable.
+LGTM bundles a dummy web UI and greeting/health RPC router in the lgtm executable.
 
-```sh
-cargo install lgtm-cli
-lgtm up
-lgtm status
-lgtm review
-lgtm down
-```
+    cargo install lgtm-cli
+    lgtm up --no-open
+    lgtm status
+    lgtm review --no-open
+    lgtm down
 
-`up` uses the embedded `daemonize` library on macOS and Linux to start the UI and backend in one background process. It opens the UI at `http://127.0.0.1:8080`. Use `--no-open` to suppress the browser, `--port` to select a different port, or `--foreground` to run in the terminal. No Node, Bun, Buf, or separate daemon tool is needed at runtime.
+The up command starts/reuses the daemon; --port selects its port and --foreground runs in the terminal. Review starts/reuses that daemon and opens the dummy UI for the encoded current path. The --no-open flag prints the URL. LGTM_HOME selects runtime files: server.pid, server.port and server.log. Status is filesystem read-only.
 
-`status` shows the UI, server, and browser RPC URLs. `status --json` exposes the same addresses for editor integration. `review` starts or reuses the server and opens `/?path=<encoded current directory>`. Use `review --no-open` to print that URL without opening a browser.
+## Review command scaffold
 
-All runtime files live in `~/.lgtm`: `server.pid`, `server.port`, and `server.log`. A repeated `up` reuses the running server. `down` sends SIGTERM to stop both UI and API serving. `LGTM_HOME` selects an isolated store for testing.
+Argument shapes exist for session start/show/complete/export/refresh/submit, sessions list and comments add/reply/list/resolve/reopen. These commands report that backend review RPCs are not implemented. They do not create review data, connect to SQLite/PostgreSQL, consult forge fixtures or create runtime/database files.
 
-From the repository, run `mise run dev` for the backend watcher and Vite, or `mise run //apps/lgtm-cli:bundle` before a raw Cargo build. Only this CLI package is published; the private backend and web app are bundled as implementation code and static assets.
+Context, attribution, anchor and historical-session flags are reserved shapes for future backend requests. The CLI does not normalize Git remotes or validate domain identities. Backend models/services will own this work behind future RPCs.
+
+The CLI contains no review DB drivers or embedded ReviewService. Only the current RPC router, generated protocol code and static web UI are bundled. Review UI and live forge integration remain deferred.
+
+## Development
+
+Run mise run //apps/lgtm-cli:bundle before raw Cargo builds. Normal lifecycle tasks invoke it automatically. Tests cover daemon lifecycle, URL encoding, argument shapes and the absence of persistence side effects from scaffold commands. Client commands preserve stdout and do not initialize server logging.

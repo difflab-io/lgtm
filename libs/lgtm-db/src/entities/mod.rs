@@ -1,0 +1,113 @@
+pub mod comments;
+pub mod identities;
+pub mod repositories;
+pub mod review_contexts;
+pub mod sessions;
+pub mod threads;
+pub mod workspace_paths;
+
+#[cfg(test)]
+mod tests {
+    fn fixture_id(label: &str) -> uuid::Uuid {
+        let mut value = 0_u128;
+        for byte in label.bytes() {
+            value = value.wrapping_mul(131).wrapping_add(u128::from(byte));
+        }
+        uuid::Uuid::from_u128(value)
+    }
+
+    use super::super::models::{identities, review_contexts};
+    use super::threads;
+
+    #[tokio::test]
+    async fn dense_relations_keep_identity_roles_and_optional_links_distinct() {
+        for (db, _, _) in super::super::tests::fixtures::isolated_databases().await {
+            for id in ["author", "resolver", "updater"] {
+                db.identities
+                    .insert(&identities::Model {
+                        id: fixture_id(id),
+                        name: id.into(),
+                        kind: super::super::types::IdentityKind::Human,
+                        email: Some(format!("{id}@example.com")),
+                        model: None,
+                        provider: None,
+                        forge_account: String::new(),
+                    })
+                    .await
+                    .unwrap();
+            }
+            db.review_contexts
+                .insert(&review_contexts::Model {
+                    id: fixture_id("context"),
+                    kind: super::super::types::ContextKind::Notes,
+                    notes_path: Some("/notes".into()),
+                    repository: None,
+                    branch: None,
+                    host: None,
+                    number: None,
+                    revision: 0,
+                    last_refreshed_at: None,
+                    refreshed_head: None,
+                    refreshed_base: None,
+                    refresh_error: None,
+                    refresh_status: "never".into(),
+                })
+                .await
+                .unwrap();
+            let mut thread = threads::Model {
+                id: fixture_id("thread"),
+                context_id: fixture_id("context"),
+                origin_session_id: None,
+                author_id: fixture_id("author"),
+                anchor_kind: "general".into(),
+                file_path: None,
+                side: None,
+                reviewed_commit: None,
+                start_line: None,
+                end_line: None,
+                state: "resolved".into(),
+                resolved_by_id: Some(fixture_id("resolver")),
+                resolved_at: Some("now".into()),
+                updated_by_id: Some(fixture_id("updater")),
+                updated_at: "now".into(),
+                forge_thread_id: None,
+                outdated: false,
+            };
+            db.comments.insert_thread(&thread).await.unwrap();
+            let loaded = threads::Entity::load()
+                .with(threads::Relation::Author)
+                .with(threads::Relation::ResolvedBy)
+                .with(threads::Relation::UpdatedBy)
+                .with(super::review_contexts::Entity)
+                .with(super::sessions::Entity)
+                .one(db.connection())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(loaded.author.as_ref().unwrap().id, fixture_id("author"));
+            assert_eq!(
+                loaded.resolved_by.as_ref().unwrap().id,
+                fixture_id("resolver")
+            );
+            assert_eq!(
+                loaded.updated_by.as_ref().unwrap().id,
+                fixture_id("updater")
+            );
+            assert_eq!(loaded.context.as_ref().unwrap().id, fixture_id("context"));
+            assert!(loaded.origin_session.as_ref().is_none());
+
+            thread.state = "open".into();
+            thread.resolved_by_id = None;
+            thread.resolved_at = None;
+            db.comments.update_thread(&thread).await.unwrap();
+            let reopened = threads::Entity::load()
+                .with(threads::Relation::ResolvedBy)
+                .one(db.connection())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(reopened.resolved_by.as_ref().is_none());
+            db.close().await;
+        }
+    }
+}

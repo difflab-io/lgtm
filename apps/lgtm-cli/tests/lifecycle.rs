@@ -116,7 +116,7 @@ async fn background_instance_serves_ui_and_rpc_and_stops() {
     std::fs::create_dir(&cwd).unwrap();
     let review = Command::new(env!("CARGO_BIN_EXE_lgtm"))
         .env("LGTM_HOME", dir)
-        .args(["review", "--no-open"])
+        .args(["review", "--no-open", "--as", "Tester <tester@example.com>"])
         .current_dir(&cwd)
         .output()
         .unwrap();
@@ -124,7 +124,8 @@ async fn background_instance_serves_ui_and_rpc_and_stops() {
     let review_url = reqwest::Url::parse(String::from_utf8_lossy(&review.stdout).trim()).unwrap();
     assert_eq!(review_url.origin().ascii_serialization(), url);
     let query: Vec<_> = review_url.query_pairs().collect();
-    assert_eq!(query, [("path".into(), cwd.to_str().unwrap().into())]);
+    assert!(query.contains(&("path".into(), cwd.to_str().unwrap().into())));
+    assert!(!query.iter().any(|(key, _)| key == "session"));
     assert_eq!(client.get(review_url).send().await.unwrap().status(), 200);
     assert!(command(dir, &["down"]).status.success());
     assert!(!dir.join("server.port").exists());
@@ -161,20 +162,29 @@ fn occupied_port_fails_without_leaving_an_instance() {
 fn review_starts_a_ready_server_for_the_current_directory() {
     let instance = Instance(tempfile::tempdir().unwrap());
     let dir = instance.0.path();
-    let review = command(dir, &["review", "--port", "0", "--no-open"]);
+    let review = command(
+        dir,
+        &[
+            "review",
+            "--port",
+            "0",
+            "--no-open",
+            "--as",
+            "Tester <tester@example.com>",
+        ],
+    );
     assert!(
         review.status.success(),
         "{}",
         String::from_utf8_lossy(&review.stderr)
     );
     let url = reqwest::Url::parse(String::from_utf8_lossy(&review.stdout).trim()).unwrap();
-    assert_eq!(
-        url.query_pairs().collect::<Vec<_>>(),
-        [(
-            "path".into(),
-            dir.canonicalize().unwrap().to_str().unwrap().into()
-        )]
-    );
+    let pairs = url.query_pairs().collect::<Vec<_>>();
+    assert!(pairs.contains(&(
+        "path".into(),
+        dir.canonicalize().unwrap().to_str().unwrap().into()
+    )));
+    assert!(!pairs.iter().any(|(key, _)| key == "session"));
     let status = command(dir, &["status", "--json"]);
     let discovery: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(discovery["running"], true);

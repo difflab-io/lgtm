@@ -1,7 +1,7 @@
 # Template contract tasks and generated-project Rust toolchain.
 
 [tools]
-rust = { version = "1.88", components = "rustfmt,clippy,rust-analyzer" }
+rust = { version = "1.94.0", components = "rustfmt,clippy,rust-analyzer" }
 "cargo:cargo-zigbuild" = "0.23.4"
 zig = "0.16.0"
 
@@ -18,8 +18,8 @@ description = "Remove build artifacts"
 run = "cargo clean"
 
 [tasks.test]
-description = "Run the test suite"
-run = "cargo test"
+description = "Run SQLite contracts and PostgreSQL contracts on Linux CI"
+run = "{{config_root}}/../../bin/test-rust-project lgtm-db"
 
 [tasks.lint]
 description = "Lint with clippy (deny warnings)"
@@ -31,11 +31,11 @@ run = "cargo clippy --fix --allow-dirty --allow-staged --allow-no-vcs"
 
 [tasks.format]
 description = "Format Rust sources"
-run = "cargo fmt --all"
+run = "cargo fmt -p lgtm-db"
 
 [tasks."format:check"]
 description = "Check formatting without modifying files"
-run = "cargo fmt --all --check"
+run = "cargo fmt -p lgtm-db --check"
 
 [tasks.env-pull]
 description = "Pull external environment configuration"
@@ -48,3 +48,7 @@ run = 'echo "Private package; publication disabled"'
 [tasks.publish]
 description = "Private package; publication disabled"
 run = 'echo "Private package; publication disabled"'
+
+[tasks."test:postgres"]
+description = "Run this project’s SQLite/PostgreSQL contracts with an explicit database or Docker"
+run = "{{config_root}}/../../bin/with-postgres cargo test --locked -p lgtm-db --all-features"
