@@ -12,16 +12,19 @@ pub async fn databases() -> Vec<(Database, String, tempfile::TempDir)> {
     #[cfg(feature = "postgres")]
     {
         use sea_orm::ConnectionTrait;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT_SCHEMA: AtomicU64 = AtomicU64::new(0);
         let url = std::env::var("LGTM_TEST_POSTGRES_URL")
             .expect("postgres tests require a disposable LGTM_TEST_POSTGRES_URL");
         let raw = sea_orm::Database::connect(&url).await.unwrap();
         let schema = format!(
-            "db_test_{}_{}",
+            "db_test_{}_{}_{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            NEXT_SCHEMA.fetch_add(1, Ordering::Relaxed)
         );
         raw.execute_unprepared(&format!("CREATE SCHEMA {schema}"))
             .await
