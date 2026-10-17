@@ -31,11 +31,11 @@ run = "cargo clippy --fix --allow-dirty --allow-staged --allow-no-vcs"
 
 [tasks.format]
 description = "Format Rust sources"
-run = "cargo fmt --all"
+run = "cargo fmt -p lgtm-db"
 
 [tasks."format:check"]
 description = "Check formatting without modifying files"
-run = "cargo fmt --all --check"
+run = "cargo fmt -p lgtm-db --check"
 
 [tasks.env-pull]
 description = "Pull external environment configuration"
