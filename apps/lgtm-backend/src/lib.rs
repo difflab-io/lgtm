@@ -1,5 +1,10 @@
 //! Reusable LGTM backend with greeting and health RPC services.
 
+pub use lgtm_db as database;
+pub mod error;
+pub mod models;
+pub mod services;
+
 use connectrpc::{Encodable, RequestContext, Response, Router, ServiceRequest, ServiceResult};
 use connectrpc_health::{StaticChecker, install_static};
 use std::sync::Arc;

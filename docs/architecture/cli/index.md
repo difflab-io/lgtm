@@ -13,6 +13,8 @@ The main module parses CLI commands and connects them to the daemon, server, sto
 | [Server](server.md) | Serve web assets and API requests      |
 | [Store](store.md)   | Own runtime paths and PID/port files   |
 | [Log](log.md)       | Configure logging and server output    |
+| [Context](context.md) | Infer context and select an actor |
+| [Reviews](reviews.md) | Manage sessions, comments and exports |
 | `ui`                | Build review URLs and open the browser |
 | Bundled backend     | Provide greeting and health services   |
 
@@ -20,7 +22,7 @@ The main module parses CLI commands and connects them to the daemon, server, sto
 
 ### Functional
 
-- Route `up`, `down`, `status`, and `review` to their module APIs.
+- Route `up`, `down`, `status`, `review`, `session`, `sessions` and `comments` to their module APIs.
 - Support foreground serving and the internal background startup command.
 - Apply one store directory to every command.
 
@@ -46,9 +48,9 @@ The main module parses CLI commands and connects them to the daemon, server, sto
 
 The entry point parses arguments and constructs a store. For `serve --daemonize`, it detaches before creating the Tokio runtime. Server commands initialize logging before creating the runtime. The entry point then calls the selected module API inside it.
 
-`review` passes the caller's absolute current directory to `ui::open_review_ui_at_path`. This function obtains a ready server, encodes the path as a query parameter, and opens the browser. The server's working directory is the store.
+`review` prepares a database session using the [review handlers](reviews.md), then passes the canonical path, repository and session ID to `ui::open_review`. This function obtains a ready server, encodes the path as a query parameter, and opens the browser. The server's working directory is the store.
 
-The daemon uses the store for discovery and the log module for background output. The server uses the same store for PID ownership and its listening port. These modules share one `Store` value from the entry point.
+The backend ReviewService uses lgtm-db’s entity repositories and transaction handles; runtime Store only supplies the default file path. The daemon uses the store for discovery and the log module for background output. The server uses the same store for PID ownership and its listening port. These modules share one `Store` value from the entry point.
 
 ### Interfaces and Contracts
 
@@ -79,7 +81,7 @@ Background startup uses a fresh copy of the executable. That copy calls `daemon:
 
 ### Backend inclusion
 
-The `backend` module comes from `bundle/backend.rs`. The bundle task copies the canonical backend implementation into the CLI package before compilation.
+The `backend` module comes from `bundle/backend/lib.rs`. The bundle task copies the canonical backend implementation into the CLI package before compilation.
 
 ## References
 
@@ -87,3 +89,7 @@ The `backend` module comes from `bundle/backend.rs`. The bundle task copies the 
 - [Daemon module](daemon.md).
 - [Server module](server.md).
 - [Shared application architecture](../index.md).
+- [Review commands](reviews.md).
+- [Database architecture](../db/index.md).
+
+Context and actor selection are detailed in [context discovery](context.md).

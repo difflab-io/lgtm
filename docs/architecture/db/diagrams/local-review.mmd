@@ -1,0 +1,7 @@
+flowchart TD
+    G["Read repository branch and commits"] --> S["Start active session"]
+    S --> D["Draft comments and replies"]
+    D --> C["Publish and record ready-to-address"]
+    C --> N["Next session sees same threads"]
+    N --> A["Mark outdated original anchors"]
+    A --> D

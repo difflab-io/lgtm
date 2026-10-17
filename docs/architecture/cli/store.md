@@ -70,7 +70,7 @@ pub fn foreground_pid_lock(&self) -> Result<File>;
 | `server.port` | Port, removed on graceful shutdown     |
 | `server.log`  | Formatted events and background output |
 
-These files describe a running process. They do not contain review data.
+These files describe a running process. Review data lives separately in `reviews.sqlite`, with a sibling migration lock for SQLite startup. The review handlers derive that default path from `Store::path`; database services own schema/migrations. `LGTM_DATABASE_URL` overrides database selection without changing daemon discovery. Read-only `status` does not initialize the database or create the store directory.
 
 ## Implementation
 

@@ -1,9 +1,14 @@
 use clap::{Args, Parser, Subcommand};
 
-#[path = "../bundle/backend.rs"]
+#[path = "../bundle/backend/lib.rs"]
 pub mod backend;
+mod context;
 mod daemon;
+#[path = "../bundle/db/src/lib.rs"]
+pub mod database;
 mod log;
+
+mod reviews;
 mod server;
 mod store;
 mod ui;
@@ -31,14 +36,13 @@ enum Command {
         json: bool,
     },
     /// Open the current directory in the web interface.
-    Review {
-        /// Server port when starting a new instance (0 selects a free port).
-        #[arg(long, default_value_t = 8080)]
-        port: u16,
-        /// Print the review URL without opening a browser.
-        #[arg(long)]
-        no_open: bool,
-    },
+    Review(reviews::ReviewArgs),
+    /// Start, inspect, complete, export, refresh or submit a review session.
+    Session(reviews::SessionArgs),
+    /// List sessions using inferred path/repository filters.
+    Sessions(reviews::SessionsArgs),
+    /// Add, reply to, list or resolve context-owned comments.
+    Comments(reviews::CommentsArgs),
     #[command(hide = true)]
     Serve {
         #[arg(long, default_value_t = 8080)]
@@ -86,9 +90,10 @@ fn main() -> anyhow::Result<()> {
             Command::Up(options) => daemon::up(options.port, !options.no_open, &store).await,
             Command::Down => daemon::down(&store).await,
             Command::Status { json } => daemon::status(&store, json).await,
-            Command::Review { port, no_open } => {
-                ui::open_review_ui_at_path(&std::env::current_dir()?, port, !no_open, &store).await
-            }
+            Command::Review(args) => reviews::review(args, &store).await,
+            Command::Session(args) => reviews::session(args, &store).await,
+            Command::Sessions(args) => reviews::sessions(args, &store).await,
+            Command::Comments(args) => reviews::comments(args, &store).await,
             Command::Serve { port, daemonize } => server::serve(port, &store, daemonize).await,
         }
     })

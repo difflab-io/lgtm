@@ -2,7 +2,7 @@
 name = "lgtm-cli"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.94"
 description = "Run LGTM code reviews with a bundled web UI and gRPC server."
 repository = "https://github.com/difflab-io/lgtm"
 publish = ["crates-io"]
@@ -13,7 +13,16 @@ license = "Apache-2.0"
 name = "lgtm"
 path = "src/main.rs"
 
+[features]
+default = ["sqlite"]
+sqlite = ["sea-orm/sqlx-sqlite", "sea-orm-migration/sqlx-sqlite"]
+postgres = ["sea-orm/sqlx-postgres", "sea-orm-migration/sqlx-postgres"]
+
 [dependencies]
+thiserror = "2.0.20"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+sha2 = "0.10"
 anyhow = "1.0.104"
 clap = { version = "4.6.6", features = ["derive"] }
 axum = { version = "0.8", features = ["http2"] }
@@ -41,3 +50,13 @@ mime_guess = "2"
 [dev-dependencies]
 connectrpc = { version = "0.9.1", default-features = false, features = ["client"] }
 tempfile = "3"
+
+[dependencies.sea-orm]
+version = "=2.0.4"
+default-features = false
+features = ["macros", "runtime-tokio-rustls"]
+
+[dependencies.sea-orm-migration]
+version = "=2.0.4"
+default-features = false
+features = ["runtime-tokio-rustls"]

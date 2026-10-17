@@ -27,8 +27,14 @@ if (!generated) throw new Error('Backend did not report generated Protobuf outpu
 const stage = join(cli, '.bundle-stage')
 await rm(stage, { recursive: true, force: true })
 await mkdir(stage)
-await cp(join(root, 'apps/lgtm-backend/src/lib.rs'), join(stage, 'backend.rs'))
+await cp(join(root, 'apps/lgtm-backend/src'), join(stage, 'backend'), { recursive: true })
+const backendSource = await readFile(join(stage, 'backend/lib.rs'), 'utf8')
+await writeFile(
+  join(stage, 'backend/lib.rs'),
+  backendSource.replace('pub use lgtm_db as database;', 'pub use crate::database;'),
+)
 await cp(generated, join(stage, 'proto'), { recursive: true })
+await cp(join(root, 'libs/lgtm-db/src'), join(stage, 'db/src'), { recursive: true })
 await cp(join(root, 'apps/lgtm-web/build'), join(stage, 'web'), { recursive: true })
 // Fail before replacing the previous bundle if the web build is incomplete.
 await readFile(join(stage, 'web/index.html'))

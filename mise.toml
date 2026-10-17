@@ -11,7 +11,7 @@ config_roots = ["apps/*", "libs/*"]
 
 [tools]
 buf = "1.73.0"
-rust = { version = "1.88", components = "rustfmt,clippy,rust-analyzer" }
+rust = { version = "1.94.0", components = "rustfmt,clippy,rust-analyzer" }
 bun = "1.4.2"
 goreleaser = "2.18.1"
 "cargo:cargo-zigbuild" = "0.23.4"
@@ -70,3 +70,8 @@ run = "cargo publish -p lgtm-cli --locked"
 [tasks.dev]
 description = "Run the backend watcher and web development server together"
 depends = ["//apps/lgtm-backend:dev", "//apps/lgtm-web:dev"]
+
+[tasks."test:postgres"]
+depends = ["//apps/lgtm-cli:bundle"]
+description = "Run shared SQLite/PostgreSQL and CLI contracts against a disposable database"
+run = 'test -n "${LGTM_TEST_POSTGRES_URL:?Set a disposable PostgreSQL database URL}" && cargo test --locked --workspace --all-features'

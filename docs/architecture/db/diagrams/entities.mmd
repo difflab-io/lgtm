@@ -1,0 +1,8 @@
+erDiagram
+    REVIEW_CONTEXTS ||--o{ SESSIONS : "one active and many completed"
+    REVIEW_CONTEXTS ||--o{ THREADS : owns
+    THREADS ||--|{ COMMENTS : "root and flat replies"
+    SESSIONS |o--o{ COMMENTS : originates
+    IDENTITIES ||--o{ SESSIONS : creates
+    IDENTITIES ||--o{ THREADS : authors
+    IDENTITIES ||--o{ COMMENTS : authors

@@ -1,0 +1,7 @@
+flowchart TD
+    A["Active session with draft comments"] -->|Complete in one transaction| C["Completed review metadata"]
+    A -->|Publish drafts on completion| P["Context conversation keeps stable comment IDs"]
+    C --> N["Next start creates another active session"]
+    P --> N
+    N --> R["Reply to or resolve existing context threads"]
+    P --> L["Bodies and resolution remain current; no snapshots"]

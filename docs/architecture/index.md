@@ -40,7 +40,7 @@ lgtm/
 - `lgtm-cli` starts the application and serves the bundled interface and backend on the local machine.
 - `lgtm-backend` provides greeting and health services through ConnectRPC. It also runs as a standalone server.
 - `lgtm-web` sends browser requests through gRPC-Web at `/rpc/*`. Its client is generated from the backend schema.
-- `lgtm-db` contains starter library code and is independent of the applications.
+- `lgtm-db` exports entity repositories with private SeaORM entities; backend review services own application models and workflows, with SQLite and optional PostgreSQL. Its private source and migrations are bundled into the CLI. See the [database architecture](db/index.md).
 
 ### Data and Control Flow
 
@@ -48,7 +48,7 @@ lgtm/
 
 Each review has its own path and browser URL. Multiple browser tabs and editor clients share one local server. Opening another review does not replace existing reviews or start another server.
 
-`lgtm review` starts or reuses the server and opens the current directory through the `path` query parameter. The web page reads that parameter. Editor clients discover the server through `lgtm status --json`.
+`lgtm review` starts or reuses the server and prepares its inferred or explicit review context/session, then opens the selected path. Encoded `repo` and `session` query keys accompany `path` where applicable. The web page still consumes only `path`; no review UI was added. Editor clients discover the server through `lgtm status --json`.
 
 #### Development flow
 
@@ -83,7 +83,11 @@ Mise manages tools and development tasks. Cargo and Bun manage dependencies. Tes
 ## References
 
 - [CLI module architecture](cli/index.md).
+- [Review database architecture](db/index.md).
+- [Review command architecture](cli/reviews.md).
 - [Development guide](../development.md).
 - [Architecture decision](../../adr/0001-initial-architecture.md).
 - [Product requirements](../../prd/0001-core-concepts/README.md).
 - [Design prototype](../../designs/prototypes/lgtm-v0/README.md).
+
+See [backend review services](backend/review.md) for application models, public persistence calls and caller-owned transactions.

@@ -1,0 +1,148 @@
+use lgtm_backend::{models::*, services::*};
+use lgtm_db::models::comments;
+mod support;
+
+#[tokio::test]
+async fn service_actions_and_client_owned_database_transactions() {
+    for (service, _, _) in support::databases().await {
+        let db = service.database();
+        let review = ReviewService::new(
+            db.clone(),
+            service.auth().clone(),
+            tracing::info_span!("review_request", request_id = "transaction-test"),
+        );
+        let actor = review
+            .auth()
+            .ensure_identity("Alice", "alice@example.com", None, None)
+            .await
+            .unwrap();
+        let context = review
+            .ensure_context(
+                ContextKey::Notes {
+                    path: "/committed".into(),
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        let session = review
+            .start_session(&context, &actor, CommitContext::default())
+            .await
+            .unwrap();
+        let comment = review
+            .add_comment(&session.id, &actor, "Root", Anchor::General)
+            .await
+            .unwrap();
+
+        // Compose named DB operations in an explicit, client-owned transaction.
+        let tx = db.begin().await.unwrap();
+        let mut row = comments::Model::from(&comment);
+        row.body = "Updated in the same transaction".into();
+        let original = row.clone();
+        row.author_id = "cannot-reassign-author".into();
+        row.origin_session_id = None;
+        row.thread_id = "cannot-move-thread".into();
+        row.position = 999;
+        row.created_at = "cannot-rewrite-created-at".into();
+        assert!(tx.comments.update(&row).await.unwrap());
+        tx.commit().await.unwrap();
+        let saved = review.comment(&context.id, &comment.id).await.unwrap();
+        assert_eq!(saved.body, row.body);
+        assert_eq!(saved.author.name, "Alice");
+        let stored = db
+            .comments
+            .get(&context.id, &comment.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.author_id, original.author_id);
+        assert_eq!(stored.origin_session_id, original.origin_session_id);
+        assert_eq!(stored.thread_id, original.thread_id);
+        assert_eq!(stored.position, original.position);
+        assert_eq!(stored.created_at, original.created_at);
+
+        let tx = db.begin().await.unwrap();
+        let nested = tx.begin().await.unwrap();
+        row.body = "Nested savepoint".into();
+        nested.comments.update(&row).await.unwrap();
+        nested.commit().await.unwrap();
+        assert_eq!(
+            tx.comments
+                .get(&context.id, &comment.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .body,
+            row.body
+        );
+        tx.rollback().await.unwrap();
+        assert_eq!(
+            review.comment(&context.id, &comment.id).await.unwrap().body,
+            saved.body
+        );
+
+        let tx = db.begin().await.unwrap();
+        row.body = "Dropped".into();
+        tx.comments.update(&row).await.unwrap();
+        drop(tx);
+        assert_eq!(
+            review.comment(&context.id, &comment.id).await.unwrap().body,
+            saved.body
+        );
+
+        // A constraint error lets the caller discard earlier work as well.
+        let tx = db.begin().await.unwrap();
+        row.body = "Discarded".into();
+        tx.comments.update(&row).await.unwrap();
+        row.visibility = "invalid".into();
+        assert!(tx.comments.update(&row).await.is_err());
+        tx.rollback().await.unwrap();
+        assert_eq!(
+            review.comment(&context.id, &comment.id).await.unwrap().body,
+            saved.body
+        );
+        let mut session_row = db.sessions.get(&session.id).await.unwrap().unwrap();
+        let initial_session = session_row.clone();
+        session_row.creator_id = "cannot-reassign-creator".into();
+        session_row.base_commit = Some("cannot-change-reviewed-base".into());
+        session_row.head_commit = Some("cannot-change-reviewed-head".into());
+        session_row.created_at = "cannot-change-created-at".into();
+        session_row.completed_at = Some("2026-10-16T00:00:00Z".into());
+        session_row.completed_by_id = Some(actor.id.clone());
+        session_row.outcome = Some("saved".into());
+        assert!(db.sessions.complete(&session_row).await.unwrap());
+        let completed = db.sessions.get(&session.id).await.unwrap().unwrap();
+        assert_eq!(completed.state, "completed");
+        assert_eq!(completed.creator_id, initial_session.creator_id);
+        assert_eq!(completed.base_commit, initial_session.base_commit);
+        assert_eq!(completed.head_commit, initial_session.head_commit);
+        assert_eq!(completed.created_at, initial_session.created_at);
+        assert!(!db.sessions.complete(&session_row).await.unwrap());
+
+        let mut thread = db
+            .comments
+            .get_thread(&context.id, &comment.thread_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let original_thread = thread.clone();
+        thread.author_id = "cannot-reassign-author".into();
+        thread.origin_session_id = None;
+        thread.anchor_kind = "file".into();
+        thread.file_path = Some("cannot-change-anchor.rs".into());
+        thread.outdated = true;
+        assert!(db.comments.update_thread(&thread).await.unwrap());
+        let stored = db
+            .comments
+            .get_thread(&context.id, &comment.thread_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.author_id, original_thread.author_id);
+        assert_eq!(stored.origin_session_id, original_thread.origin_session_id);
+        assert_eq!(stored.anchor_kind, original_thread.anchor_kind);
+        assert_eq!(stored.file_path, original_thread.file_path);
+        assert!(stored.outdated);
+        db.close().await;
+    }
+}

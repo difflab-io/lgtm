@@ -1,0 +1,9 @@
+flowchart LR
+    CLI["CLI handlers"] --> Service["Backend ReviewService and application models"]
+    Service --> API["DB client repositories"]
+    API --> Private["Private SeaORM entities"]
+    Private --> SQLite["SQLite"]
+    Private --> PostgreSQL["PostgreSQL"]
+    History["One Rust migration history"] --> Builder["SchemaManager and SeaQuery"]
+    Builder --> SQLite
+    Builder --> PostgreSQL

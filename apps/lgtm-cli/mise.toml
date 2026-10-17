@@ -1,7 +1,7 @@
 # Template contract tasks and generated-project Rust toolchain.
 
 [tools]
-rust = { version = "1.88", components = "rustfmt,clippy,rust-analyzer" }
+rust = { version = "1.94.0", components = "rustfmt,clippy,rust-analyzer" }
 "cargo:cargo-zigbuild" = "0.23.4"
 zig = "0.16.0"
 
