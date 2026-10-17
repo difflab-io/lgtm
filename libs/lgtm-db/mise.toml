@@ -18,8 +18,8 @@ description = "Remove build artifacts"
 run = "cargo clean"
 
 [tasks.test]
-description = "Run the test suite"
-run = "cargo test"
+description = "Run SQLite contracts and PostgreSQL contracts on Linux CI"
+run = "{{config_root}}/../../bin/test-rust-project lgtm-db"
 
 [tasks.lint]
 description = "Lint with clippy (deny warnings)"
@@ -50,5 +50,5 @@ description = "Private package; publication disabled"
 run = 'echo "Private package; publication disabled"'
 
 [tasks."test:postgres"]
-description = "Run shared contracts on SQLite and an isolated PostgreSQL schema"
-run = 'test -n "${LGTM_TEST_POSTGRES_URL:?Set a disposable PostgreSQL database URL}" && cargo test -p lgtm-db -p lgtm-backend --all-features'
+description = "Run this project’s SQLite/PostgreSQL contracts with an explicit database or Docker"
+run = "{{config_root}}/../../bin/with-postgres cargo test --locked -p lgtm-db --all-features"

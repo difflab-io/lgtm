@@ -10,18 +10,58 @@ impl MigrationTrait for Migration {
             .create_table(
                 Table::create()
                     .table("identities")
-                    .col(ColumnDef::new("id").text().not_null().primary_key())
+                    .col(ColumnDef::new("id").uuid().not_null().primary_key())
                     .col(ColumnDef::new("name").text().not_null())
-                    .col(ColumnDef::new("email").text().not_null())
-                    .col(ColumnDef::new("model").text().not_null())
-                    .col(ColumnDef::new("provider").text().not_null())
-                    .index(
-                        Index::create()
-                            .unique()
-                            .col("email")
-                            .col("model")
-                            .col("provider"),
+                    .col(ColumnDef::new("kind").text().not_null())
+                    .col(ColumnDef::new("email").text())
+                    .col(ColumnDef::new("model").text())
+                    .col(ColumnDef::new("provider").text())
+                    .col(ColumnDef::new("forge_account").text().not_null())
+                    .check(
+                        Condition::any()
+                            .add(
+                                Condition::all()
+                                    .add(Expr::col("kind").eq("human"))
+                                    .add(Expr::col("email").is_not_null())
+                                    .add(Expr::col("email").ne(""))
+                                    .add(Expr::col("model").is_null())
+                                    .add(Expr::col("provider").is_null()),
+                            )
+                            .add(
+                                Condition::all()
+                                    .add(Expr::col("kind").eq("agent"))
+                                    .add(Expr::col("email").is_null())
+                                    .add(Expr::col("model").is_not_null())
+                                    .add(Expr::col("model").ne(""))
+                                    .add(Expr::col("provider").is_not_null())
+                                    .add(Expr::col("provider").ne("")),
+                            ),
                     )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_index(
+                Index::create()
+                    .name("human_identity_key")
+                    .table("identities")
+                    .unique()
+                    .col("email")
+                    .col("forge_account")
+                    .and_where(Expr::col("kind").eq("human"))
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_index(
+                Index::create()
+                    .name("agent_identity_key")
+                    .table("identities")
+                    .unique()
+                    .col("name")
+                    .col("model")
+                    .col("provider")
+                    .and_where(Expr::col("kind").eq("agent"))
                     .to_owned(),
             )
             .await?;
@@ -30,9 +70,9 @@ impl MigrationTrait for Migration {
                 Index::create()
                     .name("forge_account_identity")
                     .table("identities")
-                    .col("provider")
                     .unique()
-                    .and_where(Expr::col("provider").like("forge:%"))
+                    .col("forge_account")
+                    .and_where(Expr::col("forge_account").ne(""))
                     .to_owned(),
             )
             .await?;
@@ -40,7 +80,7 @@ impl MigrationTrait for Migration {
             .create_table(
                 Table::create()
                     .table("repositories")
-                    .col(ColumnDef::new("id").text().not_null().primary_key())
+                    .col(ColumnDef::new("key").text().not_null().primary_key())
                     .to_owned(),
             )
             .await?;
@@ -48,7 +88,7 @@ impl MigrationTrait for Migration {
             .create_table(
                 Table::create()
                     .table("review_contexts")
-                    .col(ColumnDef::new("id").text().not_null().primary_key())
+                    .col(ColumnDef::new("id").uuid().not_null().primary_key())
                     .col(ColumnDef::new("kind").text().not_null())
                     .col(ColumnDef::new("notes_path").text())
                     .col(ColumnDef::new("repository").text())
@@ -75,7 +115,7 @@ impl MigrationTrait for Migration {
                             .from_tbl("review_contexts")
                             .from_col("repository")
                             .to_tbl("repositories")
-                            .to_col("id"),
+                            .to_col("key"),
                     )
                     .check(
                         Condition::any()
@@ -114,7 +154,7 @@ impl MigrationTrait for Migration {
             .create_table(
                 Table::create()
                     .table("workspace_paths")
-                    .col(ColumnDef::new("context_id").text().not_null())
+                    .col(ColumnDef::new("context_id").uuid().not_null())
                     .col(ColumnDef::new("path").text().not_null())
                     .primary_key(Index::create().col("context_id").col("path"))
                     .foreign_key(
@@ -131,15 +171,15 @@ impl MigrationTrait for Migration {
             .create_table(
                 Table::create()
                     .table("sessions")
-                    .col(ColumnDef::new("id").text().not_null().primary_key())
-                    .col(ColumnDef::new("context_id").text().not_null())
-                    .col(ColumnDef::new("creator_id").text().not_null())
+                    .col(ColumnDef::new("id").uuid().not_null().primary_key())
+                    .col(ColumnDef::new("context_id").uuid().not_null())
+                    .col(ColumnDef::new("creator_id").uuid().not_null())
                     .col(ColumnDef::new("state").text().not_null())
                     .col(ColumnDef::new("base_commit").text())
                     .col(ColumnDef::new("head_commit").text())
                     .col(ColumnDef::new("created_at").text().not_null())
                     .col(ColumnDef::new("completed_at").text())
-                    .col(ColumnDef::new("completed_by_id").text())
+                    .col(ColumnDef::new("completed_by_id").uuid())
                     .col(ColumnDef::new("outcome").text())
                     .col(ColumnDef::new("body").text())
                     .col(ColumnDef::new("forge_review_id").text())
@@ -182,6 +222,27 @@ impl MigrationTrait for Migration {
                             .to_col("id"),
                     )
                     .check(Expr::col("state").is_in(["active", "completed"]))
+                    .check(
+                        Condition::any()
+                            .add(
+                                Condition::all()
+                                    .add(Expr::col("state").eq("active"))
+                                    .add(Expr::col("completed_at").is_null())
+                                    .add(Expr::col("completed_by_id").is_null())
+                                    .add(Expr::col("outcome").is_null())
+                                    .add(Expr::col("request_key").is_null())
+                                    .add(Expr::col("request_hash").is_null()),
+                            )
+                            .add(
+                                Condition::all()
+                                    .add(Expr::col("state").eq("completed"))
+                                    .add(Expr::col("completed_at").is_not_null())
+                                    .add(Expr::col("completed_by_id").is_not_null())
+                                    .add(Expr::col("outcome").is_not_null())
+                                    .add(Expr::col("request_key").is_not_null())
+                                    .add(Expr::col("request_hash").is_not_null()),
+                            ),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -200,10 +261,10 @@ impl MigrationTrait for Migration {
             .create_table(
                 Table::create()
                     .table("threads")
-                    .col(ColumnDef::new("id").text().not_null().primary_key())
-                    .col(ColumnDef::new("context_id").text().not_null())
-                    .col(ColumnDef::new("origin_session_id").text())
-                    .col(ColumnDef::new("author_id").text().not_null())
+                    .col(ColumnDef::new("id").uuid().not_null().primary_key())
+                    .col(ColumnDef::new("context_id").uuid().not_null())
+                    .col(ColumnDef::new("origin_session_id").uuid())
+                    .col(ColumnDef::new("author_id").uuid().not_null())
                     .col(ColumnDef::new("anchor_kind").text().not_null())
                     .col(ColumnDef::new("file_path").text())
                     .col(ColumnDef::new("side").text())
@@ -211,9 +272,9 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new("start_line").big_integer())
                     .col(ColumnDef::new("end_line").big_integer())
                     .col(ColumnDef::new("state").text().not_null())
-                    .col(ColumnDef::new("resolved_by_id").text())
+                    .col(ColumnDef::new("resolved_by_id").uuid())
                     .col(ColumnDef::new("resolved_at").text())
-                    .col(ColumnDef::new("updated_by_id").text())
+                    .col(ColumnDef::new("updated_by_id").uuid())
                     .col(ColumnDef::new("updated_at").text().not_null())
                     .col(ColumnDef::new("forge_thread_id").text())
                     .col(ColumnDef::new("outdated").boolean().not_null())
@@ -305,11 +366,11 @@ impl MigrationTrait for Migration {
             .create_table(
                 Table::create()
                     .table("comments")
-                    .col(ColumnDef::new("id").text().not_null().primary_key())
-                    .col(ColumnDef::new("context_id").text().not_null())
-                    .col(ColumnDef::new("thread_id").text().not_null())
-                    .col(ColumnDef::new("origin_session_id").text())
-                    .col(ColumnDef::new("author_id").text().not_null())
+                    .col(ColumnDef::new("id").uuid().not_null().primary_key())
+                    .col(ColumnDef::new("context_id").uuid().not_null())
+                    .col(ColumnDef::new("thread_id").uuid().not_null())
+                    .col(ColumnDef::new("origin_session_id").uuid())
+                    .col(ColumnDef::new("author_id").uuid().not_null())
                     .col(ColumnDef::new("body").text().not_null())
                     .col(ColumnDef::new("position").big_integer().not_null())
                     .col(ColumnDef::new("visibility").text().not_null())
@@ -384,6 +445,24 @@ impl MigrationTrait for Migration {
                                         "conversation_comment",
                                         "review",
                                     ])),
+                            ),
+                    )
+                    .check(
+                        Condition::any()
+                            .add(
+                                Condition::all()
+                                    .add(Expr::col("posting_state").is_in([
+                                        "unposted",
+                                        "sending",
+                                        "confirmed",
+                                    ]))
+                                    .add(Expr::col("posting_error").is_null()),
+                            )
+                            .add(
+                                Condition::all()
+                                    .add(Expr::col("posting_state").eq("uncertain"))
+                                    .add(Expr::col("posting_error").is_not_null())
+                                    .add(Expr::col("posting_error").ne("")),
                             ),
                     )
                     .to_owned(),

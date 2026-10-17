@@ -72,6 +72,5 @@ description = "Run the backend watcher and web development server together"
 depends = ["//apps/lgtm-backend:dev", "//apps/lgtm-web:dev"]
 
 [tasks."test:postgres"]
-depends = ["//apps/lgtm-cli:bundle"]
-description = "Run shared SQLite/PostgreSQL and CLI contracts against a disposable database"
-run = 'test -n "${LGTM_TEST_POSTGRES_URL:?Set a disposable PostgreSQL database URL}" && cargo test --locked --workspace --all-features'
+description = "Run database and backend contracts on SQLite and PostgreSQL"
+run = "{{config_root}}/bin/with-postgres cargo test --locked -p lgtm-db -p lgtm-backend --all-features"

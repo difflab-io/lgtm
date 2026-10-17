@@ -2,7 +2,7 @@
 
 ## Overview
 
-`lgtm-db` owns the persistence API: entity repositories, SeaORM `Model` inputs/results, connections, transactions and one shared Rust migration history for SQLite/PostgreSQL. SeaORM `Model` types are public; `Entity`/`ActiveModel` module paths and raw connections remain private. Application models and review workflows belong to the [backend](../backend/review.md).
+`lgtm-db` owns the persistence API: entity repositories, SeaORM `Model` inputs/results, connections, transactions and one shared Rust migration history for SQLite/PostgreSQL. SeaORM `Model` types are public; `Entity`/`ActiveModel` module paths and raw connections remain private. Application models and review workflows belong to the [backend](../backend/index.md).
 
 ## Requirement
 
@@ -17,7 +17,7 @@
 
 - Share queries and Rust migrations across SQLite and PostgreSQL.
 - Keep Entity/ActiveModel module paths and raw connection access outside the public client API.
-- Package private database source with the standalone CLI.
+- Keep database code in the backend and out of the standalone CLI.
 
 ## Design
 
@@ -31,19 +31,25 @@
 - Private `entities/` modules define SeaORM rows, columns and relations.
 - `migration/` owns one ordered Rust history using SchemaManager and SeaQuery builders.
 
-The client exposes `identities`, `sessions`, `review_contexts`, `workspace` and `comments` repository fields. Comments include thread operations. Callers use `db.sessions.active(context_id)` and `db.comments.insert_thread(&thread)`; there is no intermediate queries/mutations property.
+The client exposes `identities`, `sessions`, `review_contexts`, `workspace` and `comments` repository fields. Comments include thread operations. Callers use `db.sessions.get_active(context_id)` and `db.comments.insert_thread(&thread)`; there is no intermediate queries/mutations property.
 
 ### Data and Control Flow
 
-Backend services call repository methods, then map returned SeaORM models to application types. The CLI calls those backend services. The database library imports no backend code and contains no forge provider or network operations.
+Backend services call repository methods, then map returned SeaORM models to application types. Future review RPC handlers call those services; the CLI currently exposes command scaffolds only. The database library imports no backend code and contains no forge provider or network operations.
 
 ![Session lifecycle](diagrams/session-lifecycle.svg)
 
 The backend coordinates draft publication and completion in a transaction. Context-owned comments continue across sessions; completed sessions retain metadata without conversation snapshots.
 
-- [Notes flow](diagrams/notes.svg): database writes, no Git/network writes.
-- [Local review flow](diagrams/local-review.svg): read Git metadata and write review records.
-- [Forge fixture flow](diagrams/forge.svg): supplied observations only; real adapters are deferred to the backend.
+![Notes flow](diagrams/notes.svg)
+
+Notes write review records without Git or network writes.
+![Local review flow](diagrams/local-review.svg)
+
+Local reviews use supplied Git metadata and persist review records.
+![Forge observation flow](diagrams/forge.svg)
+
+Supplied observations only; live adapters remain deferred.
 
 ### Interfaces and Contracts
 
@@ -54,20 +60,20 @@ The backend coordinates draft publication and completion in a transaction. Conte
 ```rust
 let tx = database.begin().await?;
 tx.comments.update(&comment).await?;
-let updated = tx.comments.get(context_id, comment_id).await?;
+let updated = tx.comments.get_by_id(context_id, comment_id).await?;
 tx.commit().await?;
 ```
 
-Identities own name/email/model/provider fields. Sessions, threads and comments store actor foreign keys. The backend batch-loads identity records when building application results. Reads resolve current identity profiles, including in completed sessions; profile editing has no public operation yet, and different model/provider values require a different identity.
+Identities have a typed kind: humans require an email, while agents require a model/provider and have no email. Forge account bindings are separate. Sessions, threads and comments store actor foreign keys. The backend batch-loads identity records when building application results. Reads resolve current identity profiles, including in completed sessions; profile editing has no public operation yet, and different model/provider values require a different identity.
 
-Composite foreign keys enforce matching contexts between sessions, threads and comments. Typed context keys have alternative non-null key columns and unique constraints. A partial index enforces one active session. Checks validate states, anchor shapes and scoped remote-ID pairs. Backend services enforce lifecycle rules such as completed metadata immutability; no backend-specific triggers are needed.
+Composite foreign keys enforce matching contexts between sessions, threads and comments. Typed context keys have alternative non-null key columns and unique constraints. A partial index enforces one active session. Checks validate states, anchor shapes and scoped remote-ID pairs. Backend services enforce lifecycle rules such as completed metadata immutability; no backend-specific triggers are needed. Active/completed session metadata and posting state/error combinations have explicit shape checks.
 
 ### Returned values and writes
 
-Model modules re-export the actual SeaORM types, such as `lgtm_db::models::comments::Model`. Public fields can be edited in memory. Database changes still require a repository write method using the supplied DB client; no raw connection is exposed. SeaORM traits remain available on these models, so this is an API boundary, not an immutable value type.
+Model modules re-export the actual SeaORM types, such as `lgtm_db::models::comments::Model`. Public fields can be edited in memory. Database changes still require a repository write method using the supplied DB client; no raw connection is exposed. SeaORM traits remain available on these models, so this is an API boundary, not an immutable value type. Internal IDs and foreign keys are Uuid values (native uuid in PostgreSQL, uuid_text in SQLite). Context/session/posting discriminators are typed enums; database constraints enforce variant-dependent fields.
 
 ```rust
-if let Some(mut comment) = database.comments.get(context_id, comment_id).await? {
+if let Some(mut comment) = database.comments.get_by_id(context_id, comment_id).await? {
     comment.body = "Updated text".to_owned(); // In memory only.
     database.comments.update(&comment).await?;
 }
@@ -75,7 +81,7 @@ if let Some(mut comment) = database.comments.get(context_id, comment_id).await? 
 
 Repository updates select writable columns explicitly. Comment updates preserve author, context/thread ownership, originating session, position and creation time. Thread updates preserve author, ownership and original anchors. Session completion forces the active → completed transition and only writes completion fields; creator, creation time and reviewed commits remain unchanged. Models stay as SeaORM inputs/results; supplying modified immutable fields cannot persist those changes.
 
-Identity profile editing is not exposed. Migrations are private startup machinery; migration tests live beside the private module in `src/migration/tests.rs`, enabled by `#[cfg(test)]`. No other crate imports private migration source.
+Identity profile editing is not exposed. Migrations are private startup machinery; migration tests live beside the private module in src/migration/mod.rs, enabled by cfg(test). No other crate imports private migration source.
 
 ## Implementation
 
@@ -91,11 +97,11 @@ The fresh initial migration owns schema definitions independently of entity mode
 
 SQLite startup uses a sibling process lock. PostgreSQL deployments run one migration job before parallel application instances. Desktop upgrade and local/remote sync policy remain [future ADR topics](../../../adr/README.md).
 
-The CLI bundle includes both private database source and backend application source. Neither private crate is published. The CLI has no private path dependency.
+The CLI bundles only the current greeting/health RPC router, generated protocol code and static UI. It has no DB driver or private path dependency.
 
 ### Verification
 
-Private migration and entity tests live in `lgtm-db/src/{migration,entities}/tests.rs` with shared test-only database fixtures. Public database transaction tests live in `lgtm-db/tests/`. Backend integration tests exercise shared SQLite/PostgreSQL behavior through the public database API. They cover constraints, migrations, identity normalization, concurrent operations, application transactions, dummy-forge failure and current-content exports. Compile-fail doctests ensure entities and raw connection access remain private.
+Private unit tests are colocated in their source files; shared fixtures live under src/tests/fixtures.rs. Public database transaction tests live in `lgtm-db/tests/`. Backend integration tests exercise shared SQLite/PostgreSQL behavior through the public database API. They cover constraints, migrations, identity normalization, concurrent operations, application transactions, dummy-forge failure and current-content exports. Compile-fail doctests ensure entities and raw connection access remain private.
 
 ### Entity declarations
 
@@ -120,11 +126,11 @@ threads::Entity::load()
     .await?;
 ```
 
-The private entity tests exercise these paths and optional links on real SQLite and PostgreSQL databases.
+Colocated entity tests exercise these paths and optional links on real SQLite and PostgreSQL. Public client integration tests compose multi-operation transactions across notes, local and forge conversations, publish drafts, start successor sessions and retain multi-identity attribution.
 
 ## References
 
 - [Repositories](../../../libs/lgtm-db/src/repositories/mod.rs), [models](../../../libs/lgtm-db/src/models.rs).
 - [Connections](../../../libs/lgtm-db/src/connection.rs), [migrations](../../../libs/lgtm-db/src/migration/mod.rs).
-- [Backend review architecture](../backend/review.md), [review tests](../../../apps/lgtm-backend/tests).
+- [Backend review architecture](../backend/index.md), [review tests](../../../apps/lgtm-backend/tests).
 - [SeaORM shared migrations](https://www.sea-ql.org/SeaORM/docs/migration/writing-migration/).

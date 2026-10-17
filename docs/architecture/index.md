@@ -40,7 +40,7 @@ lgtm/
 - `lgtm-cli` starts the application and serves the bundled interface and backend on the local machine.
 - `lgtm-backend` provides greeting and health services through ConnectRPC. It also runs as a standalone server.
 - `lgtm-web` sends browser requests through gRPC-Web at `/rpc/*`. Its client is generated from the backend schema.
-- `lgtm-db` exports entity repositories with private SeaORM entities; backend review services own application models and workflows, with SQLite and optional PostgreSQL. Its private source and migrations are bundled into the CLI. See the [database architecture](db/index.md).
+- `lgtm-db` exports entity repositories with private SeaORM entities; backend review services own application models and workflows, with SQLite and optional PostgreSQL. Review persistence stays in the backend; only the current RPC router is bundled into the CLI. See the [database architecture](db/index.md).
 
 ### Data and Control Flow
 
@@ -48,7 +48,7 @@ lgtm/
 
 Each review has its own path and browser URL. Multiple browser tabs and editor clients share one local server. Opening another review does not replace existing reviews or start another server.
 
-`lgtm review` starts or reuses the server and prepares its inferred or explicit review context/session, then opens the selected path. Encoded `repo` and `session` query keys accompany `path` where applicable. The web page still consumes only `path`; no review UI was added. Editor clients discover the server through `lgtm status --json`.
+`lgtm review` starts or reuses the server and opens the dummy UI for the encoded path. It creates no review context/session and does not open a database. Session/comment commands are argument scaffolds pending backend review RPCs. Editor clients discover the server through `lgtm status --json`.
 
 #### Development flow
 
@@ -90,4 +90,4 @@ Mise manages tools and development tasks. Cargo and Bun manage dependencies. Tes
 - [Product requirements](../../prd/0001-core-concepts/README.md).
 - [Design prototype](../../designs/prototypes/lgtm-v0/README.md).
 
-See [backend review services](backend/review.md) for application models, public persistence calls and caller-owned transactions.
+See [backend review services](backend/index.md) for application models, public persistence calls and caller-owned transactions.

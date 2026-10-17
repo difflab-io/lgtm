@@ -1,19 +1,23 @@
 use lgtm_backend::{models::*, services::*};
+use lgtm_db::types as lgtm_db_types;
 
 use support::forge::*;
 mod support;
 use support::databases;
 
 async fn actor(db: &ReviewService, name: &str, model: Option<&str>) -> Actor {
-    db.auth()
-        .ensure_identity(
-            name,
-            &format!("{}@example.com", name.to_lowercase()),
-            model.map(str::to_string),
-            None,
-        )
-        .await
-        .unwrap()
+    match model {
+        Some(model) => db
+            .auth()
+            .ensure_agent(name, model, "test-provider")
+            .await
+            .unwrap(),
+        None => db
+            .auth()
+            .ensure_human(name, &format!("{}@example.com", name.to_lowercase()))
+            .await
+            .unwrap(),
+    }
 }
 
 fn snapshot(head: &str) -> ForgeSnapshot {
@@ -63,7 +67,7 @@ async fn shared_forge_refresh_attribution_pending_posts_and_failure_contract() {
                 .await
                 .is_err()
         );
-        let c = db.context(&c.key).await.unwrap().unwrap();
+        let c = db.get_context(&c.key).await.unwrap().unwrap();
         let c = db
             .refresh(&c, &FixtureProvider(snapshot("head")))
             .await
@@ -123,23 +127,23 @@ async fn shared_forge_refresh_attribution_pending_posts_and_failure_contract() {
                 reply_to: None,
             }],
         });
-        let c = db.context(&c.key).await.unwrap().unwrap();
+        let c = db.get_context(&c.key).await.unwrap().unwrap();
         let c = db
             .refresh(&c, &FixtureProvider(remote.clone()))
             .await
             .unwrap();
-        let live = db.conversation(&c.id, true).await.unwrap();
+        let live = db.get_conversation(&c.id, true).await.unwrap();
         let imported = live.comments.iter().find(|x| x.id == local.id).unwrap();
         assert_eq!(imported.author.id, bot.id);
         assert_eq!(imported.body, local.body);
-        assert_eq!(imported.origin_session_id, Some(s.id.clone()));
+        assert_eq!(imported.origin_session_id, Some(s.id));
         remote.threads[1].comments[0].body = "Edited live by account".into();
         let c = db
             .refresh(&c, &FixtureProvider(remote.clone()))
             .await
             .unwrap();
         assert_eq!(
-            db.conversation(&c.id, true)
+            db.get_conversation(&c.id, true)
                 .await
                 .unwrap()
                 .comments
@@ -158,21 +162,30 @@ async fn shared_forge_refresh_attribution_pending_posts_and_failure_contract() {
                 .await
                 .is_err()
         );
-        let c = db.context(&c.key).await.unwrap().unwrap();
-        let before = db.conversation(&c.id, true).await.unwrap().comments.len();
+        let c = db.get_context(&c.key).await.unwrap().unwrap();
+        let before = db
+            .get_conversation(&c.id, true)
+            .await
+            .unwrap()
+            .comments
+            .len();
         let mut incomplete = remote.clone();
         incomplete.complete = false;
         assert!(db.refresh(&c, &FixtureProvider(incomplete)).await.is_err());
         assert_eq!(
-            db.conversation(&c.id, true).await.unwrap().comments.len(),
+            db.get_conversation(&c.id, true)
+                .await
+                .unwrap()
+                .comments
+                .len(),
             before
         );
-        let c = db.context(&c.key).await.unwrap().unwrap();
+        let c = db.get_context(&c.key).await.unwrap().unwrap();
         let c = db
             .refresh(&c, &FixtureProvider(snapshot("new-head")))
             .await
             .unwrap();
-        let live = db.conversation(&c.id, true).await.unwrap();
+        let live = db.get_conversation(&c.id, true).await.unwrap();
         assert_eq!(
             live.comments
                 .iter()
@@ -206,7 +219,7 @@ async fn shared_forge_refresh_attribution_pending_posts_and_failure_contract() {
             .unwrap();
         assert_eq!(completed.submission_status, "unsubmitted");
         assert!(completed.forge_review_id.is_none());
-        let c = db.context(&c.key).await.unwrap().unwrap();
+        let c = db.get_context(&c.key).await.unwrap().unwrap();
         assert!(
             db.start_session(&c, &alice, CommitContext::default())
                 .await
@@ -214,7 +227,7 @@ async fn shared_forge_refresh_attribution_pending_posts_and_failure_contract() {
         );
         // Refresh once more, then create the next review without copying comments.
         tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-        let c = db.context(&c.key).await.unwrap().unwrap();
+        let c = db.get_context(&c.key).await.unwrap().unwrap();
         let c = db
             .refresh(&c, &FixtureProvider(snapshot("new-head")))
             .await
@@ -225,7 +238,11 @@ async fn shared_forge_refresh_attribution_pending_posts_and_failure_contract() {
             .unwrap();
         assert_ne!(next.id, s.id);
         assert_eq!(
-            db.conversation(&c.id, true).await.unwrap().comments.len(),
+            db.get_conversation(&c.id, true)
+                .await
+                .unwrap()
+                .comments
+                .len(),
             before
         );
         db.database().close().await;
@@ -266,7 +283,7 @@ async fn client_can_rollback_database_work_on_provider_failure() {
     for (review, _, _) in databases().await {
         let actor = review
             .auth()
-            .ensure_identity("Alice", "alice@example.com", None, None)
+            .ensure_human("Alice", "alice@example.com")
             .await
             .unwrap();
         let context = review
@@ -294,7 +311,7 @@ async fn client_can_rollback_database_work_on_provider_failure() {
             .unwrap();
 
         let committed_count = review
-            .conversation(&context.id, true)
+            .get_conversation(&context.id, true)
             .await
             .unwrap()
             .comments
@@ -303,14 +320,16 @@ async fn client_can_rollback_database_work_on_provider_failure() {
         let identity = identities::Model {
             id: id(),
             name: "Temporary".into(),
-            email: "temporary@example.com".into(),
-            model: String::new(),
-            provider: String::new(),
+            kind: lgtm_db_types::IdentityKind::Human,
+            email: Some("temporary@example.com".into()),
+            model: None,
+            provider: None,
+            forge_account: String::new(),
         };
         tx.identities.insert(&identity).await.unwrap();
         let mut draft = comments::Model::from(&root);
         draft.id = id();
-        draft.author_id = identity.id.clone();
+        draft.author_id = identity.id;
         draft.position = 1;
         draft.body = "Discard on failure".into();
         tx.comments.insert(&draft).await.unwrap();
@@ -322,7 +341,7 @@ async fn client_can_rollback_database_work_on_provider_failure() {
             review
                 .database()
                 .identities
-                .get(&identity.id)
+                .get_by_id(&identity.id)
                 .await
                 .unwrap()
                 .is_none()
@@ -331,14 +350,14 @@ async fn client_can_rollback_database_work_on_provider_failure() {
             review
                 .database()
                 .comments
-                .get(&context.id, &draft.id)
+                .get_by_id(&context.id, &draft.id)
                 .await
                 .unwrap()
                 .is_none()
         );
         assert_eq!(
             review
-                .conversation(&context.id, true)
+                .get_conversation(&context.id, true)
                 .await
                 .unwrap()
                 .comments

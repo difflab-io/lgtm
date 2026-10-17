@@ -1,12 +1,10 @@
 use clap::{Args, Parser, Subcommand};
 use tracing::Instrument;
 
-#[path = "../bundle/backend/lib.rs"]
+#[path = "../bundle/backend.rs"]
 pub mod backend;
 mod context;
 mod daemon;
-#[path = "../bundle/db/src/lib.rs"]
-pub mod database;
 mod log;
 
 mod reviews;
@@ -38,11 +36,11 @@ enum Command {
     },
     /// Open the current directory in the web interface.
     Review(reviews::ReviewArgs),
-    /// Start, inspect, complete, export, refresh or submit a review session.
+    /// Scaffold for future backend session RPC commands.
     Session(reviews::SessionArgs),
-    /// List sessions using inferred path/repository filters.
+    /// Scaffold for future backend session listing.
     Sessions(reviews::SessionsArgs),
-    /// Add, reply to, list or resolve context-owned comments.
+    /// Scaffold for future backend comment RPC commands.
     Comments(reviews::CommentsArgs),
     #[command(hide = true)]
     Serve {

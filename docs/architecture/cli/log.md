@@ -33,7 +33,7 @@ The log module configures server logging and owns the output file under `~/.lgtm
 
 Background startup opens the output file before detaching. `daemonize` redirects stdout and stderr to it. The detached process then initializes logging before creating Tokio threads.
 
-Foreground serving initializes the same file logger. Client commands keep their normal stdout output and do not initialize server logging. Command futures are instrumented with a `cli_command` span; nested service events inherit that context when a subscriber is enabled. Services do not retain request spans.
+Foreground serving initializes the same file logger. Client commands keep their normal stdout output and do not initialize server logging. Command futures are instrumented with a `cli_command` span; nested runtime events inherit that context when a subscriber is enabled. Services do not retain request spans.
 
 ### Interfaces and Contracts
 

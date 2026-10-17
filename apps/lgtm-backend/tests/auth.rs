@@ -16,7 +16,7 @@ async fn requester_resolution_rejects_missing_unknown_and_ambiguous_metadata() {
     for (review, _, _) in support::databases().await {
         let auth = review.auth();
         let actor = auth
-            .ensure_identity("Alice", "alice@example.com", None, None)
+            .ensure_human("Alice", "alice@example.com")
             .await
             .unwrap();
         let mut request = RequestContext::new(Default::default());
@@ -32,11 +32,11 @@ async fn requester_resolution_rejects_missing_unknown_and_ambiguous_metadata() {
         }
         request
             .headers_mut()
-            .insert("x-lgtm-identity", actor.id.parse().unwrap());
+            .insert("x-lgtm-identity", actor.id.to_string().parse().unwrap());
         assert_eq!(auth.requester(&request).await.unwrap(), actor);
         request
             .headers_mut()
-            .append("x-lgtm-identity", actor.id.parse().unwrap());
+            .append("x-lgtm-identity", actor.id.to_string().parse().unwrap());
         assert!(matches!(
             auth.requester(&request).await,
             Err(Error::Invalid(_))
@@ -72,11 +72,11 @@ async fn grpc_and_grpc_web_handlers_resolve_each_requests_supplied_identity() {
     let database = Database::connect("sqlite::memory:").await.unwrap();
     let auth = AuthService::new(database.clone());
     let alice = auth
-        .ensure_identity("Alice", "alice@example.com", None, None)
+        .ensure_human("Alice", "alice@example.com")
         .await
         .unwrap();
     let agent = auth
-        .ensure_identity("Agent", "agent@example.com", Some("model-one".into()), None)
+        .ensure_agent("Agent", "model-one", "test-provider")
         .await
         .unwrap();
     let router = Router::new().add_service(Arc::new(RequesterEndpoint(auth)));
@@ -102,7 +102,7 @@ async fn grpc_and_grpc_web_handlers_resolve_each_requests_supplied_identity() {
         for actor in [&alice, &agent, &alice] {
             let options = CallOptions::default()
                 .with_timeout(Duration::from_secs(5))
-                .with_header("x-lgtm-identity", actor.id.clone());
+                .with_header("x-lgtm-identity", actor.id.to_string());
             let response = client
                 .say_hello_with_options(SayHelloRequest::default(), options)
                 .await

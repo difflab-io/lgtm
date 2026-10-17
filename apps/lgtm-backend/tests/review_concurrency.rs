@@ -18,11 +18,7 @@ async fn parallel_first_install_and_foreign_keys_on_each_connection() {
         task.await.unwrap().database().close().await;
     }
     let db = support::service(&url).await.unwrap();
-    let actor = db
-        .auth()
-        .ensure_identity("A", "a@example.com", None, None)
-        .await
-        .unwrap();
+    let actor = db.auth().ensure_human("A", "a@example.com").await.unwrap();
     let context = db
         .ensure_context(
             ContextKey::Notes {
@@ -37,7 +33,7 @@ async fn parallel_first_install_and_foreign_keys_on_each_connection() {
         let db = db.clone();
         let c = context.clone();
         let mut actor = actor.clone();
-        actor.id = "missing identity".into();
+        actor.id = uuid::Uuid::new_v4();
         tasks.push(tokio::spawn(async move {
             db.start_session(&c, &actor, CommitContext::default()).await
         }));
@@ -45,7 +41,11 @@ async fn parallel_first_install_and_foreign_keys_on_each_connection() {
     for task in tasks {
         assert!(task.await.unwrap().is_err());
     }
-    assert!(db.selected_session(&context.id, None, true).await.is_err());
+    assert!(
+        db.get_selected_session(&context.id, None, true)
+            .await
+            .is_err()
+    );
     db.database().close().await;
 }
 
@@ -56,7 +56,7 @@ async fn independent_pools_share_context_keys_and_serialize_start_complete_races
     for (db, url, _) in support::databases().await {
         let actor = db
             .auth()
-            .ensure_identity("Alice", "alice@example.com", None, None)
+            .ensure_human("Alice", "alice@example.com")
             .await
             .unwrap();
         for key in [

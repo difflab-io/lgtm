@@ -119,7 +119,7 @@ mise run //apps/lgtm-cli:bundle
 
 The shared schema lives at `apps/lgtm-backend/proto/lgtm/v1/hello.proto`. It defines `lgtm.v1.GreeterService/SayHello`. Backend build tasks regenerate the TypeScript client inside the web app, so no separate client package is needed.
 
-The backend's `build.rs` generates Rust protocol code. The CLI bundle task builds the backend and static web app. It copies backend implementation source, database source and migrations, generated Rust protocol files, and web assets into `apps/lgtm-cli/bundle`.
+The backend's `build.rs` generates Rust protocol code. The CLI bundle task builds the backend and static web app. It copies only the greeting/health router, generated Rust protocol files and web assets into `apps/lgtm-cli/bundle`.
 
 Git ignores that generated directory, but Cargo includes it in the CLI package. The CLI build script embeds the assets and compiles the copied backend source. Before a raw Cargo build in a fresh checkout, run the bundle task.
 
@@ -141,7 +141,7 @@ mise run lint
 mise run format:check
 ```
 
-Rust module tests live under `src/`, either in the same file's `#[cfg(test)] mod tests` or in an adjacent `tests.rs` loaded by that declaration. Database migration and entity tests belong to `lgtm-db`; they can access its private implementation without exporting it. Public integration tests live in each crate's `tests/` directory. Shared integration fixtures live in `tests/support/mod.rs`; the dummy forge is `tests/support/forge.rs` in the backend.
+Rust module tests live under `src/`, in the same source file’s `#[cfg(test)] mod tests`; shared fixtures live under `src/tests/`. Database migration and entity tests are colocated inside `lgtm-db`; they can access its private implementation without exporting it. Public integration tests live in each crate's `tests/` directory. Shared integration fixtures live in `tests/support/mod.rs`; the dummy forge is `tests/support/forge.rs` in the backend.
 
 Tests cover native gRPC, browser RPC calls, daemon startup, instance reuse, shutdown, and occupied-port failures. Web integration tests start an isolated Rust backend. Lint runs Clippy, ESLint, and Svelte type checks.
 
@@ -165,9 +165,7 @@ cargo check -p lgtm-db --no-default-features --features postgres
 
 Use a disposable PostgreSQL 17 database whose test user can create schemas.
 Each shared test isolates its schema. All-feature tests require the URL and fail
-rather than silently skip PostgreSQL. The database-contracts job in the existing
-On Commit workflow starts its own PostgreSQL service and uses the root
-`mise run test:postgres` task for shared database and CLI process tests.
+rather than silently skip PostgreSQL. Premise invokes each project’s standard Mise test hook in the declared platform matrix. Linux DB/backend test hooks run SQLite/PostgreSQL contracts using an isolated PostgreSQL 17 Docker container (or an explicit LGTM_TEST_POSTGRES_URL); other/local invocations use SQLite unless a URL is supplied. Database checks are not a separate Actions job.
 
 SeaORM and sea-orm-migration 2.0.4 use one shared ordered Rust migration history,
 with SeaQuery 1.0.2 schema builders. Explicit transactions keep schema and
@@ -180,8 +178,7 @@ application startup. Test-only upgrades cover populated data and failure recover
 there are no older shipped schema upgrades or destructive migrations yet. Future
 destructive SQLite changes need consistent backups and a table rebuild plan.
 
-The CLI bundle includes private database source/migrations; no private path dependency
-is published. After database source changes, rerun bundle before raw CLI Cargo checks.
+The CLI bundles no database source, drivers or migrations. Rerun the bundle task after greeting/health router or protocol changes before raw CLI Cargo checks.
 Use cargo publish --dry-run (never an actual publish for validation) to compile the
 package outside the workspace. Local/remote sync and desktop migration policy remain
 [future ADR topics](../adr/README.md).

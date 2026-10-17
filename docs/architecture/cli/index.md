@@ -48,9 +48,9 @@ The main module parses CLI commands and connects them to the daemon, server, sto
 
 The entry point parses arguments and constructs a store. For `serve --daemonize`, it detaches before creating the Tokio runtime. Server commands initialize logging before creating the runtime. The entry point then calls the selected module API inside it.
 
-`review` prepares a database session using the [review handlers](reviews.md), then passes the canonical path, repository and session ID to `ui::open_review`. This function obtains a ready server, encodes the path as a query parameter, and opens the browser. The server's working directory is the store.
+`review` uses the [review scaffold](reviews.md) to select a local path and passes that path to `ui::open_review`. This function obtains a ready server, encodes the path as a query parameter, and opens the browser. The server's working directory is the store.
 
-The backend ReviewService uses lgtm-db’s entity repositories and transaction handles; runtime Store only supplies the default file path. The daemon uses the store for discovery and the log module for background output. The server uses the same store for PID ownership and its listening port. These modules share one `Store` value from the entry point.
+ReviewService and database access stay in the backend; the CLI keeps only review command shapes pending RPCs. The daemon uses the store for discovery and the log module for background output. The server uses the same store for PID ownership and its listening port. These modules share one `Store` value from the entry point.
 
 ### Interfaces and Contracts
 
@@ -81,7 +81,7 @@ Background startup uses a fresh copy of the executable. That copy calls `daemon:
 
 ### Backend inclusion
 
-The `backend` module comes from `bundle/backend/lib.rs`. The bundle task copies the canonical backend implementation into the CLI package before compilation.
+The `backend` module comes from `bundle/backend.rs`. The bundle task copies only the current greeting/health RPC router into the CLI package before compilation.
 
 ## References
 

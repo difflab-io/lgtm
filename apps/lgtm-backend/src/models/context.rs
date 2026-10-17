@@ -1,11 +1,10 @@
-use super::super::{database as db, database::models::review_contexts, error::Result};
-use super::ContextKey;
-use sea_orm::{ConnectionTrait, TransactionTrait};
+use super::super::{database::models::review_contexts, error::Result};
+use super::{ContextKey, ContextKind};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Context {
-    pub id: String,
+    pub id: uuid::Uuid,
     pub key: ContextKey,
     pub paths: Vec<String>,
     pub revision: i64,
@@ -18,26 +17,16 @@ pub struct Context {
 }
 
 impl Context {
-    pub async fn from_db_model<D: ConnectionTrait + TransactionTrait>(
-        row: review_contexts::Model,
-        conn: &db::Database<D>,
-    ) -> Result<Context> {
-        let paths = conn
-            .workspace
-            .paths(&row.id)
-            .await?
-            .into_iter()
-            .map(|p| p.path)
-            .collect();
-        let key = match row.kind.as_str() {
-            "notes" => ContextKey::Notes {
+    pub fn from_db_model(row: review_contexts::Model, paths: Vec<String>) -> Result<Context> {
+        let key = match row.kind {
+            ContextKind::Notes => ContextKey::Notes {
                 path: row.notes_path.unwrap_or_default(),
             },
-            "branch" => ContextKey::Branch {
+            ContextKind::Branch => ContextKey::Branch {
                 repository: row.repository.unwrap_or_default(),
                 branch: row.branch.unwrap_or_default(),
             },
-            _ => ContextKey::PullRequest {
+            ContextKind::PullRequest => ContextKey::PullRequest {
                 host: row.host.unwrap_or_default(),
                 repository: row.repository.unwrap_or_default(),
                 number: row.number.unwrap_or_default(),
@@ -71,8 +60,12 @@ impl From<&Context> for review_contexts::Model {
             }
         }
         review_contexts::Model {
-            id: c.id.clone(),
-            kind: c.key.kind().into(),
+            id: c.id,
+            kind: match c.key {
+                ContextKey::Notes { .. } => ContextKind::Notes,
+                ContextKey::Branch { .. } => ContextKind::Branch,
+                ContextKey::PullRequest { .. } => ContextKind::PullRequest,
+            },
             notes_path,
             repository: c.key.repository().map(str::to_owned),
             branch,

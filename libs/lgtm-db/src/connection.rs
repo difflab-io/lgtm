@@ -9,16 +9,23 @@ use sea_orm::{
 };
 use std::{sync::Arc, time::Duration};
 
+/// Pool-backed database client, or repositories sharing one caller-owned transaction.
 #[derive(Clone)]
 pub struct Database<C = DatabaseConnection> {
     pool: Arc<C>,
+    /// Human and agent identity operations.
     pub identities: IdentityRepository<C>,
+    /// Review session operations.
     pub sessions: SessionRepository<C>,
+    /// Context identity and refresh operations.
     pub review_contexts: ReviewContextRepository<C>,
+    /// Repository keys and canonical workspace paths.
     pub workspace: WorkspaceRepository<C>,
+    /// Thread, root comment and reply operations.
     pub comments: CommentRepository<C>,
 }
 
+/// Client-owned transaction exposing the same repositories as a pool-backed client.
 pub type Transaction = Database<DatabaseTransaction>;
 
 impl<C> Database<C> {
@@ -36,6 +43,7 @@ impl<C> Database<C> {
 }
 
 impl Database {
+    /// Open a supported database and apply its private migration history. Returns an error for invalid URLs, unavailable drivers, connection failures or migration failures.
     pub async fn connect(url: &str) -> Result<Self> {
         if !(url.starts_with("sqlite:")
             || url.starts_with("postgres:")
@@ -84,6 +92,7 @@ impl Database {
         Ok(Self::from_connection(pool))
     }
 
+    /// Close the shared connection pool. Other cloned clients share the same pool.
     pub async fn close(&self) {
         let _ = self.pool.as_ref().clone().close().await;
     }
@@ -97,6 +106,7 @@ impl<C: ConnectionTrait> Database<C> {
 }
 
 impl<C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>> Database<C> {
+    /// Begin an atomic transaction, or a nested savepoint when called on a transaction.
     pub async fn begin(&self) -> Result<Transaction> {
         Ok(Database::from_connection(self.pool.begin().await?))
     }
@@ -117,10 +127,12 @@ impl Database<DatabaseTransaction> {
             .map_err(|_| invalid("Transaction still has repository handles in use"))
     }
 
+    /// Commit this transaction. Returns an error if commit fails or repository handles escaped the owner.
     pub async fn commit(self) -> Result<()> {
         Ok(self.into_transaction()?.commit().await?)
     }
 
+    /// Roll back this transaction. Dropping an uncommitted transaction also rolls it back.
     pub async fn rollback(self) -> Result<()> {
         Ok(self.into_transaction()?.rollback().await?)
     }

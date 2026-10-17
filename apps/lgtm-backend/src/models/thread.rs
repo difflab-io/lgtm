@@ -1,19 +1,13 @@
 use super::super::database::models::threads;
-use super::super::{
-    database as db,
-    error::{Error, Result},
-};
-use super::identities::IdentityMap;
+use super::super::error::Result;
 use super::{Actor, Anchor};
-use sea_orm::{ConnectionTrait, TransactionTrait};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Thread {
-    pub id: String,
-    pub context_id: String,
-    pub origin_session_id: Option<String>,
+    pub id: uuid::Uuid,
+    pub context_id: uuid::Uuid,
+    pub origin_session_id: Option<uuid::Uuid>,
     pub author: Actor,
     pub anchor: Anchor,
     pub state: String,
@@ -28,10 +22,10 @@ pub struct Thread {
 impl From<&Thread> for threads::Model {
     fn from(v: &Thread) -> Self {
         Self {
-            id: v.id.clone(),
-            context_id: v.context_id.clone(),
-            origin_session_id: v.origin_session_id.clone(),
-            author_id: v.author.id.clone(),
+            id: v.id,
+            context_id: v.context_id,
+            origin_session_id: v.origin_session_id,
+            author_id: v.author.id,
             anchor_kind: match v.anchor {
                 Anchor::General => "general",
                 Anchor::File { .. } => "file",
@@ -59,9 +53,9 @@ impl From<&Thread> for threads::Model {
                 _ => None,
             },
             state: v.state.clone(),
-            resolved_by_id: v.resolved_by.as_ref().map(|a| a.id.clone()),
+            resolved_by_id: v.resolved_by.as_ref().map(|a| a.id),
             resolved_at: v.resolved_at.clone(),
-            updated_by_id: v.updated_by.as_ref().map(|a| a.id.clone()),
+            updated_by_id: v.updated_by.as_ref().map(|a| a.id),
             updated_at: v.updated_at.clone(),
             forge_thread_id: v.forge_thread_id.clone(),
             outdated: v.outdated,
@@ -70,7 +64,12 @@ impl From<&Thread> for threads::Model {
 }
 
 impl Thread {
-    fn with_identities(v: threads::Model, actors: &IdentityMap) -> Result<Self> {
+    pub fn from_db_model(
+        v: threads::Model,
+        author: Actor,
+        resolved_by: Option<Actor>,
+        updated_by: Option<Actor>,
+    ) -> Result<Self> {
         Ok(Thread {
             id: v.id,
             context_id: v.context_id,
@@ -80,9 +79,9 @@ impl Thread {
             updated_at: v.updated_at,
             forge_thread_id: v.forge_thread_id,
             outdated: v.outdated,
-            author: actors.get(&v.author_id)?,
-            resolved_by: actors.optional(v.resolved_by_id.as_deref())?,
-            updated_by: actors.optional(v.updated_by_id.as_deref())?,
+            author,
+            resolved_by,
+            updated_by,
             anchor: match v.anchor_kind.as_str() {
                 "file" => Anchor::File {
                     path: v.file_path.unwrap_or_default(),
@@ -97,35 +96,5 @@ impl Thread {
                 _ => Anchor::General,
             },
         })
-    }
-
-    pub async fn from_db_models<C: ConnectionTrait + TransactionTrait>(
-        rows: Vec<threads::Model>,
-        db: &db::Database<C>,
-    ) -> Result<Vec<Thread>> {
-        let mut ids = HashSet::new();
-        for r in &rows {
-            ids.insert(r.author_id.clone());
-            if let Some(id) = &r.resolved_by_id {
-                ids.insert(id.clone());
-            }
-            if let Some(id) = &r.updated_by_id {
-                ids.insert(id.clone());
-            }
-        }
-        let actors = IdentityMap::load(ids, db).await?;
-        rows.into_iter()
-            .map(|r| Self::with_identities(r, &actors))
-            .collect()
-    }
-
-    pub async fn from_db_model<C: ConnectionTrait + TransactionTrait>(
-        row: threads::Model,
-        db: &db::Database<C>,
-    ) -> Result<Thread> {
-        Self::from_db_models(vec![row], db)
-            .await?
-            .pop()
-            .ok_or_else(|| Error::NotFound("Thread".into()))
     }
 }

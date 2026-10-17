@@ -125,11 +125,7 @@ async fn background_instance_serves_ui_and_rpc_and_stops() {
     assert_eq!(review_url.origin().ascii_serialization(), url);
     let query: Vec<_> = review_url.query_pairs().collect();
     assert!(query.contains(&("path".into(), cwd.to_str().unwrap().into())));
-    assert!(
-        query
-            .iter()
-            .any(|(key, value)| key == "session" && uuid::Uuid::parse_str(value).is_ok())
-    );
+    assert!(!query.iter().any(|(key, _)| key == "session"));
     assert_eq!(client.get(review_url).send().await.unwrap().status(), 200);
     assert!(command(dir, &["down"]).status.success());
     assert!(!dir.join("server.port").exists());
@@ -188,11 +184,7 @@ fn review_starts_a_ready_server_for_the_current_directory() {
         "path".into(),
         dir.canonicalize().unwrap().to_str().unwrap().into()
     )));
-    assert!(
-        pairs
-            .iter()
-            .any(|(key, value)| key == "session" && uuid::Uuid::parse_str(value).is_ok())
-    );
+    assert!(!pairs.iter().any(|(key, _)| key == "session"));
     let status = command(dir, &["status", "--json"]);
     let discovery: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(discovery["running"], true);

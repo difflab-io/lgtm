@@ -5,6 +5,7 @@ use sea_orm::{ActiveModelTrait, IntoActiveModel};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, TransactionTrait};
 use std::sync::Arc;
 
+/// Repository bound to the owning database connection or transaction.
 #[derive(Clone)]
 pub struct SessionRepository<C = sea_orm::DatabaseConnection> {
     connection: Arc<C>,
@@ -17,43 +18,47 @@ impl<C> SessionRepository<C> {
 }
 
 impl<C: ConnectionTrait + TransactionTrait> SessionRepository<C> {
-    pub async fn get(&self, id: &str) -> Result<Option<sessions::Model>> {
-        Ok(sessions::Entity::find_by_id(id)
+    /// Get a record by its internal UUID; return None when absent or outside the selected context.
+    pub async fn get_by_id(&self, id: &uuid::Uuid) -> Result<Option<sessions::Model>> {
+        Ok(sessions::Entity::find_by_id(*id)
             .one(self.connection.as_ref())
             .await?)
     }
 
-    pub async fn active(&self, context: &str) -> Result<Option<sessions::Model>> {
+    /// Get the context’s one active session, if any.
+    pub async fn get_active(&self, context: &uuid::Uuid) -> Result<Option<sessions::Model>> {
         Ok(sessions::Entity::find()
-            .filter(sessions::Column::ContextId.eq(context))
-            .filter(sessions::Column::State.eq("active"))
+            .filter(sessions::Column::ContextId.eq(*context))
+            .filter(sessions::Column::State.eq(super::super::types::SessionState::Active))
             .one(self.connection.as_ref())
             .await?)
     }
 
-    pub async fn completion_by_key(
+    /// Get the completed session associated with a context-scoped retry key.
+    pub async fn get_completion_by_key(
         &self,
-        context: &str,
+        context: &uuid::Uuid,
         key: &str,
     ) -> Result<Option<sessions::Model>> {
         Ok(sessions::Entity::find()
-            .filter(sessions::Column::ContextId.eq(context))
+            .filter(sessions::Column::ContextId.eq(*context))
             .filter(sessions::Column::RequestKey.eq(key))
             .one(self.connection.as_ref())
             .await?)
     }
 
-    pub async fn list(
+    /// Get matching records in stable display order.
+    pub async fn get_all(
         &self,
-        context: Option<&str>,
+        context: Option<&uuid::Uuid>,
         active_only: bool,
     ) -> Result<Vec<sessions::Model>> {
         let mut q = sessions::Entity::find();
         if let Some(c) = context {
-            q = q.filter(sessions::Column::ContextId.eq(c));
+            q = q.filter(sessions::Column::ContextId.eq(*c));
         }
         if active_only {
-            q = q.filter(sessions::Column::State.eq("active"));
+            q = q.filter(sessions::Column::State.eq(super::super::types::SessionState::Active));
         }
         Ok(q.order_by_asc(sessions::Column::CreatedAt)
             .order_by_asc(sessions::Column::Id)
@@ -61,6 +66,7 @@ impl<C: ConnectionTrait + TransactionTrait> SessionRepository<C> {
             .await?)
     }
 
+    /// Insert a new record. Constraint violations are returned as database errors.
     pub async fn insert(&self, row: &sessions::Model) -> Result<()> {
         row.clone()
             .into_active_model()
@@ -70,12 +76,13 @@ impl<C: ConnectionTrait + TransactionTrait> SessionRepository<C> {
         Ok(())
     }
 
+    /// Complete an active session without changing its creator or reviewed commits. Return false if no active row matches.
     pub async fn complete(&self, row: &sessions::Model) -> Result<bool> {
         Ok(sessions::Entity::update_many()
             .set(sessions::ActiveModel {
-                state: sea_orm::Set("completed".to_owned()),
+                state: sea_orm::Set(super::super::types::SessionState::Completed),
                 completed_at: sea_orm::Set(row.completed_at.clone()),
-                completed_by_id: sea_orm::Set(row.completed_by_id.clone()),
+                completed_by_id: sea_orm::Set(row.completed_by_id),
                 outcome: sea_orm::Set(row.outcome.clone()),
                 body: sea_orm::Set(row.body.clone()),
                 submission_status: sea_orm::Set(row.submission_status.clone()),
@@ -84,9 +91,9 @@ impl<C: ConnectionTrait + TransactionTrait> SessionRepository<C> {
                 request_hash: sea_orm::Set(row.request_hash.clone()),
                 ..Default::default()
             })
-            .filter(sessions::Column::Id.eq(&row.id))
-            .filter(sessions::Column::ContextId.eq(&row.context_id))
-            .filter(sessions::Column::State.eq("active"))
+            .filter(sessions::Column::Id.eq(row.id))
+            .filter(sessions::Column::ContextId.eq(row.context_id))
+            .filter(sessions::Column::State.eq(super::super::types::SessionState::Active))
             .exec(self.connection.as_ref())
             .await?
             .rows_affected

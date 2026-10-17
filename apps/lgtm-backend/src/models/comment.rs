@@ -1,20 +1,14 @@
 use super::super::database::models::comments;
-use super::super::{
-    database as db,
-    error::{Error, Result, invalid},
-};
-use super::Actor;
-use super::identities::IdentityMap;
-use sea_orm::{ConnectionTrait, TransactionTrait};
+use super::super::error::{Result, invalid};
+use super::{Actor, PostingStatus};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Comment {
-    pub id: String,
-    pub context_id: String,
-    pub thread_id: String,
-    pub origin_session_id: Option<String>,
+    pub id: uuid::Uuid,
+    pub context_id: uuid::Uuid,
+    pub thread_id: uuid::Uuid,
+    pub origin_session_id: Option<uuid::Uuid>,
     pub author: Actor,
     pub body: String,
     pub position: i64,
@@ -27,8 +21,7 @@ pub struct Comment {
     pub forge_body: Option<String>,
     pub forge_updated_at: Option<String>,
     pub posting_account_id: Option<String>,
-    pub posting_state: String,
-    pub posting_error: Option<String>,
+    pub posting: PostingStatus,
     pub posting_request_key: Option<String>,
     pub payload_hash: Option<String>,
     pub remote_presence: String,
@@ -37,11 +30,11 @@ pub struct Comment {
 impl From<&Comment> for comments::Model {
     fn from(v: &Comment) -> Self {
         Self {
-            id: v.id.clone(),
-            context_id: v.context_id.clone(),
-            thread_id: v.thread_id.clone(),
-            origin_session_id: v.origin_session_id.clone(),
-            author_id: v.author.id.clone(),
+            id: v.id,
+            context_id: v.context_id,
+            thread_id: v.thread_id,
+            origin_session_id: v.origin_session_id,
+            author_id: v.author.id,
             body: v.body.clone(),
             position: v.position,
             visibility: v.visibility.clone(),
@@ -53,8 +46,8 @@ impl From<&Comment> for comments::Model {
             forge_body: v.forge_body.clone(),
             forge_updated_at: v.forge_updated_at.clone(),
             posting_account_id: v.posting_account_id.clone(),
-            posting_state: v.posting_state.clone(),
-            posting_error: v.posting_error.clone(),
+            posting_state: v.posting.state(),
+            posting_error: v.posting.error().map(str::to_owned),
             posting_request_key: v.posting_request_key.clone(),
             payload_hash: v.payload_hash.clone(),
             remote_presence: v.remote_presence.clone(),
@@ -63,7 +56,7 @@ impl From<&Comment> for comments::Model {
 }
 
 impl Comment {
-    fn with_identities(v: comments::Model, actors: &IdentityMap) -> Result<Self> {
+    pub fn from_db_model(v: comments::Model, author: Actor) -> Result<Self> {
         Ok(Comment {
             id: v.id,
             context_id: v.context_id,
@@ -80,37 +73,12 @@ impl Comment {
             forge_body: v.forge_body,
             forge_updated_at: v.forge_updated_at,
             posting_account_id: v.posting_account_id,
-            posting_state: v.posting_state,
-            posting_error: v.posting_error,
+            posting: PostingStatus::from_db(v.posting_state, v.posting_error)?,
             posting_request_key: v.posting_request_key,
             payload_hash: v.payload_hash,
             remote_presence: v.remote_presence,
-            author: actors.get(&v.author_id)?,
+            author,
         })
-    }
-
-    pub async fn from_db_models<C: ConnectionTrait + TransactionTrait>(
-        rows: Vec<comments::Model>,
-        db: &db::Database<C>,
-    ) -> Result<Vec<Comment>> {
-        let mut ids = HashSet::new();
-        for r in &rows {
-            ids.insert(r.author_id.clone());
-        }
-        let actors = IdentityMap::load(ids, db).await?;
-        rows.into_iter()
-            .map(|r| Self::with_identities(r, &actors))
-            .collect()
-    }
-
-    pub async fn from_db_model<C: ConnectionTrait + TransactionTrait>(
-        row: comments::Model,
-        db: &db::Database<C>,
-    ) -> Result<Comment> {
-        Self::from_db_models(vec![row], db)
-            .await?
-            .pop()
-            .ok_or_else(|| Error::NotFound("Comment".into()))
     }
 }
 

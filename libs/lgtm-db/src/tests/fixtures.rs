@@ -1,7 +1,14 @@
 //! Private fixtures shared by database module tests.
-use super::Database;
+use super::super::Database;
 
-pub async fn databases() -> Vec<(Database, String, tempfile::TempDir)> {
+/// Open independent stores for private entity and migration tests.
+///
+/// Each tuple contains the client, its reconnect URL and a temporary-directory
+/// guard. Keep the guard until the client is closed so SQLite files remain alive.
+/// With the postgres feature, LGTM_TEST_POSTGRES_URL must identify a disposable
+/// database whose user may create schemas. Each test gets a fresh schema; the
+/// process/time/sequence name prevents collisions between concurrent tests.
+pub async fn isolated_databases() -> Vec<(Database, String, tempfile::TempDir)> {
     let temp = tempfile::tempdir().unwrap();
     let url = format!(
         "sqlite://{}?mode=rwc",

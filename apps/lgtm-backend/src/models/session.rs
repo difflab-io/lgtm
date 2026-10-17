@@ -1,104 +1,115 @@
-use super::super::database::models::sessions;
+//! Session identity and immutable reviewed commits with explicit lifecycle data.
 use super::super::{
-    database as db,
-    error::{Error, Result},
+    database::{models::sessions, types::SessionState},
+    error::{Result, invalid},
 };
-use super::identities::IdentityMap;
 use super::{Actor, CommitContext};
-use sea_orm::{ConnectionTrait, TransactionTrait};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Session {
-    pub id: String,
-    pub context_id: String,
+    pub id: uuid::Uuid,
+    pub context_id: uuid::Uuid,
     pub creator: Actor,
-    pub state: String,
     pub commits: CommitContext,
     pub created_at: String,
-    pub completed_at: Option<String>,
-    pub completed_by: Option<Actor>,
-    pub outcome: Option<String>,
-    pub body: Option<String>,
+    #[serde(flatten)]
+    pub status: SessionStatus,
     pub forge_review_id: Option<String>,
     pub submission_status: String,
     pub submission_error: Option<String>,
-    pub request_key: Option<String>,
-    pub request_hash: Option<String>,
 }
 
-impl From<&Session> for sessions::Model {
-    fn from(v: &Session) -> Self {
-        Self {
-            id: v.id.clone(),
-            context_id: v.context_id.clone(),
-            creator_id: v.creator.id.clone(),
-            state: v.state.clone(),
-            base_commit: v.commits.base.clone(),
-            head_commit: v.commits.head.clone(),
-            created_at: v.created_at.clone(),
-            completed_at: v.completed_at.clone(),
-            completed_by_id: v.completed_by.as_ref().map(|a| a.id.clone()),
-            outcome: v.outcome.clone(),
-            body: v.body.clone(),
-            forge_review_id: v.forge_review_id.clone(),
-            submission_status: v.submission_status.clone(),
-            submission_error: v.submission_error.clone(),
-            request_key: v.request_key.clone(),
-            request_hash: v.request_hash.clone(),
-        }
-    }
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "state", content = "completion", rename_all = "snake_case")]
+pub enum SessionStatus {
+    Active,
+    Completed(Box<CompletedSession>),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CompletedSession {
+    pub at: String,
+    pub by: Actor,
+    pub outcome: String,
+    pub body: Option<String>,
+    pub request_key: String,
+    pub request_hash: String,
 }
 
 impl Session {
-    fn with_identities(v: sessions::Model, actors: &IdentityMap) -> Result<Self> {
-        Ok(Session {
-            id: v.id,
-            context_id: v.context_id,
-            state: v.state,
-            created_at: v.created_at,
-            completed_at: v.completed_at,
-            outcome: v.outcome,
-            body: v.body,
-            forge_review_id: v.forge_review_id,
-            submission_status: v.submission_status,
-            submission_error: v.submission_error,
-            request_key: v.request_key,
-            request_hash: v.request_hash,
-            creator: actors.get(&v.creator_id)?,
-            completed_by: actors.optional(v.completed_by_id.as_deref())?,
+    pub fn state(&self) -> &'static str {
+        match self.status {
+            SessionStatus::Active => "active",
+            SessionStatus::Completed(_) => "completed",
+        }
+    }
+
+    pub fn completion(&self) -> Option<&CompletedSession> {
+        match &self.status {
+            SessionStatus::Completed(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    pub fn from_db_model(
+        row: sessions::Model,
+        creator: Actor,
+        completed_by: Option<Actor>,
+    ) -> Result<Self> {
+        let missing = || invalid("Completed session is missing its completion metadata");
+        let status = match row.state {
+            SessionState::Active => SessionStatus::Active,
+            SessionState::Completed => SessionStatus::Completed(Box::new(CompletedSession {
+                at: row.completed_at.ok_or_else(missing)?,
+                by: completed_by.ok_or_else(missing)?,
+                outcome: row.outcome.ok_or_else(missing)?,
+                body: row.body,
+                request_key: row.request_key.ok_or_else(missing)?,
+                request_hash: row.request_hash.ok_or_else(missing)?,
+            })),
+        };
+        Ok(Self {
+            id: row.id,
+            context_id: row.context_id,
+            creator,
             commits: CommitContext {
-                base: v.base_commit,
-                head: v.head_commit,
+                base: row.base_commit,
+                head: row.head_commit,
             },
+            created_at: row.created_at,
+            status,
+            forge_review_id: row.forge_review_id,
+            submission_status: row.submission_status,
+            submission_error: row.submission_error,
         })
     }
+}
 
-    pub async fn from_db_models<C: ConnectionTrait + TransactionTrait>(
-        rows: Vec<sessions::Model>,
-        db: &db::Database<C>,
-    ) -> Result<Vec<Session>> {
-        let mut ids = HashSet::new();
-        for r in &rows {
-            ids.insert(r.creator_id.clone());
-            if let Some(id) = &r.completed_by_id {
-                ids.insert(id.clone());
-            }
+impl From<&Session> for sessions::Model {
+    fn from(value: &Session) -> Self {
+        let completion = value.completion();
+        Self {
+            id: value.id,
+            context_id: value.context_id,
+            creator_id: value.creator.id,
+            state: if completion.is_some() {
+                SessionState::Completed
+            } else {
+                SessionState::Active
+            },
+            base_commit: value.commits.base.clone(),
+            head_commit: value.commits.head.clone(),
+            created_at: value.created_at.clone(),
+            completed_at: completion.map(|v| v.at.clone()),
+            completed_by_id: completion.map(|v| v.by.id),
+            outcome: completion.map(|v| v.outcome.clone()),
+            body: completion.and_then(|v| v.body.clone()),
+            request_key: completion.map(|v| v.request_key.clone()),
+            request_hash: completion.map(|v| v.request_hash.clone()),
+            forge_review_id: value.forge_review_id.clone(),
+            submission_status: value.submission_status.clone(),
+            submission_error: value.submission_error.clone(),
         }
-        let actors = IdentityMap::load(ids, db).await?;
-        rows.into_iter()
-            .map(|r| Self::with_identities(r, &actors))
-            .collect()
-    }
-
-    pub async fn from_db_model<C: ConnectionTrait + TransactionTrait>(
-        row: sessions::Model,
-        db: &db::Database<C>,
-    ) -> Result<Session> {
-        Self::from_db_models(vec![row], db)
-            .await?
-            .pop()
-            .ok_or_else(|| Error::NotFound("Session".into()))
     }
 }

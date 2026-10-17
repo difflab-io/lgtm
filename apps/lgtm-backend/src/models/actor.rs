@@ -1,120 +1,149 @@
-use super::super::database::models::identities;
-use super::super::{database as db, error::Error};
-use super::id;
+//! Logical human or agent attribution, independent of forge posting accounts.
+use super::super::{database::models::identities, database::types::IdentityKind};
 use super::{Result, invalid};
-use sea_orm::{ConnectionTrait, TransactionTrait};
 use serde::{Deserialize, Serialize};
 
+/// An identity referenced by review records.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Actor {
-    pub id: String,
+    pub id: uuid::Uuid,
     pub name: String,
-    pub email: String,
-    pub model: Option<String>,
-    pub provider: Option<String>,
+    #[serde(flatten)]
+    pub kind: ActorKind,
+}
+
+/// Required attribution fields for each kind of actor.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ActorKind {
+    Human { email: String },
+    Agent { model: String, provider: String },
 }
 
 impl Actor {
+    /// Validate the fields required by the selected identity kind.
     pub fn validate(&self) -> Result<()> {
-        if self.name.trim().is_empty()
-            || !self.email.contains('@')
-            || self.name.contains(['\n', '\r'])
-            || self.email.contains(['\n', '\r'])
-        {
-            return Err(invalid("Identity requires a single-line name and email"));
+        fn single(value: &str) -> bool {
+            !value.trim().is_empty() && !value.contains(['\n', '\r'])
         }
-        if self
-            .model
-            .as_ref()
-            .is_some_and(|m| m.trim().is_empty() || m.contains(['\n', '\r']))
-        {
-            return Err(invalid("Model must be a nonempty single-line value"));
+        if !single(&self.name) {
+            return Err(invalid("Identity requires a nonempty single-line name"));
         }
-        Ok(())
+        match &self.kind {
+            ActorKind::Human { email } if !single(email) || !email.contains('@') => {
+                Err(invalid("Human identity requires an email"))
+            }
+            ActorKind::Agent { model, provider } if !single(model) || !single(provider) => {
+                Err(invalid("Agent identity requires a model and provider"))
+            }
+            _ => Ok(()),
+        }
     }
 
+    /// Return the human email; agents have no email.
+    pub fn email(&self) -> Option<&str> {
+        match &self.kind {
+            ActorKind::Human { email } => Some(email),
+            _ => None,
+        }
+    }
+
+    /// Return the agent model; humans have no model.
+    pub fn model(&self) -> Option<&str> {
+        match &self.kind {
+            ActorKind::Agent { model, .. } => Some(model),
+            _ => None,
+        }
+    }
+
+    /// Format attribution for display and Markdown exports.
     pub fn label(&self) -> String {
-        format!(
-            "{} <{}>{}",
-            self.name,
-            self.email,
-            self.model
-                .as_ref()
-                .map(|m| format!(" ({m})"))
-                .unwrap_or_default()
-        )
+        match &self.kind {
+            ActorKind::Human { email } => format!("{} <{}>", self.name, email),
+            ActorKind::Agent { model, provider } => format!("{} ({provider}/{model})", self.name),
+        }
     }
 }
 
 impl From<&Actor> for identities::Model {
-    fn from(v: &Actor) -> Self {
+    fn from(actor: &Actor) -> Self {
+        let (kind, email, model, provider) = match &actor.kind {
+            ActorKind::Human { email } => (IdentityKind::Human, Some(email.clone()), None, None),
+            ActorKind::Agent { model, provider } => (
+                IdentityKind::Agent,
+                None,
+                Some(model.clone()),
+                Some(provider.clone()),
+            ),
+        };
         Self {
-            id: v.id.clone(),
-            name: v.name.clone(),
-            email: v.email.clone(),
-            model: v.model.clone().unwrap_or_default(),
-            provider: v.provider.clone().unwrap_or_default(),
-        }
-    }
-}
-
-impl From<identities::Model> for Actor {
-    fn from(v: identities::Model) -> Self {
-        Self {
-            id: v.id,
-            name: v.name,
-            email: v.email,
-            model: (!v.model.is_empty()).then_some(v.model),
-            provider: (!v.provider.is_empty()).then_some(v.provider),
-        }
-    }
-}
-
-impl Actor {
-    pub(crate) async fn find_or_create<D: ConnectionTrait + TransactionTrait>(
-        conn: &db::Database<D>,
-        name: &str,
-        email: &str,
-        model: Option<String>,
-        provider: Option<String>,
-    ) -> Result<Actor> {
-        let actor = Actor {
-            id: id(),
-            name: name.trim().into(),
-            email: email.trim().to_lowercase(),
+            id: actor.id,
+            name: actor.name.clone(),
+            kind,
+            email,
             model,
             provider,
+            forge_account: String::new(),
+        }
+    }
+}
+
+impl TryFrom<identities::Model> for Actor {
+    type Error = super::super::error::Error;
+
+    fn try_from(row: identities::Model) -> Result<Self> {
+        let kind = match row.kind {
+            IdentityKind::Human => ActorKind::Human {
+                email: row
+                    .email
+                    .ok_or_else(|| invalid("Human identity missing email"))?,
+            },
+            IdentityKind::Agent => ActorKind::Agent {
+                model: row
+                    .model
+                    .ok_or_else(|| invalid("Agent identity missing model"))?,
+                provider: row
+                    .provider
+                    .ok_or_else(|| invalid("Agent identity missing provider"))?,
+            },
+        };
+        let actor = Self {
+            id: row.id,
+            name: row.name,
+            kind,
         };
         actor.validate()?;
-        let provider_key = actor.provider.as_deref().unwrap_or_default();
-        if provider_key.starts_with("forge:")
-            && let Some(found) = conn.identities.by_provider(provider_key).await?
-        {
-            return Ok(found.into());
-        }
-        if actor.model.is_none() {
-            let found = conn.identities.by_email(&actor.email, provider_key).await?;
-            if found.len() > 1 || found.first().is_some_and(|a| !a.model.is_empty()) {
-                return Err(invalid(
-                    "Ambiguous identity; use --identity UUID or specify --model",
-                ));
-            }
-        }
-        conn.identities
-            .insert(&identities::Model::from(&actor))
-            .await?;
-        let row = if provider_key.starts_with("forge:") {
-            conn.identities.by_provider(provider_key).await?
-        } else {
-            conn.identities
-                .by_key(
-                    &actor.email,
-                    actor.model.as_deref().unwrap_or_default(),
-                    provider_key,
-                )
-                .await?
+        Ok(actor)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn variants_require_their_own_fields() {
+        let mut actor = Actor {
+            id: uuid::Uuid::new_v4(),
+            name: "Reviewer".into(),
+            kind: ActorKind::Human {
+                email: String::new(),
+            },
         };
-        row.map(Actor::from)
-            .ok_or_else(|| Error::NotFound("Identity".into()))
+        assert!(actor.validate().is_err());
+        actor.kind = ActorKind::Agent {
+            model: "model".into(),
+            provider: String::new(),
+        };
+        assert!(actor.validate().is_err());
+        actor.kind = ActorKind::Agent {
+            model: "model".into(),
+            provider: "provider".into(),
+        };
+        assert!(actor.validate().is_ok());
+        let row = identities::Model::from(&actor);
+        assert_eq!(row.email, None);
+        assert_eq!(row.model.as_deref(), Some("model"));
+        assert_eq!(Actor::try_from(row).unwrap(), actor);
     }
 }

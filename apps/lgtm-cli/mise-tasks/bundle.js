@@ -27,14 +27,16 @@ if (!generated) throw new Error('Backend did not report generated Protobuf outpu
 const stage = join(cli, '.bundle-stage')
 await rm(stage, { recursive: true, force: true })
 await mkdir(stage)
-await cp(join(root, 'apps/lgtm-backend/src'), join(stage, 'backend'), { recursive: true })
-const backendSource = await readFile(join(stage, 'backend/lib.rs'), 'utf8')
+const backendSource = await readFile(join(root, 'apps/lgtm-backend/src/lib.rs'), 'utf8')
+// Bundle the existing RPC router, not the backend's review-domain/database modules.
+// Future CLI review commands will use the generated RPC client.
 await writeFile(
-  join(stage, 'backend/lib.rs'),
-  backendSource.replace('pub use lgtm_db as database;', 'pub use crate::database;'),
+  join(stage, 'backend.rs'),
+  backendSource
+    .replace(/^pub use lgtm_db as database;\n|^pub mod (?:error|models|services);\n/gm, '')
+    .replace(/\n{3,}/g, '\n\n'),
 )
 await cp(generated, join(stage, 'proto'), { recursive: true })
-await cp(join(root, 'libs/lgtm-db/src'), join(stage, 'db/src'), { recursive: true })
 await cp(join(root, 'apps/lgtm-web/build'), join(stage, 'web'), { recursive: true })
 // Fail before replacing the previous bundle if the web build is incomplete.
 await readFile(join(stage, 'web/index.html'))

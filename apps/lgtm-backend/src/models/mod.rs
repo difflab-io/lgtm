@@ -4,13 +4,14 @@ use std::path::Path;
 pub mod context_key;
 pub use context_key::ContextKey;
 pub mod actor;
-pub use actor::Actor;
+pub use super::database::types::{ContextKind, PostingState, SessionState};
+pub use actor::{Actor, ActorKind};
 pub mod context;
 pub use context::Context;
 pub mod commit_context;
 pub use commit_context::CommitContext;
 pub mod session;
-pub use session::Session;
+pub use session::{CompletedSession, Session, SessionStatus};
 pub mod anchor;
 pub use anchor::Anchor;
 pub mod thread;
@@ -24,8 +25,8 @@ pub use session_filter::SessionFilter;
 pub mod completion;
 pub use completion::Completion;
 
-pub fn id() -> String {
-    uuid::Uuid::new_v4().to_string()
+pub fn id() -> uuid::Uuid {
+    uuid::Uuid::new_v4()
 }
 
 pub fn now() -> String {
@@ -47,4 +48,5 @@ pub use forge_snapshot::ForgeSnapshot;
 pub mod post_receipt;
 pub use post_receipt::PostReceipt;
 
-mod identities;
+pub mod posting_status;
+pub use posting_status::PostingStatus;

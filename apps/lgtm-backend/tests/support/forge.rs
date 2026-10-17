@@ -37,7 +37,7 @@ impl ReviewForgeProvider for FixtureProvider {
 }
 
 pub fn rendered_body(c: &Comment) -> String {
-    match &c.author.model {
+    match c.author.model() {
         Some(model) => format!("{}\n\n> Generated via {model}", c.body),
         None => c.body.clone(),
     }
@@ -54,8 +54,8 @@ pub trait ForgeReview {
 
     async fn prepare_post(
         &self,
-        session_id: &str,
-        comment_id: &str,
+        session_id: &uuid::Uuid,
+        comment_id: &uuid::Uuid,
         request_key: &str,
     ) -> Result<String>;
 }
@@ -89,12 +89,12 @@ impl ForgeReview for ReviewService {
 
     async fn prepare_post(
         &self,
-        session_id: &str,
-        comment_id: &str,
+        session_id: &uuid::Uuid,
+        comment_id: &uuid::Uuid,
         request_key: &str,
     ) -> Result<String> {
-        let session = self.session(session_id).await?;
-        let comment = self.comment(&session.context_id, comment_id).await?;
+        let session = self.get_session(session_id).await?;
+        let comment = self.get_comment(&session.context_id, comment_id).await?;
         let rendered = rendered_body(&comment);
         self.stage_post(session_id, comment_id, request_key, &comment, &rendered)
             .await

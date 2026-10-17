@@ -1,4 +1,39 @@
-//! Entity repositories, SeaORM models, migrations and transactions.
+//! Persist review conversations, identities and sessions through scoped repositories.
+//!
+//! Use [`Database`] for a shared connection pool. Begin a [`Transaction`] to compose
+//! writes across repositories; commit explicitly or drop it to roll back.
+//! Returned [`models`] are SeaORM values. Writes go through [`repositories`];
+//! application validation and workflow orchestration belong to backend services.
+//!
+//! # Examples
+//!
+//! ```
+//! use lgtm_db::{Database, models::identities, types::IdentityKind};
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let db = Database::connect("sqlite::memory:").await?;
+//! let actor = identities::Model {
+//!     id: uuid::Uuid::new_v4(), name: "Alice".into(), kind: IdentityKind::Human,
+//!     email: Some("alice@example.com".into()), model: None, provider: None,
+//!     forge_account: String::new(),
+//! };
+//! let tx = db.begin().await?;
+//! tx.identities.insert(&actor).await?;
+//! assert_eq!(tx.identities.get_by_id(&actor.id).await?, Some(actor));
+//! tx.commit().await?;
+//! db.close().await;
+//! # Ok(()) }
+//! ```
+//!
+//! # Storage and features
+//!
+//! Internal keys are typed UUIDs. External forge IDs are opaque strings, scoped by
+//! context and object kind. Repository keys are canonical natural keys, not URLs.
+//! The default `sqlite` feature enables SQLite; `postgres` adds PostgreSQL.
+//! One private Rust migration history is applied when opening the database.
+//!
+//! # API boundaries
+//!
 //! Entity module paths are private; row models are exported via `models`:
 //! ```compile_fail
 //! use lgtm_db::entities::comments::Model;
@@ -42,4 +77,7 @@ pub mod models;
 pub mod repositories;
 
 #[cfg(test)]
-mod test_support;
+mod tests;
+
+/// Typed database discriminators.
+pub mod types;

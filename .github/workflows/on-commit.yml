@@ -109,12 +109,12 @@ jobs:
           retention-days: 7
 
   publish-release:
-    needs: [plan, single, matrix, database-contracts]
+    needs: [plan, single, matrix]
     outputs:
       version: ${{ needs.plan.outputs.version }}
     if: >-
       always() && needs.plan.outputs.version != '' &&
-      needs.plan.result == 'success' && needs.database-contracts.result == 'success' &&
+      needs.plan.result == 'success' &&
       ((needs.plan.outputs.mode == 'single' &&
         needs.single.result == 'success') ||
        (needs.plan.outputs.mode != 'single' &&
@@ -188,30 +188,3 @@ jobs:
           install-premise: build
           channel: rc
           version: ${{ needs.publish-release.outputs.version }}
-
-  database-contracts:
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: read
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: lgtm
-          POSTGRES_PASSWORD: lgtm-test
-          POSTGRES_DB: lgtm_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U lgtm -d lgtm_test"
-          --health-interval 5s --health-timeout 5s --health-retries 10
-    env:
-      LGTM_TEST_POSTGRES_URL: postgres://lgtm:lgtm-test@127.0.0.1:5432/lgtm_test
-    steps:
-      - uses: actions/checkout@v6
-      - uses: jdx/mise-action@v3
-        with:
-          install: true
-      - run: mise exec -- bun install --frozen-lockfile
-      - run: mise run test:postgres
-      - run: mise exec -- cargo clippy --locked --workspace --all-targets --all-features -- -D warnings

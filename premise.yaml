@@ -15,20 +15,28 @@ workspace:
         - name: lgtm-cli
           template: cloudvoyant/premise-cargo:premise-clap-cli
           path: apps/lgtm-cli
+          ci:
+              check_platforms: [linux, macos]
           answers:
             name: lgtm-cli
         - name: lgtm-web
           template: cloudvoyant/premise-bun:premise-sveltekit-app
           path: apps/lgtm-web
+          ci:
+              check_platforms: [linux]
           answers:
             name: lgtm-web
         - name: lgtm-backend
           template: cloudvoyant/premise-cargo:premise-rust-lib
           path: apps/lgtm-backend
+          ci:
+              check_platforms: [linux]
           answers:
             name: lgtm-backend
         - name: lgtm-db
           template: cloudvoyant/premise-cargo:premise-rust-lib
           path: libs/lgtm-db
+          ci:
+              check_platforms: [linux]
           answers:
             name: lgtm-db

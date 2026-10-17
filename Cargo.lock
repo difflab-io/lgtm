@@ -1798,7 +1798,6 @@ dependencies = [
  "anyhow",
  "axum",
  "buffa",
- "chrono",
  "clap",
  "connectrpc",
  "connectrpc-health",
@@ -1808,18 +1807,13 @@ dependencies = [
  "mime_guess",
  "nix 0.30.1",
  "reqwest",
- "sea-orm",
- "sea-orm-migration",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "tempfile",
- "thiserror",
  "tokio",
  "tower",
  "tracing",
  "tracing-subscriber",
- "uuid",
  "webbrowser",
 ]
 
@@ -1830,9 +1824,11 @@ dependencies = [
  "fs2",
  "sea-orm",
  "sea-orm-migration",
+ "serde",
  "tempfile",
  "thiserror",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

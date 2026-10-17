@@ -5,6 +5,7 @@ use sea_orm::{ActiveModelTrait, IntoActiveModel};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, TransactionTrait};
 use std::sync::Arc;
 
+/// Repository bound to the owning database connection or transaction.
 #[derive(Clone)]
 pub struct IdentityRepository<C = sea_orm::DatabaseConnection> {
     connection: Arc<C>,
@@ -17,48 +18,56 @@ impl<C> IdentityRepository<C> {
 }
 
 impl<C: ConnectionTrait + TransactionTrait> IdentityRepository<C> {
-    pub async fn get(&self, id: &str) -> Result<Option<identities::Model>> {
-        Ok(identities::Entity::find_by_id(id)
+    /// Get a record by its internal UUID; return None when absent or outside the selected context.
+    pub async fn get_by_id(&self, id: &uuid::Uuid) -> Result<Option<identities::Model>> {
+        Ok(identities::Entity::find_by_id(*id)
             .one(self.connection.as_ref())
             .await?)
     }
 
-    pub async fn get_many(&self, ids: Vec<String>) -> Result<Vec<identities::Model>> {
+    /// Get identities for a batch of UUIDs. Missing IDs are omitted.
+    pub async fn get_many(&self, ids: Vec<uuid::Uuid>) -> Result<Vec<identities::Model>> {
         Ok(identities::Entity::find()
             .filter(identities::Column::Id.is_in(ids))
             .all(self.connection.as_ref())
             .await?)
     }
 
-    pub async fn by_provider(&self, provider: &str) -> Result<Option<identities::Model>> {
+    /// Get the identity bound to a scoped opaque forge account.
+    pub async fn get_by_forge_account(&self, account: &str) -> Result<Option<identities::Model>> {
         Ok(identities::Entity::find()
-            .filter(identities::Column::Provider.eq(provider))
+            .filter(identities::Column::ForgeAccount.eq(account))
             .one(self.connection.as_ref())
             .await?)
     }
 
-    pub async fn by_email(&self, email: &str, provider: &str) -> Result<Vec<identities::Model>> {
+    /// Get a local human identity by normalized email.
+    pub async fn get_by_human_email(&self, email: &str) -> Result<Option<identities::Model>> {
         Ok(identities::Entity::find()
             .filter(identities::Column::Email.eq(email))
-            .filter(identities::Column::Provider.eq(provider))
-            .all(self.connection.as_ref())
+            .filter(identities::Column::ForgeAccount.eq(""))
+            .filter(identities::Column::Kind.eq(super::super::types::IdentityKind::Human))
+            .one(self.connection.as_ref())
             .await?)
     }
 
-    pub async fn by_key(
+    /// Get an agent by display name, model and provider.
+    pub async fn get_by_agent(
         &self,
-        email: &str,
+        name: &str,
         model: &str,
         provider: &str,
     ) -> Result<Option<identities::Model>> {
         Ok(identities::Entity::find()
-            .filter(identities::Column::Email.eq(email))
+            .filter(identities::Column::Name.eq(name))
             .filter(identities::Column::Model.eq(model))
             .filter(identities::Column::Provider.eq(provider))
+            .filter(identities::Column::Kind.eq(super::super::types::IdentityKind::Agent))
             .one(self.connection.as_ref())
             .await?)
     }
 
+    /// Insert a new record. Constraint violations are returned as database errors.
     pub async fn insert(&self, row: &identities::Model) -> Result<()> {
         identities::Entity::insert(row.clone().into_active_model().reset_all())
             .on_conflict(OnConflict::new().do_nothing().to_owned())

@@ -5,6 +5,7 @@ use super::super::{
     models::*,
 };
 use super::AuthService;
+use super::identities::IdentityMap;
 use db::Database;
 use db::models::*;
 use sea_orm::{ConnectionTrait, TransactionTrait};
@@ -31,15 +32,17 @@ impl ReviewService {
         &self.database
     }
 
-    pub async fn context(&self, key: &ContextKey) -> Result<Option<Context>> {
+    pub async fn get_context(&self, key: &ContextKey) -> Result<Option<Context>> {
         key.validate()?;
         match self
             .database
             .review_contexts
-            .by_key(key.as_database_key())
+            .get_by_key(key.as_database_key())
             .await?
         {
-            Some(row) => Ok(Some(Context::from_db_model(row, &self.database).await?)),
+            Some(row) => Ok(Some(
+                Self::context_from_db_model(row, &self.database).await?,
+            )),
             None => Ok(None),
         }
     }
@@ -47,17 +50,17 @@ impl ReviewService {
     async fn load_context<D: ConnectionTrait + TransactionTrait>(
         &self,
         conn: &db::Database<D>,
-        id: &str,
+        id: &uuid::Uuid,
     ) -> Result<Context> {
         let row = conn
             .review_contexts
-            .get(id)
+            .get_by_id(id)
             .await?
             .ok_or_else(|| Error::NotFound("Context".into()))?;
-        Context::from_db_model(row, conn).await
+        Self::context_from_db_model(row, conn).await
     }
 
-    async fn context_by_id(&self, id: &str) -> Result<Context> {
+    async fn get_context_by_id(&self, id: &uuid::Uuid) -> Result<Context> {
         self.load_context(&self.database, id).await
     }
 
@@ -69,7 +72,7 @@ impl ReviewService {
         let tx = self.database.begin().await?;
         if let Some(repo) = key.repository() {
             tx.workspace
-                .insert_repository(&repositories::Model { id: repo.into() })
+                .insert_repository(&repositories::Model { key: repo.into() })
                 .await?;
         }
         let seed = Context {
@@ -88,84 +91,92 @@ impl ReviewService {
             .await?;
         let row = tx
             .review_contexts
-            .by_key(key.as_database_key())
+            .get_by_key(key.as_database_key())
             .await?
             .ok_or_else(|| Error::NotFound("Context".into()))?;
         if let Some(path) = path {
             tx.workspace
                 .insert_path(&workspace_paths::Model {
-                    context_id: row.id.clone(),
+                    context_id: row.id,
                     path: path.into(),
                 })
                 .await?;
         }
-        let context = Context::from_db_model(row, &tx).await?;
+        let context = Self::context_from_db_model(row, &tx).await?;
         tx.commit().await?;
         Ok(context)
     }
 
-    pub async fn comment(&self, context: &str, id: &str) -> Result<Comment> {
+    pub async fn get_comment(&self, context: &uuid::Uuid, id: &uuid::Uuid) -> Result<Comment> {
         let row = self
             .database
             .comments
-            .get(context, id)
+            .get_by_id(context, id)
             .await?
             .ok_or_else(|| Error::NotFound("Comment in selected context".into()))?;
-        Comment::from_db_model(row, &self.database).await
+        Self::comment_from_db_model(row, &self.database).await
     }
 
-    pub async fn session(&self, id: &str) -> Result<Session> {
+    pub async fn get_session(&self, id: &uuid::Uuid) -> Result<Session> {
         let row = self
             .database
             .sessions
-            .get(id)
+            .get_by_id(id)
             .await?
             .ok_or_else(|| Error::NotFound(format!("Session {id}")))?;
-        Session::from_db_model(row, &self.database).await
+        Self::session_from_db_model(row, &self.database).await
     }
 
-    pub async fn selected_session(
+    pub async fn get_selected_session(
         &self,
-        context: &str,
-        id: Option<&str>,
+        context: &uuid::Uuid,
+        id: Option<&uuid::Uuid>,
         active_only: bool,
     ) -> Result<Session> {
         if let Some(id) = id {
-            let s = self.session(id).await?;
-            if s.context_id != context {
+            let s = self.get_session(id).await?;
+            if s.context_id != *context {
                 return Err(invalid("Session belongs to another context"));
             }
             return Ok(s);
         }
-        let mut rows = Session::from_db_models(
+        let mut rows = Self::sessions_from_db_models(
             self.database
                 .sessions
-                .list(Some(context), active_only)
+                .get_all(Some(context), active_only)
                 .await?,
             &self.database,
         )
         .await?;
         rows.sort_by(|a, b| {
-            (a.state != "active", std::cmp::Reverse(&a.created_at), &a.id).cmp(&(
-                b.state != "active",
-                std::cmp::Reverse(&b.created_at),
-                &b.id,
-            ))
+            (
+                a.state() != "active",
+                std::cmp::Reverse(&a.created_at),
+                &a.id,
+            )
+                .cmp(&(
+                    b.state() != "active",
+                    std::cmp::Reverse(&b.created_at),
+                    &b.id,
+                ))
         });
         rows.into_iter()
             .next()
             .ok_or_else(|| Error::NotFound("Session; run lgtm session start".into()))
     }
 
-    pub async fn list_sessions(&self, filter: &SessionFilter) -> Result<Vec<(Context, Session)>> {
+    pub async fn get_sessions(&self, filter: &SessionFilter) -> Result<Vec<(Context, Session)>> {
         let mut result = vec![];
-        for session in Session::from_db_models(
-            self.database.sessions.list(None, !filter.completed).await?,
+        for session in Self::sessions_from_db_models(
+            self.database
+                .sessions
+                .get_all(None, !filter.completed)
+                .await?,
             &self.database,
         )
         .await?
         {
-            let context = self.context_by_id(&session.context_id).await?;
+            let context = self.get_context_by_id(&session.context_id).await?;
             if filter
                 .repository
                 .as_deref()
@@ -193,14 +204,20 @@ impl ReviewService {
         Ok(result)
     }
 
-    pub async fn conversation(&self, context: &str, include_drafts: bool) -> Result<Conversation> {
-        let all =
-            Comment::from_db_models(self.database.comments.list(context).await?, &self.database)
-                .await?;
+    pub async fn get_conversation(
+        &self,
+        context: &uuid::Uuid,
+        include_drafts: bool,
+    ) -> Result<Conversation> {
+        let all = Self::comments_from_db_models(
+            self.database.comments.get_all(context).await?,
+            &self.database,
+        )
+        .await?;
         let visible: std::collections::HashSet<_> = all
             .iter()
             .filter(|c| c.position == 0 && (include_drafts || c.visibility == "published"))
-            .map(|c| c.thread_id.clone())
+            .map(|c| c.thread_id)
             .collect();
         let comments = all
             .into_iter()
@@ -208,42 +225,46 @@ impl ReviewService {
                 visible.contains(&c.thread_id) && (include_drafts || c.visibility == "published")
             })
             .collect();
-        let threads = Thread::from_db_models(
-            self.database.comments.list_threads(context).await?,
+        let threads = Self::threads_from_db_models(
+            self.database.comments.get_threads(context).await?,
             &self.database,
         )
         .await?
         .into_iter()
         .filter(|t| visible.contains(&t.id))
         .collect();
-        let sessions = Session::from_db_models(
-            self.database.sessions.list(Some(context), false).await?,
+        let sessions = Self::sessions_from_db_models(
+            self.database.sessions.get_all(Some(context), false).await?,
             &self.database,
         )
         .await?;
         Ok(Conversation {
-            context: self.context_by_id(context).await?,
+            context: self.get_context_by_id(context).await?,
             sessions,
             threads,
             comments,
         })
     }
 
-    async fn lock_context(&self, tx: &db::Transaction, id: &str) -> Result<()> {
+    async fn lock_context(&self, tx: &db::Transaction, id: &uuid::Uuid) -> Result<()> {
         if !tx.review_contexts.advance_revision(id, None).await? {
             return Err(Error::NotFound("Context".into()));
         }
         Ok(())
     }
 
-    async fn require_active_session(&self, tx: &db::Transaction, id: &str) -> Result<Session> {
+    async fn require_active_session(
+        &self,
+        tx: &db::Transaction,
+        id: &uuid::Uuid,
+    ) -> Result<Session> {
         let row = tx
             .sessions
-            .get(id)
+            .get_by_id(id)
             .await?
             .ok_or_else(|| Error::NotFound("Session".into()))?;
-        let s = Session::from_db_model(row, tx).await?;
-        if s.state != "active" {
+        let s = Self::session_from_db_model(row, tx).await?;
+        if s.state() != "active" {
             return Err(Error::Conflict(
                 "Completed session metadata cannot be changed; start a new session".into(),
             ));
@@ -251,13 +272,18 @@ impl ReviewService {
         Ok(s)
     }
 
-    async fn load_thread(&self, tx: &db::Transaction, id: &str, context: &str) -> Result<Thread> {
+    async fn load_thread(
+        &self,
+        tx: &db::Transaction,
+        id: &uuid::Uuid,
+        context: &uuid::Uuid,
+    ) -> Result<Thread> {
         let row = tx
             .comments
             .get_thread(context, id)
             .await?
             .ok_or_else(|| Error::NotFound("Thread in selected context".into()))?;
-        Thread::from_db_model(row, tx).await
+        Self::thread_from_db_model(row, tx).await
     }
 
     pub async fn start_session(
@@ -270,9 +296,9 @@ impl ReviewService {
         let actor = &self.auth.validate_requester(actor).await?;
         let tx = self.database.begin().await?;
         self.lock_context(&tx, &context.id).await?;
-        let row = tx.sessions.active(&context.id).await?;
+        let row = tx.sessions.get_active(&context.id).await?;
         if let Some(row) = row {
-            let s = Session::from_db_model(row, &tx).await?;
+            let s = Self::session_from_db_model(row, &tx).await?;
             tx.commit().await?;
             return Ok(s);
         }
@@ -285,7 +311,7 @@ impl ReviewService {
                     "PR start requires a fresh complete forge fetch; configure a provider (or an explicit test fixture stub)",
                 ));
             }
-            let latest = tx.sessions.list(Some(&context.id), false).await?;
+            let latest = tx.sessions.get_all(Some(&context.id), false).await?;
             if latest.iter().any(|s| {
                 s.completed_at.as_ref().is_some_and(|time| {
                     fresh
@@ -301,15 +327,11 @@ impl ReviewService {
         }
         let s = Session {
             id: id(),
-            context_id: context.id.clone(),
+            context_id: context.id,
             creator: actor.clone(),
-            state: "active".into(),
+            status: SessionStatus::Active,
             commits,
             created_at: now(),
-            completed_at: None,
-            completed_by: None,
-            outcome: None,
-            body: None,
             forge_review_id: None,
             submission_status: if matches!(context.key, ContextKey::PullRequest { .. }) {
                 "unsubmitted"
@@ -318,13 +340,11 @@ impl ReviewService {
             }
             .into(),
             submission_error: None,
-            request_key: None,
-            request_hash: None,
         };
         tx.sessions.insert(&sessions::Model::from(&s)).await?;
         // Original anchors are immutable; only mark their current applicability.
-        let rows = tx.comments.list_threads(&context.id).await?;
-        for mut t in Thread::from_db_models(rows, &tx).await? {
+        let rows = tx.comments.get_threads(&context.id).await?;
+        for mut t in Self::threads_from_db_models(rows, &tx).await? {
             if let Anchor::Line { side, commit, .. } = &t.anchor {
                 let current = if side == "old" {
                     &s.commits.base
@@ -341,7 +361,7 @@ impl ReviewService {
 
     pub async fn add_comment(
         &self,
-        session_id: &str,
+        session_id: &uuid::Uuid,
         actor: &Actor,
         body: &str,
         anchor: Anchor,
@@ -350,7 +370,7 @@ impl ReviewService {
         let actor = &self.auth.validate_requester(actor).await?;
         Comment::validate_body(body)?;
         anchor.validate()?;
-        let seed = self.session(session_id).await?;
+        let seed = self.get_session(session_id).await?;
         let tx = self.database.begin().await?;
         self.lock_context(&tx, &seed.context_id).await?;
         let s = self.require_active_session(&tx, session_id).await?;
@@ -368,8 +388,8 @@ impl ReviewService {
         }
         let t = Thread {
             id: id(),
-            context_id: s.context_id.clone(),
-            origin_session_id: Some(s.id.clone()),
+            context_id: s.context_id,
+            origin_session_id: Some(s.id),
             author: actor.clone(),
             anchor,
             state: "open".into(),
@@ -389,20 +409,20 @@ impl ReviewService {
 
     pub async fn reply(
         &self,
-        session_id: &str,
-        thread_id: &str,
+        session_id: &uuid::Uuid,
+        thread_id: &uuid::Uuid,
         actor: &Actor,
         body: &str,
     ) -> Result<Comment> {
         tracing::debug!("Review action: reply");
         let actor = &self.auth.validate_requester(actor).await?;
         Comment::validate_body(body)?;
-        let seed = self.session(session_id).await?;
+        let seed = self.get_session(session_id).await?;
         let tx = self.database.begin().await?;
         self.lock_context(&tx, &seed.context_id).await?;
         let s = self.require_active_session(&tx, session_id).await?;
         let t = self.load_thread(&tx, thread_id, &s.context_id).await?;
-        let position = tx.comments.next_position(thread_id).await?;
+        let position = tx.comments.get_next_position(thread_id).await?;
         let c = local_comment(&s, &t, actor, body, position);
         tx.comments.insert(&comments::Model::from(&c)).await?;
         tx.commit().await?;
@@ -411,14 +431,14 @@ impl ReviewService {
 
     pub async fn resolve(
         &self,
-        session_id: &str,
-        thread_id: &str,
+        session_id: &uuid::Uuid,
+        thread_id: &uuid::Uuid,
         actor: &Actor,
         resolved: bool,
     ) -> Result<Thread> {
         tracing::debug!("Review action: resolve");
         let actor = &self.auth.validate_requester(actor).await?;
-        let seed = self.session(session_id).await?;
+        let seed = self.get_session(session_id).await?;
         let tx = self.database.begin().await?;
         self.lock_context(&tx, &seed.context_id).await?;
         self.require_active_session(&tx, session_id).await?;
@@ -440,7 +460,7 @@ impl ReviewService {
 
     pub async fn complete(
         &self,
-        context_id: &str,
+        context_id: &uuid::Uuid,
         actor: &Actor,
         input: Completion,
         request_key: &str,
@@ -458,11 +478,11 @@ impl ReviewService {
         self.lock_context(&tx, context_id).await?;
         let row = tx
             .sessions
-            .completion_by_key(context_id, request_key)
+            .get_completion_by_key(context_id, request_key)
             .await?;
         if let Some(row) = row {
-            let s = Session::from_db_model(row, &tx).await?;
-            if s.request_hash.as_deref() != Some(&hash) {
+            let s = Self::session_from_db_model(row, &tx).await?;
+            if s.completion().map(|c| c.request_hash.as_str()) != Some(&hash) {
                 return Err(Error::Conflict(
                     "Retry key was already used with different content or actor".into(),
                 ));
@@ -472,10 +492,10 @@ impl ReviewService {
         }
         let row = tx
             .sessions
-            .active(context_id)
+            .get_active(context_id)
             .await?
             .ok_or_else(|| Error::NotFound("Active session".into()))?;
-        let mut s = Session::from_db_model(row, &tx).await?;
+        let mut s = Self::session_from_db_model(row, &tx).await?;
         let context = self.load_context(&tx, context_id).await?;
         if context.key.kind() == "pr" {
             if !input
@@ -492,26 +512,27 @@ impl ReviewService {
                 "PR outcomes/submission are invalid for notes and local branches",
             ));
         }
-        let rows = tx.comments.drafts_for_session(&s.id).await?;
-        for mut c in Comment::from_db_models(rows, &tx).await? {
+        let rows = tx.comments.get_session_drafts(&s.id).await?;
+        for mut c in Self::comments_from_db_models(rows, &tx).await? {
             c.visibility = "published".into();
             c.updated_at = now();
             tx.comments.update(&comments::Model::from(&c)).await?;
         }
-        s.state = "completed".into();
-        s.completed_at = Some(now());
-        s.completed_by = Some(actor.clone());
-        s.outcome = Some(input.outcome.unwrap_or_else(|| {
-            if context.key.kind() == "notes" {
-                "saved"
-            } else {
-                "ready-to-address"
-            }
-            .into()
+        s.status = SessionStatus::Completed(Box::new(CompletedSession {
+            at: now(),
+            by: actor.clone(),
+            outcome: input.outcome.unwrap_or_else(|| {
+                if context.key.kind() == "notes" {
+                    "saved"
+                } else {
+                    "ready-to-address"
+                }
+                .into()
+            }),
+            body: input.body,
+            request_key: request_key.into(),
+            request_hash: hash,
         }));
-        s.body = input.body;
-        s.request_key = Some(request_key.into());
-        s.request_hash = Some(hash);
         if input.submit {
             s.submission_status = "unsubmitted".into();
             s.submission_error = Some("STUB: no forge submission was performed".into());
@@ -575,12 +596,13 @@ impl ReviewService {
                         "Invalid/incomplete remote root/reply graph or duplicate scoped ID",
                     ));
                 }
-                let actor = Actor::find_or_create(
+                let actor = AuthService::find_or_create(
                     &tx,
                     &c.author.name,
-                    &c.author.email,
-                    None,
-                    Some(format!(
+                    ActorKind::Human {
+                        email: c.author.email.clone(),
+                    },
+                    &format!(
                         "forge:{}",
                         serde_json::to_string(&(
                             match &context.key {
@@ -589,7 +611,7 @@ impl ReviewService {
                             },
                             &c.author.account_id
                         ))?
-                    )),
+                    ),
                 )
                 .await?;
                 authors.push(actor);
@@ -612,7 +634,7 @@ impl ReviewService {
                 .get_thread_by_remote_id(&context.id, &remote_thread.id)
                 .await?;
             let mut thread = if let Some(row) = row {
-                Thread::from_db_model(row, &tx).await?
+                Self::thread_from_db_model(row, &tx).await?
             } else {
                 let root = &remote_thread.comments[0];
                 let existing = tx
@@ -620,12 +642,12 @@ impl ReviewService {
                     .get_by_remote_id(&context.id, &root.kind, &root.id)
                     .await?;
                 if let Some(row) = existing {
-                    let c = Comment::from_db_model(row, &tx).await?;
+                    let c = Self::comment_from_db_model(row, &tx).await?;
                     self.load_thread(&tx, &c.thread_id, &context.id).await?
                 } else {
                     let t = Thread {
                         id: id(),
-                        context_id: context.id.clone(),
+                        context_id: context.id,
                         origin_session_id: None,
                         author: authors[author_index].clone(),
                         anchor: remote_thread.anchor.clone(),
@@ -672,24 +694,24 @@ impl ReviewService {
                     .await?;
                 let existing = row.is_some();
                 let mut comment = if let Some(row) = row {
-                    let c = Comment::from_db_model(row, &tx).await?;
+                    let c = Self::comment_from_db_model(row, &tx).await?;
                     if c.thread_id != thread.id {
                         return Err(Error::Conflict(
                             "Remote comment unexpectedly moved between threads".into(),
                         ));
                     }
-                    if ["sending", "uncertain"].contains(&c.posting_state.as_str()) {
+                    if ["sending", "uncertain"].contains(&c.posting.state().as_str()) {
                         return Err(Error::Conflict(
                             "Pending remote write requires explicit reconciliation".into(),
                         ));
                     }
                     c
                 } else {
-                    let position = tx.comments.next_position(&thread.id).await?;
+                    let position = tx.comments.get_next_position(&thread.id).await?;
                     Comment {
                         id: id(),
-                        context_id: context.id.clone(),
-                        thread_id: thread.id.clone(),
+                        context_id: context.id,
+                        thread_id: thread.id,
                         origin_session_id: None,
                         author: actor.clone(),
                         body: remote.body.clone(),
@@ -703,8 +725,7 @@ impl ReviewService {
                         forge_body: None,
                         forge_updated_at: None,
                         posting_account_id: Some(remote.author.account_id.clone()),
-                        posting_state: "confirmed".into(),
-                        posting_error: None,
+                        posting: PostingStatus::Confirmed,
                         posting_request_key: None,
                         payload_hash: None,
                         remote_presence: "present".into(),
@@ -726,8 +747,8 @@ impl ReviewService {
                 }
             }
         }
-        let rows = tx.comments.list_remote(&context.id).await?;
-        for mut c in Comment::from_db_models(rows, &tx).await? {
+        let rows = tx.comments.get_remote(&context.id).await?;
+        for mut c in Self::comments_from_db_models(rows, &tx).await? {
             if !seen.contains(&(
                 c.forge_object_kind.clone().unwrap_or_default(),
                 c.forge_comment_id.clone().unwrap_or_default(),
@@ -746,13 +767,13 @@ impl ReviewService {
             .update_refresh(&review_contexts::Model::from(&current))
             .await?;
         tx.commit().await?;
-        self.context_by_id(&context.id).await
+        self.get_context_by_id(&context.id).await
     }
 
     pub async fn stage_post(
         &self,
-        session_id: &str,
-        comment_id: &str,
+        session_id: &uuid::Uuid,
+        comment_id: &uuid::Uuid,
         request_key: &str,
         expected: &Comment,
         rendered: &str,
@@ -761,22 +782,22 @@ impl ReviewService {
         if request_key.trim().is_empty() {
             return Err(invalid("Posting requires a retry key"));
         }
-        let seed = self.session(session_id).await?;
+        let seed = self.get_session(session_id).await?;
         let tx = self.database.begin().await?;
         self.lock_context(&tx, &seed.context_id).await?;
         let session = self.require_active_session(&tx, session_id).await?;
         let row = tx
             .comments
-            .get(&session.context_id, comment_id)
+            .get_by_id(&session.context_id, comment_id)
             .await?
             .ok_or_else(|| Error::NotFound("Comment in selected context".into()))?;
-        let mut c = Comment::from_db_model(row, &tx).await?;
-        if c.origin_session_id.as_deref() != Some(session_id) || c.forge_comment_id.is_some() {
+        let mut c = Self::comment_from_db_model(row, &tx).await?;
+        if c.origin_session_id.as_ref() != Some(session_id) || c.forge_comment_id.is_some() {
             return Err(invalid(
                 "Only this review's unposted comments may be submitted",
             ));
         }
-        if ["sending", "uncertain", "confirmed"].contains(&c.posting_state.as_str()) {
+        if ["sending", "uncertain", "confirmed"].contains(&c.posting.state().as_str()) {
             return Err(Error::Conflict(
                 "Comment may already have been sent; reconcile before retrying".into(),
             ));
@@ -795,7 +816,7 @@ impl ReviewService {
             ));
         }
         let rendered = rendered.to_owned();
-        c.posting_state = "sending".into();
+        c.posting = PostingStatus::Sending;
         c.posting_request_key = Some(request_key.into());
         c.payload_hash = Some(format!("{:x}", Sha256::digest(&rendered)));
         c.forge_body = Some(rendered.clone());
@@ -806,8 +827,8 @@ impl ReviewService {
 
     pub async fn posting_uncertain(
         &self,
-        context_id: &str,
-        comment_id: &str,
+        context_id: &uuid::Uuid,
+        comment_id: &uuid::Uuid,
         message: &str,
     ) -> Result<()> {
         tracing::debug!("Review action: posting_uncertain");
@@ -815,12 +836,13 @@ impl ReviewService {
         self.lock_context(&tx, context_id).await?;
         let row = tx
             .comments
-            .get(context_id, comment_id)
+            .get_by_id(context_id, comment_id)
             .await?
             .ok_or_else(|| Error::NotFound("comments".into()))?;
-        let mut c = Comment::from_db_model(row, &tx).await?;
-        c.posting_state = "uncertain".into();
-        c.posting_error = Some(message.into());
+        let mut c = Self::comment_from_db_model(row, &tx).await?;
+        c.posting = PostingStatus::Uncertain {
+            error: message.into(),
+        };
         tx.comments.update(&comments::Model::from(&c)).await?;
         tx.commit().await?;
         Ok(())
@@ -829,8 +851,8 @@ impl ReviewService {
     /// Supply only a verified provider receipt, never a body/footer guess.
     pub async fn confirm_post(
         &self,
-        context_id: &str,
-        comment_id: &str,
+        context_id: &uuid::Uuid,
+        comment_id: &uuid::Uuid,
         request_key: &str,
         receipt: PostReceipt,
     ) -> Result<()> {
@@ -845,10 +867,10 @@ impl ReviewService {
         self.lock_context(&tx, context_id).await?;
         let row = tx
             .comments
-            .get(context_id, comment_id)
+            .get_by_id(context_id, comment_id)
             .await?
             .ok_or_else(|| Error::NotFound("comments".into()))?;
-        let mut c = Comment::from_db_model(row, &tx).await?;
+        let mut c = Self::comment_from_db_model(row, &tx).await?;
         if c.posting_request_key.as_deref() != Some(request_key) {
             return Err(Error::Conflict(
                 "Receipt request key does not match comment".into(),
@@ -865,8 +887,7 @@ impl ReviewService {
         c.forge_object_kind = Some(receipt.kind);
         c.forge_review_id = receipt.review_id;
         c.posting_account_id = Some(receipt.posting_account_id);
-        c.posting_state = "confirmed".into();
-        c.posting_error = None;
+        c.posting = PostingStatus::Confirmed;
         c.remote_presence = "present".into();
         tx.comments.update(&comments::Model::from(&c)).await?;
         if let Some(remote_thread) = receipt.thread_id {
@@ -891,19 +912,19 @@ impl ReviewService {
             "# {}\n\nSession: {} ({})\nCreator: {}\nReviewed base/head: {:?} / {:?}\nOutcome: {:?}\nSubmission: {}\nLast refresh: {:?} ({})\n\nConversation content and resolution are CURRENT, not a historical snapshot.\n",
             conversation.context.key.label(),
             session.id,
-            session.state,
+            session.state(),
             session.creator.label(),
             session.commits.base,
             session.commits.head,
-            session.outcome,
+            session.completion().map(|c| &c.outcome),
             session.submission_status,
             conversation.context.last_refreshed_at,
             conversation.context.refresh_status
         );
-        if let Some(body) = &session.body {
+        if let Some(body) = session.completion().and_then(|c| c.body.as_ref()) {
             out.push_str(&format!("\n{body}\n"));
         }
-        let historical = session.state == "completed";
+        let historical = session.state() == "completed";
         for t in &conversation.threads {
             let all: Vec<_> = conversation
                 .comments
@@ -913,7 +934,7 @@ impl ReviewService {
             if historical
                 && !all
                     .iter()
-                    .any(|c| c.origin_session_id.as_deref() == Some(&session.id))
+                    .any(|c| c.origin_session_id.as_ref() == Some(&session.id))
             {
                 continue;
             }
@@ -927,10 +948,117 @@ impl ReviewService {
                 t.resolved_by.as_ref().map(Actor::label)
             ));
             for c in all {
-                out.push_str(&format!("\n### {} — {}\n\nComment: {} | origin session: {:?} | {} / {} | forge: {:?}/{:?} | remote: {}\n\n{}\n",if c.position==0 {"Comment"} else {"Reply"},c.author.label(),c.id,c.origin_session_id,c.visibility,c.posting_state,c.forge_object_kind,c.forge_comment_id,c.remote_presence,c.body));
+                out.push_str(&format!("\n### {} — {}\n\nComment: {} | origin session: {:?} | {} / {} | forge: {:?}/{:?} | remote: {}\n\n{}\n",if c.position==0 {"Comment"} else {"Reply"},c.author.label(),c.id,c.origin_session_id,c.visibility,c.posting.state(),c.forge_object_kind,c.forge_comment_id,c.remote_presence,c.body));
             }
         }
         out
+    }
+    async fn comments_from_db_models<C: ConnectionTrait + TransactionTrait>(
+        rows: Vec<comments::Model>,
+        db: &db::Database<C>,
+    ) -> Result<Vec<Comment>> {
+        let mut ids = HashSet::new();
+        for r in &rows {
+            ids.insert(r.author_id);
+        }
+        let actors = IdentityMap::load(ids, db).await?;
+        rows.into_iter()
+            .map(|r| Comment::from_db_model(r.clone(), actors.get(&r.author_id)?))
+            .collect()
+    }
+
+    async fn comment_from_db_model<C: ConnectionTrait + TransactionTrait>(
+        row: comments::Model,
+        db: &db::Database<C>,
+    ) -> Result<Comment> {
+        Self::comments_from_db_models(vec![row], db)
+            .await?
+            .pop()
+            .ok_or_else(|| Error::NotFound("Comment".into()))
+    }
+
+    async fn threads_from_db_models<C: ConnectionTrait + TransactionTrait>(
+        rows: Vec<threads::Model>,
+        db: &db::Database<C>,
+    ) -> Result<Vec<Thread>> {
+        let mut ids = HashSet::new();
+        for r in &rows {
+            ids.insert(r.author_id);
+            if let Some(id) = &r.resolved_by_id {
+                ids.insert(*id);
+            }
+            if let Some(id) = &r.updated_by_id {
+                ids.insert(*id);
+            }
+        }
+        let actors = IdentityMap::load(ids, db).await?;
+        rows.into_iter()
+            .map(|r| {
+                Thread::from_db_model(
+                    r.clone(),
+                    actors.get(&r.author_id)?,
+                    actors.optional(r.resolved_by_id.as_ref())?,
+                    actors.optional(r.updated_by_id.as_ref())?,
+                )
+            })
+            .collect()
+    }
+
+    async fn thread_from_db_model<C: ConnectionTrait + TransactionTrait>(
+        row: threads::Model,
+        db: &db::Database<C>,
+    ) -> Result<Thread> {
+        Self::threads_from_db_models(vec![row], db)
+            .await?
+            .pop()
+            .ok_or_else(|| Error::NotFound("Thread".into()))
+    }
+
+    async fn sessions_from_db_models<C: ConnectionTrait + TransactionTrait>(
+        rows: Vec<sessions::Model>,
+        db: &db::Database<C>,
+    ) -> Result<Vec<Session>> {
+        let mut ids = HashSet::new();
+        for r in &rows {
+            ids.insert(r.creator_id);
+            if let Some(id) = &r.completed_by_id {
+                ids.insert(*id);
+            }
+        }
+        let actors = IdentityMap::load(ids, db).await?;
+        rows.into_iter()
+            .map(|r| {
+                Session::from_db_model(
+                    r.clone(),
+                    actors.get(&r.creator_id)?,
+                    actors.optional(r.completed_by_id.as_ref())?,
+                )
+            })
+            .collect()
+    }
+
+    async fn session_from_db_model<C: ConnectionTrait + TransactionTrait>(
+        row: sessions::Model,
+        db: &db::Database<C>,
+    ) -> Result<Session> {
+        Self::sessions_from_db_models(vec![row], db)
+            .await?
+            .pop()
+            .ok_or_else(|| Error::NotFound("Session".into()))
+    }
+
+    async fn context_from_db_model<D: ConnectionTrait + TransactionTrait>(
+        row: review_contexts::Model,
+        conn: &db::Database<D>,
+    ) -> Result<Context> {
+        let paths = conn
+            .workspace
+            .get_paths(&row.id)
+            .await?
+            .into_iter()
+            .map(|p| p.path)
+            .collect();
+        Context::from_db_model(row, paths)
     }
 }
 
@@ -941,9 +1069,9 @@ fn payload<T: Serialize>(v: &T) -> Result<String> {
 fn local_comment(s: &Session, t: &Thread, actor: &Actor, body: &str, position: i64) -> Comment {
     Comment {
         id: id(),
-        context_id: s.context_id.clone(),
-        thread_id: t.id.clone(),
-        origin_session_id: Some(s.id.clone()),
+        context_id: s.context_id,
+        thread_id: t.id,
+        origin_session_id: Some(s.id),
         author: actor.clone(),
         body: body.into(),
         position,
@@ -956,8 +1084,7 @@ fn local_comment(s: &Session, t: &Thread, actor: &Actor, body: &str, position: i
         forge_body: None,
         forge_updated_at: None,
         posting_account_id: None,
-        posting_state: "unposted".into(),
-        posting_error: None,
+        posting: PostingStatus::Unposted,
         posting_request_key: None,
         payload_hash: None,
         remote_presence: "local".into(),

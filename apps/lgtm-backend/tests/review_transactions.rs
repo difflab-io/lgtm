@@ -9,7 +9,7 @@ async fn service_actions_and_client_owned_database_transactions() {
         let review = ReviewService::new(db.clone(), service.auth().clone());
         let actor = review
             .auth()
-            .ensure_identity("Alice", "alice@example.com", None, None)
+            .ensure_human("Alice", "alice@example.com")
             .await
             .unwrap();
         let context = review
@@ -35,19 +35,19 @@ async fn service_actions_and_client_owned_database_transactions() {
         let mut row = comments::Model::from(&comment);
         row.body = "Updated in the same transaction".into();
         let original = row.clone();
-        row.author_id = "cannot-reassign-author".into();
+        row.author_id = uuid::Uuid::new_v4();
         row.origin_session_id = None;
-        row.thread_id = "cannot-move-thread".into();
+        row.thread_id = uuid::Uuid::new_v4();
         row.position = 999;
         row.created_at = "cannot-rewrite-created-at".into();
         assert!(tx.comments.update(&row).await.unwrap());
         tx.commit().await.unwrap();
-        let saved = review.comment(&context.id, &comment.id).await.unwrap();
+        let saved = review.get_comment(&context.id, &comment.id).await.unwrap();
         assert_eq!(saved.body, row.body);
         assert_eq!(saved.author.name, "Alice");
         let stored = db
             .comments
-            .get(&context.id, &comment.id)
+            .get_by_id(&context.id, &comment.id)
             .await
             .unwrap()
             .unwrap();
@@ -64,7 +64,7 @@ async fn service_actions_and_client_owned_database_transactions() {
         nested.commit().await.unwrap();
         assert_eq!(
             tx.comments
-                .get(&context.id, &comment.id)
+                .get_by_id(&context.id, &comment.id)
                 .await
                 .unwrap()
                 .unwrap()
@@ -73,7 +73,11 @@ async fn service_actions_and_client_owned_database_transactions() {
         );
         tx.rollback().await.unwrap();
         assert_eq!(
-            review.comment(&context.id, &comment.id).await.unwrap().body,
+            review
+                .get_comment(&context.id, &comment.id)
+                .await
+                .unwrap()
+                .body,
             saved.body
         );
 
@@ -82,7 +86,11 @@ async fn service_actions_and_client_owned_database_transactions() {
         tx.comments.update(&row).await.unwrap();
         drop(tx);
         assert_eq!(
-            review.comment(&context.id, &comment.id).await.unwrap().body,
+            review
+                .get_comment(&context.id, &comment.id)
+                .await
+                .unwrap()
+                .body,
             saved.body
         );
 
@@ -94,21 +102,27 @@ async fn service_actions_and_client_owned_database_transactions() {
         assert!(tx.comments.update(&row).await.is_err());
         tx.rollback().await.unwrap();
         assert_eq!(
-            review.comment(&context.id, &comment.id).await.unwrap().body,
+            review
+                .get_comment(&context.id, &comment.id)
+                .await
+                .unwrap()
+                .body,
             saved.body
         );
-        let mut session_row = db.sessions.get(&session.id).await.unwrap().unwrap();
+        let mut session_row = db.sessions.get_by_id(&session.id).await.unwrap().unwrap();
         let initial_session = session_row.clone();
-        session_row.creator_id = "cannot-reassign-creator".into();
+        session_row.creator_id = uuid::Uuid::new_v4();
         session_row.base_commit = Some("cannot-change-reviewed-base".into());
         session_row.head_commit = Some("cannot-change-reviewed-head".into());
         session_row.created_at = "cannot-change-created-at".into();
         session_row.completed_at = Some("2026-10-16T00:00:00Z".into());
-        session_row.completed_by_id = Some(actor.id.clone());
+        session_row.completed_by_id = Some(actor.id);
         session_row.outcome = Some("saved".into());
+        session_row.request_key = Some("complete".into());
+        session_row.request_hash = Some("hash".into());
         assert!(db.sessions.complete(&session_row).await.unwrap());
-        let completed = db.sessions.get(&session.id).await.unwrap().unwrap();
-        assert_eq!(completed.state, "completed");
+        let completed = db.sessions.get_by_id(&session.id).await.unwrap().unwrap();
+        assert_eq!(completed.state, SessionState::Completed);
         assert_eq!(completed.creator_id, initial_session.creator_id);
         assert_eq!(completed.base_commit, initial_session.base_commit);
         assert_eq!(completed.head_commit, initial_session.head_commit);
@@ -122,7 +136,7 @@ async fn service_actions_and_client_owned_database_transactions() {
             .unwrap()
             .unwrap();
         let original_thread = thread.clone();
-        thread.author_id = "cannot-reassign-author".into();
+        thread.author_id = uuid::Uuid::new_v4();
         thread.origin_session_id = None;
         thread.anchor_kind = "file".into();
         thread.file_path = Some("cannot-change-anchor.rs".into());

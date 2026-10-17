@@ -29,7 +29,7 @@ async fn shared_services_inherit_each_callers_span_across_awaits() {
     let database = Database::connect("sqlite::memory:").await.unwrap();
     let auth = AuthService::new(database.clone());
     let actor = auth
-        .ensure_identity("Alice", "alice@example.com", None, None)
+        .ensure_human("Alice", "alice@example.com")
         .await
         .unwrap();
     let review = ReviewService::new(database.clone(), auth.clone());
@@ -54,7 +54,7 @@ async fn shared_services_inherit_each_callers_span_across_awaits() {
     let mut request = RequestContext::new(Default::default());
     request
         .headers_mut()
-        .insert("x-lgtm-identity", actor.id.parse().unwrap());
+        .insert("x-lgtm-identity", actor.id.to_string().parse().unwrap());
 
     let output = Capture(Arc::new(Mutex::new(Vec::new())));
     let writer = output.clone();

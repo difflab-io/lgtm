@@ -4,15 +4,18 @@ mod support;
 use support::databases;
 
 async fn actor(db: &ReviewService, name: &str, model: Option<&str>) -> Actor {
-    db.auth()
-        .ensure_identity(
-            name,
-            &format!("{}@example.com", name.to_lowercase()),
-            model.map(str::to_string),
-            None,
-        )
-        .await
-        .unwrap()
+    match model {
+        Some(model) => db
+            .auth()
+            .ensure_agent(name, model, "test-provider")
+            .await
+            .unwrap(),
+        None => db
+            .auth()
+            .ensure_human(name, &format!("{}@example.com", name.to_lowercase()))
+            .await
+            .unwrap(),
+    }
 }
 
 fn completion() -> Completion {
@@ -66,7 +69,7 @@ async fn shared_lifecycle_integrity_concurrency_and_current_exports() {
             .unwrap();
         assert_eq!(reply.position, 1);
         assert!(
-            db.conversation(&context.id, false)
+            db.get_conversation(&context.id, false)
                 .await
                 .unwrap()
                 .comments
@@ -76,7 +79,10 @@ async fn shared_lifecycle_integrity_concurrency_and_current_exports() {
             .complete(&context.id, &alice, completion(), "complete-one")
             .await
             .unwrap();
-        assert_eq!(closed.outcome.as_deref(), Some("saved"));
+        assert_eq!(
+            closed.completion().map(|c| c.outcome.as_str()),
+            Some("saved")
+        );
         assert!(
             db.add_comment(&first.id, &alice, "closed", Anchor::General)
                 .await
@@ -114,17 +120,18 @@ async fn shared_lifecycle_integrity_concurrency_and_current_exports() {
         db.reply(&next.id, &c.thread_id, &alice, "New review, same thread")
             .await
             .unwrap();
-        let live = db.conversation(&context.id, true).await.unwrap();
+        let live = db.get_conversation(&context.id, true).await.unwrap();
         assert_eq!(live.threads.len(), 1);
         assert_eq!(live.comments.len(), 3);
         assert_eq!(live.sessions.len(), 2);
         assert!(ReviewService::export(&live, &closed).contains("New review, same thread"));
         assert_eq!(
-            db.session(&first.id)
+            db.get_session(&first.id)
                 .await
                 .unwrap()
-                .completed_by
+                .completion()
                 .unwrap()
+                .by
                 .id,
             alice.id
         );
@@ -147,7 +154,7 @@ async fn shared_lifecycle_integrity_concurrency_and_current_exports() {
                 .is_err()
         );
         assert!(
-            db.selected_session(&other.id, Some(&first.id), false)
+            db.get_selected_session(&other.id, Some(&first.id), false)
                 .await
                 .is_err()
         );
@@ -182,7 +189,7 @@ async fn shared_lifecycle_integrity_concurrency_and_current_exports() {
                 .is_err()
         );
         let filtered = db
-            .list_sessions(&SessionFilter {
+            .get_sessions(&SessionFilter {
                 path: Some(path.clone()),
                 repository: None,
                 completed: false,
@@ -192,7 +199,7 @@ async fn shared_lifecycle_integrity_concurrency_and_current_exports() {
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].1.id, next.id);
         assert!(
-            db.list_sessions(&SessionFilter {
+            db.get_sessions(&SessionFilter {
                 path: Some(format!("{path}-sibling")),
                 ..Default::default()
             })
@@ -202,20 +209,20 @@ async fn shared_lifecycle_integrity_concurrency_and_current_exports() {
         );
         assert!(
             db.auth()
-                .ensure_identity("Bot renamed", "bot@example.com", None, None)
+                .ensure_agent("Bot", "", "test-provider")
                 .await
                 .is_err()
         );
         assert_eq!(
-            db.auth().identity(&bot.id).await.unwrap().model.as_deref(),
+            db.auth().get_identity(&bot.id).await.unwrap().model(),
             Some("model-one")
         );
         // Concurrent reply positions must be atomic on both backends.
         let mut writes = vec![];
         for i in 0..8 {
             let db = db.clone();
-            let s = next.id.clone();
-            let t = c.thread_id.clone();
+            let s = next.id;
+            let t = c.thread_id;
             let a = alice.clone();
             writes.push(tokio::spawn(async move {
                 db.reply(&s, &t, &a, &format!("reply {i}")).await.unwrap()
@@ -237,11 +244,11 @@ async fn shared_lifecycle_integrity_concurrency_and_current_exports() {
             let mut row = db
                 .database()
                 .comments
-                .get(&context.id, &c.id)
+                .get_by_id(&context.id, &c.id)
                 .await
                 .unwrap()
                 .unwrap();
-            row.context_id = other.id.clone();
+            row.context_id = other.id;
             matches!(
                 db.database().comments.update(&row).await,
                 Ok(false) | Err(_)
@@ -252,7 +259,7 @@ async fn shared_lifecycle_integrity_concurrency_and_current_exports() {
         let reopened = support::service(&url).await.unwrap();
         assert_eq!(
             reopened
-                .conversation(&context.id, true)
+                .get_conversation(&context.id, true)
                 .await
                 .unwrap()
                 .comments
@@ -338,7 +345,7 @@ async fn shared_branch_filters_commit_context_and_anchor_invariants() {
             )
             .await
             .unwrap();
-        let live = db.conversation(&c.id, true).await.unwrap();
+        let live = db.get_conversation(&c.id, true).await.unwrap();
         assert!(
             live.threads
                 .iter()
@@ -366,10 +373,10 @@ async fn shared_branch_filters_commit_context_and_anchor_invariants() {
                 completed: false,
             },
         ] {
-            assert_eq!(db.list_sessions(&filter).await.unwrap().len(), 1);
+            assert_eq!(db.get_sessions(&filter).await.unwrap().len(), 1);
         }
         assert!(
-            db.list_sessions(&SessionFilter {
+            db.get_sessions(&SessionFilter {
                 repository: Some("github.com/acme/other".into()),
                 ..Default::default()
             })
@@ -378,7 +385,7 @@ async fn shared_branch_filters_commit_context_and_anchor_invariants() {
             .is_empty()
         );
         assert_eq!(
-            db.list_sessions(&SessionFilter {
+            db.get_sessions(&SessionFilter {
                 completed: true,
                 ..Default::default()
             })
@@ -413,7 +420,7 @@ async fn shared_branch_filters_commit_context_and_anchor_invariants() {
         for i in 0..6 {
             let db = db.clone();
             let a = a.clone();
-            let context = c.id.clone();
+            let context = c.id;
             completions.push(tokio::spawn(async move {
                 db.complete(&context, &a, completion(), &format!("finish-{i}"))
                     .await
@@ -476,35 +483,39 @@ async fn identity_relations_follow_profile_changes_and_validate_reviewed_commits
             [
                 "Renamed profile".into(),
                 "renamed@example.com".into(),
-                a.id.clone().into(),
+                a.id.into(),
             ],
         ))
         .await
         .unwrap();
         assert_eq!(
-            db.auth().identity(&a.id).await.unwrap().name,
+            db.auth().get_identity(&a.id).await.unwrap().name,
             "Renamed profile"
         );
         assert_eq!(
-            db.session(&s.id).await.unwrap().creator.name,
+            db.get_session(&s.id).await.unwrap().creator.name,
             "Renamed profile"
         );
-        let conversation = db.conversation(&c.id, true).await.unwrap();
+        let conversation = db.get_conversation(&c.id, true).await.unwrap();
         assert_eq!(conversation.comments[0].author.name, "Renamed profile");
         assert_eq!(conversation.threads[0].author.name, "Renamed profile");
         assert_eq!(
-            conversation.sessions[0].completed_by.as_ref().unwrap().name,
+            conversation.sessions[0].completion().unwrap().by.name,
             "Renamed profile"
         );
         assert_eq!(
-            conversation.threads[0].resolved_by.as_ref().unwrap().email,
-            "renamed@example.com"
+            conversation.threads[0]
+                .resolved_by
+                .as_ref()
+                .unwrap()
+                .email(),
+            Some("renamed@example.com")
         );
         assert_eq!(
             conversation.threads[0].updated_by.as_ref().unwrap().name,
             "Renamed profile"
         );
-        let current = db.auth().identity(&a.id).await.unwrap();
+        let current = db.auth().get_identity(&a.id).await.unwrap();
         let replay = db
             .complete(&c.id, &current, completion(), "profile-retry")
             .await
@@ -515,7 +526,10 @@ async fn identity_relations_follow_profile_changes_and_validate_reviewed_commits
         assert!(exported.contains("Renamed profile <renamed@example.com>"));
         assert!(!exported.contains("Alice <alice@example.com>"));
         let mut changed_model = current.clone();
-        changed_model.model = Some("different-model".into());
+        changed_model.kind = ActorKind::Agent {
+            model: "different-model".into(),
+            provider: "test-provider".into(),
+        };
         assert!(
             db.start_session(&c, &changed_model, CommitContext::default())
                 .await
@@ -527,7 +541,7 @@ async fn identity_relations_follow_profile_changes_and_validate_reviewed_commits
             let mut row = db
                 .database()
                 .comments
-                .get(&c.id, &root.id)
+                .get_by_id(&c.id, &root.id)
                 .await
                 .unwrap()
                 .unwrap();
@@ -540,46 +554,37 @@ async fn identity_relations_follow_profile_changes_and_validate_reviewed_commits
 }
 
 #[tokio::test]
-async fn remote_accounts_do_not_collide_with_local_agent_email_or_other_hosts() {
+async fn human_and_agent_identity_shapes_and_keys_are_distinct() {
     for (db, _, _) in databases().await {
-        let bot = db
+        let human = db
             .auth()
-            .ensure_identity("Agent", "shared@example.com", Some("model".into()), None)
+            .ensure_human("Reviewer", "reviewer@example.com")
             .await
             .unwrap();
-        let remote = db
+        let agent = db
             .auth()
-            .ensure_identity(
-                "Forge user",
-                "shared@example.com",
-                None,
-                Some("forge:[\"github.com\",\"123\"]".into()),
-            )
+            .ensure_agent("Reviewer", "model", "provider")
             .await
             .unwrap();
+        assert_ne!(human.id, agent.id);
+        assert_eq!(agent.email(), None);
+        assert_eq!(human.model(), None);
+        assert!(db.auth().ensure_agent("Bad", "model", "").await.is_err());
+        assert!(db.auth().ensure_human("Bad", "").await.is_err());
+        assert_eq!(
+            db.auth()
+                .ensure_agent("Reviewer", "model", "provider")
+                .await
+                .unwrap()
+                .id,
+            agent.id
+        );
         let other = db
             .auth()
-            .ensure_identity(
-                "Other forge",
-                "shared@example.com",
-                None,
-                Some("forge:[\"other.example\",\"123\"]".into()),
-            )
+            .ensure_agent("Reviewer", "model", "other-provider")
             .await
             .unwrap();
-        assert_ne!(remote.id, bot.id);
-        assert_ne!(remote.id, other.id);
-        let changed = db
-            .auth()
-            .ensure_identity(
-                "Renamed remote",
-                "new@example.com",
-                None,
-                remote.provider.clone(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(changed.id, remote.id);
+        assert_ne!(other.id, agent.id);
         db.database().close().await;
     }
 }
