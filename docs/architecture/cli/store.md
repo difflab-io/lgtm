@@ -23,7 +23,13 @@ The store module owns LGTM's runtime files under `~/.lgtm`.
 
 ### Components and Responsibilities
 
-![Runtime store](diagrams/store.svg)
+```mermaid
+flowchart TD
+    CLI["CLI and server modules"] --> STORE["Store: ~/.lgtm"]
+    STORE --> PID["server.pid: process ownership"]
+    STORE --> PORT["server.port: listener discovery"]
+    STORE --> LOG["server.log: background output"]
+```
 
 - `Store` owns the root path and filesystem operations.
 - `Instance` carries a recorded PID and port.
@@ -70,7 +76,7 @@ pub fn foreground_pid_lock(&self) -> Result<File>;
 | `server.port` | Port, removed on graceful shutdown     |
 | `server.log`  | Formatted events and background output |
 
-These files describe a running process. They do not contain review data.
+These files describe a running process. Review data lives separately in `reviews.sqlite`, with a sibling migration lock for SQLite startup. The review handlers derive that default path from `Store::path`; database services own schema/migrations. `LGTM_DATABASE_URL` overrides database selection without changing daemon discovery. Read-only `status` does not initialize the database or create the store directory.
 
 ## Implementation
 
@@ -91,6 +97,6 @@ The PID and port use plain numeric text. `instance` reads them without contactin
 ## References
 
 - [Store implementation](../../../apps/lgtm-cli/src/store.rs).
-- [Lifecycle tests](../../../apps/lgtm-cli/tests/lifecycle.rs).
+- [Lifecycle tests](../../../apps/lgtm-cli/tests/daemon.rs).
 - [Daemon module](daemon.md).
 - [Server module](server.md).

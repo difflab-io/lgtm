@@ -2,13 +2,28 @@
 name = "lgtm-db"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
-description = "A minimal Rust library template that exports a hello greeting."
+rust-version = "1.94"
+description = "Persistent review conversations and sessions using SeaORM."
 repository = "https://github.com/difflab-io/lgtm"
-
 publish = false
 license = "Apache-2.0"
 
+[features]
+default = ["sqlite"]
+sqlite = ["sea-orm/sqlx-sqlite", "sea-orm-migration/sqlx-sqlite"]
+postgres = ["sea-orm/sqlx-postgres", "sea-orm-migration/sqlx-postgres"]
+
 [dependencies]
-anyhow = "1.0.104"
-thiserror = "2.0.20"
+sea-orm = { version = "=2.0.4", default-features = false, features = ["macros", "runtime-tokio-rustls", "with-uuid"] }
+sea-orm-migration = { version = "=2.0.4", default-features = false, features = ["runtime-tokio-rustls"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+fs2 = "0.4"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+
+[dependencies.uuid]
+version = "1"
+features = ["v4", "serde"]
+
+[dev-dependencies]
+tempfile = "3"

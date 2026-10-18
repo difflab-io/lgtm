@@ -1,6 +1,0 @@
-flowchart TD
-    SERVER["Server events"] --> TRACING["tracing"]
-    TRACING --> FORMAT["tracing-subscriber: filter and format"]
-    FORMAT --> FILE["server.log"]
-    DAEMON["daemonize: stdout and stderr"] --> FILE
-    STORE["Store: ~/.lgtm path"] --> FILE

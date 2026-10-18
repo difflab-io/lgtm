@@ -2,7 +2,7 @@
 name = "lgtm-cli"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.94"
 description = "Run LGTM code reviews with a bundled web UI and gRPC server."
 repository = "https://github.com/difflab-io/lgtm"
 publish = ["crates-io"]

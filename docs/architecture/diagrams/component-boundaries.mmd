@@ -1,7 +1,0 @@
-flowchart TD
-    CLI["lgtm up / status / down"] -->|"Process management"| SERVER["Managed lgtm process"]
-    BROWSER["Browser interface"] -->|"Static assets and /rpc"| SERVER
-    NATIVE["Native gRPC client"] -->|"gRPC methods"| SERVER
-    SERVER --> BACKEND["Bundled backend router"]
-    BACKEND --> HELLO["Greeting and health services"]
-    DB["lgtm-db: starter library"]

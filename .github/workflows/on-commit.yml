@@ -1,6 +1,6 @@
 name: On Commit
 
-"on":
+'on':
   pull_request:
     branches: [main]
   push:
@@ -140,7 +140,7 @@ jobs:
           needs.plan.outputs.mode == 'matrix' &&
           needs.plan.outputs.native == 'true'
         with:
-          pattern: "*-*"
+          pattern: '*-*'
           path: ${{ runner.temp }}/premise-files
           merge-multiple: false
       - name: Keep the release checkout clean

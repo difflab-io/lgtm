@@ -23,7 +23,14 @@ The daemon module starts, discovers, and stops the single process that serves th
 
 ### Components and Responsibilities
 
-![Daemon commands](diagrams/daemon.svg)
+```mermaid
+flowchart TD
+    CALL["up / down / status"] --> PROBE["Probe recorded PID and /health"]
+    PROBE --> STORE["Store: PID, port, log paths"]
+    CALL --> START["daemonize: background server"]
+    CALL --> STOP["SIGTERM: stop identified server"]
+    CALL --> URLS["Print UI and API URLs"]
+```
 
 - `daemonize` detaches the server, locks its PID file, and redirects output.
 - `Store` supplies runtime file paths and recorded PID/port values.
@@ -82,6 +89,6 @@ Shutdown uses SIGTERM rather than an HTTP control endpoint. The caller performs 
 ## References
 
 - [Daemon implementation](../../../apps/lgtm-cli/src/daemon.rs).
-- [Lifecycle tests](../../../apps/lgtm-cli/tests/lifecycle.rs).
+- [Lifecycle tests](../../../apps/lgtm-cli/tests/daemon.rs).
 - [Store module](store.md).
 - [Server module](server.md).

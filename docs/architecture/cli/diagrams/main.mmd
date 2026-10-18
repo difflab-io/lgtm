@@ -1,6 +1,0 @@
-flowchart TD
-    MAIN["main: parse CLI command"] --> STORE["Store: select runtime directory"]
-    MAIN --> DAEMON["daemon: up / down / status"]
-    MAIN --> SERVER["server: serve"]
-    MAIN --> UI["ui: review path"]
-    MAIN --> LOG["log: initialize server logging"]

@@ -1,5 +1,11 @@
 //! Reusable LGTM backend with greeting and health RPC services.
 
+pub use lgtm_db as database;
+pub mod error;
+pub mod models;
+pub mod services;
+pub mod utils;
+
 use connectrpc::{Encodable, RequestContext, Response, Router, ServiceRequest, ServiceResult};
 use connectrpc_health::{StaticChecker, install_static};
 use std::sync::Arc;
@@ -16,6 +22,7 @@ use proto::lgtm::v1::{
 struct Greeter;
 
 impl GreeterService for Greeter {
+    #[tracing::instrument(name = "rpc_request", skip_all, fields(rpc.method = "lgtm.v1.GreeterService/SayHello"))]
     async fn say_hello<'a>(
         &'a self,
         _context: RequestContext,

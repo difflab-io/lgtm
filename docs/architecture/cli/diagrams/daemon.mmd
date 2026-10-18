@@ -1,6 +1,0 @@
-flowchart TD
-    CALL["up / down / status"] --> PROBE["Probe recorded PID and /health"]
-    PROBE --> STORE["Store: PID, port, log paths"]
-    CALL --> START["daemonize: background server"]
-    CALL --> STOP["SIGTERM: stop identified server"]
-    CALL --> URLS["Print UI and API URLs"]

@@ -1,6 +1,0 @@
-flowchart TD
-    CLIENT["Browser or API client"] --> SERVER["One Axum listener"]
-    SERVER --> ASSETS["Embedded web assets"]
-    SERVER --> RPC["Backend router: /rpc and root methods"]
-    SERVER --> HEALTH["GET /health: process ID"]
-    SERVER --> STORE["Store: record listening port"]

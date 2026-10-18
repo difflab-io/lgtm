@@ -2,14 +2,26 @@
 name = "lgtm-backend"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.94"
 description = "LGTM backend library and Connect RPC server."
 repository = "https://github.com/difflab-io/lgtm"
 
 publish = false
 license = "Apache-2.0"
 
+[features]
+default = ["sqlite"]
+sqlite = ["lgtm-db/sqlite"]
+postgres = ["lgtm-db/postgres"]
+
 [dependencies]
+url = "2"
+tracing = "0.1"
+lgtm-db = { path = "../../libs/lgtm-db", default-features = false }
+sea-orm = { version = "=2.0.4", default-features = false }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+sha2 = "0.10"
 buffa = { version = "0.9", features = ["json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -20,6 +32,8 @@ connectrpc-health = { version = "0.9.0", default-features = false }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
 
 [dev-dependencies]
+tracing-subscriber = "0.3"
+tempfile = "3"
 connectrpc = { version = "0.9.1", default-features = false, features = ["client"] }
 connectrpc-health = "0.9.0"
 

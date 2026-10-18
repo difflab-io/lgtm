@@ -22,7 +22,14 @@ The server module serves embedded web assets and backend methods through one loc
 
 ### Components and Responsibilities
 
-![Shared UI and API server](diagrams/server.svg)
+```mermaid
+flowchart TD
+    CLIENT["Browser or API client"] --> SERVER["One Axum listener"]
+    SERVER --> ASSETS["Embedded web assets"]
+    SERVER --> RPC["Backend router: /rpc and root methods"]
+    SERVER --> HEALTH["GET /health: process ID"]
+    SERVER --> STORE["Store: record listening port"]
+```
 
 - Axum owns the HTTP listener and request routing.
 - The generated asset table maps URLs to embedded bytes and content types.
@@ -75,6 +82,6 @@ A one-shot notification starts the bounded drain after the signal handler begins
 
 - [Server implementation](../../../apps/lgtm-cli/src/server.rs).
 - [Asset build script](../../../apps/lgtm-cli/build.rs).
-- [Lifecycle tests](../../../apps/lgtm-cli/tests/lifecycle.rs).
+- [Lifecycle tests](../../../apps/lgtm-cli/tests/daemon.rs).
 - [Shared application architecture](../index.md).
 - [Store module](store.md).
