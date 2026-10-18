@@ -10,7 +10,7 @@ pub struct Model {
     /// Internal UUID primary key.
     pub id: uuid::Uuid,
     /// Typed discriminator selecting the permitted record shape.
-    pub kind: super::super::types::ContextKind,
+    pub kind: crate::entities::common::ContextKind,
     /// Canonical absolute path identifying a notes context; NULL for branch/PR contexts.
     pub notes_path: Option<String>,
     /// Canonical repository key referencing repositories.key; NULL for path-only notes.

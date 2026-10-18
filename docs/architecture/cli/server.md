@@ -75,6 +75,6 @@ A one-shot notification starts the bounded drain after the signal handler begins
 
 - [Server implementation](../../../apps/lgtm-cli/src/server.rs).
 - [Asset build script](../../../apps/lgtm-cli/build.rs).
-- [Lifecycle tests](../../../apps/lgtm-cli/tests/integration/daemon.rs).
+- [Lifecycle tests](../../../apps/lgtm-cli/tests/daemon.rs).
 - [Shared application architecture](../index.md).
 - [Store module](store.md).

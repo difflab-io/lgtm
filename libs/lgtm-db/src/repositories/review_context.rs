@@ -46,10 +46,14 @@ impl<C: ConnectionTrait + TransactionTrait> ReviewContextRepository<C> {
         let query = review_contexts::Entity::find();
         let query = match key {
             ContextKey::Notes(path) => query
-                .filter(review_contexts::Column::Kind.eq(super::super::types::ContextKind::Notes))
+                .filter(
+                    review_contexts::Column::Kind.eq(crate::entities::common::ContextKind::Notes),
+                )
                 .filter(review_contexts::Column::NotesPath.eq(path)),
             ContextKey::Branch { repository, branch } => query
-                .filter(review_contexts::Column::Kind.eq(super::super::types::ContextKind::Branch))
+                .filter(
+                    review_contexts::Column::Kind.eq(crate::entities::common::ContextKind::Branch),
+                )
                 .filter(review_contexts::Column::Repository.eq(repository))
                 .filter(review_contexts::Column::Branch.eq(branch)),
             ContextKey::PullRequest {
@@ -58,7 +62,8 @@ impl<C: ConnectionTrait + TransactionTrait> ReviewContextRepository<C> {
                 number,
             } => query
                 .filter(
-                    review_contexts::Column::Kind.eq(super::super::types::ContextKind::PullRequest),
+                    review_contexts::Column::Kind
+                        .eq(crate::entities::common::ContextKind::PullRequest),
                 )
                 .filter(review_contexts::Column::Host.eq(host))
                 .filter(review_contexts::Column::Repository.eq(repository))

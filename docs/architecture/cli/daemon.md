@@ -82,6 +82,6 @@ Shutdown uses SIGTERM rather than an HTTP control endpoint. The caller performs 
 ## References
 
 - [Daemon implementation](../../../apps/lgtm-cli/src/daemon.rs).
-- [Lifecycle tests](../../../apps/lgtm-cli/tests/integration/daemon.rs).
+- [Lifecycle tests](../../../apps/lgtm-cli/tests/daemon.rs).
 - [Store module](store.md).
 - [Server module](server.md).

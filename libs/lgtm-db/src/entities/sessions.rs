@@ -14,7 +14,7 @@ pub struct Model {
     /// UUID of the identity that started the session.
     pub creator_id: uuid::Uuid,
     /// Current lifecycle discriminator for this record.
-    pub state: super::super::types::SessionState,
+    pub state: crate::entities::common::SessionState,
     /// Base commit reviewed by this session; immutable after creation.
     pub base_commit: Option<String>,
     /// Head commit reviewed by this session; immutable after creation.

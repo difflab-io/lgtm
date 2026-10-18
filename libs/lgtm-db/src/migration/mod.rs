@@ -107,7 +107,7 @@ mod tests {
             let identity = identities::Model {
                 id: fixture_id("preserved-identity"),
                 name: "Survives migrations".into(),
-                kind: super::super::types::IdentityKind::Human,
+                kind: crate::entities::common::IdentityKind::Human,
                 email: Some("alice@example.com".into()),
                 model: None,
                 provider: None,
@@ -118,7 +118,7 @@ mod tests {
             use sea_orm::{ActiveModelTrait, Set};
             review_contexts::ActiveModel {
                 id: Set(fixture_id("context")),
-                kind: Set(super::super::types::ContextKind::Notes),
+                kind: Set(crate::entities::common::ContextKind::Notes),
                 notes_path: Set(Some("/populated".into())),
                 revision: Set(0),
                 refresh_status: Set("never".into()),
@@ -131,7 +131,7 @@ mod tests {
                 id: Set(fixture_id("session")),
                 context_id: Set(fixture_id("context")),
                 creator_id: Set(identity.id),
-                state: Set(super::super::types::SessionState::Active),
+                state: Set(crate::entities::common::SessionState::Active),
                 created_at: Set("now".into()),
                 submission_status: Set("local".into()),
                 ..Default::default()
@@ -164,7 +164,7 @@ mod tests {
                 visibility: Set("published".into()),
                 created_at: Set("now".into()),
                 updated_at: Set("now".into()),
-                posting_state: Set(super::super::types::PostingState::Unposted),
+                posting_state: Set(crate::entities::common::PostingState::Unposted),
                 remote_presence: Set("local".into()),
                 ..Default::default()
             }

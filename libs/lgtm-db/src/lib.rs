@@ -77,7 +77,7 @@ pub mod models;
 pub mod repositories;
 
 /// Typed database discriminators.
-pub mod types;
+pub use entities::common as types;
 
 // tests -----------------------------------------------------------------------
 #[cfg(test)]

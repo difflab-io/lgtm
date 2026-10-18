@@ -40,7 +40,7 @@ pub struct Model {
     /// Opaque authenticated forge account that actually posted the comment.
     pub posting_account_id: Option<String>,
     /// Typed posting lifecycle; an uncertain result requires reconciliation rather than blind retry.
-    pub posting_state: super::super::types::PostingState,
+    pub posting_state: crate::entities::common::PostingState,
     /// Required error details only for an uncertain posting state; NULL after confirmation.
     pub posting_error: Option<String>,
     /// Idempotency/reconciliation key of the attempted remote write.

@@ -1,4 +1,5 @@
 pub mod comments;
+pub mod common;
 pub mod identities;
 pub mod repositories;
 pub mod review_contexts;
@@ -28,7 +29,7 @@ mod tests {
                     .insert(&identities::Model {
                         id: fixture_id(id),
                         name: id.into(),
-                        kind: super::super::types::IdentityKind::Human,
+                        kind: crate::entities::common::IdentityKind::Human,
                         email: Some(format!("{id}@example.com")),
                         model: None,
                         provider: None,
@@ -40,7 +41,7 @@ mod tests {
             db.review_contexts
                 .insert(&review_contexts::Model {
                     id: fixture_id("context"),
-                    kind: super::super::types::ContextKind::Notes,
+                    kind: crate::entities::common::ContextKind::Notes,
                     notes_path: Some("/notes".into()),
                     repository: None,
                     branch: None,

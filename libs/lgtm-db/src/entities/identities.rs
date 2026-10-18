@@ -12,7 +12,7 @@ pub struct Model {
     /// Human-readable identity display name.
     pub name: String,
     /// Typed discriminator selecting the permitted record shape.
-    pub kind: super::super::types::IdentityKind,
+    pub kind: crate::entities::common::IdentityKind,
     /// Required human email; NULL for agents.
     pub email: Option<String>,
     /// Required agent model name; NULL for humans.

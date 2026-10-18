@@ -29,7 +29,7 @@ impl<C: ConnectionTrait + TransactionTrait> SessionRepository<C> {
     pub async fn get_active(&self, context: &uuid::Uuid) -> Result<Option<sessions::Model>> {
         Ok(sessions::Entity::find()
             .filter(sessions::Column::ContextId.eq(*context))
-            .filter(sessions::Column::State.eq(super::super::types::SessionState::Active))
+            .filter(sessions::Column::State.eq(crate::entities::common::SessionState::Active))
             .one(self.connection.as_ref())
             .await?)
     }
@@ -58,7 +58,7 @@ impl<C: ConnectionTrait + TransactionTrait> SessionRepository<C> {
             q = q.filter(sessions::Column::ContextId.eq(*c));
         }
         if active_only {
-            q = q.filter(sessions::Column::State.eq(super::super::types::SessionState::Active));
+            q = q.filter(sessions::Column::State.eq(crate::entities::common::SessionState::Active));
         }
         Ok(q.order_by_asc(sessions::Column::CreatedAt)
             .order_by_asc(sessions::Column::Id)
@@ -80,7 +80,7 @@ impl<C: ConnectionTrait + TransactionTrait> SessionRepository<C> {
     pub async fn complete(&self, row: &sessions::Model) -> Result<bool> {
         Ok(sessions::Entity::update_many()
             .set(sessions::ActiveModel {
-                state: sea_orm::Set(super::super::types::SessionState::Completed),
+                state: sea_orm::Set(crate::entities::common::SessionState::Completed),
                 completed_at: sea_orm::Set(row.completed_at.clone()),
                 completed_by_id: sea_orm::Set(row.completed_by_id),
                 outcome: sea_orm::Set(row.outcome.clone()),
@@ -93,7 +93,7 @@ impl<C: ConnectionTrait + TransactionTrait> SessionRepository<C> {
             })
             .filter(sessions::Column::Id.eq(row.id))
             .filter(sessions::Column::ContextId.eq(row.context_id))
-            .filter(sessions::Column::State.eq(super::super::types::SessionState::Active))
+            .filter(sessions::Column::State.eq(crate::entities::common::SessionState::Active))
             .exec(self.connection.as_ref())
             .await?
             .rows_affected

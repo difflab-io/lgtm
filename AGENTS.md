@@ -4,7 +4,7 @@
 
 - Keep backend domain models in `apps/lgtm-backend/src/models/`, services in `src/services/`, and application errors in `src/error.rs`.
 - Put general helpers and external import/export contracts in `src/utils.rs`. Domain models represent application entities.
-- Keep database entities private; expose actual SeaORM models and the repositories required by backend workflows.
+- Keep database entities private; expose actual SeaORM models and the repositories required by backend workflows. Shared SeaORM entity types belong in `libs/lgtm-db/src/entities/common.rs`.
 
 ## Code Style
 
@@ -19,8 +19,10 @@
 
 ## Test Organization
 
+These rules apply to every app and library in the workspace.
+
 - Colocate private unit tests in the source file under `#[cfg(test)] mod tests`. Shared unit fixtures belong under `src/tests/`.
-- Use one `tests/integration.rs` entry point per crate, with named modules under `tests/integration/` for each service or repository area. Shared integration fixtures belong under `tests/support/`.
+- Use separate integration test files directly under `tests/` for each service or repository area (for example, `tests/review_service.rs`). Group cases with inline `mod name { ... }` blocks inside those files. Do not consolidate all integration tests into one file or add a nested `tests/integration/` directory or `#[path]` declarations. Shared integration fixtures belong under `tests/common/`; do not use `tests/support/` or `tests/test_support/`.
 - Name tests `should_<behavior>` and keep fixture helpers separate from test cases with the standard separators.
 - Test multi-operation transactions and full review lifecycles against real SQLite and PostgreSQL. Use dummy external services.
 - Run checks through project Mise tasks invoked by Premise. Keep their source scripts tracked; generated output stays ignored.

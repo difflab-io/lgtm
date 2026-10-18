@@ -46,7 +46,7 @@ impl<C: ConnectionTrait + TransactionTrait> IdentityRepository<C> {
         Ok(identities::Entity::find()
             .filter(identities::Column::Email.eq(email))
             .filter(identities::Column::ForgeAccount.eq(""))
-            .filter(identities::Column::Kind.eq(super::super::types::IdentityKind::Human))
+            .filter(identities::Column::Kind.eq(crate::entities::common::IdentityKind::Human))
             .one(self.connection.as_ref())
             .await?)
     }
@@ -62,7 +62,7 @@ impl<C: ConnectionTrait + TransactionTrait> IdentityRepository<C> {
             .filter(identities::Column::Name.eq(name))
             .filter(identities::Column::Model.eq(model))
             .filter(identities::Column::Provider.eq(provider))
-            .filter(identities::Column::Kind.eq(super::super::types::IdentityKind::Agent))
+            .filter(identities::Column::Kind.eq(crate::entities::common::IdentityKind::Agent))
             .one(self.connection.as_ref())
             .await?)
     }
