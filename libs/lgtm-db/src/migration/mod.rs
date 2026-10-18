@@ -1,11 +1,17 @@
 use sea_orm_migration::prelude::*;
 mod m20261015_220400_review;
+mod m20261018_200000_note_promotions;
+mod m20261018_210000_selected_text;
 
 pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(m20261015_220400_review::Migration)]
+        vec![
+            Box::new(m20261015_220400_review::Migration),
+            Box::new(m20261018_200000_note_promotions::Migration),
+            Box::new(m20261018_210000_selected_text::Migration),
+        ]
     }
 }
 
@@ -182,7 +188,7 @@ mod tests {
             );
             assert_eq!(
                 Migrator::get_applied_migrations(&raw).await.unwrap().len(),
-                1
+                3
             );
             // Retrying a failure is safe, with no successful history row or partial DDL.
             assert!(apply::<Failing>(&raw).await.is_err());
@@ -196,7 +202,7 @@ mod tests {
             );
             assert_eq!(
                 Upgraded::get_applied_migrations(&raw).await.unwrap().len(),
-                2
+                4
             );
             // The exact release refuses an applied migration absent from this executable.
             assert!(Database::connect(&url).await.is_err());

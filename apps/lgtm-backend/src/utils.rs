@@ -58,3 +58,22 @@ pub struct PostReceipt {
     pub review_id: Option<String>,
     pub posting_account_id: String,
 }
+
+/// A UTF-8 text file at the selected content revision.
+#[derive(Clone, Debug)]
+pub struct WorkspaceFile {
+    pub path: String,
+    pub content: String,
+    pub content_hash: String,
+    pub status: String,
+}
+
+/// Picker entry containing immutable reviewed revision IDs.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PullRequest {
+    pub number: i64,
+    pub title: String,
+    pub head: String,
+    pub base: String,
+    pub repository_url: String,
+}

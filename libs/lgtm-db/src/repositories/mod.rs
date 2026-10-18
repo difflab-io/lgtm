@@ -10,3 +10,6 @@ pub use identities::IdentityRepository;
 pub use review_context::ReviewContextRepository;
 pub use sessions::SessionRepository;
 pub use workspace::WorkspaceRepository;
+
+pub mod promotions;
+pub use promotions::PromotionRepository;

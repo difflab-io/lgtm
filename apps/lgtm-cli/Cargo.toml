@@ -13,19 +13,33 @@ license = "Apache-2.0"
 name = "lgtm"
 path = "src/main.rs"
 
+[features]
+default = ["sqlite"]
+sqlite = ["sea-orm/sqlx-sqlite", "sea-orm-migration/sqlx-sqlite"]
+postgres = ["sea-orm/sqlx-postgres", "sea-orm-migration/sqlx-postgres"]
+
 [dependencies]
+base64 = "0.22"
+octocrab = { version = "0.54.1", default-features = false, features = ["default-client", "rustls", "rustls-ring", "timeout"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+sha2 = "0.10"
+url = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+sea-orm = { version = "=2.0.4", default-features = false, features = ["macros", "runtime-tokio-rustls", "with-uuid"] }
+sea-orm-migration = { version = "=2.0.4", default-features = false, features = ["runtime-tokio-rustls"] }
+thiserror = "2"
 anyhow = "1.0.104"
 clap = { version = "4.6.6", features = ["derive"] }
 axum = { version = "0.8", features = ["http2"] }
 buffa = { version = "0.9", features = ["json"] }
-connectrpc = { version = "0.9.1", default-features = false, features = ["server", "json", "axum"] }
+connectrpc = { version = "0.9.1", default-features = false, features = ["server", "json", "axum", "client"] }
 connectrpc-health = { version = "0.9.0", default-features = false }
 dirs = "6"
 fs2 = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "process"] }
 tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

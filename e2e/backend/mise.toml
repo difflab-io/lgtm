@@ -1,0 +1,18 @@
+[tasks.test]
+description = "Run real-process backend end-to-end workflows"
+depends = ["//apps/lgtm-backend:build"]
+run = "cargo test -p lgtm-e2e-backend"
+
+[tasks."format:check"]
+run = "cargo fmt -p lgtm-e2e-backend --check"
+
+[tasks.format]
+run = "cargo fmt -p lgtm-e2e-backend"
+
+[tasks.lint]
+run = "cargo clippy -p lgtm-e2e-backend --all-targets -- -D warnings"
+
+[tasks."test:github:live"]
+description = "Opt-in live GitHub smoke using verified private fixtures"
+depends = ["//apps/lgtm-backend:build"]
+run = "{{config_root}}/../scripts/test-github-review"

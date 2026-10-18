@@ -15,11 +15,52 @@ pub enum Anchor {
         start: i64,
         end: i64,
         side: String,
+        /// Git commit identity, or sha256:-prefixed content identity for local non-Git notes.
         commit: String,
     },
 }
 
 impl Anchor {
+    /// Relocate local content anchors only when their selected lines match uniquely.
+    /// The caller supplies current text and identity; original persisted coordinates remain unchanged.
+    pub fn relocate(
+        &self,
+        content: &str,
+        content_hash: &str,
+        selected_text: Option<&str>,
+    ) -> Option<Self> {
+        let Self::Line {
+            path, side, commit, ..
+        } = self
+        else {
+            return None;
+        };
+        if !commit.starts_with("sha256:") {
+            return None;
+        }
+        if commit == content_hash {
+            return Some(self.clone());
+        }
+        let selected: Vec<_> = selected_text?.split('\n').collect();
+        let lines: Vec<_> = content.lines().collect();
+        let mut matches = lines
+            .windows(selected.len())
+            .enumerate()
+            .filter(|(_, window)| *window == selected.as_slice())
+            .map(|(line, _)| line);
+        let line = matches.next()?;
+        if matches.next().is_some() {
+            return None;
+        }
+        Some(Self::Line {
+            path: path.clone(),
+            start: line as i64 + 1,
+            end: (line + selected.len()) as i64,
+            side: side.clone(),
+            commit: content_hash.into(),
+        })
+    }
+
     pub fn validate(&self) -> Result<()> {
         let path = match self {
             Self::General => return Ok(()),

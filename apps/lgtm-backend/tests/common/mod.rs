@@ -45,3 +45,6 @@ pub async fn service(url: &str) -> Result<ReviewService> {
 
 #[allow(dead_code)] // Used only by remote contract tests.
 pub mod forge;
+
+#[allow(dead_code)]
+pub mod github_http;

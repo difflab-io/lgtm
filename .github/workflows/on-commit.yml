@@ -108,12 +108,32 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [backend, cli, nvim]
+        runner: [ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: cloudvoyant/premise@v0
+        with:
+          setup-only: true
+          install-premise: build
+      - name: Run isolated E2E suite
+        run: premise run e2e:${{ matrix.suite }}
+
   publish-release:
-    needs: [plan, single, matrix]
+    needs: [plan, single, matrix, e2e]
     outputs:
       version: ${{ needs.plan.outputs.version }}
     if: >-
-      always() && needs.plan.outputs.version != '' &&
+      always() && needs.e2e.result == 'success' && needs.plan.outputs.version != '' &&
       needs.plan.result == 'success' &&
       ((needs.plan.outputs.mode == 'single' &&
         needs.single.result == 'success') ||

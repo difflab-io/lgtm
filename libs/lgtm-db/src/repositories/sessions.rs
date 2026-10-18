@@ -76,6 +76,31 @@ impl<C: ConnectionTrait + TransactionTrait> SessionRepository<C> {
         Ok(())
     }
 
+    /// Atomically claim or confirm the existing submission without changing its frozen payload.
+    /// Expected status prevents concurrent submitters from sending the same review twice.
+    pub async fn update_submission(
+        &self,
+        id: &uuid::Uuid,
+        expected_status: &str,
+        status: &str,
+        error: Option<&str>,
+        forge_review_id: Option<&str>,
+    ) -> Result<bool> {
+        Ok(sessions::Entity::update_many()
+            .set(sessions::ActiveModel {
+                submission_status: sea_orm::Set(status.to_owned()),
+                submission_error: sea_orm::Set(error.map(str::to_owned)),
+                forge_review_id: sea_orm::Set(forge_review_id.map(str::to_owned)),
+                ..Default::default()
+            })
+            .filter(sessions::Column::Id.eq(*id))
+            .filter(sessions::Column::SubmissionStatus.eq(expected_status))
+            .exec(self.connection.as_ref())
+            .await?
+            .rows_affected
+            == 1)
+    }
+
     /// Complete an active session without changing its creator or reviewed commits. Return false if no active row matches.
     pub async fn complete(&self, row: &sessions::Model) -> Result<bool> {
         Ok(sessions::Entity::update_many()

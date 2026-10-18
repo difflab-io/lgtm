@@ -143,13 +143,33 @@ Acceptance: Essential, this is big for productivity.
 
 Priority: HIGH
 
-Acceptance: Parity with both Atlas.nvim and Review.nvim features.
+Acceptance: Review-focused parity: CodeDiff comments collapsed by default, Enter/K to open threads, Atlas-style reply/edit/delete/resolve shortcuts, cross-file threads, searchable PR/local-session selection, and review submission with an optional final comment. WhichKey groups and ordinary-file notes follow review.nvim workflows. General PR dashboards, issues, merge and CI browsing are outside scope.
+
+Supported editor installation and keybindings are documented in [lgtm.nvim](../../apps/lgtm.nvim/README.md). CLI access to notes, ignored directories and export is documented in [CLI review usage](../../apps/lgtm-cli/README.md).
 
 ### R12. Agent access and accessibility
 
 Priority: MEDIUM
 
 Acceptance: Also essential, and keeps forge clean from agent slop.
+
+### R13. Export notes and reviews
+
+Priority: HIGH
+
+Acceptance: Export notes, local reviews and GitHub conversations as Markdown through the API, CLI and editor. Preserve authors, anchors, replies, resolution and final review body. Export must not promote, complete or submit anything.
+
+### R14. Operation feedback
+
+Priority: HIGH
+
+Acceptance: Notify draft saves only after backend persistence. Show submission progress, confirmed success, errors and uncertain outcomes, retaining failed text and exposing reconciliation. Document notification dependencies.
+
+### R15. End-to-end validation
+
+Priority: HIGH
+
+Acceptance: Separate Rust backend/CLI and Lua editor suites under top-level `e2e/`, each with its own Mise config and no parent `e2e/mise.toml`. Editor tests use real CodeDiff, WhichKey, notification provider and backend. Deterministic GitHub HTTP fixtures are distinct from live tests; any live fixture repository is private.
 
 ## Success Measures
 

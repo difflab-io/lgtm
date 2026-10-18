@@ -137,6 +137,38 @@ impl<C: ConnectionTrait + TransactionTrait> CommentRepository<C> {
         Ok(())
     }
 
+    /// Delete a selected draft after service ownership and posting-state checks.
+    pub async fn delete_draft(&self, context: &uuid::Uuid, id: &uuid::Uuid) -> Result<bool> {
+        Ok(comments::Entity::delete_many()
+            .filter(comments::Column::ContextId.eq(*context))
+            .filter(comments::Column::Id.eq(*id))
+            .filter(comments::Column::Visibility.eq("draft"))
+            .filter(comments::Column::ForgeCommentId.is_null())
+            .exec(self.connection.as_ref())
+            .await?
+            .rows_affected
+            == 1)
+    }
+
+    /// Remove a thread after deleting its last comment in the same transaction.
+    pub async fn delete_empty_thread(&self, context: &uuid::Uuid, id: &uuid::Uuid) -> Result<bool> {
+        if comments::Entity::find()
+            .filter(comments::Column::ThreadId.eq(*id))
+            .one(self.connection.as_ref())
+            .await?
+            .is_some()
+        {
+            return Ok(false);
+        }
+        Ok(threads::Entity::delete_many()
+            .filter(threads::Column::ContextId.eq(*context))
+            .filter(threads::Column::Id.eq(*id))
+            .exec(self.connection.as_ref())
+            .await?
+            .rows_affected
+            == 1)
+    }
+
     /// Update resolution, applicability and remote linkage while preserving author, ownership and original anchor.
     pub async fn update_thread(&self, row: &threads::Model) -> Result<bool> {
         Ok(threads::Entity::update_many()

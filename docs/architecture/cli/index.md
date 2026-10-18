@@ -13,7 +13,7 @@ The main module parses CLI commands and connects them to the daemon, server, sto
 | [Server](server.md) | Serve web assets and API requests      |
 | [Store](store.md)   | Own runtime paths and PID/port files   |
 | `ui`                | Build review URLs and open the browser |
-| Bundled backend     | Provide greeting and health services   |
+| Bundled backend     | Serve review, identity, greeting and health services   |
 
 ## Requirement
 
@@ -52,13 +52,13 @@ flowchart TD
 
 The entry point parses arguments and constructs a store. For `serve --daemonize`, it detaches before creating the Tokio runtime. Server commands initialize logging before creating the runtime. The entry point then calls the selected module API inside it.
 
-`review` uses the review scaffold to select a local path and passes that path to `ui::open_review`. This function obtains a ready server, encodes the path as a query parameter, and opens the browser. The server's working directory is the store.
+`review` uses the browser compatibility entry point to select a local path and passes that path to `ui::open_review`. This function obtains a ready server, encodes the path as a query parameter, and opens the browser. The server's working directory is the store.
 
-ReviewService and database access stay in the backend; the CLI keeps only review command shapes pending RPCs. The daemon uses the store for discovery and the log module for background output. The server uses the same store for PID ownership and its listening port. These modules share one `Store` value from the entry point.
+ReviewService and database access stay in the backend. Session/comment commands use generated Rust gRPC clients; the bundled server initializes the real backend and its database. The daemon uses the store for discovery and the log module for background output. The server uses the same store for PID ownership and its listening port. These modules share one `Store` value from the entry point.
 
 ### Review-situation flows
 
-These diagrams describe planned review commands through backend RPCs. The current CLI opens the dummy UI and retains session/comment command shapes. It does not call review services or access the database.
+Session/comment commands call backend RPCs. The browser `review` entry point still opens the dummy UI; machine `review --json` uses RPCs. Only the server initializes backend services/storage.
 
 ```mermaid
 flowchart TD
@@ -74,7 +74,7 @@ A context has one active session shared by identities. Completion publishes its 
 
 ```mermaid
 flowchart TD
-    P["Planned CLI: canonical notes path"] --> RPC["Request session through backend RPC"]
+    P["CLI: canonical notes path"] --> RPC["Request session through backend RPC"]
     RPC --> S["Backend selects or creates active session"]
     S --> D["CLI requests draft annotations"]
     D --> C["Backend completes session and publishes locally"]

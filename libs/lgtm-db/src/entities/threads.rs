@@ -21,8 +21,10 @@ pub struct Model {
     pub file_path: Option<String>,
     /// Original diff side, old or new, for a line anchor.
     pub side: Option<String>,
-    /// Original commit SHA to which a line anchor belongs.
+    /// Original Git commit or sha256:-prefixed non-Git content identity.
     pub reviewed_commit: Option<String>,
+    /// Selected non-Git lines only, used for unique relocation after content changes.
+    pub selected_text: Option<String>,
     /// Original inclusive starting line, using one-based indexing.
     pub start_line: Option<i64>,
     /// Original inclusive ending line, using one-based indexing.

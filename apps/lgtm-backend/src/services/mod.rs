@@ -6,3 +6,7 @@ pub use auth::AuthService;
 pub use review::ReviewService;
 
 mod actor;
+
+pub mod workspace;
+
+pub mod forge;

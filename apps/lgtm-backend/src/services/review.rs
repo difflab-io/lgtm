@@ -56,7 +56,7 @@ impl ReviewService {
         Self::context_from_db_model(row, conn).await
     }
 
-    async fn get_context_by_id(&self, id: &uuid::Uuid) -> Result<Context> {
+    pub async fn get_context_by_id(&self, id: &uuid::Uuid) -> Result<Context> {
         self.load_context(&self.database, id).await
     }
 
@@ -225,7 +225,7 @@ impl ReviewService {
                 visible.contains(&c.thread_id) && (include_drafts || c.visibility == "published")
             })
             .collect();
-        let threads = Self::threads_from_db_models(
+        let mut threads: Vec<Thread> = Self::threads_from_db_models(
             self.database.comments.get_threads(context).await?,
             &self.database,
         )
@@ -238,8 +238,36 @@ impl ReviewService {
             &self.database,
         )
         .await?;
+        let current_context = self.get_context_by_id(context).await?;
+        if current_context.key.is_notes() {
+            for thread in &mut threads {
+                if let Anchor::Line { path, commit, .. } = &thread.anchor
+                    && commit.starts_with("sha256:")
+                {
+                    let current = super::workspace::get_workspace(&current_context, path);
+                    let current = current.ok().and_then(|(_, files)| {
+                        files
+                            .into_iter()
+                            .find(|file| file.path == *path && file.status == "present")
+                    });
+                    if let Some(file) = current
+                        && let Some(relocated) = thread.anchor.relocate(
+                            &file.content,
+                            &file.content_hash,
+                            thread.selected_text.as_deref(),
+                        )
+                    {
+                        thread.anchor = relocated;
+                        thread.outdated = false;
+                        continue;
+                    }
+                    thread.outdated = true;
+                    thread.anchor = Anchor::File { path: path.clone() };
+                }
+            }
+        }
         Ok(Conversation {
-            context: self.get_context_by_id(context).await?,
+            context: current_context,
             sessions,
             threads,
             comments,
@@ -372,6 +400,43 @@ impl ReviewService {
         Comment::validate_body(body)?;
         anchor.validate()?;
         let seed = self.get_session(session_id).await?;
+        let mut selected_text = None;
+        if let Anchor::Line {
+            path,
+            start,
+            end,
+            commit,
+            ..
+        } = &anchor
+            && commit.starts_with("sha256:")
+        {
+            let context = self.get_context_by_id(&seed.context_id).await?;
+            if !context.key.is_notes() {
+                return Err(invalid(
+                    "Content hashes are supported only for local notes roots",
+                ));
+            }
+            let (_, files) = super::workspace::get_workspace(&context, path)?;
+            selected_text = files.iter().find(|file| file.path == *path).map(|file| {
+                file.content
+                    .lines()
+                    .skip((*start - 1) as usize)
+                    .take((*end - *start + 1) as usize)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
+            if !files.iter().any(|file| {
+                file.path == *path
+                    && file.status == "present"
+                    && file.content_hash == *commit
+                    && *start >= 1
+                    && *end <= file.content.lines().count() as i64
+            }) {
+                return Err(Error::Conflict(
+                    "File content or line range changed; refresh before commenting".into(),
+                ));
+            }
+        }
         let tx = self.database.begin().await?;
         self.lock_context(&tx, &seed.context_id).await?;
         let s = self.require_active_session(&tx, session_id).await?;
@@ -381,7 +446,11 @@ impl ReviewService {
             } else {
                 &s.commits.head
             };
-            if reviewed.as_deref() != Some(commit.as_str()) {
+            if reviewed.as_deref() != Some(commit.as_str())
+                && !(self.load_context(&tx, &s.context_id).await?.key.is_notes()
+                    && commit.starts_with("sha256:")
+                    && commit.len() == 71)
+            {
                 return Err(invalid(
                     "Line anchor must reference the session's available reviewed commit",
                 ));
@@ -393,6 +462,7 @@ impl ReviewService {
             origin_session_id: Some(s.id),
             author: actor.clone(),
             anchor,
+            selected_text,
             state: "open".into(),
             resolved_by: None,
             resolved_at: None,
@@ -406,6 +476,208 @@ impl ReviewService {
         tx.comments.insert(&comments::Model::from(&c)).await?;
         tx.commit().await?;
         Ok(c)
+    }
+
+    /// Copy selected root notes atomically, retaining original authors and durable provenance.
+    pub async fn promote_notes(
+        &self,
+        source_context: &uuid::Uuid,
+        target_session: &uuid::Uuid,
+        actor: &Actor,
+        ids: &[uuid::Uuid],
+        anchors: &[Anchor],
+        request_key: &str,
+    ) -> Result<Vec<Comment>> {
+        self.auth.validate_requester(actor).await?;
+        if request_key.is_empty() || ids.is_empty() || ids.len() != anchors.len() {
+            return Err(invalid(
+                "Promotion requires a retry key, selected notes and an explicit anchor per note",
+            ));
+        }
+        let source = self.get_context_by_id(source_context).await?;
+        if !source.key.is_notes() {
+            return Err(invalid("Promotion source must be a notes context"));
+        }
+        let seed = self.get_session(target_session).await?;
+        if seed.context_id == *source_context {
+            return Err(invalid("Choose a distinct target review context"));
+        }
+        let tx = self.database.begin().await?;
+        // Stable lock order prevents cross-context promotion deadlocks.
+        let mut contexts = [*source_context, seed.context_id];
+        contexts.sort();
+        for context in contexts {
+            self.lock_context(&tx, &context).await?;
+        }
+        let target = self.require_active_session(&tx, target_session).await?;
+        let mut result = Vec::new();
+        for (source_id, anchor) in ids.iter().zip(anchors) {
+            anchor.validate()?;
+            let row = tx
+                .comments
+                .get_by_id(source_context, source_id)
+                .await?
+                .ok_or_else(|| Error::NotFound("Selected source note".into()))?;
+            let source = Self::comment_from_db_model(row, &tx).await?;
+            if source.position != 0 {
+                return Err(invalid(
+                    "Select root notes; replies remain in their source thread",
+                ));
+            }
+            if let Anchor::Line { commit, side, .. } = anchor {
+                let expected = if side == "old" {
+                    &target.commits.base
+                } else {
+                    &target.commits.head
+                };
+                if expected.as_deref() != Some(commit) {
+                    return Err(invalid(
+                        "Promotion requires a target review commit anchor or explicit file/general fallback",
+                    ));
+                }
+            }
+            let hash = format!(
+                "{:x}",
+                Sha256::digest(serde_json::to_vec(&(&source.body, &source.author, anchor))?)
+            );
+            if let Some(receipt) = tx
+                .promotions
+                .get_source_target(source_id, target_session)
+                .await?
+            {
+                if receipt.payload_hash != hash {
+                    return Err(Error::Conflict(
+                        "Note or target anchor changed since promotion".into(),
+                    ));
+                }
+                let target_id = receipt.target_comment_id.ok_or_else(|| {
+                    Error::Conflict(
+                        "Promoted comment was deleted; start a new review to promote again".into(),
+                    )
+                })?;
+                let existing = tx
+                    .comments
+                    .get_by_id(&target.context_id, &target_id)
+                    .await?
+                    .ok_or_else(|| Error::NotFound("Promoted target comment".into()))?;
+                result.push(Self::comment_from_db_model(existing, &tx).await?);
+                continue;
+            }
+            let thread = Thread {
+                id: uuid::Uuid::new_v4(),
+                context_id: target.context_id,
+                origin_session_id: Some(target.id),
+                author: source.author.clone(),
+                anchor: anchor.clone(),
+                selected_text: None,
+                state: "open".into(),
+                resolved_by: None,
+                resolved_at: None,
+                updated_by: Some(actor.clone()),
+                updated_at: now(),
+                forge_thread_id: None,
+                outdated: false,
+            };
+            let comment = Comment::local(&target, &thread, &source.author, &source.body, 0);
+            tx.comments
+                .insert_thread(&threads::Model::from(&thread))
+                .await?;
+            tx.comments.insert(&comments::Model::from(&comment)).await?;
+            tx.promotions
+                .insert(&note_promotions::Model {
+                    source_comment_id: *source_id,
+                    target_session_id: target.id,
+                    target_comment_id: Some(comment.id),
+                    request_key: request_key.into(),
+                    payload_hash: hash,
+                })
+                .await?;
+            result.push(comment);
+        }
+        tx.commit().await?;
+        Ok(result)
+    }
+
+    /// Edit an owned, unposted draft without changing its attribution or anchor.
+    pub async fn edit_comment(
+        &self,
+        session_id: &uuid::Uuid,
+        comment_id: &uuid::Uuid,
+        actor: &Actor,
+        body: &str,
+    ) -> Result<Comment> {
+        let actor = self.auth.validate_requester(actor).await?;
+        Comment::validate_body(body)?;
+        let seed = self.get_session(session_id).await?;
+        let tx = self.database.begin().await?;
+        self.lock_context(&tx, &seed.context_id).await?;
+        self.require_active_session(&tx, session_id).await?;
+        let row = tx
+            .comments
+            .get_by_id(&seed.context_id, comment_id)
+            .await?
+            .ok_or_else(|| Error::NotFound("Comment".into()))?;
+        let mut comment = Self::comment_from_db_model(row, &tx).await?;
+        if comment.author.id != actor.id
+            || comment.visibility != "draft"
+            || comment.forge_comment_id.is_some()
+            || comment.posting.state().as_str() != "unposted"
+        {
+            return Err(invalid("Only your unposted draft comments can be edited"));
+        }
+        comment.body = body.into();
+        comment.updated_at = now();
+        tx.comments.update(&comments::Model::from(&comment)).await?;
+        tx.commit().await?;
+        Ok(comment)
+    }
+
+    /// Delete an owned unposted draft; root deletion requires an empty reply list.
+    pub async fn delete_comment(
+        &self,
+        session_id: &uuid::Uuid,
+        comment_id: &uuid::Uuid,
+        actor: &Actor,
+    ) -> Result<()> {
+        let actor = self.auth.validate_requester(actor).await?;
+        let seed = self.get_session(session_id).await?;
+        let tx = self.database.begin().await?;
+        self.lock_context(&tx, &seed.context_id).await?;
+        self.require_active_session(&tx, session_id).await?;
+        let row = tx
+            .comments
+            .get_by_id(&seed.context_id, comment_id)
+            .await?
+            .ok_or_else(|| Error::NotFound("Comment".into()))?;
+        if row.author_id != actor.id
+            || row.visibility != "draft"
+            || row.forge_comment_id.is_some()
+            || row.posting_state != db::types::PostingState::Unposted
+        {
+            return Err(invalid("Only your unposted draft comments can be deleted"));
+        }
+        if row.position == 0
+            && tx
+                .comments
+                .get_all(&seed.context_id)
+                .await?
+                .iter()
+                .any(|c| c.thread_id == row.thread_id && c.id != row.id)
+        {
+            return Err(Error::Conflict(
+                "Delete replies before deleting their root".into(),
+            ));
+        }
+        tx.comments
+            .delete_draft(&seed.context_id, comment_id)
+            .await?;
+        if row.position == 0 {
+            tx.comments
+                .delete_empty_thread(&seed.context_id, &row.thread_id)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn reply(
@@ -457,6 +729,128 @@ impl ReviewService {
         tx.comments.update_thread(&threads::Model::from(&t)).await?;
         tx.commit().await?;
         Ok(t)
+    }
+
+    /// Freeze every outgoing comment and the review completion in one transaction.
+    /// A crash exposes either the original active drafts or durable sending state,
+    /// never half-staged comments without a session retry identity.
+    pub async fn prepare_submission(
+        &self,
+        session_id: &uuid::Uuid,
+        actor: &Actor,
+        input: Completion,
+        request_key: &str,
+        prepared: &[(Comment, String, String)],
+    ) -> Result<Session> {
+        let actor = self.auth.validate_requester(actor).await?;
+        if request_key.trim().is_empty()
+            || !input.submit
+            || !input
+                .outcome
+                .as_deref()
+                .is_some_and(|v| ["approve", "reject", "comment"].contains(&v))
+        {
+            return Err(invalid(
+                "Submission requires an outcome and nonempty retry key",
+            ));
+        }
+        let hash = format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&(input.clone(), actor.id))?)
+        );
+        let seed = self.get_session(session_id).await?;
+        let context_id = &seed.context_id;
+        let tx = self.database.begin().await?;
+        self.lock_context(&tx, context_id).await?;
+        let context = self.load_context(&tx, context_id).await?;
+        if !context.key.is_forge_backed() {
+            return Err(invalid("Only forge-backed reviews can be submitted"));
+        }
+        if tx
+            .sessions
+            .get_completion_by_key(context_id, request_key)
+            .await?
+            .is_some()
+        {
+            return Err(Error::Conflict(
+                "Submission was already prepared; reconcile before retrying".into(),
+            ));
+        }
+        let mut session = self.require_active_session(&tx, session_id).await?;
+        if session.creator.id != actor.id {
+            return Err(invalid("Only the session creator can submit this review"));
+        }
+        let comments =
+            Self::comments_from_db_models(tx.comments.get_all(context_id).await?, &tx).await?;
+        let outgoing: Vec<_> = comments
+            .iter()
+            .filter(|c| c.origin_session_id == Some(session.id) && c.forge_comment_id.is_none())
+            .collect();
+        let ids: HashSet<_> = prepared.iter().map(|(c, _, _)| c.id).collect();
+        if ids.len() != prepared.len()
+            || outgoing.len() != prepared.len()
+            || outgoing.iter().any(|c| !ids.contains(&c.id))
+        {
+            return Err(Error::Conflict(
+                "Draft set changed while preparing submission; refresh and retry".into(),
+            ));
+        }
+        for (expected, rendered, key) in prepared {
+            let current = outgoing
+                .iter()
+                .find(|c| c.id == expected.id)
+                .ok_or_else(|| Error::NotFound("Outgoing comment".into()))?;
+            if current.body != expected.body
+                || current.author != expected.author
+                || current.updated_at != expected.updated_at
+                || current.origin_session_id != Some(session.id)
+                || current.posting.state() != db::types::PostingState::Unposted
+                || key.trim().is_empty()
+            {
+                return Err(Error::Conflict(
+                    "Draft content or posting state changed while preparing submission".into(),
+                ));
+            }
+            let mut staged = (**current).clone();
+            staged.visibility = "published".into();
+            staged.posting = PostingStatus::Sending;
+            staged.posting_request_key = Some(key.clone());
+            staged.payload_hash = Some(format!("{:x}", Sha256::digest(rendered.as_bytes())));
+            staged.forge_body = Some(rendered.clone());
+            staged.updated_at = now();
+            tx.comments.update(&comments::Model::from(&staged)).await?;
+        }
+        for mut comment in comments {
+            if comment.origin_session_id == Some(session.id)
+                && comment.visibility == "draft"
+                && !ids.contains(&comment.id)
+            {
+                comment.visibility = "published".into();
+                comment.updated_at = now();
+                tx.comments.update(&comments::Model::from(&comment)).await?;
+            }
+        }
+        session.status = SessionStatus::Completed(Box::new(CompletedSession {
+            at: now(),
+            by: actor,
+            outcome: input.outcome.unwrap(),
+            body: input.body,
+            request_key: request_key.into(),
+            request_hash: hash,
+        }));
+        session.submission_status = "sending".into();
+        session.submission_error = None;
+        if !tx
+            .sessions
+            .complete(&sessions::Model::from(&session))
+            .await?
+        {
+            return Err(Error::Conflict(
+                "Active session changed during submission preparation".into(),
+            ));
+        }
+        tx.commit().await?;
+        Ok(session)
     }
 
     pub async fn complete(
@@ -536,7 +930,7 @@ impl ReviewService {
         }));
         if input.submit {
             s.submission_status = "unsubmitted".into();
-            s.submission_error = Some("STUB: no forge submission was performed".into());
+            s.submission_error = Some("Submission pending provider confirmation".into());
         }
         tx.sessions.complete(&sessions::Model::from(&s)).await?;
         tx.commit().await?;
@@ -658,6 +1052,7 @@ impl ReviewService {
                         origin_session_id: None,
                         author: authors[author_index].clone(),
                         anchor: remote_thread.anchor.clone(),
+                        selected_text: None,
                         state: "open".into(),
                         resolved_by: None,
                         resolved_at: None,

@@ -10,6 +10,8 @@ pub struct Thread {
     pub origin_session_id: Option<uuid::Uuid>,
     pub author: Actor,
     pub anchor: Anchor,
+    /// Original selected text for local content anchors; no full-file snapshot is stored.
+    pub selected_text: Option<String>,
     pub state: String,
     pub resolved_by: Option<Actor>,
     pub resolved_at: Option<String>,
@@ -35,6 +37,7 @@ impl Thread {
             updated_at: v.updated_at,
             forge_thread_id: v.forge_thread_id,
             outdated: v.outdated,
+            selected_text: v.selected_text,
             author,
             resolved_by,
             updated_by,
@@ -76,6 +79,7 @@ impl From<&Thread> for threads::Model {
                 Anchor::Line { side, .. } => Some(side.clone()),
                 _ => None,
             },
+            selected_text: v.selected_text.clone(),
             reviewed_commit: match &v.anchor {
                 Anchor::Line { commit, .. } => Some(commit.clone()),
                 _ => None,

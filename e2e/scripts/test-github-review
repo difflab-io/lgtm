@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""Opt-in real GitHub smoke. Creates only PRIVATE fixtures, then closes/archives them."""
+import base64
+import datetime
+import json
+import os
+from pathlib import Path
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+import uuid
+
+
+def gh(route, method="GET", body=None):
+    args = ["gh", "api", "--hostname", "github.com", "--method", method, route]
+    if body is not None:
+        args += ["--input", "-"]
+    output = subprocess.run(args, input=json.dumps(body) if body is not None else None,
+                            text=True, capture_output=True, check=False)
+    if output.returncode:
+        raise RuntimeError(f"GitHub {method} {route} failed (credentials/permissions/API)")
+    return json.loads(output.stdout) if output.stdout.strip() else None
+
+
+def run():
+    if os.environ.get("LGTM_LIVE_GITHUB_E2E") != "1":
+        print("SKIP: set LGTM_LIVE_GITHUB_E2E=1 to create a private GitHub fixture")
+        return
+    repo = None
+    number = None
+    backend = None
+    report = {"status": "failed"}
+    try:
+        account = gh("user")["login"]
+        name = "lgtm-e2e-" + datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + uuid.uuid4().hex[:6]
+        created = gh("user/repos", "POST", {"name": name, "private": True,
+                     "description": "Private disposable LGTM review API smoke fixture"})
+        repo = created["full_name"]
+        verified = gh("repos/" + repo)
+        if verified.get("private") is not True or verified.get("visibility") != "private":
+            raise RuntimeError("Private visibility verification failed; no test content uploaded")
+        report.update(repository_url=verified["html_url"], private=True)
+        # No content is uploaded before the visibility check above.
+        initial = gh(f"repos/{repo}/contents/fixture.txt", "PUT", {
+            "message": "Initialize private smoke fixture", "content": base64.b64encode(b"first\nsecond\n").decode()})
+        base_branch = gh("repos/" + repo)["default_branch"]
+        base = initial["commit"]["sha"]
+        gh(f"repos/{repo}/git/refs", "POST", {"ref": "refs/heads/review-fixture", "sha": base})
+        changed = gh(f"repos/{repo}/contents/fixture.txt", "PUT", {
+            "message": "Update smoke fixture", "branch": "review-fixture", "sha": initial["content"]["sha"],
+            "content": base64.b64encode(b"first\nchanged\n").decode()})
+        head = changed["commit"]["sha"]
+        pr = gh(f"repos/{repo}/pulls", "POST", {"title": "LGTM private review smoke", "head": "review-fixture",
+                "base": base_branch, "body": "Disposable private E2E fixture; closed and archived after testing."})
+        number = pr["number"]
+        report["pull_request_url"] = pr["html_url"]
+        with tempfile.TemporaryDirectory(prefix="lgtm-live-github-") as home:
+            with socket.socket() as listener:
+                listener.bind(("127.0.0.1", 0))
+                port = listener.getsockname()[1]
+            env = os.environ.copy()
+            for key in ["LGTM_GITHUB_TEST_MODE", "LGTM_GITHUB_TEST_API_URL", "LGTM_DATABASE_URL"]:
+                env.pop(key, None)
+            env.update(LGTM_HOME=home, LGTM_BACKEND_ADDR=f"127.0.0.1:{port}")
+            binary = os.environ.get("LGTM_BACKEND_BIN", str(Path(__file__).resolve().parents[2] / "target/debug/lgtm-backend"))
+            with open(Path(home) / "backend.log", "w+") as log:
+                backend = subprocess.Popen([binary], env=env, stdout=log, stderr=log)
+                endpoint = f"http://127.0.0.1:{port}"
+                identity = None
+
+                def rpc(method, data, service="ReviewService"):
+                    request = urllib.request.Request(endpoint + f"/lgtm.v1.{service}/{method}",
+                                data=json.dumps(data).encode(), headers={"Content-Type": "application/json",
+                                "Connect-Protocol-Version": "1", **({"x-lgtm-identity": identity} if identity else {})})
+                    try:
+                        with urllib.request.urlopen(request, timeout=40) as response:
+                            return json.load(response)
+                    except urllib.error.HTTPError as error:
+                        raise RuntimeError(f"{method}: " + error.read().decode()) from None
+
+                for _ in range(100):
+                    if backend.poll() is not None:
+                        raise RuntimeError("Backend exited during smoke startup")
+                    try:
+                        rpc("GetCapabilities", {}, "IdentityService")
+                        break
+                    except (urllib.error.URLError, ConnectionError):
+                        time.sleep(0.1)
+                identity = rpc("EnsureIdentity", {"name": "LGTM smoke agent", "model": "smoke-test", "provider": "lgtm"}, "IdentityService")["actor"]["id"]
+                context = rpc("EnsureContext", {"key": {"kind": "forge_backed", "repositoryUrl": verified["html_url"], "number": str(number)}})["context"]
+                context = rpc("RefreshContext", {"contextId": context["id"]})["context"]
+                session = rpc("StartSession", {"contextId": context["id"], "base": base, "head": head})["session"]
+                workspace = rpc("GetWorkspace", {"contextId": context["id"]})
+                assert workspace["files"][0]["content"] == "first\nchanged\n"
+                line = rpc("AddComment", {"sessionId": session["id"], "body": "Check the changed line", "anchor": {
+                    "kind": "line", "path": "fixture.txt", "start": "2", "end": "2", "side": "new", "commit": head}})["comment"]
+                rpc("Reply", {"sessionId": session["id"], "threadId": line["threadId"], "body": "Reply smoke comment"})
+                rpc("AddComment", {"sessionId": session["id"], "body": "File-level smoke comment", "anchor": {"kind": "file", "path": "fixture.txt"}})
+                rpc("AddComment", {"sessionId": session["id"], "body": "General smoke comment", "anchor": {"kind": "general"}})
+                submitted = rpc("SubmitReview", {"sessionId": session["id"], "outcome": "comment", "body": "Final smoke review body",
+                                   "requestKey": "live-smoke", "expectedHead": head})["session"]
+                if submitted["submissionStatus"] != "confirmed":
+                    raise RuntimeError("Submission not confirmed: " + json.dumps(submitted))
+                conversation = rpc("GetConversation", {"contextId": context["id"], "includeDrafts": True})
+                assert any(c.get("forgeCommentId") for c in conversation["comments"])
+                rpc("ResolveThread", {"sessionId": session["id"], "threadId": line["threadId"], "resolved": True})
+                rpc("ResolveThread", {"sessionId": session["id"], "threadId": line["threadId"], "resolved": False})
+                rpc("EditComment", {"sessionId": session["id"], "commentId": line["id"], "body": "Edited smoke comment"})
+                rpc("DeleteComment", {"sessionId": session["id"], "commentId": line["id"]})
+                exported = rpc("Export", {"sessionId": session["id"]})
+                assert "Final smoke review body" in exported["markdown"]
+                report.update(status="passed", posting_account=account, checks=["private visibility", "PR selection/content without checkout", "line/file/general comments and replies", "final-body submission", "resolve/reopen", "posted edit/delete", "Markdown export"])
+    finally:
+        if backend is not None:
+            backend.send_signal(signal.SIGINT)
+            try:
+                backend.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                backend.kill()
+                backend.wait()
+        if repo:
+            try:
+                if number:
+                    gh(f"repos/{repo}/pulls/{number}", "PATCH", {"state": "closed"})
+                gh("repos/" + repo, "PATCH", {"archived": True})
+                report["cleanup"] = "pull request closed; private repository archived"
+            except RuntimeError:
+                report["cleanup"] = "cleanup failed; inspect fixture URL"
+        print(json.dumps(report, indent=2))
+
+
+if __name__ == "__main__":
+    run()

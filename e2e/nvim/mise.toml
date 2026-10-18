@@ -1,0 +1,21 @@
+[tools]
+stylua = "2.1.0"
+neovim = "0.12.5"
+
+[tasks.install]
+description = "Fetch exact dependency revisions and CodeDiff native library"
+run = "python3 {{config_root}}/common/run.py --install"
+
+[tasks.test]
+depends = ["install", "//apps/lgtm-cli:build"]
+description = "Real child Neovim against the real backend; isolated state"
+run = "python3 {{config_root}}/common/run.py"
+
+[tasks.lint]
+run = "nvim --headless -u NONE -l {{config_root}}/common/syntax.lua"
+
+[tasks.format]
+run = "stylua --respect-ignores {{config_root}}"
+
+[tasks."format:check"]
+run = "stylua --check --respect-ignores {{config_root}}"

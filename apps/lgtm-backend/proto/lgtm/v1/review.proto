@@ -1,0 +1,299 @@
+syntax = "proto3";
+package lgtm.v1;
+
+// Logical attribution is separate from the local GitHub posting account.
+message Actor {
+  string id = 1;
+  string name = 2;
+  string kind = 3;
+  string email = 4;
+  string model = 5;
+  string provider = 6;
+}
+message EnsureIdentityRequest {
+  string name = 1;
+  string email = 2;
+  string model = 3;
+  string provider = 4;
+}
+service IdentityService {
+  rpc EnsureIdentity(EnsureIdentityRequest) returns (EnsureIdentityResponse);
+  rpc GetCapabilities(GetCapabilitiesRequest) returns (GetCapabilitiesResponse);
+}
+// kind: notes, branch, or forge_backed. Notes path and git_dir are absolute.
+message ContextKey {
+  string kind = 1;
+  string path = 2;
+  string git_dir = 3;
+  string branch = 4;
+  string repository_url = 5;
+  int64 number = 6;
+}
+message Context {
+  string id = 1;
+  ContextKey key = 2;
+  repeated string paths = 3;
+  string refreshed_head = 4;
+  string refreshed_base = 5;
+  string refresh_status = 6;
+  string refresh_error = 7;
+}
+message Session {
+  string id = 1;
+  string context_id = 2;
+  Actor creator = 3;
+  string base = 4;
+  string head = 5;
+  string state = 6;
+  string created_at = 7;
+  string outcome = 8;
+  string body = 9;
+  string submission_status = 10;
+  string submission_error = 11;
+  string forge_review_id = 12;
+}
+// kind: general, file or line; side: old/new. content_hash anchors non-Git files.
+message Anchor {
+  string kind = 1;
+  string path = 2;
+  int64 start = 3;
+  int64 end = 4;
+  string side = 5;
+  string commit = 6;
+  string content_hash = 7;
+}
+message Comment {
+  string id = 1;
+  string thread_id = 2;
+  string context_id = 3;
+  string origin_session_id = 4;
+  Actor author = 5;
+  string body = 6;
+  int64 position = 7;
+  string visibility = 8;
+  string posting_status = 9;
+  string created_at = 10;
+  string updated_at = 11;
+  string forge_comment_id = 12;
+  string remote_presence = 13;
+}
+message Thread {
+  string id = 1;
+  Anchor anchor = 2;
+  string state = 3;
+  bool outdated = 4;
+  Actor author = 5;
+  string forge_thread_id = 6;
+}
+message EnsureContextRequest {
+  ContextKey key = 1;
+  string workspace_path = 2;
+}
+message StartSessionRequest {
+  string context_id = 1;
+  string base = 2;
+  string head = 3;
+}
+message ListSessionsRequest {
+  string path = 1;
+  string git_dir = 2;
+  bool completed = 3;
+}
+message SessionEntry {
+  Context context = 1;
+  Session session = 2;
+}
+message ListSessionsResponse {
+  repeated SessionEntry entries = 1;
+}
+message AddCommentRequest {
+  string session_id = 1;
+  string body = 2;
+  Anchor anchor = 3;
+}
+message ReplyRequest {
+  string session_id = 1;
+  string thread_id = 2;
+  string body = 3;
+}
+message EditCommentRequest {
+  string session_id = 1;
+  string comment_id = 2;
+  string body = 3;
+}
+message DeleteCommentRequest {
+  string session_id = 1;
+  string comment_id = 2;
+}
+message ResolveThreadRequest {
+  string session_id = 1;
+  string thread_id = 2;
+  bool resolved = 3;
+}
+message CompleteSessionRequest {
+  string context_id = 1;
+  string outcome = 2;
+  string body = 3;
+  string request_key = 4;
+}
+message ExportRequest {
+  string session_id = 1;
+  repeated string comment_ids = 2;
+}
+message ExportResponse {
+  string markdown = 1;
+}
+message WorkspaceFile {
+  string path = 1;
+  string content = 2;
+  string base_content = 3;
+  string content_hash = 4;
+  string status = 5;
+}
+message PromoteNotesRequest {
+  string source_context_id = 1;
+  string target_session_id = 2;
+  repeated string comment_ids = 3;
+  string request_key = 4;
+  repeated Anchor anchors = 5;
+}
+message PromoteNotesResponse {
+  repeated Comment comments = 1;
+}
+message ListPullRequestsRequest {
+  string repository_url = 1;
+  string query = 2;
+  uint32 page = 3;
+}
+message PullRequest {
+  int64 number = 1;
+  string title = 2;
+  string head = 3;
+  string base = 4;
+  string repository_url = 5;
+}
+message ListPullRequestsResponse {
+  repeated PullRequest pull_requests = 1;
+  uint32 next_page = 2;
+}
+message RefreshContextRequest {
+  string context_id = 1;
+}
+message SubmitReviewRequest {
+  string session_id = 1;
+  string outcome = 2;
+  string body = 3;
+  string request_key = 4;
+  string expected_head = 5;
+}
+service ReviewService {
+  rpc EnsureContext(EnsureContextRequest) returns (EnsureContextResponse);
+  rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc GetConversation(GetConversationRequest) returns (GetConversationResponse);
+  rpc AddComment(AddCommentRequest) returns (AddCommentResponse);
+  rpc Reply(ReplyRequest) returns (ReplyResponse);
+  rpc EditComment(EditCommentRequest) returns (EditCommentResponse);
+  rpc DeleteComment(DeleteCommentRequest) returns (DeleteCommentResponse);
+  rpc ResolveThread(ResolveThreadRequest) returns (ResolveThreadResponse);
+  rpc CompleteSession(CompleteSessionRequest) returns (CompleteSessionResponse);
+  rpc Export(ExportRequest) returns (ExportResponse);
+  rpc GetWorkspace(GetWorkspaceRequest) returns (GetWorkspaceResponse);
+  rpc PromoteNotes(PromoteNotesRequest) returns (PromoteNotesResponse);
+  rpc ListPullRequests(ListPullRequestsRequest) returns (ListPullRequestsResponse);
+  rpc RefreshContext(RefreshContextRequest) returns (RefreshContextResponse);
+  rpc SubmitReview(SubmitReviewRequest) returns (SubmitReviewResponse);
+  rpc ReconcileSubmission(ReconcileSubmissionRequest) returns (ReconcileSubmissionResponse);
+}
+
+message EnsureIdentityResponse {
+  Actor actor = 1;
+}
+
+message GetCapabilitiesRequest {}
+
+message GetCapabilitiesResponse {
+  string api_version = 1;
+  repeated string capabilities = 2;
+}
+
+message EnsureContextResponse {
+  Context context = 1;
+}
+
+message StartSessionResponse {
+  Session session = 1;
+}
+
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+message GetSessionResponse {
+  Session session = 1;
+}
+
+message GetConversationRequest {
+  string context_id = 1;
+  bool include_drafts = 2;
+}
+
+message GetConversationResponse {
+  Context context = 1;
+  repeated Session sessions = 2;
+  repeated Thread threads = 3;
+  repeated Comment comments = 4;
+}
+
+message AddCommentResponse {
+  Comment comment = 1;
+}
+
+message ReplyResponse {
+  Comment comment = 1;
+}
+
+message EditCommentResponse {
+  Comment comment = 1;
+}
+
+message DeleteCommentResponse {}
+
+message ResolveThreadResponse {
+  Thread thread = 1;
+}
+
+message CompleteSessionResponse {
+  Session session = 1;
+}
+
+message GetWorkspaceRequest {
+  string context_id = 1;
+  string path = 2;
+  bool include_ignored = 3;
+  string base = 4;
+  string head = 5;
+  string mode = 6;
+}
+
+message GetWorkspaceResponse {
+  string root = 1;
+  repeated WorkspaceFile files = 2;
+}
+
+message RefreshContextResponse {
+  Context context = 1;
+}
+
+message SubmitReviewResponse {
+  Session session = 1;
+}
+
+message ReconcileSubmissionRequest {
+  string session_id = 1;
+}
+
+message ReconcileSubmissionResponse {
+  Session session = 1;
+}

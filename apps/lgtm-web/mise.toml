@@ -104,4 +104,4 @@ run = 'bunx --no-install svelte-kit sync && bunx --no-install svelte-check --tsc
 [tasks.generate]
 description = "Regenerate the web RPC client from the backend Protobuf schema"
 depends = ["install"]
-run = ["buf lint ../lgtm-backend/proto", "buf generate ../lgtm-backend/proto --template buf.gen.yaml"]
+run = ["buf lint ../lgtm-backend/proto", "buf generate ../lgtm-backend/proto --template buf.gen.yaml --path ../lgtm-backend/proto/lgtm/v1/hello.proto"]

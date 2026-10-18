@@ -23,6 +23,8 @@ pub struct Database<C = DatabaseConnection> {
     pub workspace: WorkspaceRepository<C>,
     /// Thread, root comment and reply operations.
     pub comments: CommentRepository<C>,
+    /// Source note provenance and idempotent promotion receipts.
+    pub promotions: PromotionRepository<C>,
 }
 
 /// Client-owned transaction exposing the same repositories as a pool-backed client.
@@ -37,6 +39,7 @@ impl<C> Database<C> {
             review_contexts: ReviewContextRepository::new(Arc::clone(&pool)),
             workspace: WorkspaceRepository::new(Arc::clone(&pool)),
             comments: CommentRepository::new(Arc::clone(&pool)),
+            promotions: PromotionRepository::new(Arc::clone(&pool)),
             pool,
         }
     }
@@ -121,8 +124,16 @@ impl Database<DatabaseTransaction> {
             review_contexts,
             workspace,
             comments,
+            promotions,
         } = self;
-        drop((identities, sessions, review_contexts, workspace, comments));
+        drop((
+            identities,
+            sessions,
+            review_contexts,
+            workspace,
+            comments,
+            promotions,
+        ));
         Arc::try_unwrap(pool)
             .map_err(|_| invalid("Transaction still has repository handles in use"))
     }

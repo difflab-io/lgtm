@@ -104,5 +104,5 @@ description = "Validate the deploy contract (no deployable surface)"
 run = 'echo "deploy: no deployable surface"'
 
 [tasks.e2e]
-description = "Validate the e2e contract (no end-to-end surface)"
-run = 'echo "e2e: no end-to-end surface"'
+description = "Run the independent cli E2E suite"
+run = "mise run //e2e/cli:test"

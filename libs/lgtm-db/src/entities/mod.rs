@@ -1,6 +1,7 @@
 pub mod comments;
 pub mod common;
 pub mod identities;
+pub mod note_promotions;
 pub mod repositories;
 pub mod review_contexts;
 pub mod sessions;
@@ -65,6 +66,7 @@ mod tests {
                 file_path: None,
                 side: None,
                 reviewed_commit: None,
+                selected_text: None,
                 start_line: None,
                 end_line: None,
                 state: "resolved".into(),

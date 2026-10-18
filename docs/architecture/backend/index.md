@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Rust backend owns domain validation, requester identity and review workflows over lgtm-db. The production RPC router currently exposes greeting and health only. Review RPCs and forge adapters are not implemented. The CLI manages the daemon and opens the dummy UI; review/session/comment commands are scaffolds and do not access persistence.
+The Rust backend owns domain validation, requester identity and review workflows over lgtm-db. The stateful RPC router exposes IdentityService and ReviewService alongside greeting and health. Both native gRPC clients and direct Connect JSON clients call the same services. The CLI and Neovim plugin use these RPCs; neither owns persistence or depends on the web UI.
 
 ## Requirement
 
@@ -12,7 +12,7 @@ The Rust backend owns domain validation, requester identity and review workflows
 - Track human identities (email) and agent identities (model/provider), independently of forge posting accounts.
 - Keep one active session per context shared by identities; publish drafts on completion and retain completed metadata.
 - Preserve context-owned threads/comments and scoped forge IDs across later sessions.
-- Reconcile supplied complete observations and verified posting receipts without performing network calls.
+- Reconcile complete GitHub observations and verified posting receipts through the Octocrab adapter.
 
 ### Non-Functional
 
@@ -55,7 +55,10 @@ flowchart TB
     Schema --> Storage
 ```
 
-- lib.rs: greeting RPC and health router; future review handlers will translate requests into service calls.
+- lib.rs: greeting/health router and router_with_database for stateful identity/review APIs.
+- rpc/: typed protobuf mappings, per-request tracing, requester metadata and application error mapping.
+- services/workspace.rs: ignored-inclusive notes content and Git working/index/revision reads.
+- services/forge.rs and forge/: GitHub review orchestration, Octocrab HTTP calls and local credential lookup.
 - models/: Actor/ActorKind, Context/ContextKey, Session/SessionStatus, Comment/PostingStatus, Thread/Anchor and domain inputs.
 - services/auth.rs: requester metadata resolution, explicit human/agent lookup/create and requester validation. Authentication and authorization remain future work.
 - services/review.rs: contexts, session lifecycle, comments, resolution, exports and forge reconciliation.
@@ -66,7 +69,7 @@ flowchart TB
 
 ### Data and Control Flow
 
-Future review RPC handlers establish tracing context, resolve the requester and call ReviewService. The service validates actions, opens a transaction, loads identities/workspace paths and converts supplied DB values into domain models. Domain conversion functions do not perform I/O.
+Review RPC handlers establish tracing context, resolve the requester and call ReviewService. The service validates actions, opens a transaction, loads identities/workspace paths and converts supplied DB values into domain models. Domain conversion functions do not perform I/O.
 
 ```mermaid
 flowchart TD
@@ -227,7 +230,7 @@ CLI/RPC boundaries instrument futures. Services emit ordinary tracing macros and
 
 ### Forge boundary
 
-Only supplied observations and receipts are supported. A fresh complete observation is required before each new PR session. Scoped remote IDs preserve known logical authors. Forge account bindings are separate from agent providers. Uncertain posts require reconciliation. Future forge adapters belong in the backend.
+Octocrab performs GitHub REST/GraphQL operations using privately captured local gh credentials. Complete observations and verified receipts feed the existing review service. Scoped remote IDs preserve known logical authors independently of posting accounts. Submission preparation freezes the exact comment set, payloads and session retry identity in one transaction before network writes. Reconciliation confirms accepted outcomes, or finishes an existing pending review only after exact comment/account/head verification. Missing or ambiguous receipts never trigger replay; the user must inspect and complete or discard the pending review on GitHub before retrying.
 
 ### Verification
 
@@ -239,4 +242,28 @@ Service integration tests cover lifecycle, concurrency, identity normalization, 
 - [Services](../../../apps/lgtm-backend/src/services).
 - [Domain models](../../../apps/lgtm-backend/src/models).
 - [Integration tests](../../../apps/lgtm-backend/tests).
-- [CLI scaffold](../cli/index.md).
+- [CLI architecture](../cli/index.md).
+
+### Editor and CLI API
+
+```mermaid
+flowchart LR
+    Neovim["Neovim: async Connect JSON"] --> RPC["IdentityService + ReviewService"]
+    CLI["CLI: generated gRPC client"] --> RPC
+    RPC --> Review["Existing review and auth services"]
+    RPC --> Workspace["Filesystem and Git selection"]
+    RPC --> Forge["Forge orchestration → Octocrab"]
+    Review --> DB["Named repositories"]
+    Forge --> Review
+    Forge --> GitHub["GitHub API"]
+```
+
+These protobuf services share a router, process and database. Service names organize method contracts; they do not start separate daemons. Standalone endpoints have no prefix. The CLI daemon also mounts the router below `/rpc`.
+
+`EnsureIdentity` bootstraps human or agent attribution. Mutations use one `x-lgtm-identity` UUID header. This is claimed local attribution, not remote authentication. Wire discriminators are validated into the existing ContextKey, LocalLocation and Anchor enums; incompatible combinations are rejected.
+
+`GetWorkspace` selects ignored-inclusive explicit notes directories or Git `working`, `staged` and `revisions` content without checking out another revision. Explicit symlink roots resolve to physical identities; nested links are skipped, and selected escapes are rejected. Binary and oversized files have explicit status values. Forge-backed contexts fetch PR changed files and base/head contents through GitHub, without requiring or modifying a local checkout.
+
+Non-Git line anchors carry `contentHash` with a `sha256:` prefix on the wire. The existing immutable `reviewed_commit` column stores that content identity, while Git line anchors keep their commit SHA. New comments verify actual content and line bounds. Each new non-Git line note also stores only its selected-line excerpt. After content changes, a unique exact excerpt match returns relocated line coordinates. Ambiguous, deleted or missing text falls back to an outdated file-level anchor; stored original coordinates remain intact. No baseline snapshot subsystem is introduced.
+
+Promotion copies selected root notes transactionally into an active target review, preserves authors, retains source notes and records provenance. Repeating a source/target promotion returns its existing draft; changed payloads conflict. Deleting the target retains a tombstone so retries cannot recreate it silently. Markdown exports include promotion source IDs.

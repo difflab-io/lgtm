@@ -475,3 +475,15 @@ Private tests cover entity relationships and migration history. Public integrati
 - [Shared entity types](../../../libs/lgtm-db/src/entities/common.rs) and [initial migration](../../../libs/lgtm-db/src/migration/m20261015_220400_review.rs).
 - [Migration runner](../../../libs/lgtm-db/src/migration/mod.rs) and [public integration tests](../../../libs/lgtm-db/tests).
 - [Backend architecture](../backend/index.md) and [CLI review flows](../cli/index.md#review-situation-flows).
+
+### Review workflow additions
+
+The additive `m20261018_200000_note_promotions` migration creates `note_promotions`. Its composite key is `(source_comment_id, target_session_id)`, so each note is promoted once per target review. The row stores the target draft UUID, request key and hash of the source body, author and chosen target anchor. The service inserts the receipt and draft in one transaction.
+
+The source UUID remains after source-note deletion. Target deletion sets `target_comment_id` to NULL and retains a retry tombstone. A target-session foreign key preserves review ownership. `PromotionRepository` exposes named reads/insertion rather than raw database access.
+
+For non-Git notes, `threads.reviewed_commit` also accepts a `sha256:`-prefixed content identity. This reuses the existing immutable line-anchor shape without changing context identity or adding snapshot tables. Git anchors continue to store commit IDs. Services validate which identity is allowed for a context.
+
+`CommentRepository::delete_draft` and `delete_empty_thread` support owned unposted draft deletion under the service's context transaction. A root with replies must have its replies removed first. Submission receipt/state updates use the existing session columns and named repository methods; no second submission store exists.
+
+The additive `m20261018_210000_selected_text` migration adds nullable `threads.selected_text`. It contains only the original selected lines for new non-Git line notes. Domain relocation accepts one exact match in current content and otherwise leaves an outdated file-level fallback. The original line/commit columns and excerpt are immutable after insertion; this is not full-file snapshot history. Existing rows with no excerpt retain hash-only fallback behavior.

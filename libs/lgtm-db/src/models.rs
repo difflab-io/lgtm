@@ -35,3 +35,8 @@ pub mod threads {
 pub mod comments {
     pub use super::super::entities::comments::Model;
 }
+
+/// Source-to-review provenance for notes.
+pub mod note_promotions {
+    pub use super::super::entities::note_promotions::Model;
+}

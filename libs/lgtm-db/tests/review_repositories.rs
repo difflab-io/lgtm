@@ -160,6 +160,7 @@ mod review_repositories {
                     file_path: None,
                     side: None,
                     reviewed_commit: None,
+                    selected_text: None,
                     start_line: None,
                     end_line: None,
                     state: "open".into(),

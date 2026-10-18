@@ -178,7 +178,7 @@ application startup. Test-only upgrades cover populated data and failure recover
 there are no older shipped schema upgrades or destructive migrations yet. Future
 destructive SQLite changes need consistent backups and a table rebuild plan.
 
-The CLI bundles no database source, drivers or migrations. Rerun the bundle task after greeting/health router or protocol changes before raw CLI Cargo checks.
+The CLI bundle includes the real backend/database sources, drivers and migrations; client commands still use RPC rather than opening storage. Rerun the bundle task after backend/database/protocol changes before raw CLI Cargo checks.
 Use cargo publish --dry-run (never an actual publish for validation) to compile the
 package outside the workspace. Local/remote sync and desktop migration policy remain
 [future ADR topics](../adr/README.md).
