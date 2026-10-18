@@ -28,10 +28,11 @@ The Rust backend owns domain validation, requester identity and review workflows
 ![Backend services and persistence](../db/diagrams/persistence.svg)
 
 - lib.rs: greeting RPC and health router; future review handlers will translate requests into service calls.
-- models/: Actor/ActorKind, Context/ContextKey, Session/SessionStatus, Comment/PostingStatus, Thread/Anchor, inputs and forge observations.
+- models/: Actor/ActorKind, Context/ContextKey, Session/SessionStatus, Comment/PostingStatus, Thread/Anchor and domain inputs.
 - services/auth.rs: requester metadata resolution, explicit human/agent lookup/create and requester validation. Authentication and authorization remain future work.
 - services/review.rs: contexts, session lifecycle, comments, resolution, exports and forge reconciliation.
-- services/identities.rs: private batch identity loading used by service mappings.
+- services/actor.rs: batch actor loading into a plain UUID-to-Actor lookup for service mappings.
+- utils.rs: shared formatting/path helpers and forge import/export contracts.
 - error.rs: application-defined validation, conflict and not-found errors.
 - lgtm-db: repositories, typed SeaORM models, transactions and private migrations.
 
