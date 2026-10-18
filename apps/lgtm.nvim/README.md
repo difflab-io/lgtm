@@ -70,9 +70,9 @@ URL. Backend API version 1 is required. Unary Connect calls use asynchronous
 | Command | Action |
 | --- | --- |
 | `:Lgtm note`, `:Lgtm notes` | Add a note to the current line/range; inspect notes for the file's directory |
-| `:Lgtm review` | Select working/staged/revision comparison in the current Git repository |
+| `:Lgtm review` | Choose Working, Staged, or PR |
 | `:Lgtm directory [path]` | Review all supported files, including ignored/untracked files |
-| `:Lgtm prs [repository URL]` | Search/page GitHub pull requests and start review |
+| `:Lgtm prs [repository URL]` | List open PRs for the current branch and inferred Git repository; optional URL overrides it |
 | `:Lgtm sessions [completed]` | Select active sessions or inspect completed sessions |
 | `:Lgtm refresh` | Refresh content/threads; retain drafts on failure |
 | `:Lgtm layout` | Toggle CodeDiff side-by-side / inline layout |

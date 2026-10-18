@@ -124,6 +124,16 @@ function M.directory(path)
   end
 end
 
+function M.select()
+  require("lgtm.picker").select("Review", { "working", "staged", "PR" }, tostring, function(kind)
+    if kind == "PR" then
+      require("lgtm.sessions").prs()
+    else
+      M.branch(kind)
+    end
+  end)
+end
+
 function M.branch(requested_mode, default_base)
   local root = vim.fn.getcwd()
   vim.system({
@@ -191,7 +201,7 @@ function M.branch(requested_mode, default_base)
       else
         require("lgtm.picker").select(
           "Review content",
-          { "working", "staged", "revisions" },
+          { "working", "staged" },
           tostring,
           select_mode
         )

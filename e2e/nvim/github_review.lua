@@ -1,6 +1,23 @@
 -- tests -----------------------------------------------------------------------
 local function should_support_github_review(H)
 	local api = vim.api
+	local rpc = require("lgtm.rpc")
+	local latest = rpc.latest
+	local branch = vim.trim(vim.system({ "git", "branch", "--show-current" }, { text = true }):wait().stdout)
+	rpc.latest = function(key, method, input, callback)
+		if method == "ListPullRequests" then
+			assert(input.repositoryUrl == "https://github.com/acme/repo", "infer SSH origin repository")
+			assert(input.query == "head:" .. branch, "limit PRs to the current branch")
+		end
+		return latest(key, method, input, callback)
+	end
+	local select = vim.ui.select
+	vim.ui.select = function(items, opts, callback)
+		if opts.prompt == "Review" then
+			assert(vim.deep_equal(items, { "working", "staged", "PR" }), "only requested review modes")
+		end
+		return select(items, opts, callback)
+	end
 	local function control(mode)
 		local response = vim.system({
 			"curl",
@@ -28,7 +45,16 @@ local function should_support_github_review(H)
 		if number == 1 then
 			H.manual_picker = true
 		end
-		vim.cmd("Lgtm prs https://github.com/acme/repo")
+		local input = vim.ui.input
+		vim.ui.input = function()
+			error("Repository/search prompts must not precede inferred PR listing")
+		end
+		if number == 1 then
+			H.choice = "PR"
+			vim.cmd("Lgtm review")
+		else
+			vim.cmd("Lgtm prs")
+		end
 		if number == 1 then
 			H.wait(function()
 				local p = require("lgtm.picker").last
@@ -51,6 +77,7 @@ local function should_support_github_review(H)
 			local s = require("lgtm.context").current
 			return s and tonumber(s.context.key.number) == number and s.panes ~= nil
 		end, "PR picker and remote CodeDiff without checkout")
+		vim.ui.input = input
 		return require("lgtm.context").current
 	end
 	local function submit(outcome)

@@ -10,9 +10,9 @@ installation, identity and endpoint settings. Run :checkhealth lgtm.
 COMMANDS                                                     *lgtm-commands*
 
 :Lgtm note / notes           Add current-line/range note / inspect directory notes.
-:Lgtm review                 Working, staged or revision comparison.
+:Lgtm review                 Choose Working, Staged, or PR.
 :Lgtm directory [path]       Includes ignored files and explicit symlink root.
-:Lgtm prs [URL]              Search/page PRs; no checkout modification.
+:Lgtm prs [URL]              List current-branch PRs for the Git remote; optional URL override.
 :Lgtm sessions [completed]   Resume or inspect local/GitHub sessions.
 :Lgtm files / threads        Persistent file pane / all-file conversation pane.
 :Lgtm comment [line/file/general]

@@ -28,15 +28,10 @@ function M.select(completed)
               or entry.context.key.gitDir,
           }
           if entry.context.key.kind == "branch" then
-            picker.select(
-              "Resume comparison",
-              { "working", "staged", "revisions" },
-              tostring,
-              function(mode)
-                state.mode = mode
-                require("lgtm.review").open(state)
-              end
-            )
+            picker.select("Resume comparison", { "working", "staged" }, tostring, function(mode)
+              state.mode = mode
+              require("lgtm.review").open(state)
+            end)
           else
             require("lgtm.review").open(state)
           end
@@ -46,17 +41,74 @@ function M.select(completed)
   end)
 end
 
+-- Git remotes may use HTTPS, SCP-style SSH, or ssh:// addresses.
+function M.repository_url(remote)
+  local path = vim.trim(remote):gsub("/+$", ""):gsub("%.git$", "")
+  local repository = path:match("^https?://github%.com/(.+)$")
+    or path:match("^[^@]+@github%.com:(.+)$")
+    or path:match("^ssh://[^@]+@github%.com/(.+)$")
+  if repository and repository:match("^[^/]+/[^/]+$") then
+    return "https://github.com/" .. repository
+  end
+end
+
 function M.prs(repository_url)
-  local function search(url)
-    picker.input("Search pull requests: ", "", function(query)
-      M.pr_page(url, query, 1)
+  local function open(url)
+    vim.system(
+      { "git", "-C", vim.fn.getcwd(), "branch", "--show-current" },
+      { text = true },
+      function(result)
+        vim.schedule(function()
+          local branch = result.code == 0 and vim.trim(result.stdout) or ""
+          M.pr_page(url, branch ~= "" and ("head:" .. branch) or "", 1)
+        end)
+      end
+    )
+  end
+  local function fallback()
+    picker.input("Repository URL (no GitHub remote found): ", "https://github.com/", open)
+  end
+  if repository_url and repository_url ~= "" then
+    open(M.repository_url(repository_url) or repository_url)
+    return
+  end
+  local cwd = vim.fn.getcwd()
+  local function remote(name, callback)
+    vim.system({ "git", "-C", cwd, "remote", "get-url", name }, { text = true }, function(result)
+      vim.schedule(function()
+        callback(result.code == 0 and M.repository_url(result.stdout) or nil)
+      end)
     end)
   end
-  if repository_url then
-    search(repository_url)
-  else
-    picker.input("Repository URL: ", "https://github.com/", search)
-  end
+  remote("origin", function(url)
+    if url then
+      open(url)
+      return
+    end
+    vim.system({ "git", "-C", cwd, "remote" }, { text = true }, function(result)
+      vim.schedule(function()
+        local remotes = result.code == 0
+            and vim.split(vim.trim(result.stdout), "\n", { trimempty = true })
+          or {}
+        local function select(name)
+          remote(name, function(found)
+            if found then
+              open(found)
+            else
+              fallback()
+            end
+          end)
+        end
+        if #remotes == 1 then
+          select(remotes[1])
+        elseif #remotes > 1 then
+          picker.select("Select Git remote", remotes, tostring, select)
+        else
+          fallback()
+        end
+      end)
+    end)
+  end)
 end
 
 function M.pr_page(url, query, page)

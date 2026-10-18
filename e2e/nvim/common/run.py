@@ -57,6 +57,7 @@ def main():
         (fixture / 'notes.txt').write_text('one\ntwo\nthree\n')
         (fixture / '.gitignore').write_text('.difflab\nignored/\n')
         subprocess.run(['git', 'init', '-q', str(fixture)], check=True)
+        subprocess.run(['git', '-C', str(fixture), 'remote', 'add', 'origin', 'git@github.com:acme/repo.git'], check=True)
         subprocess.run(['git', '-C', str(fixture), 'add', '.'], check=True)
         subprocess.run(['git', '-C', str(fixture), '-c', 'user.name=E2E', '-c', 'user.email=e2e@example.test', 'commit', '-qm', 'fixture'], check=True)
         (fixture / 'notes.txt').write_text('one\nchanged\nthree\n')

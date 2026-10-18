@@ -48,7 +48,7 @@ function M.command(args, range)
   local action, rest = args:match("^(%S*)%s*(.-)$")
   local review = require("lgtm.review")
   local commands = {
-    review = review.branch,
+    review = review.select,
     directory = function()
       review.directory(rest ~= "" and rest or nil)
     end,

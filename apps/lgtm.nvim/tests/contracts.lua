@@ -6,6 +6,17 @@ local function should_validate_plugin_contracts()
     assert(loadfile(file))
   end
   assert(loadfile(root .. "/plugin/lgtm.lua"))
+  local repository_url = require("lgtm.sessions").repository_url
+  for _, remote in ipairs({
+    "https://github.com/acme/repo.git",
+    "git@github.com:acme/repo.git",
+    "ssh://git@github.com/acme/repo.git",
+    "https://github.com/acme/repo/",
+  }) do
+    assert(repository_url(remote) == "https://github.com/acme/repo")
+  end
+  assert(not repository_url("git@gitlab.com:acme/repo.git"))
+  assert(not repository_url("/tmp/repo"))
   local transport = require("lgtm.transport.connect")
   require("lgtm.config").setup({ endpoint_url = "http://127.0.0.1:1/rpc/" })
   assert(transport.endpoint() == "http://127.0.0.1:1/rpc")
