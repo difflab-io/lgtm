@@ -101,11 +101,20 @@ mod review_repositories {
     #[tokio::test]
     async fn should_support_multi_actor_reviews_and_successor_sessions() {
         for db in databases().await {
-            for kind in [
-                ContextKind::Notes,
-                ContextKind::Branch,
-                ContextKind::PullRequest,
-            ] {
+            assert!(
+                db.workspace
+                    .insert_repository(&lgtm_db::models::repositories::Model {
+                        repository_url: "local:/repo".into()
+                    })
+                    .await
+                    .is_err()
+            );
+            for location in ["notes", "branch", "forge"] {
+                let kind = if location == "forge" {
+                    ContextKind::ForgeBacked
+                } else {
+                    ContextKind::Local
+                };
                 let context_id = Uuid::new_v4();
                 let first = human(&format!("first-{context_id}"));
                 let second = human(&format!("second-{context_id}"));
@@ -118,35 +127,28 @@ mod review_repositories {
                     provider: Some("provider".into()),
                     forge_account: String::new(),
                 };
-                let key = format!("github.com/acme/repo-{context_id}");
+                let key = format!("https://github.com/acme/repo-{context_id}");
                 let context = review_contexts::Model {
                     id: context_id,
                     kind,
-                    notes_path: (kind == ContextKind::Notes)
-                        .then(|| format!("/notes/{context_id}")),
-                    repository: (kind != ContextKind::Notes).then(|| key.clone()),
-                    branch: (kind == ContextKind::Branch).then(|| "refs/heads/main".into()),
-                    host: (kind == ContextKind::PullRequest).then(|| "github.com".into()),
-                    number: (kind == ContextKind::PullRequest).then_some(1),
+                    notes_path: (location == "notes").then(|| format!("/notes/{context_id}")),
+                    git_dir: (location == "branch").then(|| format!("/repos/{context_id}")),
+                    branch: (location == "branch").then(|| "refs/heads/main".into()),
+                    repository_url: (location == "forge").then(|| key.clone()),
+                    number: (location == "forge").then_some(1),
                     revision: 0,
-                    last_refreshed_at: (kind == ContextKind::PullRequest)
-                        .then(|| "2026-10-17T00:00:00Z".into()),
-                    refreshed_head: (kind == ContextKind::PullRequest).then(|| "head".into()),
-                    refreshed_base: (kind == ContextKind::PullRequest).then(|| "base".into()),
+                    last_refreshed_at: (location == "forge").then(|| "2026-10-17T00:00:00Z".into()),
+                    refreshed_head: (location == "forge").then(|| "head".into()),
+                    refreshed_base: (location == "forge").then(|| "base".into()),
                     refresh_error: None,
-                    refresh_status: if kind == ContextKind::PullRequest {
-                        "live"
-                    } else {
-                        "never"
-                    }
-                    .into(),
+                    refresh_status: if location == "forge" { "live" } else { "never" }.into(),
                 };
                 let mut review = session(context_id, first.id);
-                if kind != ContextKind::Notes {
+                if location != "notes" {
                     review.base_commit = Some("base".into());
                     review.head_commit = Some("head".into());
                 }
-                if kind == ContextKind::PullRequest {
+                if location == "forge" {
                     review.submission_status = "unsubmitted".into();
                 }
                 let mut thread = threads::Model {
@@ -170,13 +172,26 @@ mod review_repositories {
                 };
                 let mut root = comment(&thread, &review, first.id, 0);
                 let mut reply = comment(&thread, &review, agent.id, 1);
+                // The outer discriminator and its populated fields must agree.
+                let invalid_tx = db.begin().await.unwrap();
+                let mut invalid = context.clone();
+                invalid.id = Uuid::new_v4();
+                invalid.kind = if kind == ContextKind::Local {
+                    ContextKind::ForgeBacked
+                } else {
+                    ContextKind::Local
+                };
+                assert!(invalid_tx.review_contexts.insert(&invalid).await.is_err());
+                invalid_tx.rollback().await.unwrap();
                 let tx = db.begin().await.unwrap();
                 for actor in [&first, &second, &agent] {
                     tx.identities.insert(actor).await.unwrap();
                 }
-                if kind != ContextKind::Notes {
+                if location == "forge" {
                     tx.workspace
-                        .insert_repository(&lgtm_db::models::repositories::Model { key })
+                        .insert_repository(&lgtm_db::models::repositories::Model {
+                            repository_url: key,
+                        })
                         .await
                         .unwrap();
                 }
@@ -228,9 +243,9 @@ mod review_repositories {
                 review.completed_at = Some("2026-10-17T00:01:00Z".into());
                 review.completed_by_id = Some(first.id);
                 review.outcome = Some(
-                    if kind == ContextKind::PullRequest {
+                    if location == "forge" {
                         "comment"
-                    } else if kind == ContextKind::Branch {
+                    } else if location == "branch" {
                         "ready-to-address"
                     } else {
                         "saved"
@@ -252,7 +267,7 @@ mod review_repositories {
 
                 // A second reviewer addresses the original thread; no conversation is copied.
                 let tx = db.begin().await.unwrap();
-                if kind == ContextKind::PullRequest {
+                if location == "forge" {
                     let mut refreshed = context.clone();
                     refreshed.last_refreshed_at = Some("2026-10-17T00:02:00Z".into());
                     tx.review_contexts.update_refresh(&refreshed).await.unwrap();

@@ -1,14 +1,14 @@
-//! Repository natural keys shared by branch/PR contexts and workspace checkouts. A key is HOST/NAMESPACE/PROJECT or local:ABSOLUTE_GIT_COMMON_DIR, not a generated ID or URL.
+//! Forge repository URLs shared by PR/MR contexts.
 use sea_orm::entity::prelude::*;
 
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "repositories")]
-/// Repository natural keys shared by branch/PR contexts and workspace checkouts. A key is HOST/NAMESPACE/PROJECT or local:ABSOLUTE_GIT_COMMON_DIR, not a generated ID or URL.
+/// A forge repository identified by its complete HTTP(S) URL.
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    /// Canonical repository identity: HOST/NAMESPACE/PROJECT or local:ABSOLUTE_GIT_COMMON_DIR. This natural key is not a remote forge object ID.
-    pub key: String,
+    /// Complete canonical forge repository URL.
+    pub repository_url: String,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

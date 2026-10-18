@@ -19,7 +19,7 @@ pub struct Model {
     pub model: Option<String>,
     /// Required agent model provider; NULL for humans. This is not a forge account identifier.
     pub provider: Option<String>,
-    /// Scoped opaque forge account binding, encoded from host and account ID; empty for local identities.
+    /// Scoped opaque forge account binding, encoded from forge origin and account ID; empty for local identities.
     pub forge_account: String,
 }
 

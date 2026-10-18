@@ -7,16 +7,17 @@ use sea_orm::{ActiveModelTrait, IntoActiveModel};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, TransactionTrait};
 use std::sync::Arc;
 
-/// Borrowed context lookup key; each variant identifies one conversation.
-pub enum ContextKey<'a> {
+/// Borrowed local location used to identify notes or a Git branch.
+pub enum LocalLocation<'a> {
     Notes(&'a str),
-    Branch {
-        repository: &'a str,
-        branch: &'a str,
-    },
-    PullRequest {
-        host: &'a str,
-        repository: &'a str,
+    Branch { git_dir: &'a str, branch: &'a str },
+}
+
+/// Borrowed context lookup key; remote contexts require a complete repository URL.
+pub enum ContextKey<'a> {
+    Local(LocalLocation<'a>),
+    ForgeBacked {
+        repository_url: &'a str,
         number: i64,
     },
 }
@@ -41,32 +42,30 @@ impl<C: ConnectionTrait + TransactionTrait> ReviewContextRepository<C> {
             .await?)
     }
 
-    /// Get a context by its notes path, repository/branch or forge/repository/number key.
+    /// Get a local context by notes path or Git directory/branch, or a forge-backed context by repository URL/number.
     pub async fn get_by_key(&self, key: ContextKey<'_>) -> Result<Option<review_contexts::Model>> {
         let query = review_contexts::Entity::find();
         let query = match key {
-            ContextKey::Notes(path) => query
+            ContextKey::Local(LocalLocation::Notes(path)) => query
                 .filter(
-                    review_contexts::Column::Kind.eq(crate::entities::common::ContextKind::Notes),
+                    review_contexts::Column::Kind.eq(crate::entities::common::ContextKind::Local),
                 )
                 .filter(review_contexts::Column::NotesPath.eq(path)),
-            ContextKey::Branch { repository, branch } => query
+            ContextKey::Local(LocalLocation::Branch { git_dir, branch }) => query
                 .filter(
-                    review_contexts::Column::Kind.eq(crate::entities::common::ContextKind::Branch),
+                    review_contexts::Column::Kind.eq(crate::entities::common::ContextKind::Local),
                 )
-                .filter(review_contexts::Column::Repository.eq(repository))
+                .filter(review_contexts::Column::GitDir.eq(git_dir))
                 .filter(review_contexts::Column::Branch.eq(branch)),
-            ContextKey::PullRequest {
-                host,
-                repository,
+            ContextKey::ForgeBacked {
+                repository_url,
                 number,
             } => query
                 .filter(
                     review_contexts::Column::Kind
-                        .eq(crate::entities::common::ContextKind::PullRequest),
+                        .eq(crate::entities::common::ContextKind::ForgeBacked),
                 )
-                .filter(review_contexts::Column::Host.eq(host))
-                .filter(review_contexts::Column::Repository.eq(repository))
+                .filter(review_contexts::Column::RepositoryUrl.eq(repository_url))
                 .filter(review_contexts::Column::Number.eq(number)),
         };
         Ok(query.one(self.connection.as_ref()).await?)

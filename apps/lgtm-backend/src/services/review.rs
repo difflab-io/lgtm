@@ -66,9 +66,11 @@ impl ReviewService {
             return Err(invalid("Workspace path must be canonical and absolute"));
         }
         let tx = self.database.begin().await?;
-        if let Some(repo) = key.repository() {
+        if let Some(repo) = key.repository_url() {
             tx.workspace
-                .insert_repository(&repositories::Model { key: repo.into() })
+                .insert_repository(&repositories::Model {
+                    repository_url: repo.as_str().to_owned(),
+                })
                 .await?;
         }
         let seed = Context {
@@ -174,15 +176,17 @@ impl ReviewService {
         {
             let context = self.get_context_by_id(&session.context_id).await?;
             if filter
-                .repository
+                .git_dir
                 .as_deref()
-                .is_some_and(|r| context.key.repository() != Some(r))
+                .is_some_and(|r| context.key.git_dir() != Some(r))
             {
                 continue;
             }
             if let Some(root) = &filter.path {
                 let matches = match &context.key {
-                    ContextKey::Notes { path } => within(path, root),
+                    ContextKey::Local {
+                        location: LocalLocation::Notes { path },
+                    } => within(path, root),
                     _ => context
                         .paths
                         .iter()
@@ -292,13 +296,14 @@ impl ReviewService {
         let actor = &self.auth.validate_requester(actor).await?;
         let tx = self.database.begin().await?;
         self.lock_context(&tx, &context.id).await?;
+        let context = self.load_context(&tx, &context.id).await?;
         let row = tx.sessions.get_active(&context.id).await?;
         if let Some(row) = row {
             let s = Self::session_from_db_model(row, &tx).await?;
             tx.commit().await?;
             return Ok(s);
         }
-        if matches!(context.key, ContextKey::PullRequest { .. }) {
+        if context.key.is_forge_backed() {
             let fresh = self.load_context(&tx, &context.id).await?;
             if !["live", "stub"].contains(&fresh.refresh_status.as_str())
                 || fresh.last_refreshed_at.is_none()
@@ -329,7 +334,7 @@ impl ReviewService {
             commits,
             created_at: now(),
             forge_review_id: None,
-            submission_status: if matches!(context.key, ContextKey::PullRequest { .. }) {
+            submission_status: if context.key.is_forge_backed() {
                 "unsubmitted"
             } else {
                 "local"
@@ -493,7 +498,7 @@ impl ReviewService {
             .ok_or_else(|| Error::NotFound("Active session".into()))?;
         let mut s = Self::session_from_db_model(row, &tx).await?;
         let context = self.load_context(&tx, context_id).await?;
-        if context.key.kind() == "pr" {
+        if context.key.is_forge_backed() {
             if !input
                 .outcome
                 .as_deref()
@@ -518,7 +523,7 @@ impl ReviewService {
             at: now(),
             by: actor.clone(),
             outcome: input.outcome.unwrap_or_else(|| {
-                if context.key.kind() == "notes" {
+                if context.key.is_notes() {
                     "saved"
                 } else {
                     "ready-to-address"
@@ -543,6 +548,9 @@ impl ReviewService {
         let tx = self.database.begin().await?;
         self.lock_context(&tx, &context.id).await?;
         let mut current = self.load_context(&tx, &context.id).await?;
+        if !current.key.is_forge_backed() {
+            return Err(invalid("Forge refresh requires a forge-backed context"));
+        }
         current.refresh_status = "failed".into();
         current.refresh_error = Some(message.into());
         tx.review_contexts
@@ -559,6 +567,15 @@ impl ReviewService {
         stub: bool,
     ) -> Result<Context> {
         tracing::debug!("Review action: apply_remote");
+        let stored = self.get_context_by_id(&context.id).await?;
+        if stored.key != context.key {
+            return Err(invalid("Context key does not match persisted context"));
+        }
+        let repository_url = stored
+            .key
+            .repository_url()
+            .ok_or_else(|| invalid("Forge refresh requires a forge-backed context"))?;
+
         if !snapshot.complete || snapshot.head.is_empty() {
             return Err(invalid(
                 "Incomplete forge fetch; all pages and reviewed head are required",
@@ -600,13 +617,7 @@ impl ReviewService {
                     },
                     &format!(
                         "forge:{}",
-                        serde_json::to_string(&(
-                            match &context.key {
-                                ContextKey::PullRequest { host, .. } => host,
-                                _ => unreachable!(),
-                            },
-                            &c.author.account_id
-                        ))?
+                        serde_json::to_string(&(repository_url.origin(), &c.author.account_id))?
                     ),
                 )
                 .await?;
@@ -799,7 +810,7 @@ impl ReviewService {
             ));
         }
         let context = self.load_context(&tx, &session.context_id).await?;
-        if context.key.kind() != "pr" {
+        if !context.key.is_forge_backed() {
             return Err(invalid("Only PR comments can be posted"));
         }
         if c.id != expected.id
@@ -830,6 +841,14 @@ impl ReviewService {
         tracing::debug!("Review action: posting_uncertain");
         let tx = self.database.begin().await?;
         self.lock_context(&tx, context_id).await?;
+        if !self
+            .load_context(&tx, context_id)
+            .await?
+            .key
+            .is_forge_backed()
+        {
+            return Err(invalid("Remote posting requires a forge-backed context"));
+        }
         let row = tx
             .comments
             .get_by_id(context_id, comment_id)
@@ -861,6 +880,14 @@ impl ReviewService {
         }
         let tx = self.database.begin().await?;
         self.lock_context(&tx, context_id).await?;
+        if !self
+            .load_context(&tx, context_id)
+            .await?
+            .key
+            .is_forge_backed()
+        {
+            return Err(invalid("Remote posting requires a forge-backed context"));
+        }
         let row = tx
             .comments
             .get_by_id(context_id, comment_id)

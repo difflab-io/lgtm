@@ -15,6 +15,7 @@ sqlite = ["lgtm-db/sqlite"]
 postgres = ["lgtm-db/postgres"]
 
 [dependencies]
+url = "2"
 tracing = "0.1"
 lgtm-db = { path = "../../libs/lgtm-db", default-features = false }
 sea-orm = { version = "=2.0.4", default-features = false }

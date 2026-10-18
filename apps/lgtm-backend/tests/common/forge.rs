@@ -68,7 +68,7 @@ impl ForgeReview for ReviewService {
         context: &Context,
         provider: &P,
     ) -> Result<Context> {
-        if context.key.kind() != "pr" {
+        if !context.key.is_forge_backed() {
             return Err(invalid("Only PR contexts can be refreshed"));
         }
         let result = async {

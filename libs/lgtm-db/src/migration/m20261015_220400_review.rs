@@ -80,7 +80,17 @@ impl MigrationTrait for Migration {
             .create_table(
                 Table::create()
                     .table("repositories")
-                    .col(ColumnDef::new("key").text().not_null().primary_key())
+                    .col(
+                        ColumnDef::new("repository_url")
+                            .text()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .check(
+                        Condition::any()
+                            .add(Expr::col("repository_url").like("https://%/%/%"))
+                            .add(Expr::col("repository_url").like("http://%/%/%")),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -91,9 +101,9 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new("id").uuid().not_null().primary_key())
                     .col(ColumnDef::new("kind").text().not_null())
                     .col(ColumnDef::new("notes_path").text())
-                    .col(ColumnDef::new("repository").text())
+                    .col(ColumnDef::new("git_dir").text())
                     .col(ColumnDef::new("branch").text())
-                    .col(ColumnDef::new("host").text())
+                    .col(ColumnDef::new("repository_url").text())
                     .col(ColumnDef::new("number").big_integer())
                     .col(ColumnDef::new("revision").big_integer().not_null())
                     .col(ColumnDef::new("last_refreshed_at").text())
@@ -102,48 +112,53 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new("refresh_error").text())
                     .col(ColumnDef::new("refresh_status").text().not_null())
                     .index(Index::create().unique().col("notes_path"))
-                    .index(Index::create().unique().col("repository").col("branch"))
-                    .index(
-                        Index::create()
-                            .unique()
-                            .col("host")
-                            .col("repository")
-                            .col("number"),
-                    )
+                    .index(Index::create().unique().col("git_dir").col("branch"))
+                    .index(Index::create().unique().col("repository_url").col("number"))
                     .foreign_key(
                         ForeignKey::create()
                             .from_tbl("review_contexts")
-                            .from_col("repository")
+                            .from_col("repository_url")
                             .to_tbl("repositories")
-                            .to_col("key"),
+                            .to_col("repository_url"),
                     )
                     .check(
                         Condition::any()
                             .add(
                                 Condition::all()
-                                    .add(Expr::col("kind").eq("notes"))
+                                    .add(Expr::col("kind").eq("local"))
                                     .add(Expr::col("notes_path").is_not_null())
-                                    .add(Expr::col("repository").is_null())
+                                    .add(Expr::col("git_dir").is_null())
                                     .add(Expr::col("branch").is_null())
-                                    .add(Expr::col("host").is_null())
-                                    .add(Expr::col("number").is_null()),
+                                    .add(Expr::col("repository_url").is_null())
+                                    .add(Expr::col("number").is_null())
+                                    .add(Expr::col("refresh_status").eq("never"))
+                                    .add(Expr::col("last_refreshed_at").is_null())
+                                    .add(Expr::col("refreshed_head").is_null())
+                                    .add(Expr::col("refreshed_base").is_null())
+                                    .add(Expr::col("refresh_error").is_null()),
                             )
                             .add(
                                 Condition::all()
-                                    .add(Expr::col("kind").eq("branch"))
-                                    .add(Expr::col("repository").is_not_null())
+                                    .add(Expr::col("kind").eq("local"))
+                                    .add(Expr::col("git_dir").is_not_null())
                                     .add(Expr::col("branch").is_not_null())
                                     .add(Expr::col("notes_path").is_null())
-                                    .add(Expr::col("host").is_null())
-                                    .add(Expr::col("number").is_null()),
+                                    .add(Expr::col("repository_url").is_null())
+                                    .add(Expr::col("number").is_null())
+                                    .add(Expr::col("refresh_status").eq("never"))
+                                    .add(Expr::col("last_refreshed_at").is_null())
+                                    .add(Expr::col("refreshed_head").is_null())
+                                    .add(Expr::col("refreshed_base").is_null())
+                                    .add(Expr::col("refresh_error").is_null()),
                             )
                             .add(
                                 Condition::all()
-                                    .add(Expr::col("kind").eq("pr"))
-                                    .add(Expr::col("repository").is_not_null())
-                                    .add(Expr::col("host").is_not_null())
+                                    .add(Expr::col("kind").eq("forge_backed"))
+                                    .add(Expr::col("repository_url").is_not_null())
+                                    .add(Expr::col("number").gt(0))
                                     .add(Expr::col("number").is_not_null())
                                     .add(Expr::col("notes_path").is_null())
+                                    .add(Expr::col("git_dir").is_null())
                                     .add(Expr::col("branch").is_null()),
                             ),
                     )

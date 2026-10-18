@@ -118,7 +118,7 @@ mod tests {
             use sea_orm::{ActiveModelTrait, Set};
             review_contexts::ActiveModel {
                 id: Set(fixture_id("context")),
-                kind: Set(crate::entities::common::ContextKind::Notes),
+                kind: Set(crate::entities::common::ContextKind::Local),
                 notes_path: Set(Some("/populated".into())),
                 revision: Set(0),
                 refresh_status: Set("never".into()),

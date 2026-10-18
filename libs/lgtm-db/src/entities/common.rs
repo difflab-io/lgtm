@@ -34,23 +34,19 @@ impl std::fmt::Display for IdentityKind {
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::None)")]
 #[serde(rename_all = "snake_case")]
 pub enum ContextKind {
-    /// The notes variant.
-    #[sea_orm(string_value = "notes")]
-    Notes,
-    /// The branch variant.
-    #[sea_orm(string_value = "branch")]
-    Branch,
-    /// The pr variant.
-    #[sea_orm(string_value = "pr")]
-    PullRequest,
+    /// A local notes or branch context.
+    #[sea_orm(string_value = "local")]
+    Local,
+    /// A PR/MR context backed by a forge repository URL.
+    #[sea_orm(string_value = "forge_backed")]
+    ForgeBacked,
 }
 impl ContextKind {
     /// Return the persisted discriminator.
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Notes => "notes",
-            Self::Branch => "branch",
-            Self::PullRequest => "pr",
+            Self::Local => "local",
+            Self::ForgeBacked => "forge_backed",
         }
     }
 }

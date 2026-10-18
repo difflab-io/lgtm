@@ -19,7 +19,7 @@ pub struct Database<C = DatabaseConnection> {
     pub sessions: SessionRepository<C>,
     /// Context identity and refresh operations.
     pub review_contexts: ReviewContextRepository<C>,
-    /// Repository keys and canonical workspace paths.
+    /// Forge repository URLs and canonical workspace paths.
     pub workspace: WorkspaceRepository<C>,
     /// Thread, root comment and reply operations.
     pub comments: CommentRepository<C>,

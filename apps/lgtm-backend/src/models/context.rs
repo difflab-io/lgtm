@@ -1,5 +1,8 @@
-use super::super::{database::models::review_contexts, error::Result};
-use super::{ContextKey, ContextKind};
+use super::super::{
+    database::models::review_contexts,
+    error::{Result, invalid},
+};
+use super::{ContextKey, ContextKind, ForgeRepositoryUrl, LocalLocation};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -18,20 +21,26 @@ pub struct Context {
 
 impl Context {
     pub fn from_db_model(row: review_contexts::Model, paths: Vec<String>) -> Result<Context> {
+        let missing = || invalid("Invalid persisted context shape");
         let key = match row.kind {
-            ContextKind::Notes => ContextKey::Notes {
-                path: row.notes_path.unwrap_or_default(),
+            ContextKind::Local => ContextKey::Local {
+                location: if let Some(path) = row.notes_path {
+                    LocalLocation::Notes { path }
+                } else {
+                    LocalLocation::Branch {
+                        git_dir: row.git_dir.ok_or_else(missing)?,
+                        branch: row.branch.ok_or_else(missing)?,
+                    }
+                },
             },
-            ContextKind::Branch => ContextKey::Branch {
-                repository: row.repository.unwrap_or_default(),
-                branch: row.branch.unwrap_or_default(),
-            },
-            ContextKind::PullRequest => ContextKey::PullRequest {
-                host: row.host.unwrap_or_default(),
-                repository: row.repository.unwrap_or_default(),
-                number: row.number.unwrap_or_default(),
+            ContextKind::ForgeBacked => ContextKey::ForgeBacked {
+                repository_url: ForgeRepositoryUrl::parse(
+                    &row.repository_url.ok_or_else(missing)?,
+                )?,
+                number: row.number.ok_or_else(missing)?,
             },
         };
+        key.validate()?;
         Ok(Context {
             id: row.id,
             key,
@@ -48,28 +57,41 @@ impl Context {
 
 impl From<&Context> for review_contexts::Model {
     fn from(c: &Context) -> Self {
-        let (mut notes_path, mut branch, mut host, mut number) = (None, None, None, None);
-        match &c.key {
-            ContextKey::Notes { path } => notes_path = Some(path.clone()),
-            ContextKey::Branch { branch: b, .. } => branch = Some(b.clone()),
-            ContextKey::PullRequest {
-                host: h, number: n, ..
-            } => {
-                host = Some(h.clone());
-                number = Some(*n);
-            }
-        }
+        let (notes_path, git_dir, branch, repository_url, number) = match &c.key {
+            ContextKey::Local {
+                location: LocalLocation::Notes { path },
+            } => (Some(path.clone()), None, None, None, None),
+            ContextKey::Local {
+                location: LocalLocation::Branch { git_dir, branch },
+            } => (
+                None,
+                Some(git_dir.clone()),
+                Some(branch.clone()),
+                None,
+                None,
+            ),
+            ContextKey::ForgeBacked {
+                repository_url,
+                number,
+            } => (
+                None,
+                None,
+                None,
+                Some(repository_url.as_str().to_owned()),
+                Some(*number),
+            ),
+        };
         review_contexts::Model {
             id: c.id,
-            kind: match c.key {
-                ContextKey::Notes { .. } => ContextKind::Notes,
-                ContextKey::Branch { .. } => ContextKind::Branch,
-                ContextKey::PullRequest { .. } => ContextKind::PullRequest,
+            kind: if c.key.is_forge_backed() {
+                ContextKind::ForgeBacked
+            } else {
+                ContextKind::Local
             },
             notes_path,
-            repository: c.key.repository().map(str::to_owned),
+            git_dir,
             branch,
-            host,
+            repository_url,
             number,
             revision: c.revision,
             last_refreshed_at: c.last_refreshed_at.clone(),

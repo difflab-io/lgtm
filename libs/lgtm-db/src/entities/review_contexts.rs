@@ -11,14 +11,14 @@ pub struct Model {
     pub id: uuid::Uuid,
     /// Typed discriminator selecting the permitted record shape.
     pub kind: crate::entities::common::ContextKind,
-    /// Canonical absolute path identifying a notes context; NULL for branch/PR contexts.
+    /// Canonical absolute notes path; set only for local notes.
     pub notes_path: Option<String>,
-    /// Canonical repository key referencing repositories.key; NULL for path-only notes.
-    pub repository: Option<String>,
-    /// Full refs/heads/ branch name for local review; NULL for other context kinds.
+    /// Canonical absolute Git common directory; set only for local branch reviews.
+    pub git_dir: Option<String>,
+    /// Full refs/heads/ branch name; set only for local branch reviews.
     pub branch: Option<String>,
-    /// Forge hostname for PR/MR contexts, including self-hosted instances.
-    pub host: Option<String>,
+    /// Complete forge repository URL referencing repositories.repository_url; set only for forge-backed contexts.
+    pub repository_url: Option<String>,
     /// Repository/project-scoped PR or MR number, not a global forge object ID.
     pub number: Option<i64>,
     /// Monotonic context write revision used for locking and stale-refresh detection.

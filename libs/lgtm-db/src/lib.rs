@@ -28,7 +28,8 @@
 //! # Storage and features
 //!
 //! Internal keys are typed UUIDs. External forge IDs are opaque strings, scoped by
-//! context and object kind. Repository keys are canonical natural keys, not URLs.
+//! context and object kind. Forge repositories use complete repository URLs.
+//! Local contexts use notes paths or Git-directory/branch pairs.
 //! The default `sqlite` feature enables SQLite; `postgres` adds PostgreSQL.
 //! One private Rust migration history is applied when opening the database.
 //!

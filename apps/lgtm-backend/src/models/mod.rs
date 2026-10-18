@@ -25,3 +25,8 @@ pub use completion::Completion;
 
 pub mod posting_status;
 pub use posting_status::PostingStatus;
+
+pub mod local_location;
+pub use local_location::LocalLocation;
+pub mod forge_repository_url;
+pub use forge_repository_url::ForgeRepositoryUrl;

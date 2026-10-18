@@ -32,8 +32,10 @@ mod review_service {
             let actor = db.auth().ensure_human("A", "a@example.com").await.unwrap();
             let context = db
                 .ensure_context(
-                    ContextKey::Notes {
-                        path: "/notes".into(),
+                    ContextKey::Local {
+                        location: LocalLocation::Notes {
+                            path: "/notes".into(),
+                        },
                     },
                     None,
                 )
@@ -69,16 +71,20 @@ mod review_service {
                     .await
                     .unwrap();
                 for key in [
-                    ContextKey::Notes {
-                        path: "/race-notes".into(),
+                    ContextKey::Local {
+                        location: LocalLocation::Notes {
+                            path: "/race-notes".into(),
+                        },
                     },
-                    ContextKey::Branch {
-                        repository: "github.com/acme/race".into(),
-                        branch: "refs/heads/topic".into(),
+                    ContextKey::Local {
+                        location: LocalLocation::Branch {
+                            git_dir: "/repos/acme/race".into(),
+                            branch: "refs/heads/topic".into(),
+                        },
                     },
-                    ContextKey::PullRequest {
-                        host: "github.com".into(),
-                        repository: "github.com/acme/race".into(),
+                    ContextKey::ForgeBacked {
+                        repository_url: ForgeRepositoryUrl::parse("https://github.com/acme/race")
+                            .unwrap(),
                         number: 42,
                     },
                 ] {
@@ -97,7 +103,7 @@ mod review_service {
                     for task in tasks {
                         assert_eq!(task.await.unwrap().id, context.id);
                     }
-                    let context = if context.key.kind() == "pr" {
+                    let context = if context.key.is_forge_backed() {
                         db.apply_remote(
                             &context,
                             ForgeSnapshot {
@@ -132,7 +138,7 @@ mod review_service {
                     for task in starts {
                         assert_eq!(task.await.unwrap().id, session.id);
                     }
-                    if context.key.kind() != "pr" {
+                    if !context.key.is_forge_backed() {
                         let a = actor.clone();
                         let c = context.clone();
                         let other = db.clone();
@@ -260,9 +266,11 @@ mod review_service {
                 let bot = actor(&db, "Bot", Some("model-one")).await;
                 let c = db
                     .ensure_context(
-                        ContextKey::PullRequest {
-                            host: "github.com".into(),
-                            repository: "acme/repo".into(),
+                        ContextKey::ForgeBacked {
+                            repository_url: ForgeRepositoryUrl::parse(
+                                "https://github.com/acme/repo",
+                            )
+                            .unwrap(),
                             number: 42,
                         },
                         None,
@@ -468,9 +476,11 @@ mod review_service {
                     .unwrap();
                 let context = review
                     .ensure_context(
-                        ContextKey::PullRequest {
-                            host: "github.com".into(),
-                            repository: "github.com/acme/rollback".into(),
+                        ContextKey::ForgeBacked {
+                            repository_url: ForgeRepositoryUrl::parse(
+                                "https://github.com/acme/rollback",
+                            )
+                            .unwrap(),
                             number: 1,
                         },
                         None,
@@ -581,7 +591,9 @@ mod review_service {
         }
 
         fn notes(path: &str) -> ContextKey {
-            ContextKey::Notes { path: path.into() }
+            ContextKey::Local {
+                location: LocalLocation::Notes { path: path.into() },
+            }
         }
 
         // tests --------------------------------------------------------------
@@ -747,7 +759,7 @@ mod review_service {
                 let filtered = db
                     .get_sessions(&SessionFilter {
                         path: Some(path.clone()),
-                        repository: None,
+                        git_dir: None,
                         completed: false,
                     })
                     .await
@@ -833,9 +845,11 @@ mod review_service {
                 let root = temp.path().to_str().unwrap();
                 let c = db
                     .ensure_context(
-                        ContextKey::Branch {
-                            repository: "github.com/acme/repo".into(),
-                            branch: "refs/heads/feature/one".into(),
+                        ContextKey::Local {
+                            location: LocalLocation::Branch {
+                                git_dir: "/repos/acme/repo".into(),
+                                branch: "refs/heads/feature/one".into(),
+                            },
                         },
                         Some(root),
                     )
@@ -920,12 +934,12 @@ mod review_service {
                 for filter in [
                     SessionFilter {
                         path: None,
-                        repository: Some("github.com/acme/repo".into()),
+                        git_dir: Some("/repos/acme/repo".into()),
                         completed: false,
                     },
                     SessionFilter {
                         path: Some(format!("{root}/child")),
-                        repository: Some("github.com/acme/repo".into()),
+                        git_dir: Some("/repos/acme/repo".into()),
                         completed: false,
                     },
                 ] {
@@ -933,7 +947,7 @@ mod review_service {
                 }
                 assert!(
                     db.get_sessions(&SessionFilter {
-                        repository: Some("github.com/acme/other".into()),
+                        git_dir: Some("/repos/acme/other".into()),
                         ..Default::default()
                     })
                     .await
@@ -1166,8 +1180,10 @@ mod review_service {
                     .unwrap();
                 let context = review
                     .ensure_context(
-                        ContextKey::Notes {
-                            path: "/committed".into(),
+                        ContextKey::Local {
+                            location: LocalLocation::Notes {
+                                path: "/committed".into(),
+                            },
                         },
                         None,
                     )
@@ -1306,6 +1322,120 @@ mod review_service {
                 assert_eq!(stored.file_path, original_thread.file_path);
                 assert!(stored.outdated);
                 db.close().await;
+            }
+        }
+    }
+    mod context_boundaries {
+        use crate::common;
+        use lgtm_backend::{
+            models::*,
+            utils::{ForgeSnapshot, PostReceipt},
+        };
+
+        // tests ---------------------------------------------------------------
+        #[tokio::test]
+        async fn should_reject_forge_operations_for_all_local_contexts() {
+            for (review, _, _) in common::databases().await {
+                let actor = review
+                    .auth()
+                    .ensure_human("Local reviewer", "local@example.com")
+                    .await
+                    .unwrap();
+                for location in [
+                    LocalLocation::Notes {
+                        path: "/notes/local-only".into(),
+                    },
+                    LocalLocation::Branch {
+                        git_dir: "/repos/local-only/.git".into(),
+                        branch: "refs/heads/main".into(),
+                    },
+                ] {
+                    let context = review
+                        .ensure_context(ContextKey::Local { location }, None)
+                        .await
+                        .unwrap();
+                    let session = review
+                        .start_session(&context, &actor, CommitContext::default())
+                        .await
+                        .unwrap();
+                    let comment = review
+                        .add_comment(&session.id, &actor, "Keep local", Anchor::General)
+                        .await
+                        .unwrap();
+                    let observation = ForgeSnapshot {
+                        complete: true,
+                        head: "head".into(),
+                        base: None,
+                        threads: vec![],
+                    };
+                    assert!(
+                        review
+                            .apply_remote(&context, observation, true)
+                            .await
+                            .is_err()
+                    );
+                    assert!(
+                        review
+                            .record_refresh_failure(&context, "remote failure")
+                            .await
+                            .is_err()
+                    );
+                    assert!(
+                        review
+                            .stage_post(&session.id, &comment.id, "post", &comment, "Keep local")
+                            .await
+                            .is_err()
+                    );
+                    assert!(
+                        review
+                            .posting_uncertain(&context.id, &comment.id, "uncertain")
+                            .await
+                            .is_err()
+                    );
+                    assert!(
+                        review
+                            .confirm_post(
+                                &context.id,
+                                &comment.id,
+                                "post",
+                                PostReceipt {
+                                    comment_id: "remote".into(),
+                                    kind: "review_comment".into(),
+                                    thread_id: None,
+                                    review_id: None,
+                                    posting_account_id: "account".into()
+                                }
+                            )
+                            .await
+                            .is_err()
+                    );
+                    let stored = review.get_context(&context.key).await.unwrap().unwrap();
+                    assert_eq!(stored.refresh_status, "never");
+                    let stored = review.get_comment(&context.id, &comment.id).await.unwrap();
+                    assert!(matches!(stored.posting, PostingStatus::Unposted));
+                    let mut forged = context.clone();
+                    forged.key = ContextKey::ForgeBacked {
+                        repository_url: ForgeRepositoryUrl::parse("https://github.com/acme/repo")
+                            .unwrap(),
+                        number: 1,
+                    };
+                    assert!(
+                        review
+                            .apply_remote(
+                                &forged,
+                                ForgeSnapshot {
+                                    complete: true,
+                                    head: "head".into(),
+                                    base: None,
+                                    threads: vec![]
+                                },
+                                true
+                            )
+                            .await
+                            .is_err()
+                    );
+                }
+                review.database().close().await;
             }
         }
     }

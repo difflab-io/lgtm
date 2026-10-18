@@ -28,7 +28,7 @@ impl<C: ConnectionTrait + TransactionTrait> WorkspaceRepository<C> {
             .await?)
     }
 
-    /// Insert a canonical repository natural key if it does not already exist.
+    /// Insert a canonical forge repository URL if it does not already exist.
     pub async fn insert_repository(&self, row: &repositories::Model) -> Result<()> {
         repositories::Entity::insert(row.clone().into_active_model().reset_all())
             .on_conflict(OnConflict::new().do_nothing().to_owned())

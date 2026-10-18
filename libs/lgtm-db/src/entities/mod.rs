@@ -41,11 +41,11 @@ mod tests {
             db.review_contexts
                 .insert(&review_contexts::Model {
                     id: fixture_id("context"),
-                    kind: crate::entities::common::ContextKind::Notes,
+                    kind: crate::entities::common::ContextKind::Local,
                     notes_path: Some("/notes".into()),
-                    repository: None,
+                    git_dir: None,
                     branch: None,
-                    host: None,
+                    repository_url: None,
                     number: None,
                     revision: 0,
                     last_refreshed_at: None,
