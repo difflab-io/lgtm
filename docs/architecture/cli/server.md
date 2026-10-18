@@ -22,7 +22,14 @@ The server module serves embedded web assets and backend methods through one loc
 
 ### Components and Responsibilities
 
-![Shared UI and API server](diagrams/server.svg)
+```mermaid
+flowchart TD
+    CLIENT["Browser or API client"] --> SERVER["One Axum listener"]
+    SERVER --> ASSETS["Embedded web assets"]
+    SERVER --> RPC["Backend router: /rpc and root methods"]
+    SERVER --> HEALTH["GET /health: process ID"]
+    SERVER --> STORE["Store: record listening port"]
+```
 
 - Axum owns the HTTP listener and request routing.
 - The generated asset table maps URLs to embedded bytes and content types.

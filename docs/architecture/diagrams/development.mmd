@@ -1,7 +1,0 @@
-flowchart TD
-    DEV["mise run dev"] --> WATCH["Rust backend watcher"]
-    DEV --> VITE["Vite: 127.0.0.1:5173"]
-    WATCH --> GEN["Generate Rust and TypeScript protocol code"]
-    GEN --> BACKEND["Standalone backend: 127.0.0.1:8080"]
-    BROWSER["Browser"] --> VITE
-    VITE -->|"Proxy /rpc requests"| BACKEND

@@ -141,7 +141,7 @@ mise run lint
 mise run format:check
 ```
 
-Rust module tests live under `src/`, in the same source file’s `#[cfg(test)] mod tests`; shared fixtures live under `src/tests/`. Database migration and entity tests are colocated inside `lgtm-db`; they can access its private implementation without exporting it. Public integration tests live in each crate's `tests/` directory. Shared integration fixtures live in `tests/support/mod.rs`; the dummy forge is `tests/support/forge.rs` in the backend.
+Rust module tests live under `src/`, in the same source file’s `#[cfg(test)] mod tests`; shared fixtures live under `src/tests/`. Database migration and entity tests are colocated inside `lgtm-db`; they can access its private implementation without exporting it. Public integration tests live in each crate's `tests/` directory. Shared integration fixtures live in `tests/common/mod.rs`; the dummy forge is `tests/common/forge.rs` in the backend.
 
 Tests cover native gRPC, browser RPC calls, daemon startup, instance reuse, shutdown, and occupied-port failures. Web integration tests start an isolated Rust backend. Lint runs Clippy, ESLint, and Svelte type checks.
 

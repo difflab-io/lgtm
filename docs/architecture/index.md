@@ -35,7 +35,15 @@ lgtm/
 
 ### Components and Responsibilities
 
-![Component boundaries](diagrams/component-boundaries.svg)
+```mermaid
+flowchart TD
+    CLI["lgtm up / status / down"] -->|"Process management"| SERVER["Managed lgtm process"]
+    BROWSER["Browser interface"] -->|"Static assets and /rpc"| SERVER
+    NATIVE["Native gRPC client"] -->|"gRPC methods"| SERVER
+    SERVER --> BACKEND["Bundled backend router"]
+    BACKEND --> HELLO["Greeting and health services"]
+    DB["lgtm-db: starter library"]
+```
 
 - `lgtm-cli` starts the application and serves the bundled interface and backend on the local machine.
 - `lgtm-backend` provides greeting and health services through ConnectRPC. It also runs as a standalone server.
@@ -52,13 +60,28 @@ Each review has its own path and browser URL. Multiple browser tabs and editor c
 
 #### Development flow
 
-![Development](diagrams/development.svg)
+```mermaid
+flowchart TD
+    DEV["mise run dev"] --> WATCH["Rust backend watcher"]
+    DEV --> VITE["Vite: 127.0.0.1:5173"]
+    WATCH --> GEN["Generate Rust and TypeScript protocol code"]
+    GEN --> BACKEND["Standalone backend: 127.0.0.1:8080"]
+    BROWSER["Browser"] --> VITE
+    VITE -->|"Proxy /rpc requests"| BACKEND
+```
 
 `mise run dev` starts Vite and the Rust backend watcher. Vite updates the browser when frontend files change. Backend and schema changes regenerate client code and restart the server.
 
 #### Packaging flow
 
-![Packaging](diagrams/packaging.svg)
+```mermaid
+flowchart TD
+    SOURCE["Backend source and generated Rust protocols"] --> BUNDLE["CLI bundle directory"]
+    WEB["SvelteKit static build"] --> BUNDLE
+    BUNDLE --> PACKAGE["lgtm-cli Cargo package"]
+    PACKAGE --> BINARY["lgtm executable"]
+    BINARY --> ARCHIVE["macOS and Linux CLI archives"]
+```
 
 The CLI bundle contains backend source, generated Rust protocol code, and static web assets. Cargo includes the bundle in `lgtm-cli`. The installed executable runs without Bun, Buf, or a source checkout.
 

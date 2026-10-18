@@ -23,7 +23,13 @@ The store module owns LGTM's runtime files under `~/.lgtm`.
 
 ### Components and Responsibilities
 
-![Runtime store](diagrams/store.svg)
+```mermaid
+flowchart TD
+    CLI["CLI and server modules"] --> STORE["Store: ~/.lgtm"]
+    STORE --> PID["server.pid: process ownership"]
+    STORE --> PORT["server.port: listener discovery"]
+    STORE --> LOG["server.log: background output"]
+```
 
 - `Store` owns the root path and filesystem operations.
 - `Instance` carries a recorded PID and port.
