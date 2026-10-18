@@ -69,6 +69,7 @@ pub(crate) fn open(url: &str) {
     launch(&SystemBrowser, url);
 }
 
+// tests -----------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
     use super::*;

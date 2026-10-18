@@ -1,8 +1,19 @@
 use lgtm_db::types as lgtm_db_types;
 use lgtm_db::{Database, models::identities};
 
+// fixtures --------------------------------------------------------------------
+fn fixture_id(label: &str) -> uuid::Uuid {
+    let mut value = 0_u128;
+    for byte in label.bytes() {
+        value = value.wrapping_mul(131).wrapping_add(u128::from(byte));
+    }
+    uuid::Uuid::from_u128(value)
+}
+
+// tests -----------------------------------------------------------------------
+
 #[tokio::test]
-async fn repositories_share_commit_rollback_and_savepoint_scope() {
+async fn should_share_commit_rollback_and_savepoint_scope_across_repositories() {
     let db = Database::connect("sqlite::memory:").await.unwrap();
     let identity = identities::Model {
         id: fixture_id("identity-one"),
@@ -59,12 +70,4 @@ async fn repositories_share_commit_rollback_and_savepoint_scope() {
     drop(tx);
     assert!(db.identities.get_by_id(&second.id).await.unwrap().is_none());
     db.close().await;
-}
-
-fn fixture_id(label: &str) -> uuid::Uuid {
-    let mut value = 0_u128;
-    for byte in label.bytes() {
-        value = value.wrapping_mul(131).wrapping_add(u128::from(byte));
-    }
-    uuid::Uuid::from_u128(value)
 }

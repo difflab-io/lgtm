@@ -84,7 +84,7 @@ Mise manages tools and development tasks. Cargo and Bun manage dependencies. Tes
 
 - [CLI module architecture](cli/index.md).
 - [Review database architecture](db/index.md).
-- [Review command architecture](cli/reviews.md).
+- [Review command architecture](cli/index.md).
 - [Development guide](../development.md).
 - [Architecture decision](../../adr/0001-initial-architecture.md).
 - [Product requirements](../../prd/0001-core-concepts/README.md).

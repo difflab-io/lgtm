@@ -81,4 +81,4 @@ Service integration tests cover lifecycle, concurrency, identity normalization, 
 - [Services](../../../apps/lgtm-backend/src/services).
 - [Domain models](../../../apps/lgtm-backend/src/models).
 - [Integration tests](../../../apps/lgtm-backend/tests).
-- [CLI scaffold](../cli/reviews.md).
+- [CLI scaffold](../cli/index.md).

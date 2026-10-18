@@ -76,8 +76,9 @@ pub use connection::{Database, Transaction};
 pub mod models;
 pub mod repositories;
 
-#[cfg(test)]
-mod tests;
-
 /// Typed database discriminators.
 pub mod types;
+
+// tests -----------------------------------------------------------------------
+#[cfg(test)]
+mod tests;

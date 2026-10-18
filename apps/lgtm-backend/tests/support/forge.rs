@@ -5,7 +5,9 @@ use db::{
     services::ReviewService,
 };
 use lgtm_backend as db;
+use lgtm_backend::utils::*;
 
+// fixtures --------------------------------------------------------------------
 fn invalid(message: impl Into<String>) -> Error {
     Error::Invalid(message.into())
 }

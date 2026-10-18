@@ -4,6 +4,7 @@ pub use lgtm_db as database;
 pub mod error;
 pub mod models;
 pub mod services;
+pub mod utils;
 
 use connectrpc::{Encodable, RequestContext, Response, Router, ServiceRequest, ServiceResult};
 use connectrpc_health::{StaticChecker, install_static};

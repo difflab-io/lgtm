@@ -1,9 +1,11 @@
+use crate::support;
 use lgtm_backend::{models::*, services::*};
 use lgtm_db::models::comments;
-mod support;
+
+// tests -----------------------------------------------------------------------
 
 #[tokio::test]
-async fn service_actions_and_client_owned_database_transactions() {
+async fn should_preserve_immutable_fields_in_client_owned_transactions() {
     for (service, _, _) in support::databases().await {
         let db = service.database();
         let review = ReviewService::new(db.clone(), service.auth().clone());

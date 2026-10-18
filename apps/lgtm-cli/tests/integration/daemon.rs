@@ -1,3 +1,4 @@
+// fixtures --------------------------------------------------------------------
 pub mod proto {
     connectrpc::include_generated!();
 }
@@ -19,8 +20,32 @@ impl Drop for Instance {
 
 // api -------------------------------------------------------------------------
 
+// helpers ---------------------------------------------------------------------
+
+fn command(dir: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_lgtm"))
+        .env("LGTM_HOME", dir)
+        .env("RUST_LOG", "info")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap()
+}
+
+fn discovery(dir: &Path) -> serde_json::Value {
+    let status = command(dir, &["status", "--json"]);
+    assert!(
+        status.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    serde_json::from_slice(&status.stdout).unwrap()
+}
+
+// tests -----------------------------------------------------------------------
+
 #[tokio::test]
-async fn background_instance_serves_ui_and_rpc_and_stops() {
+async fn should_serve_ui_and_rpc_from_background_instance_and_stop() {
     let instance = Instance(tempfile::tempdir().unwrap());
     let dir = instance.0.path();
     let up = command(dir, &["up", "--port", "0", "--no-open"]);
@@ -143,7 +168,7 @@ async fn background_instance_serves_ui_and_rpc_and_stops() {
 }
 
 #[test]
-fn occupied_port_fails_without_leaving_an_instance() {
+fn should_fail_on_occupied_port_without_leaving_instance() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port().to_string();
     let dir = tempfile::tempdir().unwrap();
@@ -159,7 +184,7 @@ fn occupied_port_fails_without_leaving_an_instance() {
 }
 
 #[test]
-fn review_starts_a_ready_server_for_the_current_directory() {
+fn should_start_ready_review_server_for_current_directory() {
     let instance = Instance(tempfile::tempdir().unwrap());
     let dir = instance.0.path();
     let review = command(
@@ -192,7 +217,7 @@ fn review_starts_a_ready_server_for_the_current_directory() {
 }
 
 #[test]
-fn simultaneous_up_calls_share_one_daemon() {
+fn should_share_one_daemon_between_simultaneous_up_calls() {
     let instance = Instance(tempfile::tempdir().unwrap());
     let dir = instance.0.path();
     let spawn = || {
@@ -231,7 +256,7 @@ fn simultaneous_up_calls_share_one_daemon() {
 }
 
 #[test]
-fn stale_pid_does_not_stop_another_server() {
+fn should_preserve_other_server_when_pid_is_stale() {
     let first = Instance(tempfile::tempdir().unwrap());
     let second = Instance(tempfile::tempdir().unwrap());
     for instance in [&first, &second] {
@@ -264,7 +289,7 @@ fn stale_pid_does_not_stop_another_server() {
 }
 
 #[test]
-fn status_on_unused_home_does_not_create_files() {
+fn should_leave_unused_home_untouched_when_reading_status() {
     let root = tempfile::tempdir().unwrap();
     let home = root.path().join("unused home");
     let status = Command::new(env!("CARGO_BIN_EXE_lgtm"))
@@ -278,26 +303,4 @@ fn status_on_unused_home_does_not_create_files() {
         serde_json::json!({"running": false})
     );
     assert!(!home.exists());
-}
-
-// helpers ---------------------------------------------------------------------
-
-fn command(dir: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_lgtm"))
-        .env("LGTM_HOME", dir)
-        .env("RUST_LOG", "info")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .unwrap()
-}
-
-fn discovery(dir: &Path) -> serde_json::Value {
-    let status = command(dir, &["status", "--json"]);
-    assert!(
-        status.status.success(),
-        "{}",
-        String::from_utf8_lossy(&status.stderr)
-    );
-    serde_json::from_slice(&status.stdout).unwrap()
 }

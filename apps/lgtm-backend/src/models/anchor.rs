@@ -1,4 +1,4 @@
-use super::{Result, invalid};
+use crate::error::{Result, invalid};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 

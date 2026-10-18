@@ -91,6 +91,6 @@ The PID and port use plain numeric text. `instance` reads them without contactin
 ## References
 
 - [Store implementation](../../../apps/lgtm-cli/src/store.rs).
-- [Lifecycle tests](../../../apps/lgtm-cli/tests/lifecycle.rs).
+- [Lifecycle tests](../../../apps/lgtm-cli/tests/integration/daemon.rs).
 - [Daemon module](daemon.md).
 - [Server module](server.md).

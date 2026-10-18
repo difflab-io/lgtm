@@ -19,6 +19,42 @@ pub struct Thread {
     pub outdated: bool,
 }
 
+impl Thread {
+    pub fn from_db_model(
+        v: threads::Model,
+        author: Actor,
+        resolved_by: Option<Actor>,
+        updated_by: Option<Actor>,
+    ) -> Result<Self> {
+        Ok(Thread {
+            id: v.id,
+            context_id: v.context_id,
+            origin_session_id: v.origin_session_id,
+            state: v.state,
+            resolved_at: v.resolved_at,
+            updated_at: v.updated_at,
+            forge_thread_id: v.forge_thread_id,
+            outdated: v.outdated,
+            author,
+            resolved_by,
+            updated_by,
+            anchor: match v.anchor_kind.as_str() {
+                "file" => Anchor::File {
+                    path: v.file_path.unwrap_or_default(),
+                },
+                "line" => Anchor::Line {
+                    path: v.file_path.unwrap_or_default(),
+                    start: v.start_line.unwrap_or_default(),
+                    end: v.end_line.unwrap_or_default(),
+                    side: v.side.unwrap_or_default(),
+                    commit: v.reviewed_commit.unwrap_or_default(),
+                },
+                _ => Anchor::General,
+            },
+        })
+    }
+}
+
 impl From<&Thread> for threads::Model {
     fn from(v: &Thread) -> Self {
         Self {
@@ -60,41 +96,5 @@ impl From<&Thread> for threads::Model {
             forge_thread_id: v.forge_thread_id.clone(),
             outdated: v.outdated,
         }
-    }
-}
-
-impl Thread {
-    pub fn from_db_model(
-        v: threads::Model,
-        author: Actor,
-        resolved_by: Option<Actor>,
-        updated_by: Option<Actor>,
-    ) -> Result<Self> {
-        Ok(Thread {
-            id: v.id,
-            context_id: v.context_id,
-            origin_session_id: v.origin_session_id,
-            state: v.state,
-            resolved_at: v.resolved_at,
-            updated_at: v.updated_at,
-            forge_thread_id: v.forge_thread_id,
-            outdated: v.outdated,
-            author,
-            resolved_by,
-            updated_by,
-            anchor: match v.anchor_kind.as_str() {
-                "file" => Anchor::File {
-                    path: v.file_path.unwrap_or_default(),
-                },
-                "line" => Anchor::Line {
-                    path: v.file_path.unwrap_or_default(),
-                    start: v.start_line.unwrap_or_default(),
-                    end: v.end_line.unwrap_or_default(),
-                    side: v.side.unwrap_or_default(),
-                    commit: v.reviewed_commit.unwrap_or_default(),
-                },
-                _ => Anchor::General,
-            },
-        })
     }
 }

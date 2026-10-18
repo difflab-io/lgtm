@@ -4,6 +4,7 @@ use lgtm_backend::{
     services::{AuthService, ReviewService},
 };
 
+// fixtures --------------------------------------------------------------------
 pub async fn databases() -> Vec<(ReviewService, String, tempfile::TempDir)> {
     let temp = tempfile::tempdir().unwrap();
     let url = format!(

@@ -12,9 +12,6 @@ The main module parses CLI commands and connects them to the daemon, server, sto
 | [Daemon](daemon.md) | Start, discover, and stop the server   |
 | [Server](server.md) | Serve web assets and API requests      |
 | [Store](store.md)   | Own runtime paths and PID/port files   |
-| [Log](log.md)       | Configure logging and server output    |
-| [Context](context.md) | Infer context and select an actor |
-| [Reviews](reviews.md) | Manage sessions, comments and exports |
 | `ui`                | Build review URLs and open the browser |
 | Bundled backend     | Provide greeting and health services   |
 
@@ -48,7 +45,7 @@ The main module parses CLI commands and connects them to the daemon, server, sto
 
 The entry point parses arguments and constructs a store. For `serve --daemonize`, it detaches before creating the Tokio runtime. Server commands initialize logging before creating the runtime. The entry point then calls the selected module API inside it.
 
-`review` uses the [review scaffold](reviews.md) to select a local path and passes that path to `ui::open_review`. This function obtains a ready server, encodes the path as a query parameter, and opens the browser. The server's working directory is the store.
+`review` uses the review scaffold to select a local path and passes that path to `ui::open_review`. This function obtains a ready server, encodes the path as a query parameter, and opens the browser. The server's working directory is the store.
 
 ReviewService and database access stay in the backend; the CLI keeps only review command shapes pending RPCs. The daemon uses the store for discovery and the log module for background output. The server uses the same store for PID ownership and its listening port. These modules share one `Store` value from the entry point.
 
@@ -89,7 +86,4 @@ The `backend` module comes from `bundle/backend.rs`. The bundle task copies only
 - [Daemon module](daemon.md).
 - [Server module](server.md).
 - [Shared application architecture](../index.md).
-- [Review commands](reviews.md).
 - [Database architecture](../db/index.md).
-
-Context and actor selection are detailed in [context discovery](context.md).

@@ -33,7 +33,7 @@ const backendSource = await readFile(join(root, 'apps/lgtm-backend/src/lib.rs'),
 await writeFile(
   join(stage, 'backend.rs'),
   backendSource
-    .replace(/^pub use lgtm_db as database;\n|^pub mod (?:error|models|services);\n/gm, '')
+    .replace(/^pub use lgtm_db as database;\n|^pub mod (?:error|models|services|utils);\n/gm, '')
     .replace(/\n{3,}/g, '\n\n'),
 )
 await cp(generated, join(stage, 'proto'), { recursive: true })

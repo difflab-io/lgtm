@@ -5,11 +5,11 @@ use super::super::{
     models::*,
 };
 use super::AuthService;
-use super::identities::IdentityMap;
+use super::actor::{get_actor, load_actors};
+use crate::utils::{ForgeSnapshot, PostReceipt, now, within};
 use db::Database;
 use db::models::*;
 use sea_orm::{ConnectionTrait, TransactionTrait};
-use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 
@@ -20,10 +20,6 @@ pub struct ReviewService {
 }
 
 impl ReviewService {
-    pub fn new(database: Database, auth: AuthService) -> Self {
-        Self { database, auth }
-    }
-
     pub fn auth(&self) -> &AuthService {
         &self.auth
     }
@@ -76,7 +72,7 @@ impl ReviewService {
                 .await?;
         }
         let seed = Context {
-            id: id(),
+            id: uuid::Uuid::new_v4(),
             key: key.clone(),
             paths: vec![],
             revision: 0,
@@ -326,7 +322,7 @@ impl ReviewService {
             }
         }
         let s = Session {
-            id: id(),
+            id: uuid::Uuid::new_v4(),
             context_id: context.id,
             creator: actor.clone(),
             status: SessionStatus::Active,
@@ -387,7 +383,7 @@ impl ReviewService {
             }
         }
         let t = Thread {
-            id: id(),
+            id: uuid::Uuid::new_v4(),
             context_id: s.context_id,
             origin_session_id: Some(s.id),
             author: actor.clone(),
@@ -401,7 +397,7 @@ impl ReviewService {
             outdated: false,
         };
         tx.comments.insert_thread(&threads::Model::from(&t)).await?;
-        let c = local_comment(&s, &t, actor, body, 0);
+        let c = Comment::local(&s, &t, actor, body, 0);
         tx.comments.insert(&comments::Model::from(&c)).await?;
         tx.commit().await?;
         Ok(c)
@@ -423,7 +419,7 @@ impl ReviewService {
         let s = self.require_active_session(&tx, session_id).await?;
         let t = self.load_thread(&tx, thread_id, &s.context_id).await?;
         let position = tx.comments.get_next_position(thread_id).await?;
-        let c = local_comment(&s, &t, actor, body, position);
+        let c = Comment::local(&s, &t, actor, body, position);
         tx.comments.insert(&comments::Model::from(&c)).await?;
         tx.commit().await?;
         Ok(c)
@@ -472,7 +468,7 @@ impl ReviewService {
         }
         let hash = format!(
             "{:x}",
-            Sha256::digest(payload(&(input.clone(), &actor.id))?)
+            Sha256::digest(serde_json::to_string(&(input.clone(), &actor.id))?)
         );
         let tx = self.database.begin().await?;
         self.lock_context(&tx, context_id).await?;
@@ -646,7 +642,7 @@ impl ReviewService {
                     self.load_thread(&tx, &c.thread_id, &context.id).await?
                 } else {
                     let t = Thread {
-                        id: id(),
+                        id: uuid::Uuid::new_v4(),
                         context_id: context.id,
                         origin_session_id: None,
                         author: authors[author_index].clone(),
@@ -709,7 +705,7 @@ impl ReviewService {
                 } else {
                     let position = tx.comments.get_next_position(&thread.id).await?;
                     Comment {
-                        id: id(),
+                        id: uuid::Uuid::new_v4(),
                         context_id: context.id,
                         thread_id: thread.id,
                         origin_session_id: None,
@@ -907,6 +903,10 @@ impl ReviewService {
         Ok(())
     }
 
+    pub fn new(database: Database, auth: AuthService) -> Self {
+        Self { database, auth }
+    }
+
     pub fn export(conversation: &Conversation, session: &Session) -> String {
         let mut out = format!(
             "# {}\n\nSession: {} ({})\nCreator: {}\nReviewed base/head: {:?} / {:?}\nOutcome: {:?}\nSubmission: {}\nLast refresh: {:?} ({})\n\nConversation content and resolution are CURRENT, not a historical snapshot.\n",
@@ -953,6 +953,7 @@ impl ReviewService {
         }
         out
     }
+
     async fn comments_from_db_models<C: ConnectionTrait + TransactionTrait>(
         rows: Vec<comments::Model>,
         db: &db::Database<C>,
@@ -961,9 +962,9 @@ impl ReviewService {
         for r in &rows {
             ids.insert(r.author_id);
         }
-        let actors = IdentityMap::load(ids, db).await?;
+        let actors = load_actors(ids, db).await?;
         rows.into_iter()
-            .map(|r| Comment::from_db_model(r.clone(), actors.get(&r.author_id)?))
+            .map(|r| Comment::from_db_model(r.clone(), get_actor(&actors, &r.author_id)?))
             .collect()
     }
 
@@ -991,14 +992,20 @@ impl ReviewService {
                 ids.insert(*id);
             }
         }
-        let actors = IdentityMap::load(ids, db).await?;
+        let actors = load_actors(ids, db).await?;
         rows.into_iter()
             .map(|r| {
                 Thread::from_db_model(
                     r.clone(),
-                    actors.get(&r.author_id)?,
-                    actors.optional(r.resolved_by_id.as_ref())?,
-                    actors.optional(r.updated_by_id.as_ref())?,
+                    get_actor(&actors, &r.author_id)?,
+                    r.resolved_by_id
+                        .as_ref()
+                        .map(|id| get_actor(&actors, id))
+                        .transpose()?,
+                    r.updated_by_id
+                        .as_ref()
+                        .map(|id| get_actor(&actors, id))
+                        .transpose()?,
                 )
             })
             .collect()
@@ -1025,13 +1032,16 @@ impl ReviewService {
                 ids.insert(*id);
             }
         }
-        let actors = IdentityMap::load(ids, db).await?;
+        let actors = load_actors(ids, db).await?;
         rows.into_iter()
             .map(|r| {
                 Session::from_db_model(
                     r.clone(),
-                    actors.get(&r.creator_id)?,
-                    actors.optional(r.completed_by_id.as_ref())?,
+                    get_actor(&actors, &r.creator_id)?,
+                    r.completed_by_id
+                        .as_ref()
+                        .map(|id| get_actor(&actors, id))
+                        .transpose()?,
                 )
             })
             .collect()
@@ -1059,34 +1069,5 @@ impl ReviewService {
             .map(|p| p.path)
             .collect();
         Context::from_db_model(row, paths)
-    }
-}
-
-fn payload<T: Serialize>(v: &T) -> Result<String> {
-    Ok(serde_json::to_string(v)?)
-}
-
-fn local_comment(s: &Session, t: &Thread, actor: &Actor, body: &str, position: i64) -> Comment {
-    Comment {
-        id: id(),
-        context_id: s.context_id,
-        thread_id: t.id,
-        origin_session_id: Some(s.id),
-        author: actor.clone(),
-        body: body.into(),
-        position,
-        visibility: "draft".into(),
-        created_at: now(),
-        updated_at: now(),
-        forge_comment_id: None,
-        forge_object_kind: None,
-        forge_review_id: None,
-        forge_body: None,
-        forge_updated_at: None,
-        posting_account_id: None,
-        posting: PostingStatus::Unposted,
-        posting_request_key: None,
-        payload_hash: None,
-        remote_presence: "local".into(),
     }
 }

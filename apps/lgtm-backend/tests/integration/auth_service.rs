@@ -1,3 +1,4 @@
+use crate::support;
 use connectrpc::{
     Encodable, Protocol, RequestContext, Response, Router, Server, ServiceRequest, ServiceResult,
     client::{CallOptions, ClientConfig, HttpClient},
@@ -9,10 +10,34 @@ use lgtm_backend::{
     services::AuthService,
 };
 use std::{sync::Arc, time::Duration};
-mod support;
+
+// fixtures --------------------------------------------------------------------
+/// Test endpoint: production greeting/health routes keep their existing contract.
+struct RequesterEndpoint(AuthService);
+
+impl GreeterService for RequesterEndpoint {
+    #[tracing::instrument(name = "rpc_request", skip_all, fields(rpc.method = "requester"))]
+    async fn say_hello<'a>(
+        &'a self,
+        context: RequestContext,
+        _request: ServiceRequest<'_, SayHelloRequest>,
+    ) -> ServiceResult<impl Encodable<SayHelloResponse> + Send + use<'a>> {
+        let requester = self
+            .0
+            .requester(&context)
+            .await
+            .map_err(|error| connectrpc::ConnectError::invalid_argument(error.to_string()))?;
+        Response::ok(SayHelloResponse {
+            message: requester.label(),
+            ..Default::default()
+        })
+    }
+}
+
+// tests -----------------------------------------------------------------------
 
 #[tokio::test]
-async fn requester_resolution_rejects_missing_unknown_and_ambiguous_metadata() {
+async fn should_reject_missing_unknown_and_ambiguous_requester_metadata() {
     for (review, _, _) in support::databases().await {
         let auth = review.auth();
         let actor = auth
@@ -45,30 +70,8 @@ async fn requester_resolution_rejects_missing_unknown_and_ambiguous_metadata() {
     }
 }
 
-/// Test endpoint: production greeting/health routes keep their existing contract.
-struct RequesterEndpoint(AuthService);
-
-impl GreeterService for RequesterEndpoint {
-    #[tracing::instrument(name = "rpc_request", skip_all, fields(rpc.method = "requester"))]
-    async fn say_hello<'a>(
-        &'a self,
-        context: RequestContext,
-        _request: ServiceRequest<'_, SayHelloRequest>,
-    ) -> ServiceResult<impl Encodable<SayHelloResponse> + Send + use<'a>> {
-        let requester = self
-            .0
-            .requester(&context)
-            .await
-            .map_err(|error| connectrpc::ConnectError::invalid_argument(error.to_string()))?;
-        Response::ok(SayHelloResponse {
-            message: requester.label(),
-            ..Default::default()
-        })
-    }
-}
-
 #[tokio::test]
-async fn grpc_and_grpc_web_handlers_resolve_each_requests_supplied_identity() {
+async fn should_resolve_each_requests_supplied_identity_over_grpc_and_grpc_web() {
     let database = Database::connect("sqlite::memory:").await.unwrap();
     let auth = AuthService::new(database.clone());
     let alice = auth

@@ -1,6 +1,6 @@
 //! Resolve the supplied requester identity. Authentication and authorization are future work.
 use super::super::database::Database;
-use super::super::{database as db, database::models::identities, models::id};
+use super::super::{database as db, database::models::identities};
 use super::super::{
     error::{Error, Result, invalid},
     models::Actor,
@@ -14,10 +14,6 @@ pub struct AuthService {
 }
 
 impl AuthService {
-    pub fn new(database: Database) -> Self {
-        Self { database }
-    }
-
     /// Resolve an explicitly supplied identity UUID from gRPC/Connect request metadata.
     /// This identifies the claimed requester; it does not authenticate that claim.
     pub async fn requester(&self, request: &RequestContext) -> Result<Actor> {
@@ -84,6 +80,10 @@ impl AuthService {
         Ok(current)
     }
 
+    pub fn new(database: Database) -> Self {
+        Self { database }
+    }
+
     pub(super) async fn find_or_create<D: ConnectionTrait + TransactionTrait>(
         conn: &db::Database<D>,
         name: &str,
@@ -92,7 +92,7 @@ impl AuthService {
     ) -> Result<Actor> {
         use super::super::models::ActorKind;
         let actor = Actor {
-            id: id(),
+            id: uuid::Uuid::new_v4(),
             name: name.trim().into(),
             kind,
         };

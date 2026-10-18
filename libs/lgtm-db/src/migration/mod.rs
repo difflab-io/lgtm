@@ -18,6 +18,7 @@ pub async fn apply<M: MigratorTrait>(db: &sea_orm::DatabaseConnection) -> Result
     tx.commit().await
 }
 
+// tests -----------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
     fn fixture_id(label: &str) -> uuid::Uuid {

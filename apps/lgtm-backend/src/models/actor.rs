@@ -1,6 +1,6 @@
 //! Logical human or agent attribution, independent of forge posting accounts.
 use super::super::{database::models::identities, database::types::IdentityKind};
-use super::{Result, invalid};
+use crate::error::{Result, invalid};
 use serde::{Deserialize, Serialize};
 
 /// An identity referenced by review records.
@@ -117,6 +117,7 @@ impl TryFrom<identities::Model> for Actor {
     }
 }
 
+// tests -----------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
     use super::*;

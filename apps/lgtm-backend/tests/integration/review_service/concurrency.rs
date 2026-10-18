@@ -1,7 +1,12 @@
 use lgtm_backend::models::*;
+use lgtm_backend::utils::*;
+
+use crate::support;
+
+// tests -----------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn parallel_first_install_and_foreign_keys_on_each_connection() {
+async fn should_initialize_parallel_connections_with_foreign_keys_enabled() {
     let temp = tempfile::tempdir().unwrap();
     let url = format!(
         "sqlite://{}?mode=rwc",
@@ -49,10 +54,8 @@ async fn parallel_first_install_and_foreign_keys_on_each_connection() {
     db.database().close().await;
 }
 
-mod support;
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn independent_pools_share_context_keys_and_serialize_start_complete_races() {
+async fn should_share_context_keys_and_serialize_session_races_across_pools() {
     for (db, url, _) in support::databases().await {
         let actor = db
             .auth()

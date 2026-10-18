@@ -6,6 +6,7 @@ pub mod sessions;
 pub mod threads;
 pub mod workspace_paths;
 
+// tests -----------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
     fn fixture_id(label: &str) -> uuid::Uuid {

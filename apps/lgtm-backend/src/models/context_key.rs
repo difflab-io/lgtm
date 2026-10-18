@@ -1,5 +1,5 @@
 use super::super::database::repositories;
-use super::{Result, invalid};
+use crate::error::{Result, invalid};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -86,9 +86,7 @@ impl ContextKey {
             ),
         }
     }
-}
 
-impl ContextKey {
     pub fn as_database_key(&self) -> repositories::review_context::ContextKey<'_> {
         match self {
             ContextKey::Notes { path } => repositories::review_context::ContextKey::Notes(path),

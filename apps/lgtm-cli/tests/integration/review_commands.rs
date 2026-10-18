@@ -1,8 +1,10 @@
 //! The CLI exposes argument shapes but must not access review persistence.
 use std::process::Command;
 
+// tests -----------------------------------------------------------------------
+
 #[test]
-fn scaffold_commands_do_not_open_a_database_or_create_runtime_files() {
+fn should_reject_scaffold_commands_without_opening_database_or_creating_runtime_files() {
     let root = tempfile::tempdir().unwrap();
     let home = root.path().join("unused-home");
     for args in [
@@ -38,7 +40,7 @@ fn scaffold_commands_do_not_open_a_database_or_create_runtime_files() {
 }
 
 #[test]
-fn review_argument_shapes_remain_available() {
+fn should_expose_review_command_help() {
     for command in ["review", "session", "sessions", "comments"] {
         let out = Command::new(env!("CARGO_BIN_EXE_lgtm"))
             .args([command, "--help"])

@@ -6,6 +6,7 @@ use lgtm_db::{
 };
 use uuid::Uuid;
 
+// fixtures --------------------------------------------------------------------
 fn human(name: &str) -> identities::Model {
     identities::Model {
         id: Uuid::new_v4(),
@@ -93,8 +94,10 @@ async fn databases() -> Vec<Database> {
     result
 }
 
+// tests -----------------------------------------------------------------------
+
 #[tokio::test]
-async fn public_repositories_support_multi_actor_review_and_successor_sessions() {
+async fn should_support_multi_actor_reviews_and_successor_sessions() {
     for db in databases().await {
         for kind in [
             ContextKind::Notes,

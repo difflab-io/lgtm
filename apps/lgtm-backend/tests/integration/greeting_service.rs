@@ -5,8 +5,10 @@ use connectrpc::{
 use lgtm_backend::proto::lgtm::v1::{GreeterServiceClient, SayHelloRequest};
 use std::time::Duration;
 
+// tests -----------------------------------------------------------------------
+
 #[tokio::test]
-async fn hello_works_over_grpc_and_grpc_web() {
+async fn should_greet_over_grpc_and_grpc_web() {
     let (router, _) = lgtm_backend::router();
     let bound = Server::bind("127.0.0.1:0").await.unwrap();
     let address = bound.local_addr().unwrap();

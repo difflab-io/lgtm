@@ -8,8 +8,10 @@ use connectrpc_health::{
 };
 use std::time::Duration;
 
+// tests -----------------------------------------------------------------------
+
 #[tokio::test]
-async fn health_works_over_connect_and_grpc() {
+async fn should_report_health_over_connect_and_grpc() {
     let (router, health) = lgtm_backend::router();
     let bound = Server::bind("127.0.0.1:0").await.unwrap();
     let address = bound.local_addr().unwrap();

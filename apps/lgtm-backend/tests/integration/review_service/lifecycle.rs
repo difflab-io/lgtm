@@ -1,8 +1,9 @@
 use lgtm_backend::{models::*, services::*};
 
-mod support;
-use support::databases;
+use crate::support;
+use crate::support::databases;
 
+// fixtures --------------------------------------------------------------------
 async fn actor(db: &ReviewService, name: &str, model: Option<&str>) -> Actor {
     match model {
         Some(model) => db
@@ -30,8 +31,10 @@ fn notes(path: &str) -> ContextKey {
     ContextKey::Notes { path: path.into() }
 }
 
+// tests -----------------------------------------------------------------------
+
 #[tokio::test]
-async fn shared_lifecycle_integrity_concurrency_and_current_exports() {
+async fn should_preserve_conversation_across_completed_and_successor_sessions() {
     for (db, url, temp) in databases().await {
         let alice = actor(&db, "Alice", None).await;
         let bot = actor(&db, "Bot", Some("model-one")).await;
@@ -271,7 +274,7 @@ async fn shared_lifecycle_integrity_concurrency_and_current_exports() {
 }
 
 #[tokio::test]
-async fn shared_branch_filters_commit_context_and_anchor_invariants() {
+async fn should_filter_branch_reviews_and_validate_commit_anchors() {
     for (db, url, temp) in databases().await {
         let a = actor(&db, "Reviewer", None).await;
         let root = temp.path().to_str().unwrap();
@@ -439,7 +442,7 @@ async fn shared_branch_filters_commit_context_and_anchor_invariants() {
 }
 
 #[tokio::test]
-async fn identity_relations_follow_profile_changes_and_validate_reviewed_commits() {
+async fn should_resolve_updated_identity_profiles_and_validate_reviewed_commits() {
     for (db, url, _) in databases().await {
         let a = actor(&db, "Alice", None).await;
         let c = db.ensure_context(notes("/authorship"), None).await.unwrap();
@@ -554,7 +557,7 @@ async fn identity_relations_follow_profile_changes_and_validate_reviewed_commits
 }
 
 #[tokio::test]
-async fn human_and_agent_identity_shapes_and_keys_are_distinct() {
+async fn should_distinguish_human_and_agent_identity_keys() {
     for (db, _, _) in databases().await {
         let human = db
             .auth()

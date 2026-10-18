@@ -1,10 +1,11 @@
+use lgtm_backend::utils::*;
 use lgtm_backend::{models::*, services::*};
 use lgtm_db::types as lgtm_db_types;
 
-use support::forge::*;
-mod support;
-use support::databases;
+use crate::support::databases;
+use crate::support::forge::*;
 
+// fixtures --------------------------------------------------------------------
 async fn actor(db: &ReviewService, name: &str, model: Option<&str>) -> Actor {
     match model {
         Some(model) => db
@@ -46,8 +47,37 @@ fn snapshot(head: &str) -> ForgeSnapshot {
     }
 }
 
+fn completion() -> Completion {
+    Completion {
+        outcome: None,
+        body: Some("Ready".into()),
+        submit: false,
+    }
+}
+
+struct FailingProvider(std::sync::atomic::AtomicUsize);
+
+impl ReviewForgeProvider for FailingProvider {
+    fn is_stub(&self) -> bool {
+        true
+    }
+
+    async fn fetch(&self, _: &ContextKey) -> lgtm_backend::error::Result<ForgeSnapshot> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err(lgtm_backend::error::Error::Invalid(
+            "External fetch failed".into(),
+        ))
+    }
+
+    async fn head(&self, _: &ContextKey) -> lgtm_backend::error::Result<String> {
+        unreachable!()
+    }
+}
+
+// tests -----------------------------------------------------------------------
+
 #[tokio::test]
-async fn shared_forge_refresh_attribution_pending_posts_and_failure_contract() {
+async fn should_reconcile_forge_refreshes_and_preserve_attribution_on_post_failures() {
     for (db, _, _) in databases().await {
         let alice = actor(&db, "Alice", None).await;
         let bot = actor(&db, "Bot", Some("model-one")).await;
@@ -249,35 +279,8 @@ async fn shared_forge_refresh_attribution_pending_posts_and_failure_contract() {
     }
 }
 
-fn completion() -> Completion {
-    Completion {
-        outcome: None,
-        body: Some("Ready".into()),
-        submit: false,
-    }
-}
-
-struct FailingProvider(std::sync::atomic::AtomicUsize);
-
-impl ReviewForgeProvider for FailingProvider {
-    fn is_stub(&self) -> bool {
-        true
-    }
-
-    async fn fetch(&self, _: &ContextKey) -> lgtm_backend::error::Result<ForgeSnapshot> {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Err(lgtm_backend::error::Error::Invalid(
-            "External fetch failed".into(),
-        ))
-    }
-
-    async fn head(&self, _: &ContextKey) -> lgtm_backend::error::Result<String> {
-        unreachable!()
-    }
-}
-
 #[tokio::test]
-async fn client_can_rollback_database_work_on_provider_failure() {
+async fn should_rollback_database_work_when_provider_fails() {
     use lgtm_db::models::{comments, identities};
 
     for (review, _, _) in databases().await {
@@ -318,7 +321,7 @@ async fn client_can_rollback_database_work_on_provider_failure() {
             .len();
         let tx = review.database().begin().await.unwrap();
         let identity = identities::Model {
-            id: id(),
+            id: uuid::Uuid::new_v4(),
             name: "Temporary".into(),
             kind: lgtm_db_types::IdentityKind::Human,
             email: Some("temporary@example.com".into()),
@@ -328,7 +331,7 @@ async fn client_can_rollback_database_work_on_provider_failure() {
         };
         tx.identities.insert(&identity).await.unwrap();
         let mut draft = comments::Model::from(&root);
-        draft.id = id();
+        draft.id = uuid::Uuid::new_v4();
         draft.author_id = identity.id;
         draft.position = 1;
         draft.body = "Discard on failure".into();
