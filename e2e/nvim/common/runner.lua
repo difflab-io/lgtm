@@ -1,6 +1,15 @@
 local suite = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h")
 package.path = suite .. "/?.lua;" .. suite .. "/common/?.lua;" .. package.path
 local H = {}
+function H.scenario(name, run)
+	H.active_scenario = name
+	io.stdout:write("\nSCENARIO: " .. name .. "\n")
+	io.stdout:flush()
+	run()
+	io.stdout:write("PASS: " .. name .. "\n")
+	io.stdout:flush()
+	H.active_scenario = nil
+end
 local test
 local function drive_picker()
 	local picker = require("lgtm.picker").last
@@ -62,7 +71,8 @@ function H.rpc(method, input)
 	return result
 end
 function H.keys(keys)
-	print("Driving " .. keys)
+	io.stdout:write("  Keys: " .. keys .. "\n")
+	io.stdout:flush()
 	vim.api.nvim_input(keys)
 	vim.defer_fn(resume, 80)
 	coroutine.yield()
@@ -74,6 +84,13 @@ function H.compose(body)
 	end, "composer")
 	local c = require("lgtm.composer").last
 	assert(vim.api.nvim_win_get_width(c.win) == 80 and vim.api.nvim_win_get_height(c.win) == 12, "fixed-size composer")
+	assert(
+		vim.wo[c.win].winhighlight:find("FloatBorder:LgtmBorder", 1, true),
+		"composer uses shared LGTM modal styling"
+	)
+	local bounds = vim.api.nvim_win_get_config(c.win)
+	assert(bounds.row == math.floor((vim.o.lines - bounds.height - 2) / 2), "composer centered vertically")
+	assert(bounds.col == math.floor((vim.o.columns - bounds.width - 2) / 2), "composer centered horizontally")
 	vim.api.nvim_buf_set_lines(c.buf, 0, -1, false, vim.split(body, "\n", { plain = true }))
 	H.keys("<C-s>")
 	H.wait(function()
@@ -109,7 +126,7 @@ test = coroutine.create(function()
 		require(case)(H)
 	end, debug.traceback)
 	if not ok then
-		io.stderr:write(error .. "\n")
+		io.stderr:write("FAIL: " .. (H.active_scenario or case) .. "\n" .. error .. "\n")
 		vim.cmd("cquit 1")
 	else
 		print("PASS Neovim " .. case)

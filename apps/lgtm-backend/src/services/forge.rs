@@ -1,4 +1,6 @@
 //! Remote review orchestration. All network calls happen outside database transactions.
+mod changes;
+
 use super::ReviewService;
 use crate::{
     error::{Error, Result, invalid},
@@ -14,8 +16,11 @@ use uuid::Uuid;
 pub struct ForgeService {
     reviews: ReviewService,
     provider: Option<Github>,
+    // The daemon owns one forge service; clones serialize draft and submit writes.
+    writes: std::sync::Arc<tokio::sync::Mutex<()>>,
 }
 
+#[derive(Clone, Copy)]
 struct Submission<'a> {
     repo: &'a Repository,
     pr: i64,
@@ -35,6 +40,29 @@ impl ForgeService {
         }
     }
 
+    async fn validate_comparison(
+        &self,
+        github: &Github,
+        repo: &Repository,
+        pr: i64,
+        session: &Session,
+    ) -> Result<()> {
+        let observed = github.get_pull_request(repo, pr).await?;
+        if observed.state != crate::database::types::ForgeState::Open {
+            return Err(Error::Conflict(
+                "PR is closed or merged; saved feedback remains available".into(),
+            ));
+        }
+        if session.commits.head.as_deref() != Some(observed.head.as_str())
+            || session.commits.base.as_deref() != Some(observed.base.as_str())
+        {
+            return Err(Error::Conflict(
+                "PR base or head changed; refresh and review before publishing".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub async fn get_pull_requests(
         &self,
         repository_url: &str,
@@ -49,10 +77,81 @@ impl ForgeService {
     }
 
     pub async fn refresh(&self, context_id: &Uuid) -> Result<Context> {
+        let _write = self.writes.lock().await;
+        self.refresh_context(context_id, None).await
+    }
+
+    pub async fn refresh_at_version(&self, context_id: &Uuid, version: i64) -> Result<Context> {
+        let _write = self.writes.lock().await;
+        self.refresh_context(context_id, Some(version)).await
+    }
+
+    /// Acceptance never deletes an existing provider review or repeats an uncertain intent.
+    pub async fn refresh_for_acceptance(
+        &self,
+        context_id: &Uuid,
+        review_id: &Uuid,
+        actor: &Actor,
+        expected_version: i64,
+    ) -> Result<Context> {
+        let _write = self.writes.lock().await;
+        let session = self.reviews.get_session(review_id).await?;
+        if session.context_id != *context_id
+            || session.creator.id != actor.id
+            || session.state() != "active"
+            || session.submission_status != "unsubmitted"
+        {
+            return Err(Error::Conflict(
+                "Recover the selected PR attempt before accepting another comparison".into(),
+            ));
+        }
         let context = self.reviews.get_context_by_id(context_id).await?;
         let (repo, pr) = Repository::from_context(&context.key)?;
+        let github = self.get_provider().await?;
+        let account = github.get_account_id().await?;
+        let reviews = github
+            .get_all(&format!("{}/pulls/{pr}/reviews", repo.route()))
+            .await?;
+        if reviews.iter().any(|review| {
+            review["state"] == "PENDING"
+                && crate::forge::github::opaque(&review["user"], "id")
+                    .ok()
+                    .as_deref()
+                    == Some(account.as_str())
+        }) {
+            return Err(Error::Conflict("Handle the existing GitHub pending review before accepting a new comparison. Saved feedback will be retained".into()));
+        }
+        self.refresh_context(context_id, Some(expected_version))
+            .await
+    }
+
+    async fn refresh_context(
+        &self,
+        context_id: &Uuid,
+        expected_version: Option<i64>,
+    ) -> Result<Context> {
+        let context = self.reviews.get_context_by_id(context_id).await?;
+        if expected_version.is_some_and(|version| version != context.revision) {
+            return Err(Error::Conflict(
+                "Review changed before the provider observation".into(),
+            ));
+        }
+        let (repo, pr) = Repository::from_context(&context.key)?;
         let result = async {
-            let snapshot = self.get_provider().await?.get_snapshot(&repo, pr).await?;
+            let github = self.get_provider().await?;
+            let snapshot = github.get_snapshot(&repo, pr).await?;
+            let conversation = self.reviews.get_conversation(context_id, true).await?;
+            for c in conversation.comments.iter().filter(|c| {
+                ["sending", "uncertain"].contains(&c.posting.state().as_str())
+                    && c.visibility == "draft"
+            }) {
+                let account = github.get_account_id().await?;
+                let session_id = c
+                    .origin_session_id
+                    .ok_or_else(|| invalid("Staged draft has no session"))?;
+                self.confirm_draft_receipt(&snapshot, c, &account, &session_id)
+                    .await?;
+            }
             self.reviews.apply_remote(&context, snapshot, false).await
         }
         .await;
@@ -64,107 +163,307 @@ impl ForgeService {
         result
     }
 
-    /// Read both revision sides from GitHub without checking out or trusting a local worktree.
+    /// Compatibility adapter for the existing wire method during consumer migration.
     pub async fn get_workspace(
         &self,
         context_id: &Uuid,
+        selected: &str,
+        metadata_only: bool,
     ) -> Result<(String, Vec<(WorkspaceFile, String)>)> {
-        use base64::Engine;
-        use sha2::{Digest, Sha256};
         let context = self.reviews.get_context_by_id(context_id).await?;
         let (repo, pr) = Repository::from_context(&context.key)?;
-        let github = self.get_provider().await?;
-        let pull = github.get_pull_request(&repo, pr).await?;
-        if context.refreshed_head.as_deref() != Some(&pull.head) {
-            return Err(Error::Conflict(
-                "PR head changed; refresh before reading content".into(),
-            ));
-        }
-        let files = github
-            .get_all(&format!("{}/pulls/{pr}/files", repo.route()))
-            .await?;
-        if files.len() >= 3000 {
+        super::diff::DiffService::with_provider(self.get_provider().await?)
+            .get_remote_workspace(
+                &repo,
+                pr,
+                context.refreshed_base.as_deref(),
+                context.refreshed_head.as_deref().unwrap_or(""),
+                selected,
+                metadata_only,
+            )
+            .await
+    }
+
+    /// Persisted comments stay drafts until the explicit review submission.
+    /// An uncertain write is recovered by exact receipt lookup, never replayed.
+    pub async fn sync_draft(
+        &self,
+        session_id: &Uuid,
+        comment_id: &Uuid,
+        actor: &Actor,
+    ) -> Result<Comment> {
+        let _write = self.writes.lock().await;
+        let actor = self.reviews.auth().validate_requester(actor).await?;
+        let session = self.reviews.get_session(session_id).await?;
+        let context = self.reviews.get_context_by_id(&session.context_id).await?;
+        let comment = self.reviews.get_comment(&context.id, comment_id).await?;
+        if session.state() != "active"
+            || comment.owner_id != Some(actor.id)
+            || comment.origin_session_id != Some(*session_id)
+        {
             return Err(invalid(
-                "GitHub file listing may be truncated; narrow the review before proceeding",
+                "Only your active review drafts can be synchronized",
             ));
         }
-        let mut output = vec![];
-        for file in files {
-            let path = file["filename"]
-                .as_str()
-                .ok_or_else(|| invalid("GitHub file missing path"))?;
-            Anchor::File { path: path.into() }.validate()?;
-            let status = file["status"]
-                .as_str()
-                .ok_or_else(|| invalid("GitHub file missing status"))?;
-            let previous = file["previous_filename"].as_str().unwrap_or(path);
-            Anchor::File {
-                path: previous.into(),
-            }
-            .validate()?;
-            let mut sides = vec![];
-            for (name, revision, absent) in [
-                (previous, &pull.base, status == "added"),
-                (path, &pull.head, status == "removed"),
-            ] {
-                if absent {
-                    sides.push(String::new());
-                    continue;
-                }
-                let encoded = name
-                    .split('/')
-                    .map(|part| {
-                        url::form_urlencoded::byte_serialize(part.as_bytes())
-                            .collect::<String>()
-                            .replace('+', "%20")
-                    })
-                    .collect::<Vec<_>>()
-                    .join("/");
-                let result = github
-                    .get(
-                        &format!("{}/contents/{encoded}", repo.route()),
-                        Some(&json!({"ref":revision})),
-                    )
-                    .await?;
-                if result["size"].as_u64().is_none_or(|n| n > 1024 * 1024) {
-                    return Err(invalid("Remote file exceeds supported 1 MiB text limit"));
-                }
-                if result["encoding"] != "base64" {
-                    return Err(invalid("Remote content encoding unsupported"));
-                }
-                let encoded = result["content"]
-                    .as_str()
-                    .ok_or_else(|| invalid("GitHub content missing"))?
-                    .replace(['\n', '\r'], "");
-                let bytes = base64::engine::general_purpose::STANDARD
-                    .decode(encoded)
-                    .map_err(|_| invalid("Malformed GitHub content encoding"))?;
-                if bytes.contains(&0) {
-                    return Err(invalid("Binary remote file is unsupported"));
-                }
-                sides.push(
-                    String::from_utf8(bytes)
-                        .map_err(|_| invalid("Remote file is not UTF-8 text"))?,
-                );
-            }
-            let content = sides.pop().unwrap();
-            let base = sides.pop().unwrap();
-            output.push((
-                WorkspaceFile {
-                    path: path.into(),
-                    content_hash: format!("sha256:{:x}", Sha256::digest(content.as_bytes())),
-                    content,
-                    status: status.into(),
-                },
-                base,
-            ));
+        if !context.key.is_forge_backed() {
+            return Ok(comment);
         }
-        if github.get_pull_request(&repo, pr).await?.head != pull.head {
+        let conversation = self.reviews.get_conversation(&context.id, true).await?;
+        let thread = conversation
+            .threads
+            .iter()
+            .find(|t| t.id == comment.thread_id)
+            .ok_or_else(|| invalid("Comment thread missing"))?;
+        // GitHub has no private standalone general comment; keep it local until submission.
+        if matches!(thread.anchor, Anchor::General) {
+            return Ok(comment);
+        }
+        if let Anchor::Line { commit, side, .. } = &thread.anchor {
+            let reviewed = if side == "old" {
+                &session.commits.base
+            } else {
+                &session.commits.head
+            };
+            if reviewed.as_ref() != Some(commit) {
+                return Err(Error::Conflict(
+                    "Comment references an outdated revision".into(),
+                ));
+            }
+        }
+        let (repo, pr) = Repository::from_context(&context.key)?;
+        let github = self.get_provider().await?;
+        let account = github.get_account_id().await?;
+        self.validate_comparison(&github, &repo, pr, &session)
+            .await?;
+        let pending = if let Some(pending) = self
+            .get_pending(&github, &repo, pr, &session, &account)
+            .await?
+        {
+            pending
+        } else {
+            if session.forge_review_id.is_some()
+                || !["unsubmitted", "draft_failed"].contains(&session.submission_status.as_str())
+            {
+                return Err(Error::Conflict("Pending review creation is uncertain; inspect GitHub before retrying. No write repeated".into()));
+            }
+            if !self
+                .reviews
+                .database()
+                .sessions
+                .update_submission(
+                    session_id,
+                    &session.submission_status,
+                    "draft_sending",
+                    None,
+                    None,
+                )
+                .await?
+            {
+                return Err(Error::Conflict(
+                    "Another request is preparing this pending review".into(),
+                ));
+            }
+            let result = github
+                .post(
+                    &format!("{}/pulls/{pr}/reviews", repo.route()),
+                    &json!({"commit_id":session.commits.head,"body":review_marker(session.id)}),
+                )
+                .await;
+            match result {
+                Ok(value) => value,
+                Err(error) => {
+                    self.reviews
+                        .database()
+                        .sessions
+                        .update_submission(
+                            session_id,
+                            "draft_sending",
+                            if definite_rejection(&error) {
+                                "draft_failed"
+                            } else {
+                                "draft_uncertain"
+                            },
+                            Some(&error.to_string()),
+                            None,
+                        )
+                        .await?;
+                    return Err(error);
+                }
+            }
+        };
+        let review_id = crate::forge::github::opaque(&pending, "id")?;
+        let current = self.reviews.get_session(session_id).await?;
+        if !self
+            .reviews
+            .database()
+            .sessions
+            .update_submission(
+                session_id,
+                &current.submission_status,
+                "unsubmitted",
+                None,
+                Some(&review_id),
+            )
+            .await?
+        {
+            return Err(Error::Conflict("Pending review state changed".into()));
+        }
+        if let Some(id) = &comment.forge_comment_id {
+            check_owner(&comment, &actor, &account)?;
+            if comment.forge_review_id.as_deref() != Some(&review_id) {
+                return Err(Error::Conflict(
+                    "Comment belongs to another pending review".into(),
+                ));
+            }
+            let remote = github
+                .get_all(&format!(
+                    "{}/pulls/{pr}/reviews/{review_id}/comments",
+                    repo.route()
+                ))
+                .await?;
+            if !remote.iter().any(|v| {
+                crate::forge::github::opaque(v, "id").ok().as_ref() == Some(id)
+                    && v["body"].as_str() == comment.forge_body.as_deref()
+                    && crate::forge::github::opaque(&v["user"], "id")
+                        .ok()
+                        .as_deref()
+                        == Some(account.as_str())
+            }) {
+                return Err(Error::Conflict(
+                    "GitHub draft changed or disappeared; refresh before continuing".into(),
+                ));
+            }
+            return Ok(comment);
+        }
+        if ["sending", "uncertain"].contains(&comment.posting.state().as_str()) {
+            let snapshot = github.get_snapshot(&repo, pr).await?;
+            self.confirm_draft_receipt(&snapshot, &comment, &account, session_id)
+                .await?;
+        } else {
+            let payload = format!(
+                "{}\n\n{}",
+                render(&comment),
+                comment_marker(*session_id, *comment_id)
+            );
+            self.reviews
+                .stage_post(
+                    session_id,
+                    comment_id,
+                    &comment_key(session_id, comment_id),
+                    &comment,
+                    &payload,
+                )
+                .await?;
+            let submission = Submission {
+                repo: &repo,
+                pr,
+                session: &session,
+                comments: &[],
+                threads: &conversation.threads,
+                account: &account,
+                event: "",
+                body: "",
+            };
+            if let Err(error) = self
+                .send_comment(&github, &submission, &comment, &pending)
+                .await
+            {
+                if definite_rejection(&error) {
+                    self.reviews.reject_post(&context.id, comment_id).await?;
+                } else {
+                    self.reviews
+                        .posting_uncertain(&context.id, comment_id, &error.to_string())
+                        .await?;
+                }
+                return Err(error);
+            }
+        }
+        self.reviews.get_comment(&context.id, comment_id).await
+    }
+
+    async fn confirm_draft_receipt(
+        &self,
+        snapshot: &crate::utils::ForgeSnapshot,
+        comment: &Comment,
+        account: &str,
+        session_id: &Uuid,
+    ) -> Result<()> {
+        let payload = comment
+            .forge_body
+            .as_deref()
+            .ok_or_else(|| invalid("Missing staged draft payload"))?;
+        let session = self.reviews.get_session(session_id).await?;
+        let matches: Vec<_> = snapshot
+            .threads
+            .iter()
+            .flat_map(|t| t.comments.iter().map(move |c| (t, c)))
+            .filter(|(_, c)| {
+                c.pending
+                    && c.review_id == session.forge_review_id
+                    && c.body == payload
+                    && c.author.account_id == account
+            })
+            .collect();
+        if matches.len() != 1 {
             return Err(Error::Conflict(
-                "PR head changed during content fetch".into(),
+                "Draft receipt is missing or ambiguous; inspect GitHub. No comment was reposted"
+                    .into(),
             ));
         }
-        Ok((repo.repository_url, output))
+        let (thread, remote) = matches[0];
+        self.reviews
+            .confirm_post(
+                &comment.context_id,
+                &comment.id,
+                &comment_key(session_id, &comment.id),
+                PostReceipt {
+                    comment_id: remote.id.clone(),
+                    kind: "review_comment".into(),
+                    thread_id: Some(thread.id.clone()),
+                    review_id: remote.review_id.clone(),
+                    posting_account_id: account.into(),
+                },
+            )
+            .await
+    }
+
+    async fn get_pending(
+        &self,
+        github: &Github,
+        repo: &Repository,
+        pr: i64,
+        session: &Session,
+        account: &str,
+    ) -> Result<Option<Value>> {
+        let reviews = github
+            .get_all(&format!("{}/pulls/{pr}/reviews", repo.route()))
+            .await?;
+        let owned: Vec<_> = reviews
+            .into_iter()
+            .filter(|v| {
+                v["state"] == "PENDING"
+                    && crate::forge::github::opaque(&v["user"], "id")
+                        .ok()
+                        .as_deref()
+                        == Some(account)
+            })
+            .collect();
+        if owned.len() > 1 {
+            return Err(Error::Conflict(
+                "Multiple pending reviews found; inspect GitHub".into(),
+            ));
+        }
+        let Some(pending) = owned.into_iter().next() else {
+            return Ok(None);
+        };
+        let id = crate::forge::github::opaque(&pending, "id")?;
+        if pending["commit_id"].as_str() != session.commits.head.as_deref()
+            || (session.forge_review_id.as_ref() != Some(&id)
+                && pending["body"].as_str() != Some(&review_marker(session.id)))
+        {
+            return Err(Error::Conflict("A different pending review already exists on GitHub; submit or discard it before starting this review".into()));
+        }
+        Ok(Some(pending))
     }
 
     /// Freeze local payload before the first remote write; replay never starts a second review.
@@ -177,7 +476,38 @@ impl ForgeService {
         request_key: &str,
         expected_head: &str,
     ) -> Result<Session> {
+        self.submit_review(
+            session_id,
+            actor,
+            crate::models::ReviewSubmission {
+                outcome: outcome.into(),
+                body: body.into(),
+                request_key: request_key.into(),
+                expected_head: expected_head.into(),
+                expected_base: None,
+                expected_version: None,
+            },
+        )
+        .await
+    }
+
+    pub async fn submit_review(
+        &self,
+        session_id: &Uuid,
+        actor: &Actor,
+        intent: crate::models::ReviewSubmission,
+    ) -> Result<Session> {
+        let outcome = intent.outcome.as_str();
+        let body = intent.body.as_str();
+        let request_key = intent.request_key.as_str();
+        let expected_head = intent.expected_head.as_str();
+        let _write = self.writes.lock().await;
         let actor = self.reviews.auth().validate_requester(actor).await?;
+        let outcome = if outcome == "request_changes" {
+            "reject"
+        } else {
+            outcome
+        };
         let event = event(outcome)?;
         if request_key.trim().is_empty() {
             return Err(invalid("Submission requires a retry key"));
@@ -193,10 +523,21 @@ impl ForgeService {
             body: Some(body.into()),
             submit: true,
         };
+        if expected_head.is_empty()
+            || session.commits.head.as_deref() != Some(expected_head)
+            || intent
+                .expected_base
+                .as_ref()
+                .is_some_and(|base| session.commits.base.as_ref() != Some(base))
+        {
+            return Err(Error::Conflict(
+                "Expected PR base and head must match the reviewed comparison".into(),
+            ));
+        }
         if session.completion().is_some() {
             // Existing completion performs exact key/payload/actor validation.
             self.reviews
-                .complete(&context.id, &actor, input, request_key)
+                .complete(&context.id, &actor, input, request_key, None, None)
                 .await?;
             return self.reconcile(session_id, &actor).await;
         }
@@ -206,17 +547,14 @@ impl ForgeService {
             ));
         }
         let github = self.get_provider().await?;
-        if github.get_pull_request(&repo, pr).await?.head != expected_head {
-            return Err(Error::Conflict(
-                "PR head changed; refresh and review before submitting".into(),
-            ));
-        }
+        self.validate_comparison(&github, &repo, pr, &session)
+            .await?;
         let account = github.get_account_id().await?;
         let conversation = self.reviews.get_conversation(&context.id, true).await?;
         let mut comments: Vec<_> = conversation
             .comments
             .into_iter()
-            .filter(|c| c.origin_session_id == Some(*session_id))
+            .filter(|c| c.origin_session_id == Some(*session_id) && c.remote_presence != "missing")
             .collect();
         comments.sort_by_key(|c| (c.position, c.created_at.clone(), c.id));
         // Validate all mappings before changing any posting state.
@@ -241,6 +579,7 @@ impl ForgeService {
         }
         let prepared: Vec<_> = comments
             .iter()
+            .filter(|c| c.forge_comment_id.is_none())
             .map(|c| {
                 (
                     c.clone(),
@@ -251,7 +590,14 @@ impl ForgeService {
             .collect();
         let frozen = self
             .reviews
-            .prepare_submission(session_id, &actor, input, request_key, &prepared)
+            .prepare_submission(
+                session_id,
+                &actor,
+                input,
+                request_key,
+                &prepared,
+                intent.expected_version,
+            )
             .await?;
         let result = self
             .send(
@@ -313,13 +659,149 @@ impl ForgeService {
         }
     }
 
+    async fn send_comment(
+        &self,
+        github: &Github,
+        submission: &Submission<'_>,
+        c: &Comment,
+        pending: &serde_json::Value,
+    ) -> Result<()> {
+        let Submission {
+            repo,
+            pr,
+            session,
+            threads,
+            account,
+            ..
+        } = *submission;
+        self.validate_comparison(github, repo, pr, session).await?;
+        let review_id = crate::forge::github::opaque(pending, "id")?;
+        let node_id = pending["node_id"]
+            .as_str()
+            .ok_or_else(|| invalid("Pending review receipt lacks node ID"))?;
+        let thread = threads
+            .iter()
+            .find(|t| t.id == c.thread_id)
+            .ok_or_else(|| invalid("Comment thread missing"))?;
+        let body = format!("{}\n\n{}", render(c), comment_marker(session.id, c.id));
+        let receipt = if c.position > 0 {
+            let root = threads
+                .iter()
+                .find(|t| t.id == c.thread_id)
+                .ok_or_else(|| invalid("Reply thread missing"))?;
+            let conversation = self
+                .reviews
+                .get_conversation(&session.context_id, true)
+                .await?;
+            let root_comment = conversation
+                .comments
+                .iter()
+                .find(|v| v.thread_id == root.id && v.position == 0)
+                .ok_or_else(|| invalid("Reply root missing"))?;
+            if root_comment.forge_comment_id.is_none()
+                || root_comment.forge_object_kind.as_deref() != Some("review_comment")
+            {
+                return Err(invalid(
+                    "GitHub replies require an existing review-comment thread",
+                ));
+            }
+            let thread_id = conversation
+                .threads
+                .iter()
+                .find(|t| t.id == root.id)
+                .and_then(|t| t.forge_thread_id.as_deref())
+                .ok_or_else(|| invalid("Reply thread has no verified GitHub node ID"))?;
+            let response = github.graphql(json!({"query":"mutation($input:AddPullRequestReviewThreadReplyInput!){addPullRequestReviewThreadReply(input:$input){comment{databaseId}}}","variables":{"input":{"pullRequestReviewId":node_id,"pullRequestReviewThreadId":thread_id,"body":body}}})).await?;
+            PostReceipt {
+                comment_id: crate::forge::github::opaque(
+                    &response["addPullRequestReviewThreadReply"]["comment"],
+                    "databaseId",
+                )?,
+                kind: "review_comment".into(),
+                thread_id: Some(thread_id.into()),
+                review_id: Some(review_id.clone()),
+                posting_account_id: account.into(),
+            }
+        } else {
+            match &thread.anchor {
+                Anchor::General => {
+                    let response = github
+                        .post(
+                            &format!("{}/issues/{pr}/comments", repo.route()),
+                            &json!({"body":body}),
+                        )
+                        .await?;
+                    PostReceipt {
+                        comment_id: crate::forge::github::opaque(&response, "id")?,
+                        kind: "conversation_comment".into(),
+                        thread_id: None,
+                        review_id: None,
+                        posting_account_id: account.into(),
+                    }
+                }
+                anchor => {
+                    let mut input = json!({"pullRequestReviewId":node_id,"body":body});
+                    match anchor {
+                        Anchor::File { path } => {
+                            input["path"] = json!(path);
+                            input["subjectType"] = json!("FILE");
+                        }
+                        Anchor::Line {
+                            path,
+                            start,
+                            end,
+                            side,
+                            ..
+                        } => {
+                            input["path"] = json!(path);
+                            input["subjectType"] = json!("LINE");
+                            input["line"] = json!(end);
+                            input["side"] = json!(if side == "old" { "LEFT" } else { "RIGHT" });
+                            if start != end {
+                                input["startLine"] = json!(start);
+                                input["startSide"] = input["side"].clone();
+                            }
+                        }
+                        Anchor::General => unreachable!(),
+                    }
+                    let response=github.graphql(json!({"query":"mutation($input:AddPullRequestReviewThreadInput!){addPullRequestReviewThread(input:$input){thread{id comments(first:1){nodes{databaseId}}}}}","variables":{"input":input}})).await?;
+                    let t = &response["addPullRequestReviewThread"]["thread"];
+                    PostReceipt {
+                        comment_id: crate::forge::github::opaque(
+                            &t["comments"]["nodes"][0],
+                            "databaseId",
+                        )?,
+                        kind: "review_comment".into(),
+                        thread_id: Some(
+                            t["id"]
+                                .as_str()
+                                .ok_or_else(|| invalid("Thread receipt missing ID"))?
+                                .into(),
+                        ),
+                        review_id: Some(review_id.clone()),
+                        posting_account_id: account.into(),
+                    }
+                }
+            }
+        };
+        self.reviews
+            .confirm_post(
+                &session.context_id,
+                &c.id,
+                &comment_key(&session.id, &c.id),
+                receipt,
+            )
+            .await?;
+        Ok(())
+    }
+
     async fn send(&self, github: &Github, submission: Submission<'_>) -> Result<String> {
         let Submission {
             repo,
             pr,
             session,
             comments,
-            threads,
+            threads: _,
             account,
             event,
             body,
@@ -327,16 +809,24 @@ impl ForgeService {
         let marker = review_marker(session.id);
         let review_body = format!("{body}\n\n{marker}");
         let route = format!("{}/pulls/{pr}/reviews", repo.route());
-        let review = github
-            .post(
-                &route,
-                &json!({"commit_id":session.commits.head,"body":review_body}),
-            )
-            .await?;
+        let review = if let Some(id) = &session.forge_review_id {
+            self.get_pending(github, repo, pr, session, account)
+                .await?
+                .filter(|v| crate::forge::github::opaque(v, "id").ok().as_ref() == Some(id))
+                .ok_or_else(|| {
+                    Error::Conflict(
+                        "Pending review changed or disappeared; refresh before submitting".into(),
+                    )
+                })?
+        } else {
+            github
+                .post(
+                    &route,
+                    &json!({"commit_id":session.commits.head,"body":review_body}),
+                )
+                .await?
+        };
         let review_id = crate::forge::github::opaque(&review, "id")?;
-        let node_id = review["node_id"]
-            .as_str()
-            .ok_or_else(|| invalid("Pending review receipt lacks node ID"))?;
         if !self
             .reviews
             .database()
@@ -348,128 +838,29 @@ impl ForgeService {
                 "Submission state changed after pending review creation".into(),
             ));
         }
-        for c in comments {
-            let thread = threads
-                .iter()
-                .find(|t| t.id == c.thread_id)
-                .ok_or_else(|| invalid("Comment thread missing"))?;
-            let body = format!("{}\n\n{}", render(c), comment_marker(session.id, c.id));
-            let receipt = if c.position > 0 {
-                let root = threads
-                    .iter()
-                    .find(|t| t.id == c.thread_id)
-                    .ok_or_else(|| invalid("Reply thread missing"))?;
-                let conversation = self
-                    .reviews
-                    .get_conversation(&session.context_id, true)
-                    .await?;
-                let root_comment = conversation
-                    .comments
-                    .iter()
-                    .find(|v| v.thread_id == root.id && v.position == 0)
-                    .ok_or_else(|| invalid("Reply root missing"))?;
-                if root_comment.forge_comment_id.is_none()
-                    || root_comment.forge_object_kind.as_deref() != Some("review_comment")
-                {
-                    return Err(invalid(
-                        "GitHub replies require an existing review-comment thread",
+        for c in comments.iter().filter(|c| c.forge_comment_id.is_none()) {
+            self.send_comment(github, &submission, c, &review).await?;
+        }
+        if comments.iter().any(|c| c.forge_comment_id.is_some()) {
+            let remote = github
+                .get_all(&format!("{route}/{review_id}/comments"))
+                .await?;
+            for c in comments.iter().filter(|c| c.forge_comment_id.is_some()) {
+                if !remote.iter().any(|v| {
+                    crate::forge::github::opaque(v, "id").ok() == c.forge_comment_id
+                        && v["body"].as_str() == c.forge_body.as_deref()
+                        && crate::forge::github::opaque(&v["user"], "id")
+                            .ok()
+                            .as_deref()
+                            == Some(account)
+                }) {
+                    return Err(Error::Conflict(
+                        "A synchronized draft changed on GitHub; refresh before submitting".into(),
                     ));
                 }
-                let thread_id = conversation
-                    .threads
-                    .iter()
-                    .find(|t| t.id == root.id)
-                    .and_then(|t| t.forge_thread_id.as_deref())
-                    .ok_or_else(|| invalid("Reply thread has no verified GitHub node ID"))?;
-                let response = github.graphql(json!({"query":"mutation($input:AddPullRequestReviewThreadReplyInput!){addPullRequestReviewThreadReply(input:$input){comment{databaseId}}}","variables":{"input":{"pullRequestReviewId":node_id,"pullRequestReviewThreadId":thread_id,"body":body}}})).await?;
-                PostReceipt {
-                    comment_id: crate::forge::github::opaque(
-                        &response["addPullRequestReviewThreadReply"]["comment"],
-                        "databaseId",
-                    )?,
-                    kind: "review_comment".into(),
-                    thread_id: Some(thread_id.into()),
-                    review_id: Some(review_id.clone()),
-                    posting_account_id: account.into(),
-                }
-            } else {
-                match &thread.anchor {
-                    Anchor::General => {
-                        let response = github
-                            .post(
-                                &format!("{}/issues/{pr}/comments", repo.route()),
-                                &json!({"body":body}),
-                            )
-                            .await?;
-                        PostReceipt {
-                            comment_id: crate::forge::github::opaque(&response, "id")?,
-                            kind: "conversation_comment".into(),
-                            thread_id: None,
-                            review_id: None,
-                            posting_account_id: account.into(),
-                        }
-                    }
-                    anchor => {
-                        let mut input = json!({"pullRequestReviewId":node_id,"body":body});
-                        match anchor {
-                            Anchor::File { path } => {
-                                input["path"] = json!(path);
-                                input["subjectType"] = json!("FILE");
-                            }
-                            Anchor::Line {
-                                path,
-                                start,
-                                end,
-                                side,
-                                ..
-                            } => {
-                                input["path"] = json!(path);
-                                input["subjectType"] = json!("LINE");
-                                input["line"] = json!(end);
-                                input["side"] = json!(if side == "old" { "LEFT" } else { "RIGHT" });
-                                if start != end {
-                                    input["startLine"] = json!(start);
-                                    input["startSide"] = input["side"].clone();
-                                }
-                            }
-                            Anchor::General => unreachable!(),
-                        }
-                        let response=github.graphql(json!({"query":"mutation($input:AddPullRequestReviewThreadInput!){addPullRequestReviewThread(input:$input){thread{id comments(first:1){nodes{databaseId}}}}}","variables":{"input":input}})).await?;
-                        let t = &response["addPullRequestReviewThread"]["thread"];
-                        PostReceipt {
-                            comment_id: crate::forge::github::opaque(
-                                &t["comments"]["nodes"][0],
-                                "databaseId",
-                            )?,
-                            kind: "review_comment".into(),
-                            thread_id: Some(
-                                t["id"]
-                                    .as_str()
-                                    .ok_or_else(|| invalid("Thread receipt missing ID"))?
-                                    .into(),
-                            ),
-                            review_id: Some(review_id.clone()),
-                            posting_account_id: account.into(),
-                        }
-                    }
-                }
-            };
-            self.reviews
-                .confirm_post(
-                    &session.context_id,
-                    &c.id,
-                    &comment_key(&session.id, &c.id),
-                    receipt,
-                )
-                .await?;
+            }
         }
-        if github.get_pull_request(repo, pr).await?.head
-            != session.commits.head.as_deref().unwrap_or("")
-        {
-            return Err(Error::Conflict(
-                "PR head changed before final review submission".into(),
-            ));
-        }
+        self.validate_comparison(github, repo, pr, session).await?;
         let response = github
             .post(
                 &format!("{route}/{review_id}/events"),
@@ -510,11 +901,15 @@ impl ForgeService {
         let matches: Vec<_> = reviews
             .iter()
             .filter(|v| {
-                v["body"].as_str() == Some(expected_body.as_str())
+                (v["body"].as_str() == Some(expected_body.as_str())
+                    || (v["state"] == "PENDING"
+                        && session.forge_review_id.as_deref()
+                            == crate::forge::github::opaque(v, "id").ok().as_deref()
+                        && v["body"].as_str() == Some(marker.as_str())))
                     && crate::forge::github::opaque(&v["user"], "id")
                         .ok()
                         .as_deref()
-                        == Some(&account)
+                        == Some(account.as_str())
             })
             .collect();
         if matches.len() != 1 {
@@ -572,7 +967,7 @@ impl ForgeService {
                         && crate::forge::github::opaque(&v["user"], "id")
                             .ok()
                             .as_deref()
-                            == Some(&account)
+                            == Some(account.as_str())
                 })
                 .collect();
             if found.len() != 1 {
@@ -606,11 +1001,8 @@ impl ForgeService {
                 .await?;
         }
         let expected_status = if pending {
-            if github.get_pull_request(&repo, pr).await?.head
-                != session.commits.head.as_deref().unwrap_or("")
-            {
-                return Err(Error::Conflict("PR head changed; pending review was not submitted. Inspect it in GitHub before reworking the review".into()));
-            }
+            self.validate_comparison(&github, &repo, pr, &session)
+                .await?;
             if !self
                 .reviews
                 .database()
@@ -678,40 +1070,43 @@ impl ForgeService {
         actor: &Actor,
         resolved: bool,
     ) -> Result<Thread> {
-        let actor = self.reviews.auth().validate_requester(actor).await?;
-        let session = self.reviews.get_session(session_id).await?;
+        match self
+            .change(
+                session_id,
+                actor,
+                crate::models::ForgeChangeInput::Resolve {
+                    thread_id: *thread_id,
+                    resolved,
+                },
+                None,
+            )
+            .await?
+        {
+            crate::models::ForgeChangeObject::Thread(thread) => Ok(*thread),
+            _ => Err(invalid("Unexpected remote resolution result")),
+        }
+    }
+
+    async fn get_comment_node_id(&self, github: &Github, comment: &Comment) -> Result<String> {
         let conversation = self
             .reviews
-            .get_conversation(&session.context_id, true)
+            .get_conversation(&comment.context_id, true)
             .await?;
-        let thread = conversation
+        let thread_id = conversation
             .threads
             .iter()
-            .find(|t| t.id == *thread_id)
-            .ok_or_else(|| Error::NotFound("Thread".into()))?;
-        let Some(id) = &thread.forge_thread_id else {
-            return self
-                .reviews
-                .resolve(session_id, thread_id, &actor, resolved)
-                .await;
-        };
-        if matches!(thread.anchor, Anchor::General) {
-            return Err(invalid("GitHub only supports resolving review threads"));
-        }
-        let mutation = if resolved {
-            "resolveReviewThread"
-        } else {
-            "unresolveReviewThread"
-        };
-        self.get_provider().await?.graphql(json!({"query":format!("mutation($id:ID!){{{mutation}(input:{{threadId:$id}}){{thread{{id isResolved}}}}}}"),"variables":{"id":id}})).await?;
-        self.refresh(&session.context_id).await?;
-        self.reviews
-            .get_conversation(&session.context_id, true)
-            .await?
-            .threads
-            .into_iter()
-            .find(|t| t.id == *thread_id)
-            .ok_or_else(|| Error::NotFound("Thread after refresh".into()))
+            .find(|t| t.id == comment.thread_id)
+            .and_then(|t| t.forge_thread_id.as_deref())
+            .ok_or_else(|| invalid("Review comment has no verified GitHub thread"))?;
+        github
+            .get_review_comment_node_id(
+                thread_id,
+                comment
+                    .forge_comment_id
+                    .as_deref()
+                    .ok_or_else(|| invalid("Missing GitHub comment receipt"))?,
+            )
+            .await
     }
 
     pub async fn edit_comment(
@@ -721,47 +1116,21 @@ impl ForgeService {
         actor: &Actor,
         body: &str,
     ) -> Result<Comment> {
-        Comment::validate_body(body)?;
-        let session = self.reviews.get_session(session_id).await?;
-        let comment = self
-            .reviews
-            .get_comment(&session.context_id, comment_id)
-            .await?;
-        if comment.forge_comment_id.is_none() {
-            return self
-                .reviews
-                .edit_comment(session_id, comment_id, actor, body)
-                .await;
-        }
-        let actor = self.reviews.auth().validate_requester(actor).await?;
-        let context = self.reviews.get_context_by_id(&session.context_id).await?;
-        let (repo, pr) = Repository::from_context(&context.key)?;
-        let github = self.get_provider().await?;
-        check_owner(&comment, &actor, &github.get_account_id().await?)?;
-        let route = comment_route(&repo, pr, &comment)?;
-        let mut updated = comment.clone();
-        updated.body = body.into();
-        let rendered = if let Some(origin) = updated.origin_session_id {
-            format!(
-                "{}\n\n{}",
-                render(&updated),
-                comment_marker(origin, updated.id)
+        match self
+            .change(
+                session_id,
+                actor,
+                crate::models::ForgeChangeInput::Edit {
+                    comment_id: *comment_id,
+                    body: body.into(),
+                },
+                None,
             )
-        } else {
-            body.to_owned()
-        };
-        github.patch(&route, &json!({"body":rendered})).await?;
-        updated.forge_body = Some(rendered);
-        updated.updated_at = crate::utils::now();
-        self.reviews
-            .database()
-            .comments
-            .update(&crate::database::models::comments::Model::from(&updated))
-            .await?;
-        self.refresh(&session.context_id).await?;
-        self.reviews
-            .get_comment(&session.context_id, comment_id)
-            .await
+            .await?
+        {
+            crate::models::ForgeChangeObject::Comment(comment) => Ok(*comment),
+            _ => Err(invalid("Unexpected remote edit result")),
+        }
     }
 
     pub async fn delete_comment(
@@ -770,29 +1139,15 @@ impl ForgeService {
         comment_id: &Uuid,
         actor: &Actor,
     ) -> Result<()> {
-        let session = self.reviews.get_session(session_id).await?;
-        let comment = self
-            .reviews
-            .get_comment(&session.context_id, comment_id)
-            .await?;
-        if comment.forge_comment_id.is_none() {
-            return self
-                .reviews
-                .delete_comment(session_id, comment_id, actor)
-                .await;
-        }
-        let actor = self.reviews.auth().validate_requester(actor).await?;
-        let context = self.reviews.get_context_by_id(&session.context_id).await?;
-        let (repo, pr) = Repository::from_context(&context.key)?;
-        let github = self.get_provider().await?;
-        check_owner(&comment, &actor, &github.get_account_id().await?)?;
-        if comment.forge_object_kind.as_deref() == Some("review") {
-            return Err(invalid(
-                "Submitted reviews cannot be deleted through comment deletion",
-            ));
-        }
-        github.delete(&comment_route(&repo, pr, &comment)?).await?;
-        self.refresh(&session.context_id).await?;
+        self.change(
+            session_id,
+            actor,
+            crate::models::ForgeChangeInput::Delete {
+                comment_id: *comment_id,
+            },
+            None,
+        )
+        .await?;
         Ok(())
     }
 
@@ -800,6 +1155,7 @@ impl ForgeService {
         Self {
             reviews,
             provider: None,
+            writes: Default::default(),
         }
     }
 
@@ -807,6 +1163,7 @@ impl ForgeService {
         Self {
             reviews,
             provider: Some(provider),
+            writes: Default::default(),
         }
     }
 }
@@ -844,7 +1201,7 @@ fn render(c: &Comment) -> String {
     }
 }
 fn check_owner(c: &Comment, actor: &Actor, account: &str) -> Result<()> {
-    if (c.origin_session_id.is_some() && c.author.id != actor.id)
+    if (c.origin_session_id.is_some() && c.owner_id != Some(actor.id))
         || c.posting_account_id.as_deref() != Some(account)
     {
         Err(invalid(

@@ -35,7 +35,7 @@ impl Fixture {
         let output = self.cli(&args);
         assert!(
             output.status.success(),
-            "stdout={} stderr={}",
+            "args={args:?}: stdout={} stderr={}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
@@ -46,6 +46,11 @@ impl Fixture {
         let _ = self.child.kill();
         let _ = self.child.wait();
         let _ = std::fs::remove_file(self.home.path().join("server.port"));
+        let log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.home.path().join("backend.log"))
+            .unwrap();
         self.child = Command::new(binary("lgtm"))
             .args(["up", "--foreground", "--no-open", "--port", "0"])
             .env("LGTM_HOME", self.home.path())
@@ -53,8 +58,8 @@ impl Fixture {
             .env_remove("LGTM_DATABASE_URL")
             .env_remove("LGTM_RPC_URL")
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(Stdio::from(log.try_clone().unwrap()))
+            .stderr(Stdio::from(log))
             .spawn()
             .unwrap();
         let start = Instant::now();
@@ -70,8 +75,19 @@ impl Fixture {
     }
 
     pub fn start() -> Self {
-        let home = tempfile::tempdir().unwrap();
+        let artifacts = binary("lgtm")
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("e2e/cli");
+        std::fs::create_dir_all(&artifacts).unwrap();
+        let home = tempfile::Builder::new()
+            .prefix("run-")
+            .tempdir_in(artifacts)
+            .unwrap();
         let files = tempfile::tempdir().unwrap();
+        let log = std::fs::File::create(home.path().join("backend.log")).unwrap();
         let child = Command::new(binary("lgtm"))
             .args(["up", "--foreground", "--no-open", "--port", "0"])
             .env("LGTM_HOME", home.path())
@@ -79,8 +95,8 @@ impl Fixture {
             .env_remove("LGTM_DATABASE_URL")
             .env_remove("LGTM_RPC_URL")
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(Stdio::from(log.try_clone().unwrap()))
+            .stderr(Stdio::from(log))
             .spawn()
             .unwrap();
         let mut fixture = Self {
@@ -113,6 +129,18 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        if std::thread::panicking() {
+            self.home.disable_cleanup(true);
+            self.files.disable_cleanup(true);
+            eprintln!(
+                "Failed CLI fixture retained at {} (workspace {})",
+                self.home.path().display(),
+                self.files.path().display()
+            );
+            if let Ok(log) = std::fs::read_to_string(self.home.path().join("backend.log")) {
+                eprintln!("{log}");
+            }
+        }
     }
 }
 

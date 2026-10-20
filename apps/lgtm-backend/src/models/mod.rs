@@ -11,7 +11,8 @@ pub use commit_context::CommitContext;
 pub mod session;
 pub use session::{CompletedSession, Session, SessionStatus};
 pub mod anchor;
-pub use anchor::Anchor;
+pub use super::database::types::{ComparisonKind, OrphanReason};
+pub use anchor::{Anchor, AnchorEvidence, AnchorPlacement, AnchorSource, ForgeObservation};
 pub mod thread;
 pub use thread::Thread;
 pub mod comment;
@@ -30,3 +31,22 @@ pub mod local_location;
 pub use local_location::LocalLocation;
 pub mod forge_repository_url;
 pub use forge_repository_url::ForgeRepositoryUrl;
+
+pub mod review;
+pub use review::{MutationGuard, Review, ReviewComparison, ReviewScope, ReviewTarget};
+
+pub use review::SourceChange;
+
+pub mod diff;
+pub use diff::{ContentSide, DiffComparison, DiffContent, DiffFile};
+
+pub use review::NotePromotion;
+
+pub use review::StartOptions;
+
+pub use review::{ExpectedObject, ObjectKind};
+
+pub mod forge_change;
+pub use forge_change::{ForgeChange, ForgeChangeInput, ForgeChangeObject};
+
+pub use review::ReviewSubmission;

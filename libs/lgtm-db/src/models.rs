@@ -40,3 +40,8 @@ pub mod comments {
 pub mod note_promotions {
     pub use super::super::entities::note_promotions::Model;
 }
+
+/// Committed local mutation retry results.
+pub mod mutation_receipts {
+    pub use super::super::entities::mutation_receipts::Model;
+}

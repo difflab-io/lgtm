@@ -54,11 +54,13 @@ pub fn router_with_database(database: database::Database) -> (Router, Arc<Static
         Router::new()
             .add_service(Arc::new(Greeter))
             .add_service::<rpc::Api, proto::lgtm::v1::IdentityServiceRegisterMarker>(api.clone())
-            .add_service::<rpc::Api, proto::lgtm::v1::ReviewServiceRegisterMarker>(api),
+            .add_service::<rpc::Api, proto::lgtm::v1::ReviewServiceRegisterMarker>(api.clone())
+            .add_service::<rpc::Api, proto::lgtm::v1::DiffServiceRegisterMarker>(api),
         [
             GREETER_SERVICE_SERVICE_NAME,
             proto::lgtm::v1::IDENTITY_SERVICE_SERVICE_NAME,
             proto::lgtm::v1::REVIEW_SERVICE_SERVICE_NAME,
+            proto::lgtm::v1::DIFF_SERVICE_SERVICE_NAME,
         ],
     )
 }

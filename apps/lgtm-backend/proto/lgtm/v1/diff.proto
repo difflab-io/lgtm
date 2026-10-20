@@ -1,0 +1,72 @@
+syntax = "proto3";
+package lgtm.v1;
+
+import "lgtm/v1/review.proto";
+
+// A transient comparison descriptor. It has no review ID or database ownership.
+message DiffDescriptor {
+  ReviewTarget target = 1;
+  ReviewComparison comparison = 2;
+  string root = 3;
+  string observation_token = 4;
+}
+message DiffFile {
+  string path = 1;
+  string previous_path = 2;
+  string status = 3;
+  string identity = 4;
+}
+message ContentSide {
+  string path = 1;
+  AnchorSource source = 2;
+  string content = 3;
+}
+message SuppliedAnchor {
+  Anchor original = 1;
+  string current_path = 2;
+}
+message ConfirmedPlacement {
+  Anchor location = 1;
+  AnchorSource displayed_source = 2;
+}
+message UnplacedAnchor { string reason = 1; }
+message AnchorPlacement {
+  uint32 index = 1;
+  oneof kind {
+    ConfirmedPlacement exact = 2;
+    ConfirmedPlacement relocated = 3;
+    UnplacedAnchor outdated = 4;
+    UnplacedAnchor orphaned = 5;
+    UnplacedAnchor unverified = 6;
+  }
+}
+message GetDiffRequest {
+  ReviewTarget target = 1;
+  ReviewComparison comparison = 2;
+}
+message GetDiffResponse { DiffDescriptor diff = 1; }
+message GetFilesRequest {
+  DiffDescriptor diff = 1;
+  string page_token = 2;
+  uint32 page_size = 3;
+}
+message GetFilesResponse {
+  repeated DiffFile files = 1;
+  string next_page_token = 2;
+}
+message GetFileRequest {
+  DiffDescriptor diff = 1;
+  string path = 2;
+  repeated SuppliedAnchor anchors = 3;
+}
+message GetFileResponse {
+  DiffFile file = 1;
+  ContentSide old_side = 2;
+  ContentSide new_side = 3;
+  repeated AnchorPlacement placements = 4;
+}
+service DiffService {
+  rpc GetDiff(GetDiffRequest) returns (GetDiffResponse);
+  rpc GetFiles(GetFilesRequest) returns (GetFilesResponse);
+  rpc GetFile(GetFileRequest) returns (GetFileResponse);
+}

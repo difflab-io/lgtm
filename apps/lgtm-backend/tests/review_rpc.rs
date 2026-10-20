@@ -1,4 +1,4 @@
-//! Public typed API contracts exercised over a real native gRPC server.
+//! Public typed contracts exercised over a real native gRPC server.
 use connectrpc::{
     ErrorCode, Protocol, Server,
     client::{CallOptions, ClientConfig, HttpClient},
@@ -32,7 +32,15 @@ async fn should_validate_requests_and_preserve_local_conversation_through_rpc() 
         .unwrap()
         .into_owned();
     assert_eq!(capabilities.api_version, "1");
-    for capability in ["notes", "local_review", "export"] {
+    for capability in [
+        "notes",
+        "local_review",
+        "export",
+        "review_targets",
+        "feedback_scopes",
+        "anchor_evidence",
+        "diff_service",
+    ] {
         assert!(
             capabilities
                 .capabilities
@@ -40,20 +48,6 @@ async fn should_validate_requests_and_preserve_local_conversation_through_rpc() 
                 .any(|value| value == capability)
         );
     }
-    let invalid_context = reviews
-        .ensure_context(EnsureContextRequest {
-            key: Some(ContextKey {
-                kind: "notes".into(),
-                path: temp.path().to_str().unwrap().into(),
-                repository_url: "https://github.com/acme/repo".into(),
-                ..Default::default()
-            })
-            .into(),
-            ..Default::default()
-        })
-        .await
-        .unwrap_err();
-    assert_eq!(invalid_context.code, ErrorCode::InvalidArgument);
     let who = identities
         .ensure_identity(EnsureIdentityRequest {
             name: "Alice".into(),
@@ -69,83 +63,92 @@ async fn should_validate_requests_and_preserve_local_conversation_through_rpc() 
             .with_timeout(Duration::from_secs(5))
             .with_header("x-lgtm-identity", who.id.clone())
     };
-    let context = reviews
-        .ensure_context(EnsureContextRequest {
-            key: Some(ContextKey {
-                kind: "notes".into(),
-                path: temp.path().to_str().unwrap().into(),
+    let start = StartReviewRequest {
+        target: Some(ReviewTarget {
+            kind: Some(review_target::Kind::Directory(Box::new(DirectoryTarget {
+                path: temp.path().to_string_lossy().into_owned(),
                 ..Default::default()
-            })
-            .into(),
+            }))),
             ..Default::default()
         })
-        .await
-        .unwrap()
-        .into_owned()
-        .context;
+        .into(),
+        request_key: "native-start".into(),
+        ..Default::default()
+    };
     assert!(
+        reviews.start_review(start.clone()).await.is_err(),
+        "a target does not bypass requester identity"
+    );
+    assert_eq!(
         reviews
-            .start_session(StartSessionRequest {
-                context_id: context.id.clone(),
+            .start_review_with_options(
+                start.clone(),
+                CallOptions::default().with_header("x-lgtm-identity", "not-a-uuid")
+            )
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        reviews
+            .start_review_with_options(
+                start.clone(),
+                CallOptions::default()
+                    .with_header("x-lgtm-identity", "00000000-0000-0000-0000-000000000001")
+            )
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::NotFound
+    );
+    assert_eq!(
+        reviews
+            .start_review_with_options(
+                StartReviewRequest {
+                    request_key: "missing-target".into(),
+                    ..Default::default()
+                },
+                options()
+            )
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        reviews
+            .get_review(GetReviewRequest {
+                review_id: "00000000-0000-0000-0000-000000000002".into(),
                 ..Default::default()
             })
             .await
-            .is_err()
+            .unwrap_err()
+            .code,
+        ErrorCode::NotFound
     );
-    let invalid_identity = reviews
-        .start_session_with_options(
-            StartSessionRequest {
-                context_id: context.id.clone(),
-                ..Default::default()
-            },
-            CallOptions::default()
-                .with_timeout(Duration::from_secs(5))
-                .with_header("x-lgtm-identity", "not-a-uuid"),
-        )
-        .await
-        .unwrap_err();
-    assert_eq!(invalid_identity.code, ErrorCode::InvalidArgument);
-    let unknown_identity = reviews
-        .start_session_with_options(
-            StartSessionRequest {
-                context_id: context.id.clone(),
-                ..Default::default()
-            },
-            CallOptions::default()
-                .with_timeout(Duration::from_secs(5))
-                .with_header("x-lgtm-identity", "00000000-0000-0000-0000-000000000001"),
-        )
-        .await
-        .unwrap_err();
-    assert_eq!(unknown_identity.code, ErrorCode::NotFound);
-    let unknown_context = reviews
-        .start_session_with_options(
-            StartSessionRequest {
-                context_id: "00000000-0000-0000-0000-000000000002".into(),
-                ..Default::default()
-            },
-            options(),
-        )
-        .await
-        .unwrap_err();
-    assert_eq!(unknown_context.code, ErrorCode::NotFound);
-    let session = reviews
-        .start_session_with_options(
-            StartSessionRequest {
-                context_id: context.id.clone(),
-                ..Default::default()
-            },
-            options(),
-        )
+    let review = reviews
+        .start_review_with_options(start, options())
         .await
         .unwrap()
         .into_owned()
-        .session;
+        .review;
+    let scope = ReviewScope {
+        kind: Some(review_scope::Kind::ReviewId(review.id.clone())),
+        ..Default::default()
+    };
+    let read = || GetConversationRequest {
+        scope: Some(scope.clone()).into(),
+        include_drafts: Some(true),
+        ..Default::default()
+    };
     let first = reviews
         .add_comment_with_options(
             AddCommentRequest {
-                session_id: session.id.clone(),
+                scope: Some(scope.clone()).into(),
                 body: "A general note".into(),
+                expected_version: review.version.clone(),
+                request_key: "root".into(),
                 ..Default::default()
             },
             options(),
@@ -154,12 +157,15 @@ async fn should_validate_requests_and_preserve_local_conversation_through_rpc() 
         .unwrap()
         .into_owned()
         .comment;
+    let after_root = reviews.get_conversation(read()).await.unwrap().into_owned();
     let reply = reviews
         .reply_with_options(
             ReplyRequest {
-                session_id: session.id.clone(),
+                scope: Some(scope.clone()).into(),
                 thread_id: first.thread_id.clone(),
                 body: "A reply".into(),
+                expected_version: after_root.threads[0].version.clone(),
+                request_key: "reply".into(),
                 ..Default::default()
             },
             options(),
@@ -168,12 +174,14 @@ async fn should_validate_requests_and_preserve_local_conversation_through_rpc() 
         .unwrap()
         .into_owned()
         .comment;
-    // A root cannot be removed while its reply remains; the failed write is atomic.
+    // A stale root token cannot bypass an intervening accepted reply. The rejected write is atomic.
     let conflict = reviews
         .delete_comment_with_options(
             DeleteCommentRequest {
-                session_id: session.id.clone(),
+                scope: Some(scope.clone()).into(),
                 comment_id: first.id.clone(),
+                expected_version: first.version.clone(),
+                request_key: "stale-delete".into(),
                 ..Default::default()
             },
             options(),
@@ -183,91 +191,99 @@ async fn should_validate_requests_and_preserve_local_conversation_through_rpc() 
     assert_eq!(conflict.code, ErrorCode::FailedPrecondition);
     let result = reviews
         .export(ExportRequest {
-            session_id: session.id.clone(),
+            scope: Some(scope.clone()).into(),
             ..Default::default()
         })
         .await
         .unwrap()
         .into_owned();
-    assert!(result.markdown.contains("A general note"));
-    assert!(result.markdown.contains("A reply"));
+    assert!(result.markdown.contains("A general note") && result.markdown.contains("A reply"));
+    assert!(result.markdown.contains("1. **[COMMENT]**") && !result.markdown.contains(&review.id));
+    let current = reviews.get_conversation(read()).await.unwrap().into_owned();
+    let reply_version = current
+        .comments
+        .iter()
+        .find(|comment| comment.id == reply.id)
+        .unwrap()
+        .version
+        .clone();
     reviews
         .delete_comment_with_options(
             DeleteCommentRequest {
-                session_id: session.id.clone(),
+                scope: Some(scope.clone()).into(),
                 comment_id: reply.id.clone(),
+                expected_version: reply_version,
+                request_key: "delete-reply".into(),
                 ..Default::default()
             },
             options(),
         )
         .await
         .unwrap();
+    let current = reviews.get_conversation(read()).await.unwrap().into_owned();
     reviews
         .resolve_thread_with_options(
             ResolveThreadRequest {
-                session_id: session.id.clone(),
+                scope: Some(scope.clone()).into(),
                 thread_id: first.thread_id.clone(),
                 resolved: true,
+                expected_version: current.threads[0].version.clone(),
+                request_key: "resolve".into(),
                 ..Default::default()
             },
             options(),
         )
         .await
         .unwrap();
-    let conversation = reviews
-        .get_conversation(GetConversationRequest {
-            context_id: context.id.clone(),
-            include_drafts: true,
-            ..Default::default()
-        })
-        .await
-        .unwrap()
-        .into_owned();
+    let conversation = reviews.get_conversation(read()).await.unwrap().into_owned();
     assert_eq!(conversation.comments.len(), 1);
     assert_eq!(conversation.threads[0].state, "resolved");
+    let completion = CompleteReviewRequest {
+        review_id: review.id.clone(),
+        expected_version: conversation.version.clone(),
+        request_key: "complete-once".into(),
+        ..Default::default()
+    };
     let done = reviews
-        .complete_session_with_options(
-            CompleteSessionRequest {
-                context_id: context.id.clone(),
-                request_key: "complete-once".into(),
-                ..Default::default()
-            },
-            options(),
-        )
+        .complete_review_with_options(completion.clone(), options())
         .await
         .unwrap()
         .into_owned()
-        .session;
+        .review;
     assert_eq!(done.state, "completed");
     let changed_retry = reviews
-        .complete_session_with_options(
-            CompleteSessionRequest {
-                context_id: context.id.clone(),
-                request_key: "complete-once".into(),
+        .complete_review_with_options(
+            CompleteReviewRequest {
                 body: "Changed retry payload".into(),
-                ..Default::default()
+                ..completion
             },
             options(),
         )
         .await
         .unwrap_err();
     assert_eq!(changed_retry.code, ErrorCode::FailedPrecondition);
-    let immutable_session = reviews
+    let immutable = reviews
         .add_comment_with_options(
             AddCommentRequest {
-                session_id: session.id.clone(),
+                scope: Some(scope).into(),
                 body: "Too late".into(),
+                expected_version: done.version.clone(),
+                request_key: "completed-write".into(),
                 ..Default::default()
             },
             options(),
         )
         .await
         .unwrap_err();
-    assert_eq!(immutable_session.code, ErrorCode::FailedPrecondition);
+    assert_eq!(immutable.code, ErrorCode::FailedPrecondition);
     let unchanged = reviews
         .get_conversation(GetConversationRequest {
-            context_id: context.id.clone(),
-            include_drafts: true,
+            scope: Some(ReviewScope {
+                kind: Some(review_scope::Kind::ReviewId(review.id.clone())),
+                ..Default::default()
+            })
+            .into(),
+            include_drafts: Some(true),
             ..Default::default()
         })
         .await

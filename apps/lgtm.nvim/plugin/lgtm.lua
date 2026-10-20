@@ -28,6 +28,7 @@ end, {
       "complete",
       "submit",
       "reconcile",
+      "sync",
       "export",
     })
   end,

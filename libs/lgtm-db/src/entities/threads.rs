@@ -44,6 +44,41 @@ pub struct Model {
     /// Whether the original line anchor refers to a commit different from the current reviewed commit.
     pub outdated: bool,
 
+    /// Immutable source discriminator. Legacy records have no proven source evidence.
+    pub source_kind: crate::entities::common::SourceKind,
+    /// Original stage-zero index blob ID, required only for index evidence.
+    pub source_blob_oid: Option<String>,
+    /// Immutable content commit, including file-level anchors with no line coordinates.
+    pub source_commit: Option<String>,
+    /// SHA-256 identity of the exact annotated bytes, including line endings.
+    pub source_content_hash: Option<String>,
+    /// Bounded original text immediately before the selected range.
+    pub context_before: Option<String>,
+    /// Bounded original text immediately after the selected range.
+    pub context_after: Option<String>,
+    /// Confirmed repository-relative path or absolute saved-file association. The original file_path never changes.
+    pub current_path: Option<String>,
+    /// Immutable absolute saved-file location for local notes. Git and forge anchors remain repository-relative.
+    pub source_path: Option<String>,
+    /// Confirmed file deletion or changed ephemeral working source. Absence is not proof of a valid line.
+    pub orphan_reason: Option<crate::entities::common::OrphanReason>,
+    /// Base identity of the last complete forge location observation.
+    pub observed_base: Option<String>,
+    /// Head identity of the last complete forge location observation.
+    pub observed_head: Option<String>,
+    /// Provider outdated flag, independent of resolution and local mapping.
+    pub observed_outdated: Option<bool>,
+    /// Provider current path, separate from the immutable original path.
+    pub observed_path: Option<String>,
+    /// Provider current diff side for a line observation.
+    pub observed_side: Option<String>,
+    /// Provider current inclusive first line. Never filled from historical lines.
+    pub observed_start: Option<i64>,
+    /// Provider current inclusive last line. Absent when no current line exists.
+    pub observed_end: Option<i64>,
+    /// Actual source commit for the provider current line.
+    pub observed_commit: Option<String>,
+
     #[sea_orm(belongs_to, relation_enum = "Author", from = "author_id", to = "id")]
     /// Loaded relationship; not an additional stored column.
     pub author: BelongsTo<super::identities::Entity>,

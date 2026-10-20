@@ -2,6 +2,10 @@ use sea_orm_migration::prelude::*;
 mod m20261015_220400_review;
 mod m20261018_200000_note_promotions;
 mod m20261018_210000_selected_text;
+mod m20261019_090000_anchor_evidence;
+mod m20261019_091000_mutation_receipts;
+mod m20261019_092000_forge_lifecycle;
+mod m20261019_093000_notes_locations;
 
 pub struct Migrator;
 #[async_trait::async_trait]
@@ -11,6 +15,10 @@ impl MigratorTrait for Migrator {
             Box::new(m20261015_220400_review::Migration),
             Box::new(m20261018_200000_note_promotions::Migration),
             Box::new(m20261018_210000_selected_text::Migration),
+            Box::new(m20261019_090000_anchor_evidence::Migration),
+            Box::new(m20261019_091000_mutation_receipts::Migration),
+            Box::new(m20261019_092000_forge_lifecycle::Migration),
+            Box::new(m20261019_093000_notes_locations::Migration),
         ]
     }
 }
@@ -159,7 +167,7 @@ mod tests {
             .insert(db.connection())
             .await
             .unwrap();
-            let comment = comments::ActiveModel {
+            let mut comment = comments::ActiveModel {
                 id: Set(fixture_id("comment")),
                 context_id: Set(fixture_id("context")),
                 thread_id: Set(fixture_id("thread")),
@@ -179,6 +187,37 @@ mod tests {
             .unwrap();
 
             let raw = sea_orm::Database::connect(&url).await.unwrap();
+            // Upgrade a populated pre-evidence database, preserving legacy data without inventing a source.
+            Migrator::down(&raw, Some(Migrator::migrations().len() as u32 - 3))
+                .await
+                .unwrap();
+            assert!(
+                !SchemaManager::new(&raw)
+                    .has_column("threads", "source_kind")
+                    .await
+                    .unwrap()
+            );
+            apply::<Migrator>(&raw).await.unwrap();
+            comment.owner_id = Some(comment.author_id);
+            let preserved = db
+                .comments
+                .get_thread(&fixture_id("context"), &fixture_id("thread"))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(preserved.source_kind, crate::types::SourceKind::Legacy);
+            assert!(preserved.source_content_hash.is_none());
+            assert_eq!(
+                db.comments
+                    .get_by_id(&fixture_id("context"), &comment.id)
+                    .await
+                    .unwrap(),
+                Some({
+                    let mut expected = comment.clone();
+                    expected.owner_id = Some(expected.author_id);
+                    expected
+                })
+            );
             assert!(apply::<Failing>(&raw).await.is_err());
             assert!(
                 !SchemaManager::new(&raw)
@@ -188,7 +227,7 @@ mod tests {
             );
             assert_eq!(
                 Migrator::get_applied_migrations(&raw).await.unwrap().len(),
-                3
+                Migrator::migrations().len()
             );
             // Retrying a failure is safe, with no successful history row or partial DDL.
             assert!(apply::<Failing>(&raw).await.is_err());
@@ -202,7 +241,7 @@ mod tests {
             );
             assert_eq!(
                 Upgraded::get_applied_migrations(&raw).await.unwrap().len(),
-                4
+                Migrator::migrations().len() + 1
             );
             // The exact release refuses an applied migration absent from this executable.
             assert!(Database::connect(&url).await.is_err());
@@ -258,7 +297,11 @@ mod tests {
                     .get_by_id(&fixture_id("context"), &comment.id)
                     .await
                     .unwrap(),
-                Some(comment.clone())
+                Some({
+                    let mut expected = comment.clone();
+                    expected.owner_id = Some(expected.author_id);
+                    expected
+                })
             );
             raw.close().await.unwrap();
             db.close().await;

@@ -6,9 +6,12 @@
 - Put general helpers and external import/export contracts in `src/utils.rs`. Domain models represent application entities.
 - Keep database entities private; expose actual SeaORM models and the repositories required by backend workflows. Shared SeaORM entity types belong in `libs/lgtm-db/src/entities/common.rs`.
 
-## Code Style
+## Docs
 
+- Use soft wraps for documentation prose. Keep each paragraph on one source line and let the editor wrap it for display. Do not add manual line breaks between sentences or at a fixed column width. Preserve structural line breaks in lists, tables, code, and Mermaid diagrams.
 - Embed architecture diagrams as inline Mermaid fences so MmdToImg can preview the source in Neovim. Keep diagram source in the Markdown page, without separate diagram directories or tracked preview images.
+
+## Code Style
 
 - Name public repository and service reads `get_*`.
 - Use one inherent `impl` block per type per file. Put instance methods first, associated functions after them, and required trait implementations after the inherent block.

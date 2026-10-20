@@ -1,52 +1,45 @@
-//! Public Connect JSON endpoints served by the bundled backend process.
+//! Notes, replies, resolution and export through the bundled public Connect JSON API.
 mod common;
 use common::Fixture;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 // tests -----------------------------------------------------------------------
 #[test]
 fn should_persist_notes_replies_resolution_and_export_through_rpc() {
     let f = Fixture::start();
-    std::fs::write(f.files.path().join("plan.md"), "one\ntwo\n").unwrap();
+    let bytes = b"one\ntwo\n";
+    let file = f.files.path().join("plan.md");
+    std::fs::write(&file, bytes).unwrap();
     let actor = f.rpc(
         "EnsureIdentity",
         json!({"name":"RPC reviewer","email":"rpc@example.invalid"}),
         None,
     );
     let identity = actor["actor"]["id"].as_str().unwrap();
-    let context = f.rpc(
-        "EnsureContext",
-        json!({"key":{"kind":"notes","path":f.files.path()},"workspacePath":f.files.path()}),
-        None,
-    );
-    let id = context["context"]["id"].as_str().unwrap();
-    let session = f.rpc("StartSession", json!({"contextId":id}), Some(identity));
-    let sid = session["session"]["id"].as_str().unwrap();
-    let ws = f.rpc(
-        "GetWorkspace",
-        json!({"contextId":id,"includeIgnored":true}),
-        None,
-    );
-    let hash = ws["files"][0]["contentHash"].as_str().unwrap();
-    let comment=f.rpc("AddComment",json!({"sessionId":sid,"body":"Check this","anchor":{"kind":"line","path":"plan.md","start":"2","end":"2","side":"new","contentHash":hash}}),Some(identity));
-    let thread = comment["comment"]["threadId"].as_str().unwrap();
-    f.rpc(
-        "Reply",
-        json!({"sessionId":sid,"threadId":thread,"body":"Checked"}),
-        Some(identity),
-    );
-    f.rpc(
-        "ResolveThread",
-        json!({"sessionId":sid,"threadId":thread,"resolved":true}),
-        Some(identity),
-    );
-    let export = f.rpc("Export", json!({"sessionId":sid}), None);
+    let scope = json!({"notes":{"path":file}});
+    let comment = f.rpc("AddComment",json!({"scope":scope,"body":"Check this","expectedVersion":"0","requestKey":"note-root","anchor":{
+        "kind":"line","start":"2","end":"2","side":"new","source":{"localFile":{"contentHash":format!("sha256:{:x}",Sha256::digest(bytes))}},
+        "evidence":{"selectedText":"two","contextBefore":"one"}}}),Some(identity));
+    let thread = &comment["comment"]["threadId"];
+    let current = f.rpc("GetConversation", json!({"scope":scope}), None);
+    f.rpc("Reply",json!({"scope":scope,"threadId":thread,"body":"Checked","expectedVersion":current["threads"][0]["version"],"requestKey":"note-reply"}),Some(identity));
+    let current = f.rpc("GetConversation", json!({"scope":scope}), None);
+    f.rpc("ResolveThread",json!({"scope":scope,"threadId":thread,"resolved":true,"expectedVersion":current["threads"][0]["version"],"requestKey":"note-resolve"}),Some(identity));
+    let before = f.rpc("GetConversation", json!({"scope":scope}), None);
+    let export = f.rpc("Export", json!({"scope":scope}), None);
     let text = export["markdown"].as_str().unwrap();
     assert!(text.contains("Check this") && text.contains("Checked") && text.contains("resolved"));
-    let conversation = f.rpc(
-        "GetConversation",
-        json!({"contextId":id,"includeDrafts":true}),
-        None,
+    assert!(text.contains("1. **[NOTE]**") && !text.contains(thread.as_str().unwrap()));
+    assert_eq!(before["comments"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        f.rpc("GetConversation", json!({"scope":scope}), None),
+        before,
+        "export never changes stored notes"
     );
-    assert_eq!(conversation["comments"].as_array().unwrap().len(), 2);
+    assert!(
+        f.rpc("ListReviews", json!({}), None)["reviews"]
+            .as_array()
+            .is_none_or(|reviews| reviews.is_empty())
+    );
 }

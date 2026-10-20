@@ -9,7 +9,7 @@ run = "python3 {{config_root}}/common/run.py --install"
 [tasks.test]
 depends = ["install", "//apps/lgtm-cli:build"]
 description = "Real child Neovim against the real backend; isolated state"
-run = "python3 {{config_root}}/common/run.py"
+run = ["python3 {{config_root}}/common/run.py", "python3 {{config_root}}/common/run.py --kak"]
 
 [tasks.lint]
 run = "nvim --headless -u NONE -l {{config_root}}/common/syntax.lua"

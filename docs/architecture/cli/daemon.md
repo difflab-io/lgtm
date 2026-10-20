@@ -1,4 +1,4 @@
-# Daemon module architecture
+# CLI daemon — software architecture
 
 ## Overview
 
@@ -8,18 +8,32 @@ The daemon module starts, discovers, and stops the single process that serves th
 
 ### Functional
 
-- Start the server when no healthy instance exists.
-- Reuse a healthy server for repeated or concurrent startup requests.
-- Report the PID and UI/API URLs.
-- Stop the identified server with SIGTERM.
+- FR1: Start the server when no healthy instance exists.
+- FR2: Reuse a healthy server for repeated or concurrent startup requests.
+- FR3: Report the PID and UI/API URLs.
+- FR4: Stop the identified server with SIGTERM.
 
 ### Non-Functional
 
-- Use the embedded `daemonize` library without a separate daemon tool.
-- Match the stored PID to the server's health response before signaling it.
-- Return startup and shutdown failures with a log file location.
+- NFR1: Use the embedded `daemonize` library without a separate daemon tool.
+- NFR2: Match the stored PID to the server's health response before signaling it.
+- NFR3: Return startup and shutdown failures with a log file location.
 
 ## Design
+
+### Usage
+
+Pass the same store to startup, discovery, and shutdown:
+
+```rust
+let store = Store::new()?;
+up(0, false, &store).await?;
+status(&store, true).await?;
+down(&store).await?;
+```
+
+`up` starts or reuses a healthy instance. `status` reports discovery data without starting one. `down` stops only the process that matches the recorded health response.
+
 
 ### Components and Responsibilities
 

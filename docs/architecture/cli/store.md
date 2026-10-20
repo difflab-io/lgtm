@@ -1,4 +1,4 @@
-# Store module architecture
+# CLI store — software architecture
 
 ## Overview
 
@@ -8,18 +8,30 @@ The store module owns LGTM's runtime files under `~/.lgtm`.
 
 ### Functional
 
-- Select one directory for runtime files.
-- Create the directory when the server needs it.
-- Read the recorded PID and port.
-- Write the port and lock foreground PID ownership.
+- FR1: Select one directory for runtime files.
+- FR2: Create the directory when the server needs it.
+- FR3: Read the recorded PID and port.
+- FR4: Write the port and lock foreground PID ownership.
 
 ### Non-Functional
 
-- Restrict directory access to its owner on Unix.
-- Keep read-only discovery from creating directories.
-- Support isolated stores for tests and explicit directory overrides.
+- NFR1: Restrict directory access to its owner on Unix.
+- NFR2: Keep read-only discovery from creating directories.
+- NFR3: Support isolated stores for tests and explicit directory overrides.
 
 ## Design
+
+### Usage
+
+Construct one store and pass it to the daemon and server modules:
+
+```rust
+let store = Store::new()?;
+let port_path = store.path("server.port");
+```
+
+Construction reads the selected root without creating it. Call `ensure_exists()` before writing runtime files. Use `LGTM_HOME` for an isolated runtime directory.
+
 
 ### Components and Responsibilities
 

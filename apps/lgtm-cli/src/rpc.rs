@@ -43,26 +43,34 @@ impl Client {
                 GetCapabilitiesRequest,
                 get_capabilities_with_options
             ),
-            "EnsureContext" => invoke!(
+            "StartReview" => invoke!(
                 ReviewServiceClient,
-                EnsureContextRequest,
-                ensure_context_with_options
+                StartReviewRequest,
+                start_review_with_options
             ),
-            "StartSession" => invoke!(
+            "ListReviews" => invoke!(
                 ReviewServiceClient,
-                StartSessionRequest,
-                start_session_with_options
+                ListReviewsRequest,
+                list_reviews_with_options
             ),
-            "GetSession" => invoke!(
+            "GetReview" => invoke!(
                 ReviewServiceClient,
-                GetSessionRequest,
-                get_session_with_options
+                GetReviewRequest,
+                get_review_with_options
             ),
-            "ListSessions" => invoke!(
+            "RefreshReview" => invoke!(
                 ReviewServiceClient,
-                ListSessionsRequest,
-                list_sessions_with_options
+                RefreshReviewRequest,
+                refresh_review_with_options
             ),
+            "CompleteReview" => invoke!(
+                ReviewServiceClient,
+                CompleteReviewRequest,
+                complete_review_with_options
+            ),
+            "GetDiff" => invoke!(DiffServiceClient, GetDiffRequest, get_diff_with_options),
+            "GetFiles" => invoke!(DiffServiceClient, GetFilesRequest, get_files_with_options),
+            "GetFile" => invoke!(DiffServiceClient, GetFileRequest, get_file_with_options),
             "GetConversation" => invoke!(
                 ReviewServiceClient,
                 GetConversationRequest,
@@ -72,6 +80,11 @@ impl Client {
                 ReviewServiceClient,
                 AddCommentRequest,
                 add_comment_with_options
+            ),
+            "SyncDraftComment" => invoke!(
+                ReviewServiceClient,
+                SyncDraftCommentRequest,
+                sync_draft_comment_with_options
             ),
             "Reply" => invoke!(ReviewServiceClient, ReplyRequest, reply_with_options),
             "EditComment" => invoke!(
@@ -89,17 +102,7 @@ impl Client {
                 ResolveThreadRequest,
                 resolve_thread_with_options
             ),
-            "CompleteSession" => invoke!(
-                ReviewServiceClient,
-                CompleteSessionRequest,
-                complete_session_with_options
-            ),
             "Export" => invoke!(ReviewServiceClient, ExportRequest, export_with_options),
-            "GetWorkspace" => invoke!(
-                ReviewServiceClient,
-                GetWorkspaceRequest,
-                get_workspace_with_options
-            ),
             "PromoteNotes" => invoke!(
                 ReviewServiceClient,
                 PromoteNotesRequest,
@@ -109,11 +112,6 @@ impl Client {
                 ReviewServiceClient,
                 ListPullRequestsRequest,
                 list_pull_requests_with_options
-            ),
-            "RefreshContext" => invoke!(
-                ReviewServiceClient,
-                RefreshContextRequest,
-                refresh_context_with_options
             ),
             "SubmitReview" => invoke!(
                 ReviewServiceClient,

@@ -1,93 +1,211 @@
 local M = { submission_drafts = {} }
 local rpc, contexts, notice =
   require("lgtm.rpc"), require("lgtm.context"), require("lgtm.notifications")
-function M.open(state)
-  contexts.set(state)
-  state.refresh = function(done)
-    local generation = contexts.generation
-    rpc.call(
-      "GetConversation",
-      { contextId = state.context.id, includeDrafts = true },
-      function(err, result)
-        if generation ~= contexts.generation then
-          return
-        end
-        if not err then
-          state.conversation = result
-          if state.render then
-            state.render()
-          end
-        end
-        if done then
-          done(err)
-        elseif err then
-          notice.error(err)
-        end
-      end
-    )
+-- Directory and remote fallbacks enumerate metadata, then fetch only the selected file.
+function M.load_diff(state, callback)
+  local previous = {}
+  for _, file in ipairs(state.files or {}) do
+    previous[file.path] = file
   end
-  state.show_file = function(path, anchor)
-    if anchor and anchor.side == "old" and state.layout == "inline" then
-      require("lgtm.codediff").toggle(state)
-      vim.schedule(function()
-        state.show_file(path, anchor)
-      end)
-      return
-    end
-    for _, file in ipairs(state.files or {}) do
-      if file.path == path then
-        if file.status == "binary" or file.status == "too_large" then
-          notice.error("Unsupported review content: " .. path .. " (" .. file.status .. ")")
-          return
-        end
-        state.on_ready = anchor
-            and function()
-              local pane = state.panes[anchor.side or "new"]
-              if pane then
-                vim.api.nvim_set_current_win(pane.win)
-                pcall(vim.api.nvim_win_set_cursor, pane.win, { tonumber(anchor.start or 1), 0 })
-              end
-              state.on_ready = nil
-            end
-          or nil
-        require("lgtm.codediff").open(state, file)
+  rpc.call(
+    "GetDiff",
+    { target = state.target, comparison = state.comparison },
+    function(err, response)
+      if err then
+        callback(err)
         return
       end
+      state.diff = response.diff
+      state.root = response.diff.root
+      local files = {}
+      local function page(token)
+        rpc.call(
+          "GetFiles",
+          { diff = state.diff, pageToken = token, pageSize = 100 },
+          function(error, result)
+            if error then
+              callback(error)
+              return
+            end
+            for _, file in ipairs(result.files or {}) do
+              local saved = previous[file.path]
+              files[#files + 1] = saved and saved.identity == file.identity and saved or file
+            end
+            if result.nextPageToken and result.nextPageToken ~= "" then
+              page(result.nextPageToken)
+            else
+              state.files = files
+              callback()
+            end
+          end
+        )
+      end
+      page(nil)
     end
-    notice.error(
-      "File no longer available: " .. path .. ". Its conversation is retained in :Lgtm threads."
-    )
-  end
-  state.refresh(function(err)
-    if err then
-      notice.error(err)
-      return
-    end
-    rpc.call("GetWorkspace", {
-      contextId = state.context.id,
-      includeIgnored = true,
-      base = state.session.base,
-      head = state.session.head,
-      mode = state.mode or (state.context.key.kind == "notes" and "directory" or "working"),
-    }, function(error, workspace)
+  )
+end
+
+function M.open(state, on_loaded)
+  state.closed = false
+  contexts.set(state)
+  state.refresh = function(done)
+    contexts.refresh(state, function(err)
       if contexts.current ~= state then
         return
       end
-      if error then
-        notice.error(error)
-        return
+      if done then
+        done(err)
+      elseif err then
+        notice.error(err)
       end
-      state.root = workspace.root
-      state.files = workspace.files or {}
-      M.files()
     end)
-  end)
+  end
+  state.show_file = function(path, anchor, on_ready)
+    if state.kind == "directory" and path:sub(1, 1) == "/" then
+      local prefix = state.root .. "/"
+      if path:sub(1, #prefix) == prefix then
+        path = path:sub(#prefix + 1)
+      end
+    end
+    local function ready()
+      if anchor and anchor.kind == "line" then
+        local pane = state.panes[anchor.side or "new"]
+        if pane and vim.api.nvim_win_is_valid(pane.win) then
+          vim.api.nvim_set_current_win(pane.win)
+          pcall(vim.api.nvim_win_set_cursor, pane.win, { tonumber(anchor.start), 0 })
+        end
+      end
+      state.on_ready = nil
+      if on_ready then
+        on_ready()
+      end
+    end
+    if state.native_explorer then
+      if state.tab and vim.api.nvim_tabpage_is_valid(state.tab) then
+        vim.api.nvim_set_current_tabpage(state.tab)
+      end
+      local panel = require("codediff.ui.lifecycle").get_panel_view(state.tab)
+      for _, file in ipairs(state.files) do
+        if file.path == path then
+          state.on_ready = (anchor or on_ready) and ready or nil
+          panel.on_file_select(file.native_entry)
+          return
+        end
+      end
+    else
+      if anchor and anchor.side == "old" and state.layout == "inline" then
+        require("lgtm.codediff").toggle(state)
+      end
+      for _, file in ipairs(state.files or {}) do
+        if file.path == path then
+          if not file.loaded then
+            local pending = notice.show("Loading " .. path .. "…")
+            rpc.latest(
+              "review-file",
+              "GetFile",
+              { diff = state.diff, path = path },
+              function(err, result)
+                if contexts.current ~= state then
+                  return
+                end
+                if err then
+                  notice.error(err, pending)
+                  return
+                end
+                file.sides = { old = result.oldSide, new = result.newSide }
+                file.content = result.newSide and result.newSide.content or ""
+                file.baseContent = result.oldSide and result.oldSide.content or ""
+                file.contentHash = file.identity
+                file.loaded = true
+                state.show_file(path, anchor, on_ready)
+                notice.show("File ready", nil, pending)
+              end
+            )
+          else
+            state.on_ready = (anchor or on_ready) and ready or nil
+            require("lgtm.codediff").open(state, file)
+          end
+          return
+        end
+      end
+    end
+    notice.error("File is outside this diff. Its discussion is retained in :Lgtm threads.")
+  end
+  if (state.kind == "git" or state.kind == "pr") and not state.comparison then
+    notice.error(
+      "Saved review has no recorded comparison. Use :Lgtm threads or export; select an explicit comparison for a new review."
+    )
+    if not state.initializing then
+      state.refresh(on_loaded)
+    end
+    return
+  end
+  local function browse()
+    if state.browsing then
+      return
+    end
+    state.browsing = true
+    if state.git_root then
+      require("lgtm.codediff").open_native(state)
+    elseif not state.initializing then
+      M.load_diff(state, function(err)
+        if contexts.current ~= state then
+          return
+        end
+        if err then
+          notice.error(err)
+        else
+          M.files()
+        end
+      end)
+    else
+      state.browsing = false
+    end
+  end
+  if state.kind == "git" then
+    state.git_root = state.root
+  end
+  if state.kind == "pr" and not state.git_checked then
+    state.git_checked, state.git_pending = true, true
+    vim.system({
+      "git",
+      "-C",
+      vim.fn.getcwd(),
+      "rev-parse",
+      "--show-toplevel",
+      state.base .. "^{commit}",
+      state.head .. "^{commit}",
+    }, { text = true }, function(result)
+      vim.schedule(function()
+        if contexts.current ~= state then
+          return
+        end
+        state.git_pending = false
+        if result.code == 0 then
+          state.git_root = vim.split(vim.trim(result.stdout), "\n", { plain = true })[1]
+        end
+        browse()
+      end)
+    end)
+  else
+    browse()
+  end
+  if not state.initializing then
+    state.refresh(on_loaded)
+  end
 end
 
 function M.files()
   local state = contexts.current
   if not state then
     notice.error("Select a review first")
+    return
+  end
+  if state.native_explorer then
+    local panel = require("codediff.ui.lifecycle").get_panel_view(state.tab)
+    if panel and panel.winid and vim.api.nvim_win_is_valid(panel.winid) then
+      vim.api.nvim_set_current_win(panel.winid)
+    end
     return
   end
   if not state.file then
@@ -97,7 +215,15 @@ function M.files()
         return
       end
     end
-    notice.show("No supported review files")
+    if #(state.files or {}) == 0 then
+      notice.show(
+        state.mode == "staged" and "No staged changes"
+          or state.mode == "working" and "No working-tree changes"
+          or "No changed files"
+      )
+    else
+      notice.show("No supported text files in this review")
+    end
   else
     require("lgtm.files").show(state, true)
   end
@@ -105,13 +231,19 @@ end
 
 function M.directory(path)
   local function start(selected)
-    contexts.notes(selected, function(err, state)
-      if err then
-        notice.error(err)
-      else
-        M.open(state)
+    local root = vim.fn.fnamemodify(selected, ":p"):gsub("/$", "")
+    contexts.start(
+      { directory = { path = root } },
+      { directory = vim.empty_dict() },
+      root,
+      function(err, state)
+        if err then
+          notice.error(err)
+        else
+          M.open(state)
+        end
       end
-    end)
+    )
   end
   if path then
     start(path)
@@ -124,14 +256,78 @@ function M.directory(path)
   end
 end
 
-function M.select()
-  require("lgtm.picker").select("Review", { "working", "staged", "PR" }, tostring, function(kind)
-    if kind == "PR" then
-      require("lgtm.sessions").prs()
-    else
-      M.branch(kind)
+function M.sync()
+  local state = contexts.current
+  if not state or state.initializing then
+    notice.error("Open a review and wait for Review ready before synchronizing drafts")
+    return
+  end
+  if state.kind ~= "pr" then
+    notice.show("Local review drafts are already saved")
+    return
+  end
+  local drafts = {}
+  for _, c in ipairs((state.conversation or {}).comments or {}) do
+    if
+      c.originSessionId == state.review.id
+      and c.author
+      and (c.ownerId ~= "" and c.ownerId or c.author.id) == rpc.identity
+      and c.visibility == "draft"
+      and c.remotePresence ~= "missing"
+    then
+      drafts[#drafts + 1] = c
     end
+  end
+  table.sort(drafts, function(a, b)
+    return tonumber(a.position or 0) < tonumber(b.position or 0)
   end)
+  local pending = notice.show("Synchronizing review drafts…")
+  local index = 0
+  local function next_draft()
+    index = index + 1
+    if not drafts[index] then
+      state.refresh(function(err)
+        if err then
+          notice.error(err, pending)
+        else
+          notice.show(
+            "Drafts synchronized; general comments remain local until submission",
+            nil,
+            pending
+          )
+        end
+      end)
+      return
+    end
+    rpc.call(
+      "SyncDraftComment",
+      { reviewId = state.review.id, commentId = drafts[index].id },
+      function(err)
+        if err then
+          notice.error(err, pending)
+          state.refresh()
+          return
+        end
+        next_draft()
+      end
+    )
+  end
+  next_draft()
+end
+
+function M.select()
+  require("lgtm.picker").select(
+    "Review",
+    { "working", "staged", "branch", "PR" },
+    tostring,
+    function(kind)
+      if kind == "PR" then
+        require("lgtm.sessions").prs()
+      else
+        M.branch(kind)
+      end
+    end
+  )
 end
 
 function M.branch(requested_mode, default_base)
@@ -169,28 +365,40 @@ function M.branch(requested_mode, default_base)
                   return
                 end
                 local refs = vim.split(vim.trim(resolved.stdout), "\n", { plain = true })
-                contexts.ensure(
-                  { kind = "branch", gitDir = identity[2], branch = identity[3] },
+                local comparison = mode == "branch"
+                    and { branch = { baseCommit = refs[1], headCommit = refs[2] } }
+                  or { [mode] = { baseCommit = refs[1] } }
+                contexts.start(
+                  { localGit = { path = root, branch = identity[3] } },
+                  comparison,
                   root,
                   function(err, state)
                     if err then
                       notice.error(err)
                     else
-                      state.mode = mode
                       M.open(state)
                     end
-                  end,
-                  { base = refs[1], head = refs[2] }
+                  end
                 )
               end)
             end
           )
         end
-        if mode == "revisions" then
-          require("lgtm.picker").input("Base revision: ", default_base or "HEAD~1", function(base)
-            require("lgtm.picker").input("Head revision: ", "HEAD", function(head)
-              start(base, head)
-            end)
+        if mode == "branch" then
+          require("lgtm.picker").input("Base branch: ", "main", function(base_branch)
+            vim.system(
+              { "git", "-C", root, "merge-base", base_branch, "HEAD" },
+              { text = true },
+              function(result)
+                vim.schedule(function()
+                  if result.code ~= 0 then
+                    notice.error("Cannot find a common ancestor with " .. base_branch)
+                    return
+                  end
+                  start(vim.trim(result.stdout), "HEAD")
+                end)
+              end
+            )
           end)
         else
           start("HEAD", "HEAD")
@@ -212,53 +420,91 @@ end
 
 function M.comment(kind, range)
   local state = contexts.current
-  if not state then
-    notice.error("Select a review first, or use :Lgtm note")
+  if not state or state.initializing then
+    notice.show(
+      state and "PR comments are still loading; wait for Review ready"
+        or "Select a review first, or use :Lgtm note"
+    )
     return
   end
+  kind = kind or "line"
   local location = vim.b.lgtm or {}
-  local anchor = { kind = kind or "line", path = location.path or (state.file and state.file.path) }
-  if anchor.kind == "general" then
-    anchor.path = nil
-  elseif not anchor.path then
+  if kind ~= "general" and (not state.file or not location.side) then
     notice.error("Open a review file first")
     return
   end
-  if anchor.kind == "line" then
-    local first, last = vim.api.nvim_win_get_cursor(0)[1], vim.api.nvim_win_get_cursor(0)[1]
-    if vim.fn.mode():match("[vV\22]") then
-      first, last = vim.fn.line("v"), vim.fn.line(".")
-      first, last = math.min(first, last), math.max(first, last)
-    end
-    if range then
-      first, last = range[1], range[2]
-    end
-    anchor.start = first
-    anchor["end"] = last
-    anchor.side = location.side or "new"
-    anchor.commit = anchor.side == "old" and state.session.base or state.session.head
-    if not anchor.commit or anchor.commit == "" then
-      anchor.contentHash = location.content_hash
-    end
+  local buf = vim.api.nvim_get_current_buf()
+  local first, last = vim.api.nvim_win_get_cursor(0)[1], vim.api.nvim_win_get_cursor(0)[1]
+  if vim.fn.mode():match("[vV\22]") then
+    first, last = vim.fn.line("v"), vim.fn.line(".")
+    first, last = math.min(first, last), math.max(first, last)
   end
-  require("lgtm.composer").open("Review comment", "", function(body, done)
-    rpc.call(
-      "AddComment",
-      { sessionId = state.session.id, anchor = anchor, body = body },
-      function(err)
-        if err then
-          done(err)
+  if range then
+    first, last = range[1], range[2]
+  end
+  local generation = state.render_generation
+  local function compose(err, selected)
+    if contexts.current ~= state or generation ~= state.render_generation then
+      return
+    end
+    if err then
+      notice.error(err)
+      return
+    end
+    local view = selected
+      and vim.tbl_extend("force", selected, {
+        path = location.side == "old" and (state.file.previousPath or state.file.path)
+          or state.file.path,
+        side = location.side,
+      })
+    local anchor, capture_error = require("lgtm.sources").capture(view, buf, kind, first, last)
+    if not anchor then
+      notice.error(capture_error)
+      return
+    end
+    local input = {
+      scope = state.scope,
+      expectedVersion = state.version,
+      requestKey = contexts.request_key(),
+      anchor = anchor,
+    }
+    require("lgtm.composer").open("Review comment", "", function(body, done)
+      -- Keep the exact source, version, and operation key when an uncertain save is retried.
+      if input.body and input.body ~= body then
+        input.requestKey = contexts.request_key()
+      end
+      input.body = body
+      rpc.call("AddComment", input, function(error, result)
+        if error then
+          done(error)
           return
         end
-        state.refresh(function(refresh_err)
-          if not refresh_err then
-            notice.show("Draft saved")
+        state.refresh(function(refresh_error)
+          if result.syncError and result.syncError ~= "" then
+            notice.error(
+              "Draft saved locally; GitHub sync failed: "
+                .. result.syncError
+                .. ". Use :Lgtm sync to recover."
+            )
+          else
+            notice.show(
+              result.comment
+                  and result.comment.forgeCommentId
+                  and result.comment.forgeCommentId ~= ""
+                  and "Draft saved on GitHub"
+                or "Draft saved locally"
+            )
           end
-          done(refresh_err)
+          done(refresh_error)
         end)
-      end
-    )
-  end)
+      end)
+    end)
+  end
+  if kind == "general" then
+    compose()
+  else
+    require("lgtm.sources").read(state, state.file, location.side, compose)
+  end
 end
 
 function M.comment_action(action)
@@ -273,7 +519,6 @@ function M.comment_action(action)
       return
     end
     local popup = threads.open(selected, matches)
-    vim.api.nvim_win_set_cursor(popup.win, { 2, 0 })
     if #matches == 1 then
       vim.api.nvim_input(action)
     else
@@ -304,18 +549,22 @@ end
 
 function M.refresh()
   local state = contexts.current
-  if not state then
+  if not state or state.initializing then
+    return
+  end
+  if state.pending_location then
+    require("lgtm.locations").retry(state, function(err)
+      if err then
+        notice.error(err)
+      end
+    end)
     return
   end
   local pending = notice.show("Refreshing review…")
-  local function content()
-    rpc.call("GetWorkspace", {
-      contextId = state.context.id,
-      includeIgnored = true,
-      base = state.session.base,
-      head = state.session.head,
-      mode = state.mode or (state.context.key.kind == "notes" and "directory" or "working"),
-    }, function(err, result)
+  rpc.call(
+    "RefreshReview",
+    { scope = state.scope, expectedVersion = state.version, requestKey = contexts.request_key() },
+    function(err, result)
       if contexts.current ~= state then
         return
       end
@@ -323,51 +572,81 @@ function M.refresh()
         notice.error(err, pending)
         return
       end
-      state.files = result.files or {}
-      state.root = result.root
-      state.refresh(function(error)
-        if error then
-          notice.error(error, pending)
-          return
-        end
-        if state.file then
-          state.show_file(state.file.path)
-        end
-        notice.show("Review refreshed", nil, pending)
-      end)
-    end)
-  end
-  if state.context.key.kind == "forge_backed" then
-    rpc.call("RefreshContext", { contextId = state.context.id }, function(err, result)
-      if contexts.current ~= state then
-        return
+      if result.review then
+        contexts.apply(state, result.review)
       end
-      if err then
-        notice.error(err, pending)
-        return
+      local function content()
+        state.refresh(function(error)
+          if error then
+            notice.error(error, pending)
+            return
+          end
+          if state.native_explorer then
+            state.render_ready = false
+            require("codediff.ui.refresh").request(state.tab, { full = true }, function()
+              if contexts.current == state then
+                state.bind_panes()
+              end
+            end)
+          else
+            local path = state.file and state.file.path
+            M.load_diff(state, function(load_error)
+              if load_error then
+                notice.error(load_error)
+              elseif path then
+                state.show_file(path)
+              else
+                M.files()
+              end
+            end)
+          end
+          notice.show("Review refreshed", nil, pending)
+        end)
       end
-      if result.context.refreshedHead ~= state.session.head then
-        notice.error("PR head changed. Start a fresh review before adding more comments.", pending)
-        return
+      local observed = state.review.observedComparison
+      if state.kind == "pr" and observed and not vim.deep_equal(observed, state.comparison) then
+        state.reviewed = {}
+        require("lgtm.picker").select(
+          "PR comparison changed; saved feedback is retained",
+          { "Keep reviewing saved comparison", "Accept current PR comparison" },
+          tostring,
+          function(choice)
+            if choice == "Keep reviewing saved comparison" then
+              content()
+              return
+            end
+            contexts.start(state.target, observed, state.root, function(accept_error, replacement)
+              if accept_error then
+                notice.error(accept_error, pending)
+                return
+              end
+              require("lgtm.codediff").close(state)
+              M.open(replacement)
+              notice.show("Current PR comparison accepted", nil, pending)
+            end, {
+              resumePolicy = "RESUME_POLICY_ACCEPT_PR_COMPARISON",
+              expectedReviewId = state.review.id,
+              expectedVersion = state.version,
+              localGitPath = state.git_root,
+            })
+          end
+        )
+      else
+        content()
       end
-      state.context = result.context
-      content()
-    end)
-  else
-    content()
-  end
+    end
+  )
 end
 
 function M.save()
   local state = contexts.current
-  if not state then
+  if not state or state.initializing then
     return
   end
-  rpc.call("GetSession", { sessionId = state.session.id }, function(err, result)
+  state.refresh(function(err)
     if err then
       notice.error(err)
     else
-      state.session = result.session
       notice.show("Review saved (drafts persist after every change)")
     end
   end)
@@ -377,7 +656,7 @@ function M.close()
   local state = contexts.current
   if state then
     require("lgtm.codediff").close(state)
-    contexts.set(nil)
+    contexts.set(contexts.tabs[vim.api.nvim_get_current_tabpage()])
   end
 end
 
@@ -386,26 +665,22 @@ function M.complete()
   if not state then
     return
   end
-  if state.context.key.kind == "forge_backed" then
+  if state.kind == "pr" then
     notice.error("Use :Lgtm submit for GitHub reviews")
     return
   end
-  rpc.call(
-    "CompleteSession",
-    { contextId = state.context.id, requestKey = M.request_key() },
-    function(err, result)
-      if err then
-        notice.error(err)
-      else
-        state.session = result.session
-        notice.show("Local review completed")
-      end
+  rpc.call("CompleteReview", {
+    reviewId = state.review.id,
+    expectedVersion = state.version,
+    requestKey = contexts.request_key(),
+  }, function(err, result)
+    if err then
+      notice.error(err)
+    else
+      contexts.apply(state, result.review)
+      notice.show("Local review completed")
     end
-  )
-end
-
-function M.request_key()
-  return vim.fn.sha256(tostring(vim.uv.hrtime()) .. tostring(math.random()))
+  end)
 end
 
 function M.submission_result(state, err, result, pending, done)
@@ -417,13 +692,20 @@ function M.submission_result(state, err, result, pending, done)
       ) .. (err.message or "Unknown error"),
       pending
     )
-    done(err)
+    local draft = M.submission_drafts[state.review.id]
+    if draft then
+      draft.uncertain = err.uncertain
+    end
+    -- Learn durable intent state without observing GitHub again or repeating a write.
+    state.refresh(function()
+      done(err)
+    end)
     return
   end
-  state.session = result.session
-  local status = result.session.submissionStatus
+  contexts.apply(state, result.review)
+  local status = result.review.submissionStatus
   if status == "confirmed" then
-    M.submission_drafts[state.session.id] = nil
+    M.submission_drafts[state.review.id] = nil
     notice.show("Review submitted", nil, pending)
     done()
   elseif
@@ -438,7 +720,7 @@ function M.submission_result(state, err, result, pending, done)
     done(error)
   else
     local error = {
-      message = (result.session.submissionError or ("Submission " .. tostring(status)))
+      message = (result.review.submissionError or ("Submission " .. tostring(status)))
         .. ". Use :Lgtm reconcile to inspect/recover.",
     }
     notice.error(error, pending)
@@ -447,22 +729,35 @@ function M.submission_result(state, err, result, pending, done)
 end
 
 function M.submit()
+  if contexts.current and contexts.current.initializing then
+    notice.show("PR comments are still loading; wait for Review ready")
+    return
+  end
   local state = contexts.current
   if not state then
     return
   end
+  local retained = M.submission_drafts[state.review.id]
+  if retained and retained.uncertain then
+    notice.error("Submission response was lost. Use :Lgtm reconcile before retrying.")
+    return
+  end
+  if (state.review.submissionStatus or ""):match("^draft_") then
+    notice.error("Draft synchronization needs recovery. Use :Lgtm sync before submitting.")
+    return
+  end
   if
-    state.session.submissionStatus == "uncertain"
-    or state.session.submissionStatus == "pending"
-    or state.session.submissionStatus == "posting"
-    or state.session.submissionStatus == "sending"
-    or state.session.submissionStatus == "reconciling"
-    or state.session.submissionStatus == "failed"
+    state.review.submissionStatus == "uncertain"
+    or state.review.submissionStatus == "pending"
+    or state.review.submissionStatus == "posting"
+    or state.review.submissionStatus == "sending"
+    or state.review.submissionStatus == "reconciling"
+    or state.review.submissionStatus == "failed"
   then
     notice.error("Submission is pending or uncertain. Use :Lgtm reconcile before retrying.")
     return
   end
-  if state.context.key.kind ~= "forge_backed" then
+  if state.kind ~= "pr" then
     notice.error("Local reviews cannot be submitted to GitHub; use :Lgtm complete")
     return
   end
@@ -471,23 +766,30 @@ function M.submit()
     { "comment", "approve", "request_changes" },
     tostring,
     function(outcome)
-      local draft = M.submission_drafts[state.session.id]
-        or { body = state.session.body or "", requestKey = M.request_key() }
-      M.submission_drafts[state.session.id] = draft
+      local draft = M.submission_drafts[state.review.id]
+        or { body = state.review.body or "", requestKey = contexts.request_key() }
+      M.submission_drafts[state.review.id] = draft
       require("lgtm.composer").open("Final review body (optional)", draft.body, function(body, done)
         draft.body = body
         draft.outcome = outcome
         local pending = notice.show("Submitting review…")
-        rpc.call("SubmitReview", {
-          sessionId = state.session.id,
+        local input = {
+          reviewId = state.review.id,
           outcome = outcome,
           body = body,
-          requestKey = draft.requestKey,
-          expectedHead = state.session.head,
-        }, function(err, result)
+          expectedHead = state.head,
+          expectedBase = state.base,
+          expectedVersion = state.version,
+        }
+        local fingerprint = vim.json.encode(input)
+        if draft.fingerprint ~= fingerprint then
+          draft.requestKey, draft.fingerprint = contexts.request_key(), fingerprint
+        end
+        input.requestKey = draft.requestKey
+        rpc.call("SubmitReview", input, function(err, result)
           M.submission_result(state, err, result, pending, done)
         end)
-      end)
+      end, { action = "submit review" })
     end
   )
 end
@@ -498,22 +800,51 @@ function M.reconcile()
     return
   end
   local pending = notice.show("Checking submission status…")
-  rpc.call("ReconcileSubmission", { sessionId = state.session.id }, function(err, result)
+  rpc.call("ReconcileSubmission", { reviewId = state.review.id }, function(err, result)
     M.submission_result(state, err, result, pending, function() end)
   end)
 end
 
-function M.reviewed()
+function M.reviewed(path)
   local state = contexts.current
   if not state or not state.file then
     return
   end
-  state.reviewed = state.reviewed or {}
-  state.reviewed[state.file.path] = state.reviewed[state.file.path] and nil
-    or state.file.contentHash
-  require("lgtm.files").render(state)
-  notice.show(
-    state.reviewed[state.file.path] and "File marked reviewed" or "File marked unreviewed"
-  )
+  if state.native_explorer and not path then
+    local panel = require("codediff.ui.lifecycle").get_panel_view(state.tab)
+    if panel and vim.api.nvim_get_current_buf() == panel.bufnr then
+      local node = panel.tree:get_node()
+      if
+        not node
+        or not node.data
+        or node.data.type == "group"
+        or node.data.type == "directory"
+      then
+        return
+      end
+      path = node.data.path
+    end
+  end
+  path = path or state.file.path
+  for _, file in ipairs(state.files or {}) do
+    if file.path == path then
+      local origin = vim.api.nvim_get_current_win()
+      local cursor = vim.api.nvim_win_get_cursor(origin)
+      local function toggle()
+        require("lgtm.files").toggle_reviewed(state, file)
+        if vim.api.nvim_win_is_valid(origin) then
+          vim.api.nvim_set_current_win(origin)
+          pcall(vim.api.nvim_win_set_cursor, origin, cursor)
+        end
+      end
+      if state.file.path ~= path or not state.render_ready then
+        -- Read the selected revision before recording its content identity.
+        state.show_file(path, nil, toggle)
+      else
+        toggle()
+      end
+      return
+    end
+  end
 end
 return M

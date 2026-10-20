@@ -1,5 +1,6 @@
 """Isolated real editor/daemon E2E runner; does not create remote repositories."""
 import argparse
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,22 @@ from github_server import Github
 SUITE = Path(__file__).resolve().parents[1]
 ROOT = SUITE.parents[1]
 CACHE = SUITE / '.cache'
+
+
+@contextmanager
+def runtime_fixture():
+    """Keep failed editor runs, including the database and daemon log, for diagnosis."""
+    base = Path(tempfile.mkdtemp(prefix='lgtm-nvim-e2e-'))
+    try:
+        yield base
+    except BaseException:
+        artifacts = ROOT / 'target' / 'e2e' / 'nvim' / base.name
+        artifacts.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(base, artifacts)
+        print(f'Failed Neovim fixture retained at {artifacts}', file=sys.stderr)
+        raise
+    finally:
+        shutil.rmtree(base)
 
 
 def install():
@@ -35,6 +52,7 @@ def install():
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--install', action='store_true')
+    parser.add_argument('--kak', action='store_true')
     args = parser.parse_args()
     if args.install:
         install()
@@ -50,8 +68,7 @@ def main():
     binary = Path(os.environ.get('LGTM_E2E_BINARY', ROOT / 'target/debug/lgtm'))
     if not binary.exists():
         raise RuntimeError('Build lgtm CLI first through the project Mise build task')
-    with tempfile.TemporaryDirectory(prefix='lgtm-nvim-e2e-') as temp:
-        base = Path(temp)
+    with runtime_fixture() as base:
         fixture = base / 'workspace'
         fixture.mkdir()
         (fixture / 'notes.txt').write_text('one\ntwo\nthree\n')
@@ -68,10 +85,11 @@ def main():
         (fixture / '.difflab').symlink_to(plans.parent, target_is_directory=True)
         home = base / 'home'
         env = {**os.environ, 'LGTM_HOME': str(home), 'LGTM_REPO_ROOT': str(ROOT),
-               'LGTM_E2E_WORKSPACE': str(fixture), 'PATH': str(binary.parent) + os.pathsep + os.environ['PATH'], 'XDG_CONFIG_HOME': str(base / 'config'),
+               'LGTM_E2E_WORKSPACE': str(fixture), 'LGTM_E2E_KAK': '1' if args.kak else '0', 'PATH': str(binary.parent) + os.pathsep + os.environ['PATH'], 'XDG_CONFIG_HOME': str(base / 'config'),
                'XDG_DATA_HOME': str(base / 'data'), 'XDG_STATE_HOME': str(base / 'state'),
                'XDG_CACHE_HOME': str(base / 'cache')}
         github = Github()
+        github.base_sha, github.head_sha = "a" * 40, "b" * 40
         env.update({'LGTM_GITHUB_TEST_MODE': '1', 'LGTM_GITHUB_TEST_API_URL': github.endpoint_url, 'LGTM_E2E_GITHUB': github.endpoint_url})
         with (base / 'daemon.log').open('w+') as log:
             process = subprocess.Popen([str(binary), 'up', '--foreground', '--no-open', '--port', '0'], env=env, stdout=log, stderr=log)
@@ -82,8 +100,23 @@ def main():
                         log.seek(0)
                         raise RuntimeError('Daemon did not start: ' + log.read())
                     time.sleep(.05)
-                for case in ['workflow', 'persistence', 'github_review', 'health', 'transport', 'notifications']:
-                    subprocess.run(['nvim', '--headless', '-u', str(SUITE / 'minimal_init.lua'), '-c', f"lua vim.g.lgtm_case='{case}'", '-c', 'luafile ' + str(SUITE / 'common' / 'runner.lua')], env=env, cwd=fixture, check=True, timeout=120)
+                for case in ['workflow', 'persistence', 'github_review', 'health', 'transport', 'notifications', 'pending_drafts', 'pending_resume', 'native_pr', 'anchor_lifecycle', 'anchor_resume', 'notes_moves', 'notes_moves_resume']:
+                    if case in ('pending_resume', 'anchor_resume', 'notes_moves_resume'):
+                        process.terminate()
+                        process.wait(timeout=10)
+                        (home / 'server.port').unlink(missing_ok=True)
+                        process = subprocess.Popen([str(binary), 'up', '--foreground', '--no-open', '--port', '0'], env=env, stdout=log, stderr=log)
+                        deadline = time.monotonic() + 20
+                        while not (home / 'server.port').exists():
+                            if process.poll() is not None or time.monotonic() > deadline:
+                                raise RuntimeError('Daemon did not restart for pending review persistence')
+                            time.sleep(.05)
+                    case_log = base / f'{case}.log'
+                    try:
+                        with case_log.open('w') as output:
+                            subprocess.run(['nvim', '--headless', '-u', str(SUITE / 'minimal_init.lua'), '-c', f"lua vim.g.lgtm_case='{case}'", '-c', 'luafile ' + str(SUITE / 'common' / 'runner.lua')], env=env, cwd=fixture, stdout=output, stderr=subprocess.STDOUT, check=True, timeout=120)
+                    finally:
+                        print(case_log.read_text(), end='', flush=True)
                 if github.errors:
                     raise RuntimeError("Unexpected GitHub fixture requests: " + repr(github.errors))
             finally:

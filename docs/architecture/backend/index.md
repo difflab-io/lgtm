@@ -4,24 +4,47 @@
 
 The Rust backend owns domain validation, requester identity and review workflows over lgtm-db. The stateful RPC router exposes IdentityService and ReviewService alongside greeting and health. Both native gRPC clients and direct Connect JSON clients call the same services. The CLI and Neovim plugin use these RPCs; neither owns persistence or depends on the web UI.
 
+See [review architecture](reviews.md) for context requirements, backend data flows, and the intended review contracts. The [system architecture](../index.md) defines shared concepts and comment lifecycle behavior. The [DiffService](diffs.md) owns backend file listing and content access for the web UI. Neovim uses CodeDiff for analogous content access. The review service owns review data and state transitions. The review document's [Usage](reviews.md#usage) covers API consumer request sequences and recovery. The [LGTM user guide](../../user-guide.md) covers Neovim review workflows and the web interface's availability.
+
 ## Requirement
 
 ### Functional
 
-- Persist notes, local branch reviews and forge-review conversations through services.
-- Track human identities (email) and agent identities (model/provider), independently of forge posting accounts.
-- Keep one active session per context shared by identities; publish drafts on completion and retain completed metadata.
-- Preserve context-owned threads/comments and scoped forge IDs across later sessions.
-- Reconcile complete GitHub observations and verified posting receipts through the Octocrab adapter.
+- FR1: Persist notes, local branch reviews and forge-review conversations through services.
+- FR2: Track human identities (email) and agent identities (model/provider), independently of forge posting accounts.
+- FR3: Keep one active session per context shared by identities; publish drafts on completion and retain completed metadata.
+- FR4: Preserve context-owned threads/comments and scoped forge IDs across later sessions.
+- FR5: Reconcile complete GitHub observations and verified posting receipts through the Octocrab adapter.
 
 ### Non-Functional
 
-- Keep all database interaction in services; models only validate, map supplied values and implement domain behavior.
-- Share transaction semantics across SQLite and PostgreSQL.
-- Keep review persistence out of the CLI until backend RPCs exist.
-- Inherit caller tracing context without retaining request spans.
+- NFR1: Keep all database interaction in services; models only validate, map supplied values and implement domain behavior.
+- NFR2: Share transaction semantics across SQLite and PostgreSQL.
+- NFR3: Keep review persistence out of the CLI until backend RPCs exist.
+- NFR4: Inherit caller tracing context without retaining request spans.
 
 ## Design
+
+### Usage
+
+#### API clients
+
+Start the bundled backend with `lgtm up --no-open`. Read its endpoint through `lgtm status --json`. Use [review usage](reviews.md#usage) for review data and state transitions. Use [diff usage](diffs.md#usage) for backend content access. Neovim uses CodeDiff for now.
+
+#### Internal callers
+
+Create the shared database and services at startup:
+
+```rust
+let db = Database::connect(database_url).await?;
+let auth = AuthService::new(db.clone());
+let human = auth.ensure_human("Alice", "alice@example.com").await?;
+let agent = auth.ensure_agent("Reviewer", "model-name", "provider-name").await?;
+let review = ReviewService::new(db.clone(), auth);
+```
+
+Call domain services for application workflows. Keep database access behind named repository operations.
+
 
 ### Components and Responsibilities
 
@@ -98,11 +121,6 @@ Context identity uses these serialized variants:
 A local notes location contains `{"kind":"notes","path":"/work/notes"}` instead of branch fields. The backend validates absolute local paths and full branch refs. Forge repository URLs require HTTP(S), a host and a namespace/project path, with no credentials, query or fragment. This validates the address shape, not the existence of a live forge repository.
 
 
-    let db = Database::connect(database_url).await?;
-    let auth = AuthService::new(db.clone());
-    let human = auth.ensure_human("Alice", "alice@example.com").await?;
-    let agent = auth.ensure_agent("Reviewer", "model-name", "provider-name").await?;
-    let review = ReviewService::new(db.clone(), auth);
 
 Internal IDs are uuid::Uuid. External forge IDs remain opaque strings scoped by host/context/object kind. Human and agent records have mutually exclusive required fields, checked in Rust and SQL. Context keys distinguish Local locations from ForgeBacked reviews. Local locations are notes paths or Git-directory/branch pairs. Forge-backed reviews require a parsed HTTP(S) repository_url and positive PR/MR number. Forge origins are derived from the URL; remote operations reject local contexts.
 
@@ -236,14 +254,6 @@ Octocrab performs GitHub REST/GraphQL operations using privately captured local 
 
 Service integration tests cover lifecycle, concurrency, identity normalization, immutable attribution/anchors, dummy-provider failures and remote reconciliation. Public DB-client integration tests compose repositories across notes, local and forge contexts, including successor sessions and multiple actors. Private unit tests are colocated; shared fixtures live in test modules.
 
-## References
-
-- [Database architecture](../db/index.md).
-- [Services](../../../apps/lgtm-backend/src/services).
-- [Domain models](../../../apps/lgtm-backend/src/models).
-- [Integration tests](../../../apps/lgtm-backend/tests).
-- [CLI architecture](../cli/index.md).
-
 ### Editor and CLI API
 
 ```mermaid
@@ -262,8 +272,20 @@ These protobuf services share a router, process and database. Service names orga
 
 `EnsureIdentity` bootstraps human or agent attribution. Mutations use one `x-lgtm-identity` UUID header. This is claimed local attribution, not remote authentication. Wire discriminators are validated into the existing ContextKey, LocalLocation and Anchor enums; incompatible combinations are rejected.
 
-`GetWorkspace` selects ignored-inclusive explicit notes directories or Git `working`, `staged` and `revisions` content without checking out another revision. Explicit symlink roots resolve to physical identities; nested links are skipped, and selected escapes are rejected. Binary and oversized files have explicit status values. Forge-backed contexts fetch PR changed files and base/head contents through GitHub, without requiring or modifying a local checkout.
+`StartReview` accepts a target and comparison. `GetConversation` and mutations accept a review or saved-file scope. Context lookup and write-session selection remain internal. Capability flags identify target, scope, anchor-evidence, and diff support; API version alone is insufficient for older clients.
 
-Non-Git line anchors carry `contentHash` with a `sha256:` prefix on the wire. The existing immutable `reviewed_commit` column stores that content identity, while Git line anchors keep their commit SHA. New comments verify actual content and line bounds. Each new non-Git line note also stores only its selected-line excerpt. After content changes, a unique exact excerpt match returns relocated line coordinates. Ambiguous, deleted or missing text falls back to an outdated file-level anchor; stored original coordinates remain intact. No baseline snapshot subsystem is introduced.
+DiffService supplies descriptors, paged file metadata, and selected content without review persistence. CodeDiff supplies local Git content in Neovim. Explicit symlink roots resolve to physical identities; nested links and selected escapes are rejected. Binary and oversized files have explicit statuses.
 
-Promotion copies selected root notes transactionally into an active target review, preserves authors, retains source notes and records provenance. Repeating a source/target promotion returns its existing draft; changed payloads conflict. Deleting the target retains a tombstone so retries cannot recreate it silently. Markdown exports include promotion source IDs.
+Original anchors retain typed source identities and bounded excerpts. Thread current paths, immutable saved-file source paths, notes current roots, and separate forge observations preserve discussion identity across confirmed moves. Clients derive placements from the displayed source; ReviewService does not rewrite response anchors or serve file bodies. Unknown legacy evidence stays unknown.
+
+Promotion preserves source notes and attribution in one transaction. Markdown exports contain numbered feedback and useful original locations without internal IDs. Export does not mutate review state. The [review contract](reviews.md) defines lifecycle and retry behavior.
+
+PR draft saves persist locally first, then synchronize line/file comments and replies through Octocrab to one pending GitHub review. Session and comment receipts survive daemon/editor restart; no separate submission store is added. The shared forge service serializes refresh and remote mutations so a refresh cannot import a newly accepted draft before its receipt is recorded. A lost response is reconciled against exact account, review and payload evidence. General comments remain local until submission. `SyncDraftComment` explicitly recovers or synchronizes saved drafts without publishing the review. Add/reply RPC responses expose `sync_error` separately from durable local-save success.
+
+## References
+
+- [Database architecture](../db/index.md).
+- [Services](../../../apps/lgtm-backend/src/services).
+- [Domain models](../../../apps/lgtm-backend/src/models).
+- [Integration tests](../../../apps/lgtm-backend/tests).
+- [CLI architecture](../cli/index.md).

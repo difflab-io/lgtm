@@ -13,3 +13,6 @@ pub use workspace::WorkspaceRepository;
 
 pub mod promotions;
 pub use promotions::PromotionRepository;
+
+pub mod mutations;
+pub use mutations::MutationRepository;

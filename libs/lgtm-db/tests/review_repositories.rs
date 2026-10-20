@@ -1,8 +1,8 @@
 //! Integration tests for review repositories.
+mod common;
 mod review_repositories {
     //! Public client usage: multi-repository transactions over notes, local and forge contexts.
     use lgtm_db::{
-        Database,
         models::{comments, identities, review_contexts, sessions, threads},
         types::{ContextKind, IdentityKind, PostingState, SessionState},
     };
@@ -29,6 +29,7 @@ mod review_repositories {
             state: SessionState::Active,
             base_commit: None,
             head_commit: None,
+            comparison_kind: lgtm_db::types::ComparisonKind::Legacy,
             created_at: "2026-10-17T00:00:00Z".into(),
             completed_at: None,
             completed_by_id: None,
@@ -54,7 +55,9 @@ mod review_repositories {
             thread_id: thread.id,
             origin_session_id: Some(session.id),
             author_id: author,
+            owner_id: Some(author),
             body: format!("Comment {position}"),
+            deleted: false,
             position,
             visibility: "draft".into(),
             created_at: "2026-10-17T00:00:00Z".into(),
@@ -73,34 +76,11 @@ mod review_repositories {
         }
     }
 
-    async fn databases() -> Vec<Database> {
-        #[allow(unused_mut)]
-        let mut result = vec![Database::connect("sqlite::memory:").await.unwrap()];
-        #[cfg(feature = "postgres")]
-        {
-            use sea_orm::ConnectionTrait;
-            let url = std::env::var("LGTM_TEST_POSTGRES_URL")
-                .expect("PostgreSQL contracts require an explicit disposable database");
-            let raw = sea_orm::Database::connect(&url).await.unwrap();
-            let schema = format!("workflow_{}", Uuid::new_v4().simple());
-            raw.execute_unprepared(&format!("CREATE SCHEMA {schema}"))
-                .await
-                .unwrap();
-            raw.close().await.unwrap();
-            let scoped = format!(
-                "{url}{}options=-c%20search_path%3D{schema}",
-                if url.contains('?') { '&' } else { '?' }
-            );
-            result.push(Database::connect(&scoped).await.unwrap());
-        }
-        result
-    }
-
     // tests ------------------------------------------------------------------
 
     #[tokio::test]
     async fn should_support_multi_actor_reviews_and_successor_sessions() {
-        for db in databases().await {
+        for db in super::common::databases().await {
             assert!(
                 db.workspace
                     .insert_repository(&lgtm_db::models::repositories::Model {
@@ -132,6 +112,7 @@ mod review_repositories {
                     id: context_id,
                     kind,
                     notes_path: (location == "notes").then(|| format!("/notes/{context_id}")),
+                    current_notes_path: None,
                     git_dir: (location == "branch").then(|| format!("/repos/{context_id}")),
                     branch: (location == "branch").then(|| "refs/heads/main".into()),
                     repository_url: (location == "forge").then(|| key.clone()),
@@ -142,6 +123,7 @@ mod review_repositories {
                     refreshed_base: (location == "forge").then(|| "base".into()),
                     refresh_error: None,
                     refresh_status: if location == "forge" { "live" } else { "never" }.into(),
+                    forge_state: None,
                 };
                 let mut review = session(context_id, first.id);
                 if location != "notes" {
@@ -161,6 +143,24 @@ mod review_repositories {
                     side: None,
                     reviewed_commit: None,
                     selected_text: None,
+                    source_kind: lgtm_db::types::SourceKind::Legacy,
+                    source_blob_oid: None,
+                    source_commit: None,
+                    source_content_hash: None,
+                    context_before: None,
+                    context_after: None,
+                    current_path: None,
+                    source_path: None,
+                    orphan_reason: None,
+                    observed_base: None,
+                    observed_head: None,
+                    observed_outdated: None,
+                    observed_path: None,
+                    observed_side: None,
+                    observed_start: None,
+                    observed_end: None,
+                    observed_commit: None,
+
                     start_line: None,
                     end_line: None,
                     state: "open".into(),

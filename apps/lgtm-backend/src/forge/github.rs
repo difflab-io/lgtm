@@ -173,21 +173,17 @@ impl Github {
                     })
                     .collect::<Result<Vec<_>>>()?;
                 let path = text(node, "path")?;
-                let anchor = if node["subjectType"] == "FILE" {
-                    Anchor::File { path }
-                } else {
-                    let end = node["line"]
-                        .as_i64()
-                        .or_else(|| node["originalLine"].as_i64())
-                        .ok_or_else(|| invalid("Missing GitHub thread line"))?;
-                    let start = node["startLine"]
-                        .as_i64()
-                        .or_else(|| node["originalStartLine"].as_i64())
-                        .unwrap_or(end);
+                let outdated = node["isOutdated"] == true;
+                let original_commit = comments[0]["originalCommit"]["oid"]
+                    .as_str()
+                    .or_else(|| comments[0]["commit"]["oid"].as_str());
+                let current = if node["subjectType"] == "FILE" {
+                    Some(Anchor::File { path: path.clone() })
+                } else if let Some(end) = node["line"].as_i64() {
                     let old = node["diffSide"] == "LEFT";
-                    Anchor::Line {
-                        path,
-                        start,
+                    Some(Anchor::Line {
+                        path: path.clone(),
+                        start: node["startLine"].as_i64().unwrap_or(end),
                         end,
                         side: if old { "old" } else { "new" }.into(),
                         commit: if old {
@@ -195,12 +191,54 @@ impl Github {
                         } else {
                             initial.head.clone()
                         },
+                    })
+                } else {
+                    None
+                };
+                let observation = Some(crate::models::ForgeObservation {
+                    base: initial.base.clone(),
+                    head: initial.head.clone(),
+                    outdated,
+                    current,
+                });
+                let original_path = comments[0]["path"].as_str().unwrap_or(&path).to_owned();
+                let anchor = if node["subjectType"] == "FILE" {
+                    Anchor::File {
+                        path: original_path,
+                    }
+                } else {
+                    let end = node["originalLine"]
+                        .as_i64()
+                        .or_else(|| (!outdated).then(|| node["line"].as_i64()).flatten())
+                        .ok_or_else(|| invalid("Missing GitHub thread line"))?;
+                    let start = node["originalStartLine"]
+                        .as_i64()
+                        .or_else(|| (!outdated).then(|| node["startLine"].as_i64()).flatten())
+                        .unwrap_or(end);
+                    let old = node["diffSide"] == "LEFT";
+                    Anchor::Line {
+                        path: original_path,
+                        start,
+                        end,
+                        side: if old { "old" } else { "new" }.into(),
+                        // This is provider revision evidence, not proof of old-side bytes.
+                        // Current coordinates use the observed comparison above.
+                        commit: original_commit.map(str::to_owned).unwrap_or_else(|| {
+                            if outdated {
+                                "unknown".into()
+                            } else if old {
+                                initial.base.clone()
+                            } else {
+                                initial.head.clone()
+                            }
+                        }),
                     }
                 };
                 anchor.validate()?;
                 threads.push(RemoteThread {
                     id,
                     anchor,
+                    observation,
                     resolved: node["isResolved"] == true,
                     comments: mapped,
                 });
@@ -215,6 +253,9 @@ impl Github {
             (format!("/pulls/{pr}/reviews"), "review"),
         ] {
             for item in self.get_all(&format!("{}{}", repo.route(), suffix)).await? {
+                if kind == "review" && item["state"] == "PENDING" {
+                    continue;
+                }
                 if item["body"].as_str().is_none_or(|v| v.trim().is_empty()) {
                     continue;
                 }
@@ -225,20 +266,60 @@ impl Github {
                 threads.push(RemoteThread {
                     id: format!("{kind}:{}", c.id),
                     anchor: Anchor::General,
+                    observation: None,
                     resolved: false,
                     comments: vec![c],
                 });
             }
         }
-        if self.get_pull_request(repo, pr).await?.head != initial.head {
-            return Err(Error::Conflict("PR head changed during refresh".into()));
+        let latest = self.get_pull_request(repo, pr).await?;
+        if latest.head != initial.head
+            || latest.base != initial.base
+            || latest.state != initial.state
+        {
+            return Err(Error::Conflict(
+                "PR comparison changed during refresh".into(),
+            ));
         }
         Ok(ForgeSnapshot {
             complete: true,
+            state: Some(initial.state),
             head: initial.head,
             base: Some(initial.base),
             threads,
         })
+    }
+
+    /// Resolve the GraphQL node for one scoped review comment, including private drafts.
+    pub async fn get_review_comment_node_id(
+        &self,
+        thread_id: &str,
+        comment_id: &str,
+    ) -> Result<String> {
+        let mut cursor = Value::Null;
+        loop {
+            let response = self
+                .graphql(
+                    json!({"query":COMMENTS_QUERY,"variables":{"id":thread_id,"cursor":cursor}}),
+                )
+                .await?;
+            let connection = &response["node"]["comments"];
+            let nodes = connection["nodes"]
+                .as_array()
+                .ok_or_else(|| invalid("Review thread comments unavailable"))?;
+            for comment in nodes {
+                if opaque(comment, "databaseId")? == comment_id {
+                    return text(comment, "id");
+                }
+            }
+            if connection["pageInfo"]["hasNextPage"] != true {
+                break;
+            }
+            cursor = Value::String(text(&connection["pageInfo"], "endCursor")?);
+        }
+        Err(Error::NotFound(
+            "GitHub review comment in selected thread".into(),
+        ))
     }
 
     pub async fn get_all(&self, route: &str) -> Result<Vec<Value>> {
@@ -381,6 +462,13 @@ pub(crate) fn opaque(v: &Value, key: &str) -> Result<String> {
 fn pull_request(repo: &Repository, v: &Value) -> Result<PullRequest> {
     Ok(PullRequest {
         number: number(v, "number")?,
+        state: if v["merged"] == true || v["merged_at"].is_string() {
+            crate::database::types::ForgeState::Merged
+        } else if v["state"] == "closed" {
+            crate::database::types::ForgeState::Closed
+        } else {
+            crate::database::types::ForgeState::Open
+        },
         title: text(v, "title")?,
         head: text(&v["head"], "sha")?,
         base: text(&v["base"], "sha")?,
@@ -405,6 +493,7 @@ fn remote_author(user: &Value) -> Result<RemoteAuthor> {
 }
 fn remote_comment(v: &Value, kind: &str, reply_to: Option<String>) -> Result<RemoteComment> {
     Ok(RemoteComment {
+        pending: v["pullRequestReview"]["state"] == "PENDING",
         id: opaque(v, "databaseId")?,
         kind: kind.into(),
         review_id: v["pullRequestReview"]["databaseId"]
@@ -418,6 +507,7 @@ fn remote_comment(v: &Value, kind: &str, reply_to: Option<String>) -> Result<Rem
 }
 fn remote_rest_comment(v: &Value, kind: &str) -> Result<RemoteComment> {
     Ok(RemoteComment {
+        pending: v["state"] == "PENDING",
         id: opaque(v, "id")?,
         kind: kind.into(),
         review_id: None,
@@ -431,5 +521,5 @@ fn remote_rest_comment(v: &Value, kind: &str) -> Result<RemoteComment> {
         reply_to: None,
     })
 }
-const THREADS_QUERY: &str = r#"query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$cursor){nodes{id path line startLine originalLine originalStartLine diffSide subjectType isResolved comments(first:100){nodes{databaseId body updatedAt author{login ... on User{databaseId} ... on Bot{databaseId}} pullRequestReview{databaseId}} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}}}}}"#;
-const COMMENTS_QUERY: &str = r#"query($id:ID!,$cursor:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$cursor){nodes{databaseId body updatedAt author{login ... on User{databaseId} ... on Bot{databaseId}} pullRequestReview{databaseId}} pageInfo{hasNextPage endCursor}}}}}"#;
+const THREADS_QUERY: &str = r#"query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$cursor){nodes{id path line startLine originalLine originalStartLine diffSide startDiffSide subjectType isResolved isOutdated comments(first:100){nodes{id databaseId path body updatedAt commit{oid} originalCommit{oid} author{login ... on User{databaseId} ... on Bot{databaseId}} pullRequestReview{databaseId state}} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}}}}}"#;
+const COMMENTS_QUERY: &str = r#"query($id:ID!,$cursor:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$cursor){nodes{id databaseId path body updatedAt commit{oid} originalCommit{oid} author{login ... on User{databaseId} ... on Bot{databaseId}} pullRequestReview{databaseId state}} pageInfo{hasNextPage endCursor}}}}}"#;

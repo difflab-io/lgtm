@@ -1,4 +1,5 @@
 //! Full submission orchestration with real databases and a dummy HTTP forge.
+use lgtm_backend::models::ComparisonKind;
 mod common;
 use common::github_http::{Fixture, Request};
 use lgtm_backend::{
@@ -14,9 +15,16 @@ use std::sync::{Arc, Mutex};
 struct Remote {
     review: Option<Value>,
     comments: Vec<Value>,
+    threads: Vec<Value>,
+    lose_draft_response: bool,
     writes: usize,
+    content_reads: usize,
     lose_response: bool,
     head_changed: bool,
+    base_changed: bool,
+    lifecycle: &'static str,
+    lose_mutation_response: bool,
+    snapshot_unavailable: bool,
     event_failure: Option<u16>,
     missing_comment: bool,
 }
@@ -29,30 +37,126 @@ fn fixture(state: Arc<Mutex<Remote>>) -> Fixture {
                 "/user" => (200, json!({"id":1})),
                 "/repos/acme/repo/pulls/1" => (
                     200,
-                    json!({"number":1,"title":"PR","head":{"sha":if state.head_changed{"changed"}else{"head"}},"base":{"sha":"base"}}),
+                    json!({"number":1,"title":"PR","head":{"sha":if state.head_changed{"changed"}else{"head"}},"base":{"sha":if state.base_changed {"new-base"} else {"base"}},"state":if state.lifecycle == "closed" || state.lifecycle == "merged" {"closed"} else {"open"},"merged":state.lifecycle == "merged"}),
                 ),
                 "/repos/acme/repo/pulls/1/files" => {
                     (200, json!([{"filename":"file.txt","status":"modified"}]))
                 }
-                "/repos/acme/repo/contents/file.txt" => (
-                    200,
-                    json!({"encoding":"base64","size":4,"content":if r.path.contains("ref=head") {"bmV3Cg=="} else {"b2xkCg=="}}),
-                ),
+                "/repos/acme/repo/contents/file.txt" => {
+                    state.content_reads += 1;
+                    (
+                        200,
+                        json!({"encoding":"base64","size":4,"content":if r.path.contains("ref=head") {"bmV3Cg=="} else {"b2xkCg=="}}),
+                    )
+                }
                 "/repos/acme/repo/pulls/1/reviews" => {
                     (200, json!(state.review.iter().collect::<Vec<_>>()))
                 }
                 "/repos/acme/repo/issues/1/comments" => (200, json!(state.comments)),
                 "/repos/acme/repo/pulls/1/comments"
-                | "/repos/acme/repo/pulls/1/reviews/5/comments" => (200, json!([])),
+                | "/repos/acme/repo/pulls/1/reviews/5/comments" => (
+                    200,
+                    json!(
+                        state
+                            .threads
+                            .iter()
+                            .flat_map(|t| t["comments"]["nodes"].as_array().unwrap())
+                            .map(|c| json!({"id":c["databaseId"],"body":c["body"],"user":{"id":1}}))
+                            .collect::<Vec<_>>()
+                    ),
+                ),
                 _ => panic!("Unexpected GET {}", r.path),
             };
         }
         if path == "/graphql" {
-            assert!(r.body["query"].as_str().unwrap().contains("reviewThreads"));
+            let query = r.body["query"].as_str().unwrap();
+            if query.contains("updatePullRequestReviewComment") {
+                state.writes += 1;
+                state.threads[0]["comments"]["nodes"][0]["body"] =
+                    r.body["variables"]["body"].clone();
+                if state.lose_mutation_response {
+                    state.snapshot_unavailable = true;
+                    return (500, json!({"message":"accepted edit response lost"}));
+                }
+                return (
+                    200,
+                    json!({"data":{"updatePullRequestReviewComment":{"pullRequestReviewComment":state.threads[0]["comments"]["nodes"][0]}}}),
+                );
+            }
+            if query.contains("deletePullRequestReviewComment") {
+                state.writes += 1;
+                state.threads.clear();
+                if state.lose_mutation_response {
+                    state.snapshot_unavailable = true;
+                    return (500, json!({"message":"accepted deletion response lost"}));
+                }
+                return (
+                    200,
+                    json!({"data":{"deletePullRequestReviewComment":{"clientMutationId":null}}}),
+                );
+            }
+            if query.contains("resolveReviewThread(") || query.contains("unresolveReviewThread(") {
+                state.writes += 1;
+                state.threads[0]["isResolved"] = json!(!query.contains("unresolveReviewThread("));
+                if state.lose_mutation_response {
+                    state.snapshot_unavailable = true;
+                    return (500, json!({"message":"accepted resolution response lost"}));
+                }
+                return (
+                    200,
+                    json!({"data":{"resolveReviewThread":{"thread":state.threads[0]}}}),
+                );
+            }
+            if query.contains("node(id:") {
+                return (
+                    200,
+                    json!({"data":{"node":{"comments":state.threads[0]["comments"]}}}),
+                );
+            }
+            if query.contains("addPullRequestReviewThread(") {
+                state.writes += 1;
+                let input = &r.body["variables"]["input"];
+                let thread = json!({"id":"T_10","path":input["path"],"subjectType":input["subjectType"],"line":input["line"],"startLine":input["startLine"],"diffSide":input["side"],"isResolved":false,"comments":{"nodes":[{"id":"C_10","databaseId":10,"body":input["body"],"updatedAt":"2026-10-18T00:00:00Z","author":{"databaseId":1,"login":"user"},"pullRequestReview":{"databaseId":5,"state":"PENDING"}}],"pageInfo":{"hasNextPage":false}}});
+                state.threads.push(thread.clone());
+                if state.lose_draft_response {
+                    return (500, json!({"message":"draft response lost"}));
+                }
+                return (
+                    200,
+                    json!({"data":{"addPullRequestReviewThread":{"thread":thread}}}),
+                );
+            }
+            assert!(query.contains("reviewThreads"));
+            if state.snapshot_unavailable {
+                return (
+                    503,
+                    json!({"message":"observation temporarily unavailable"}),
+                );
+            }
             return (
                 200,
-                json!({"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":false}}}}}}),
+                json!({"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":state.threads,"pageInfo":{"hasNextPage":false}}}}}}),
             );
+        }
+        if path == "/repos/acme/repo/pulls/comments/10" {
+            if state
+                .review
+                .as_ref()
+                .is_some_and(|v| v["state"] == "PENDING")
+            {
+                return (
+                    404,
+                    json!({"message":"Private pending comment unavailable through REST"}),
+                );
+            }
+            state.writes += 1;
+            if r.method == "PATCH" {
+                state.threads[0]["comments"]["nodes"][0]["body"] = r.body["body"].clone();
+                return (200, state.threads[0]["comments"]["nodes"][0].clone());
+            }
+            assert_eq!(r.method, "DELETE");
+            state.threads.clear();
+            return (204, Value::Null);
         }
         state.writes += 1;
         match path {
@@ -88,6 +192,10 @@ fn fixture(state: Arc<Mutex<Remote>>) -> Fixture {
                 });
                 review["body"] = r.body["body"].clone();
                 let response = review.clone();
+                for thread in &mut state.threads {
+                    thread["comments"]["nodes"][0]["pullRequestReview"]["state"] =
+                        response["state"].clone();
+                }
                 if state.lose_response {
                     (
                         500,
@@ -141,15 +249,36 @@ async fn should_submit_final_body_and_comments_once_and_reconcile_lost_response(
                         base: Some("base".into()),
                         head: Some("head".into()),
                     },
+                    ComparisonKind::Legacy,
+                    None,
                 )
                 .await
                 .unwrap();
-            let (root, files) = forge.get_workspace(&context.id).await.unwrap();
+            let (_, metadata) = forge.get_workspace(&context.id, "", true).await.unwrap();
+            assert_eq!(metadata.len(), 1);
+            assert_eq!(metadata[0].0.previous_path, "file.txt");
+            assert!(metadata[0].0.content.is_empty());
+            assert!(metadata[0].1.is_empty());
+            assert_eq!(state.lock().unwrap().content_reads, 0);
+            let (_, missing) = forge
+                .get_workspace(&context.id, "other.txt", false)
+                .await
+                .unwrap();
+            assert!(missing.is_empty());
+            assert_eq!(state.lock().unwrap().content_reads, 0);
+            let (root, files) = forge.get_workspace(&context.id, "", false).await.unwrap();
             assert_eq!(root, "https://github.com/acme/repo");
             assert_eq!(files[0].0.content, "new\n");
             assert_eq!(files[0].1, "old\n");
             let comment = reviews
-                .add_comment(&session.id, &actor, "Check assumptions", Anchor::General)
+                .add_comment(
+                    &session.id,
+                    &actor,
+                    "Check assumptions",
+                    Anchor::General,
+                    None,
+                    None,
+                )
                 .await
                 .unwrap();
             let submitted = forge
@@ -258,6 +387,8 @@ async fn should_reject_stale_head_before_freezing_or_writing() {
                     base: Some("base".into()),
                     head: Some("head".into()),
                 },
+                ComparisonKind::Legacy,
+                None,
             )
             .await
             .unwrap();
@@ -310,19 +441,41 @@ async fn should_roll_back_every_staged_comment_when_a_later_payload_changed() {
                     base: Some("base".into()),
                     head: Some("head".into()),
                 },
+                ComparisonKind::Legacy,
+                None,
             )
             .await
             .unwrap();
         let first = reviews
-            .add_comment(&session.id, &actor, "First draft", Anchor::General)
+            .add_comment(
+                &session.id,
+                &actor,
+                "First draft",
+                Anchor::General,
+                None,
+                None,
+            )
             .await
             .unwrap();
         let second = reviews
-            .add_comment(&session.id, &actor, "Second draft", Anchor::General)
+            .add_comment(
+                &session.id,
+                &actor,
+                "Second draft",
+                Anchor::General,
+                None,
+                None,
+            )
             .await
             .unwrap();
         reviews
-            .edit_comment(&session.id, &second.id, &actor, "Changed second draft")
+            .edit_comment(
+                &session.id,
+                &second.id,
+                &actor,
+                "Changed second draft",
+                None,
+            )
             .await
             .unwrap();
         let result = reviews
@@ -339,6 +492,7 @@ async fn should_roll_back_every_staged_comment_when_a_later_payload_changed() {
                     (first.clone(), first.body.clone(), "first-key".into()),
                     (second.clone(), second.body.clone(), "second-key".into()),
                 ],
+                None,
             )
             .await;
         assert!(result.is_err());
@@ -392,11 +546,20 @@ async fn should_finalize_only_verified_pending_review_and_never_replay_missing_c
                         base: Some("base".into()),
                         head: Some("head".into()),
                     },
+                    ComparisonKind::Legacy,
+                    None,
                 )
                 .await
                 .unwrap();
             reviews
-                .add_comment(&session.id, &actor, "Frozen draft", Anchor::General)
+                .add_comment(
+                    &session.id,
+                    &actor,
+                    "Frozen draft",
+                    Anchor::General,
+                    None,
+                    None,
+                )
                 .await
                 .unwrap();
             let failed = forge
@@ -445,6 +608,497 @@ async fn should_finalize_only_verified_pending_review_and_never_replay_missing_c
                 );
                 assert_eq!(state.lock().unwrap().comments.len(), 1);
             }
+        }
+    }
+}
+
+mod pending_drafts {
+    use super::*;
+
+    // tests -------------------------------------------------------------------
+    #[tokio::test]
+    async fn should_sync_edit_refresh_and_submit_the_same_pending_review_after_restart() {
+        for lose_draft_response in [false, true] {
+            for (reviews, _, _temp) in common::databases().await {
+                let state = Arc::new(Mutex::new(Remote {
+                    lose_draft_response,
+                    ..Default::default()
+                }));
+                let fixture = fixture(state.clone());
+                let forge = ForgeService::with_provider(
+                    reviews.clone(),
+                    Github::for_test(&fixture.endpoint).unwrap(),
+                );
+                let actor = reviews
+                    .auth()
+                    .ensure_human("Reviewer", "reviewer@example.test")
+                    .await
+                    .unwrap();
+                let context = reviews
+                    .ensure_context(
+                        ContextKey::ForgeBacked {
+                            repository_url: ForgeRepositoryUrl::parse(
+                                "https://github.com/acme/repo",
+                            )
+                            .unwrap(),
+                            number: 1,
+                        },
+                        None,
+                    )
+                    .await
+                    .unwrap();
+                let context = forge.refresh(&context.id).await.unwrap();
+                let session = reviews
+                    .start_session(
+                        &context,
+                        &actor,
+                        CommitContext {
+                            base: Some("base".into()),
+                            head: Some("head".into()),
+                        },
+                        ComparisonKind::Legacy,
+                        None,
+                    )
+                    .await
+                    .unwrap();
+                let comment = reviews
+                    .add_comment(
+                        &session.id,
+                        &actor,
+                        "Draft feedback",
+                        Anchor::Line {
+                            path: "file.txt".into(),
+                            start: 2,
+                            end: 2,
+                            side: "new".into(),
+                            commit: "head".into(),
+                        },
+                        None,
+                        None,
+                    )
+                    .await
+                    .unwrap();
+                let result = forge.sync_draft(&session.id, &comment.id, &actor).await;
+                assert_eq!(result.is_err(), lose_draft_response);
+                assert_eq!(
+                    state.lock().unwrap().review.as_ref().unwrap()["state"],
+                    "PENDING"
+                );
+                assert_eq!(state.lock().unwrap().writes, 2);
+                // A fresh service has no in-memory receipt or lock; recover only from durable/provider evidence.
+                let forge = ForgeService::with_provider(
+                    reviews.clone(),
+                    Github::for_test(&fixture.endpoint).unwrap(),
+                );
+                let draft = forge
+                    .sync_draft(&session.id, &comment.id, &actor)
+                    .await
+                    .unwrap();
+                assert_eq!(draft.visibility, "draft");
+                assert_eq!(draft.forge_comment_id.as_deref(), Some("10"));
+                assert_eq!(
+                    state.lock().unwrap().writes,
+                    2,
+                    "recovery must not duplicate a pending review or draft"
+                );
+                forge
+                    .edit_comment(&session.id, &comment.id, &actor, "Edited draft feedback")
+                    .await
+                    .unwrap();
+                forge.refresh(&context.id).await.unwrap();
+                let conversation = reviews.get_conversation(&context.id, true).await.unwrap();
+                assert_eq!(
+                    conversation.comments.len(),
+                    1,
+                    "refresh must not import the pending review marker or duplicate the local comment"
+                );
+                assert_eq!(conversation.comments[0].body, "Edited draft feedback");
+                assert_eq!(conversation.comments[0].visibility, "draft");
+                let outcome = if lose_draft_response {
+                    "request_changes"
+                } else {
+                    "comment"
+                };
+                let submitted = forge
+                    .submit(
+                        &session.id,
+                        &actor,
+                        outcome,
+                        "Final body",
+                        "submit-key",
+                        "head",
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(submitted.forge_review_id.as_deref(), Some("5"));
+                assert_eq!(submitted.submission_status, "confirmed");
+                assert_eq!(
+                    submitted.completion().unwrap().outcome,
+                    if lose_draft_response {
+                        "reject"
+                    } else {
+                        "comment"
+                    }
+                );
+                assert_eq!(
+                    state.lock().unwrap().writes,
+                    4,
+                    "create review + draft + edit + submit; no repost"
+                );
+                assert_eq!(
+                    state.lock().unwrap().review.as_ref().unwrap()["body"],
+                    format!("Final body\n\n<!-- lgtm-review:{} -->", session.id)
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn should_keep_original_anchors_and_refresh_current_provider_locations_independently() {
+    for (reviews, _, _temp) in common::databases().await {
+        let original = "a".repeat(40);
+        let state = Arc::new(Mutex::new(Remote::default()));
+        state.lock().unwrap().threads.push(json!({
+            "id":"T_observed","path":"file.txt","subjectType":"LINE","diffSide":"RIGHT",
+            "line":8,"startLine":7,"originalLine":3,"originalStartLine":2,"isOutdated":false,"isResolved":false,
+            "comments":{"nodes":[{"id":"C_observed","databaseId":77,"body":"Keep this feedback","updatedAt":"2026-10-19T00:00:00Z","author":{"databaseId":1,"login":"user"},"originalCommit":{"oid":original},"commit":{"oid":"head"},"pullRequestReview":{"databaseId":5,"state":"COMMENTED"}}],"pageInfo":{"hasNextPage":false}}
+        }));
+        let server = fixture(state.clone());
+        let forge = ForgeService::with_provider(
+            reviews.clone(),
+            Github::for_test(&server.endpoint).unwrap(),
+        );
+        let context = reviews
+            .ensure_context(
+                ContextKey::ForgeBacked {
+                    repository_url: ForgeRepositoryUrl::parse("https://github.com/acme/repo")
+                        .unwrap(),
+                    number: 1,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        forge.refresh(&context.id).await.unwrap();
+        let first = reviews.get_conversation(&context.id, true).await.unwrap();
+        let thread = &first.threads[0];
+        assert_eq!(
+            thread.anchor,
+            Anchor::Line {
+                path: "file.txt".into(),
+                start: 2,
+                end: 3,
+                side: "new".into(),
+                commit: original.clone()
+            }
+        );
+        assert_eq!(
+            thread.forge_observation.as_ref().unwrap().current,
+            Some(Anchor::Line {
+                path: "file.txt".into(),
+                start: 7,
+                end: 8,
+                side: "new".into(),
+                commit: "head".into()
+            })
+        );
+        assert!(!thread.outdated);
+        {
+            let mut remote = state.lock().unwrap();
+            remote.threads[0]["isOutdated"] = json!(true);
+            remote.threads[0]["isResolved"] = json!(true);
+            remote.threads[0]["line"] = Value::Null;
+            remote.threads[0]["startLine"] = Value::Null;
+        }
+        forge.refresh(&context.id).await.unwrap();
+        let refreshed = reviews.get_conversation(&context.id, true).await.unwrap();
+        let current = &refreshed.threads[0];
+        assert_eq!(current.id, thread.id);
+        assert_eq!(current.anchor, thread.anchor);
+        assert_eq!(current.state, "resolved");
+        assert!(current.outdated);
+        assert!(
+            current
+                .forge_observation
+                .as_ref()
+                .unwrap()
+                .current
+                .is_none(),
+            "original lines must not become current coordinates"
+        );
+        assert_eq!(refreshed.comments[0].id, first.comments[0].id);
+    }
+}
+
+#[tokio::test]
+async fn should_reject_changed_base_and_closed_or_merged_publication_without_losing_drafts() {
+    for (reviews, _, _temp) in common::databases().await {
+        let state = Arc::new(Mutex::new(Remote::default()));
+        let server = fixture(state.clone());
+        let forge = ForgeService::with_provider(
+            reviews.clone(),
+            Github::for_test(&server.endpoint).unwrap(),
+        );
+        let actor = reviews
+            .auth()
+            .ensure_human("Reviewer", "reviewer@example.test")
+            .await
+            .unwrap();
+        let context = reviews
+            .ensure_context(
+                ContextKey::ForgeBacked {
+                    repository_url: ForgeRepositoryUrl::parse("https://github.com/acme/repo")
+                        .unwrap(),
+                    number: 1,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        let context = forge.refresh(&context.id).await.unwrap();
+        let session = reviews
+            .start_session(
+                &context,
+                &actor,
+                CommitContext {
+                    base: Some("base".into()),
+                    head: Some("head".into()),
+                },
+                ComparisonKind::PullRequest,
+                None,
+            )
+            .await
+            .unwrap();
+        let saved = reviews
+            .add_comment(
+                &session.id,
+                &actor,
+                "Saved draft",
+                Anchor::File {
+                    path: "file.txt".into(),
+                },
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        for (base_changed, lifecycle) in [(true, "open"), (false, "closed"), (false, "merged")] {
+            {
+                let mut remote = state.lock().unwrap();
+                remote.base_changed = base_changed;
+                remote.lifecycle = lifecycle;
+            }
+            let writes = state.lock().unwrap().writes;
+            assert!(
+                forge
+                    .sync_draft(&session.id, &saved.id, &actor)
+                    .await
+                    .is_err()
+            );
+            assert!(
+                forge
+                    .submit(
+                        &session.id,
+                        &actor,
+                        "comment",
+                        "Final feedback",
+                        lifecycle,
+                        "head"
+                    )
+                    .await
+                    .is_err()
+            );
+            assert_eq!(state.lock().unwrap().writes, writes);
+            assert_eq!(
+                reviews
+                    .get_comment(&context.id, &saved.id)
+                    .await
+                    .unwrap()
+                    .body,
+                "Saved draft"
+            );
+            assert_eq!(
+                reviews.get_session(&session.id).await.unwrap().state(),
+                "active"
+            );
+        }
+        {
+            let mut remote = state.lock().unwrap();
+            remote.base_changed = false;
+            remote.lifecycle = "open";
+        }
+        forge.refresh(&context.id).await.unwrap();
+        assert_eq!(
+            forge
+                .sync_draft(&session.id, &saved.id, &actor)
+                .await
+                .unwrap()
+                .posting
+                .state()
+                .as_str(),
+            "confirmed"
+        );
+    }
+}
+
+#[tokio::test]
+async fn should_recover_remote_edits_resolution_and_deletion_after_response_loss_without_replaying_writes()
+ {
+    use lgtm_backend::models::{ForgeChangeInput, ForgeChangeObject, MutationGuard};
+    for (reviews, url, _temp) in common::databases().await {
+        let state = Arc::new(Mutex::new(Remote::default()));
+        let server = fixture(state.clone());
+        let forge = ForgeService::with_provider(
+            reviews.clone(),
+            Github::for_test(&server.endpoint).unwrap(),
+        );
+        let actor = reviews
+            .auth()
+            .ensure_human("Reviewer", "reviewer@example.test")
+            .await
+            .unwrap();
+        let context = reviews
+            .ensure_context(
+                ContextKey::ForgeBacked {
+                    repository_url: ForgeRepositoryUrl::parse("https://github.com/acme/repo")
+                        .unwrap(),
+                    number: 1,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        let context = forge.refresh(&context.id).await.unwrap();
+        let session = reviews
+            .start_session(
+                &context,
+                &actor,
+                CommitContext {
+                    base: Some("base".into()),
+                    head: Some("head".into()),
+                },
+                ComparisonKind::PullRequest,
+                None,
+            )
+            .await
+            .unwrap();
+        let draft = reviews
+            .add_comment(
+                &session.id,
+                &actor,
+                "Original draft",
+                Anchor::File {
+                    path: "file.txt".into(),
+                },
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        forge
+            .sync_draft(&session.id, &draft.id, &actor)
+            .await
+            .unwrap();
+        for (key, input) in [
+            (
+                "edit",
+                ForgeChangeInput::Edit {
+                    comment_id: draft.id,
+                    body: "Accepted edit".into(),
+                },
+            ),
+            (
+                "resolve",
+                ForgeChangeInput::Resolve {
+                    thread_id: draft.thread_id,
+                    resolved: true,
+                },
+            ),
+            (
+                "delete",
+                ForgeChangeInput::Delete {
+                    comment_id: draft.id,
+                },
+            ),
+        ] {
+            let current = reviews.get_context_by_id(&context.id).await.unwrap();
+            let guard = MutationGuard::new(Some(current.revision), key.into());
+            state.lock().unwrap().lose_mutation_response = true;
+            assert!(
+                forge
+                    .change(&session.id, &actor, input.clone(), Some(&guard))
+                    .await
+                    .is_err()
+            );
+            let writes = state.lock().unwrap().writes;
+            assert!(
+                reviews
+                    .database()
+                    .mutations
+                    .get_pending(&context.id, Some(&input.object().1))
+                    .await
+                    .unwrap()
+            );
+            assert!(
+                forge
+                    .submit(
+                        &session.id,
+                        &actor,
+                        "comment",
+                        "Final body",
+                        "while-pending",
+                        "head"
+                    )
+                    .await
+                    .is_err()
+            );
+            assert_eq!(state.lock().unwrap().writes, writes);
+            {
+                let mut remote = state.lock().unwrap();
+                remote.lose_mutation_response = false;
+                remote.snapshot_unavailable = false;
+            }
+            // A fresh service instance recovers only the original saved action.
+            let reopened = common::service(&url).await.unwrap();
+            let restarted = ForgeService::with_provider(
+                reopened.clone(),
+                Github::for_test(&server.endpoint).unwrap(),
+            );
+            let result = restarted
+                .change(&session.id, &actor, input.clone(), Some(&guard))
+                .await
+                .unwrap();
+            match (key, result) {
+                ("edit", ForgeChangeObject::Comment(comment)) => {
+                    assert_eq!(comment.body, "Accepted edit")
+                }
+                ("resolve", ForgeChangeObject::Thread(thread)) => {
+                    assert_eq!(thread.state, "resolved")
+                }
+                ("delete", ForgeChangeObject::Comment(comment)) => {
+                    assert_eq!(comment.remote_presence, "missing")
+                }
+                _ => panic!("unexpected remote result"),
+            }
+            assert!(
+                !reviews
+                    .database()
+                    .mutations
+                    .get_pending(&context.id, Some(&input.object().1))
+                    .await
+                    .unwrap()
+            );
+            restarted
+                .change(&session.id, &actor, input, Some(&guard))
+                .await
+                .unwrap();
+            assert_eq!(
+                state.lock().unwrap().writes,
+                writes,
+                "response loss and accepted retries must never repeat the mutation"
+            );
+            reopened.database().close().await;
         }
     }
 }

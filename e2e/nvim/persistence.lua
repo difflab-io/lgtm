@@ -13,23 +13,23 @@ local function should_support_persistence(H)
 	end, "notes after editor restart")
 	assert(table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n"):find("Edited standalone note", 1, true))
 	H.keys("q")
-	local sessions = H.rpc("ListSessions", { completed = true })
+	local sessions = H.rpc("ListReviews", { state = "completed" })
 	local found
-	for _, entry in ipairs(sessions.entries or {}) do
-		if entry.context.key.path and entry.context.key.path:find("specific%-plan") then
+	for _, entry in ipairs(sessions.reviews or {}) do
+		if entry.target.directory and entry.target.directory.path:find("specific%-plan") then
 			found = entry
 		end
 	end
 	assert(found, "completed local session remains selectable")
-	local conversation = H.rpc("GetConversation", { contextId = found.context.id, includeDrafts = true })
+	local conversation = H.rpc("GetConversation", { scope = { reviewId = found.id }, includeDrafts = true })
 	assert(#conversation.comments == 3)
-	local export = H.rpc("Export", { sessionId = found.session.id })
+	local export = H.rpc("Export", { scope = { reviewId = found.id } })
 	assert(export.markdown:find("Directory line review", 1, true))
 	assert(export.markdown:find("Directory file review", 1, true))
 	assert(export.markdown:find("Directory general review", 1, true))
 	H.choice = function(items)
 		for _, entry in ipairs(items) do
-			if entry.context.key.path and entry.context.key.path:find("specific%-plan") then
+			if entry.target.directory and entry.target.directory.path:find("specific%-plan") then
 				return entry
 			end
 		end
@@ -51,22 +51,22 @@ local function should_support_persistence(H)
 	H.manual_picker = false
 	H.wait(function()
 		local state = require("lgtm.context").current
-		return state and state.session.id == found.session.id and state.panes
+		return state and state.review.id == found.id and state.panes
 	end, "completed local-session picker")
-	vim.cmd("Lgtm close")
-	local before = H.rpc("ListSessions", { completed = true })
+	local before = H.rpc("ListReviews", { state = "completed" })
 	vim.cmd("tabnew")
 	vim.cmd.edit(vim.fn.fnameescape(vim.env.LGTM_E2E_WORKSPACE .. "/.difflab/specific-plan/PLAN.md"))
 	H.choice = "Preview"
-	vim.cmd("Lgtm export notes")
+	vim.cmd("Lgtm export review")
 	H.wait(function()
 		return table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n"):find("Directory line review", 1, true)
-	end, "export completed notes without successor")
-	local after = H.rpc("ListSessions", { completed = true })
-	assert(#before.entries == #after.entries, "notes export never creates a successor")
-	assert(H.rpc("GetSession", { sessionId = found.session.id }).session.state == "completed")
+	end, "export completed review without successor")
+	local after = H.rpc("ListReviews", { state = "completed" })
+	assert(#before.reviews == #after.reviews, "notes export never creates a successor")
+	assert(H.rpc("GetReview", { reviewId = found.id }).review.state == "completed")
 	vim.cmd("close")
 	vim.cmd("tabclose")
+	vim.cmd("Lgtm close")
 end
 
 return should_support_persistence

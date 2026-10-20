@@ -17,8 +17,12 @@ pub struct Model {
     pub origin_session_id: Option<uuid::Uuid>,
     /// UUID of the logical human or agent author, independent of the posting account.
     pub author_id: uuid::Uuid,
+    /// Actor allowed to change this locally created draft; independent of source attribution.
+    pub owner_id: Option<uuid::Uuid>,
     /// User-authored comment text, or optional session completion summary.
     pub body: String,
+    /// Explicit LGTM deletion, distinct from an object missing in a provider observation.
+    pub deleted: bool,
     /// Stable zero-based reply order within a thread; zero is the root comment.
     pub position: i64,
     /// Draft until session completion; published records belong to the context conversation.

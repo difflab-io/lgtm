@@ -10,12 +10,17 @@ pub struct Context {
     pub id: uuid::Uuid,
     pub key: ContextKey,
     pub paths: Vec<String>,
+    #[serde(default)]
+    /// Confirmed current notes file or directory. The original context key remains unchanged.
+    pub current_notes_path: Option<String>,
     pub revision: i64,
     pub last_refreshed_at: Option<String>,
     pub refreshed_head: Option<String>,
     #[serde(default)]
     pub refreshed_base: Option<String>,
     pub refresh_status: String,
+    #[serde(default)]
+    pub forge_state: Option<crate::database::types::ForgeState>,
     pub refresh_error: Option<String>,
 }
 
@@ -45,11 +50,13 @@ impl Context {
             id: row.id,
             key,
             paths,
+            current_notes_path: row.current_notes_path,
             revision: row.revision,
             last_refreshed_at: row.last_refreshed_at,
             refreshed_head: row.refreshed_head,
             refreshed_base: row.refreshed_base,
             refresh_status: row.refresh_status,
+            forge_state: row.forge_state,
             refresh_error: row.refresh_error,
         })
     }
@@ -89,6 +96,7 @@ impl From<&Context> for review_contexts::Model {
                 ContextKind::Local
             },
             notes_path,
+            current_notes_path: c.current_notes_path.clone(),
             git_dir,
             branch,
             repository_url,
@@ -98,6 +106,7 @@ impl From<&Context> for review_contexts::Model {
             refreshed_head: c.refreshed_head.clone(),
             refreshed_base: c.refreshed_base.clone(),
             refresh_status: c.refresh_status.clone(),
+            forge_state: c.forge_state,
             refresh_error: c.refresh_error.clone(),
         }
     }

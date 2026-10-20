@@ -4,16 +4,9 @@ function M.setup()
   local groups = {
     { prefix, group = "LGTM review" },
     {
-      prefix .. "c",
-      function()
-        require("lgtm.review").branch("revisions")
-      end,
-      desc = "Review commits",
-    },
-    {
       prefix .. "b",
       function()
-        require("lgtm.review").branch("revisions", "main")
+        require("lgtm.review").branch("branch")
       end,
       desc = "Review branch",
     },
@@ -46,7 +39,7 @@ function M.setup()
       desc = "Pull requests",
     },
     {
-      prefix .. "s",
+      prefix .. "S",
       function()
         require("lgtm.sessions").select()
       end,
@@ -66,7 +59,7 @@ function M.setup()
       mode = { "n", "x" },
     },
     {
-      prefix .. "C",
+      prefix .. "c",
       function()
         require("lgtm.review").comment("line")
       end,
@@ -123,11 +116,18 @@ function M.setup()
       desc = "Export review",
     },
     {
-      prefix .. "S",
+      prefix .. "s",
       function()
         require("lgtm.review").submit()
       end,
       desc = "Submit review",
+    },
+    {
+      prefix .. "y",
+      function()
+        require("lgtm.review").sync()
+      end,
+      desc = "Sync GitHub drafts",
     },
     {
       prefix .. "q",

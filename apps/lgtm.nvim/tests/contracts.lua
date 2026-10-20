@@ -20,17 +20,53 @@ local function should_validate_plugin_contracts()
   local transport = require("lgtm.transport.connect")
   require("lgtm.config").setup({ endpoint_url = "http://127.0.0.1:1/rpc/" })
   assert(transport.endpoint() == "http://127.0.0.1:1/rpc")
+  local content = "a\nb\nc\nd\ne\n"
+  local source =
+    { commit = { sha = string.rep("a", 40), contentHash = "sha256:" .. vim.fn.sha256(content) } }
+  local evidence = { selectedText = "b\nc\nd", contextBefore = "a", contextAfter = "e" }
   local states = {
+    views = {
+      old = {
+        path = "a",
+        logical_path = "a",
+        side = "old",
+        content = content,
+        source = require("lgtm.anchors").source_from_wire(source),
+      },
+      new = {
+        path = "a",
+        logical_path = "a",
+        side = "new",
+        content = content,
+        source = require("lgtm.anchors").source_from_wire(source),
+      },
+    },
     conversation = {
       comments = { { threadId = "old" }, { threadId = "new" } },
       threads = {
         {
           id = "old",
-          anchor = { kind = "line", path = "a", side = "old", start = "2", ["end"] = "4" },
+          anchor = {
+            kind = "line",
+            path = "a",
+            side = "old",
+            start = "2",
+            ["end"] = "4",
+            source = source,
+            evidence = evidence,
+          },
         },
         {
           id = "new",
-          anchor = { kind = "line", path = "a", side = "new", start = "2", ["end"] = "4" },
+          anchor = {
+            kind = "line",
+            path = "a",
+            side = "new",
+            start = "2",
+            ["end"] = "4",
+            source = source,
+            evidence = evidence,
+          },
         },
       },
     },
@@ -51,8 +87,79 @@ local function should_validate_plugin_contracts()
   vim.health = original_health
   assert(table.concat(health_errors, "\n"):find("Missing dependency which-key", 1, true))
   assert(table.concat(health_errors, "\n"):find("Backend unavailable", 1, true))
+  local rpc = require("lgtm.rpc")
+  local old_call, old_identity, old_caps = transport.call, rpc.identity, rpc.capabilities
+  local old_config = require("lgtm.config").options.identity
+  require("lgtm.config").options.identity = { name = "Reviewer", email = "reviewer@example.test" }
+  local identity_calls, result = 0, nil
+  transport.call = function(_, method, _, _, done)
+    if method == "GetCapabilities" then
+      done(nil, { apiVersion = "1", capabilities = { "notes" } })
+    else
+      identity_calls = identity_calls + 1
+    end
+  end
+  rpc.bootstrap(function(err)
+    result = err
+  end)
+  assert(result and result.message:find("update the LGTM CLI/backend", 1, true))
+  assert(
+    identity_calls == 0 and not rpc.identity,
+    "an old v1 backend is rejected before identity setup"
+  )
+  transport.call = function(_, method, _, _, done)
+    if method == "GetCapabilities" then
+      done(nil, { apiVersion = "1", capabilities = rpc.required_capabilities })
+    else
+      identity_calls = identity_calls + 1
+      done(nil, { actor = { id = "supported-backend-actor" } })
+    end
+  end
+  rpc.bootstrap(function(err)
+    result = err
+  end)
+  assert(
+    not result and identity_calls == 1 and rpc.identity == "supported-backend-actor",
+    "a failed compatibility check does not leave bootstrap stuck"
+  )
+  transport.call, rpc.identity, rpc.capabilities = old_call, old_identity, old_caps
+  require("lgtm.config").options.identity = old_config
+  local contexts = require("lgtm.context")
+  local previous_state, previous_rpc = contexts.current, rpc.call
+  local notifications = require("lgtm.notifications")
+  local previous_error, message = notifications.error, nil
+  notifications.error = function(value)
+    message = value
+  end
+  local legacy = {
+    id = "legacy",
+    version = "0",
+    state = "completed",
+    target = { localGit = { path = "/missing/legacy", branch = "refs/heads/old" } },
+  }
+  rpc.call = function(method, _, done)
+    if method == "GetReview" then
+      done(nil, { review = legacy })
+    elseif method == "GetConversation" then
+      done(nil, { version = "0", comments = {}, threads = {} })
+    else
+      error("Unknown legacy evidence must not invoke content operations: " .. method)
+    end
+  end
+  local state = contexts.apply({}, legacy)
+  require("lgtm.review").open(state)
+  assert(
+    state.conversation and not state.panes,
+    "unknown legacy comparisons keep discussion access without guessing content"
+  )
+  assert(message:find("no recorded comparison", 1, true))
+  notifications.error = previous_error
+  rpc.call = previous_rpc
+  contexts.set(previous_state)
   print("Plugin contract checks passed")
 end
 
 should_validate_plugin_contracts()
+assert(loadfile(root .. "/tests/anchors.lua"))()(root)
+assert(loadfile(root .. "/tests/sources.lua"))()(root)
 vim.cmd("qa!")

@@ -9,6 +9,17 @@ use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 use std::{path::PathBuf, process::Command};
 
+/// Optional guards for replaying the same reviewed mutation from a shell.
+#[derive(Args, Default)]
+pub struct MutationArgs {
+    /// Version returned by the conversation or selected object.
+    #[arg(long)]
+    expected_version: Option<String>,
+    /// Reuse only with the exact original payload and expected version.
+    #[arg(long, requires = "expected_version")]
+    request_key: Option<String>,
+}
+
 #[derive(Args)]
 pub struct ReviewArgs {
     #[command(flatten)]
@@ -27,46 +38,49 @@ pub struct SessionArgs {
 }
 #[derive(Subcommand)]
 pub enum SessionCommand {
-    /// start or resume the context's one active review.
+    /// Start or resume the matching review comparison.
     Start {
         #[command(flatten)]
         context: ContextArgs,
         #[command(flatten)]
         actor: ActorArgs,
     },
-    /// show active/latest review metadata, or a historical session.
+    /// Show the active/latest review, or an explicit historical review.
     Show {
         #[command(flatten)]
         context: ContextArgs,
-        #[arg(long)]
+        #[arg(long, visible_alias = "review")]
         session: Option<String>,
     },
-    /// publish drafts locally and complete the review (no forge write).
+    /// Publish local drafts and complete the review without a forge write.
     Complete {
         #[command(flatten)]
         context: ContextArgs,
         #[command(flatten)]
         actor: ActorArgs,
         #[arg(long)]
-        outcome: Option<String>,
-        #[arg(long)]
         body: Option<String>,
         #[arg(long)]
         request_key: Option<String>,
     },
-    /// export current conversation text with selected review metadata.
+    /// Export concise Markdown feedback without changing review state.
     Export {
         #[command(flatten)]
         context: ContextArgs,
-        #[arg(long)]
+        #[arg(long, visible_alias = "review")]
         session: Option<String>,
         #[arg(long)]
         output: Option<PathBuf>,
     },
-    /// Refresh PR state through the backend RPC.
+    /// Refresh review data or record a confirmed saved-file/directory move.
     Refresh {
         #[command(flatten)]
         context: ContextArgs,
+        /// Original absolute path after moving --notes to its current location.
+        #[arg(long, requires = "notes")]
+        moved_from: Option<PathBuf>,
+        #[command(flatten)]
+        mutation: MutationArgs,
     },
     /// Reconcile a frozen submission, completing only a verified pending review.
     Reconcile {
@@ -74,7 +88,7 @@ pub enum SessionCommand {
         context: ContextArgs,
         #[command(flatten)]
         actor: ActorArgs,
-        #[arg(long)]
+        #[arg(long, visible_alias = "review")]
         session: Option<String>,
     },
     /// Submit through the backend RPC.
@@ -116,6 +130,14 @@ pub struct CommentsArgs {
 }
 #[derive(Subcommand)]
 pub enum CommentsCommand {
+    /// Synchronize or recover a locally saved PR draft without publishing its review.
+    Sync {
+        comment: String,
+        #[command(flatten)]
+        context: ContextArgs,
+        #[command(flatten)]
+        actor: ActorArgs,
+    },
     List {
         #[command(flatten)]
         context: ContextArgs,
@@ -135,6 +157,8 @@ pub enum CommentsCommand {
         end_line: Option<i64>,
         #[arg(long,requires="line",value_parser=["old","new"])]
         side: Option<String>,
+        #[command(flatten)]
+        guard: MutationArgs,
     },
     Reply {
         thread: String,
@@ -144,6 +168,8 @@ pub enum CommentsCommand {
         actor: ActorArgs,
         #[arg(long)]
         body: String,
+        #[command(flatten)]
+        guard: MutationArgs,
     },
     Resolve {
         thread: String,
@@ -151,6 +177,8 @@ pub enum CommentsCommand {
         context: ContextArgs,
         #[command(flatten)]
         actor: ActorArgs,
+        #[command(flatten)]
+        guard: MutationArgs,
     },
     Edit {
         comment: String,
@@ -160,6 +188,8 @@ pub enum CommentsCommand {
         actor: ActorArgs,
         #[arg(long)]
         body: String,
+        #[command(flatten)]
+        guard: MutationArgs,
     },
     Delete {
         comment: String,
@@ -167,6 +197,8 @@ pub enum CommentsCommand {
         context: ContextArgs,
         #[command(flatten)]
         actor: ActorArgs,
+        #[command(flatten)]
+        guard: MutationArgs,
     },
     Promote {
         #[command(flatten)]
@@ -191,59 +223,46 @@ pub enum CommentsCommand {
         context: ContextArgs,
         #[command(flatten)]
         actor: ActorArgs,
+        #[command(flatten)]
+        guard: MutationArgs,
     },
 }
 
-/// Open a review context through the API without launching a browser in machine mode.
+/// Machine mode starts a review through the same public contract used by editor clients.
 pub async fn review(args: ReviewArgs, store: &Store, json_output: bool) -> Result<()> {
     if !json_output {
-        let path = args
-            .context
-            .notes
-            .as_ref()
-            .or(args.context.path.as_ref())
-            .cloned()
-            .unwrap_or(std::env::current_dir()?)
-            .canonicalize()?;
+        let path = location(&args.context)?;
         return crate::ui::open_review(&path, None, None, args.port, !args.no_open, store).await;
     }
     let client = client_for_actor(store, &args.actor).await?;
-    let context = ensure_context(&client, &args.context).await?;
-    let session = start(&client, &context, &args.context).await?;
-    print_result(&session, json_output)
+    print_result(&start(&client, &args.context).await?, true)
 }
 
 pub async fn session(args: SessionArgs, store: &Store, json_output: bool) -> Result<()> {
     match args.command {
         SessionCommand::Start { context, actor } => {
             let client = client_for_actor(store, &actor).await?;
-            let value = ensure_context(&client, &context).await?;
-            print_result(&start(&client, &value, &context).await?, json_output)
+            print_result(&start(&client, &context).await?, json_output)
         }
         SessionCommand::Show { context, session } => {
             let client = Client::new(store)?;
-            let id = match session {
-                Some(id) => id,
-                None => selected_session(&client, &get_context(&client, &context).await?).await?,
+            let review = match session {
+                Some(id) => {
+                    client.call("GetReview", json!({"reviewId":id})).await?["review"].clone()
+                }
+                None => get_review(&client, &context).await?,
             };
-            print_result(
-                &client.call("GetSession", json!({"sessionId":id})).await?,
-                json_output,
-            )
+            print_result(&json!({"review":review}), json_output)
         }
         SessionCommand::Complete {
             context,
             actor,
-            outcome,
             body,
             request_key,
         } => {
             let client = client_for_actor(store, &actor).await?;
-            let value = ensure_context(&client, &context).await?;
-            print_result(&client.call("CompleteSession", json!({
-                "contextId": value["id"], "outcome":outcome.unwrap_or_default(),
-                "body":body.unwrap_or_default(), "requestKey":request_key.unwrap_or_else(||uuid::Uuid::new_v4().to_string())
-            })).await?, json_output)
+            let review = get_review(&client, &context).await?;
+            print_result(&client.call("CompleteReview", json!({"reviewId":review["id"], "expectedVersion":review["version"],"body":body.unwrap_or_default(),"requestKey":key(request_key)})).await?,json_output)
         }
         SessionCommand::Export {
             context,
@@ -251,11 +270,11 @@ pub async fn session(args: SessionArgs, store: &Store, json_output: bool) -> Res
             output,
         } => {
             let client = Client::new(store)?;
-            let id = match session {
-                Some(id) => id,
-                None => selected_session(&client, &get_context(&client, &context).await?).await?,
+            let scope = match session {
+                Some(id) => json!({"reviewId":id}),
+                None => get_scope(&client, &context, None, false).await?,
             };
-            let result = client.call("Export", json!({"sessionId":id})).await?;
+            let result = client.call("Export", json!({"scope":scope})).await?;
             let text = result["markdown"]
                 .as_str()
                 .context("Backend returned no export content")?;
@@ -265,11 +284,47 @@ pub async fn session(args: SessionArgs, store: &Store, json_output: bool) -> Res
                     print_result(&json!({"output":path,"markdown":text}), true)?;
                 }
             } else if json_output {
-                return print_result(&result, true);
+                print_result(&result, true)?;
             } else {
                 print!("{text}");
             }
             Ok(())
+        }
+        SessionCommand::Refresh {
+            context,
+            moved_from,
+            mutation,
+        } => {
+            let client = client_for_actor(store, &ActorArgs::default()).await?;
+            let (scope, changes) = if let Some(previous) = moved_from {
+                let current = location(&context)?;
+                if !current.exists() {
+                    bail!("The current notes location must exist");
+                }
+                let previous = if previous.is_absolute() {
+                    previous
+                } else {
+                    std::env::current_dir()?.join(previous)
+                };
+                let scope = if current.is_dir() {
+                    let mut prior = context.clone();
+                    prior.notes = Some(previous.clone());
+                    json!({"reviewId":get_review(&client, &prior).await?["id"]})
+                } else {
+                    json!({"notes":{"path":previous}})
+                };
+                (
+                    scope,
+                    json!([{"locationMoved":{"previousPath":previous,"currentPath":current}}]),
+                )
+            } else {
+                (get_scope(&client, &context, None, false).await?, json!([]))
+            };
+            let version = match mutation.expected_version {
+                Some(version) => json!(version),
+                None => get_conversation(&client, &scope).await?["version"].clone(),
+            };
+            print_result(&client.call("RefreshReview",json!({"scope":scope,"sourceChanges":changes,"expectedVersion":version,"requestKey":key(mutation.request_key)})).await?,json_output)
         }
         SessionCommand::Reconcile {
             context,
@@ -277,23 +332,13 @@ pub async fn session(args: SessionArgs, store: &Store, json_output: bool) -> Res
             session,
         } => {
             let client = client_for_actor(store, &actor).await?;
-            let session_id = match session {
-                Some(id) => id,
-                None => selected_session(&client, &get_context(&client, &context).await?).await?,
+            let id = match session {
+                Some(id) => json!(id),
+                None => get_review(&client, &context).await?["id"].clone(),
             };
             print_result(
                 &client
-                    .call("ReconcileSubmission", json!({"sessionId":session_id}))
-                    .await?,
-                json_output,
-            )
-        }
-        SessionCommand::Refresh { context } => {
-            let client = Client::new(store)?;
-            let value = ensure_context(&client, &context).await?;
-            print_result(
-                &client
-                    .call("RefreshContext", json!({"contextId":value["id"]}))
+                    .call("ReconcileSubmission", json!({"reviewId":id}))
                     .await?,
                 json_output,
             )
@@ -306,9 +351,12 @@ pub async fn session(args: SessionArgs, store: &Store, json_output: bool) -> Res
             request_key,
         } => {
             let client = client_for_actor(store, &actor).await?;
-            let value = ensure_context(&client, &context).await?;
-            let id = selected_session(&client, &value).await?;
-            print_result(&client.call("SubmitReview",json!({"sessionId":id,"outcome":outcome.unwrap_or_else(||"comment".into()),"body":body.unwrap_or_default(),"requestKey":request_key.unwrap_or_else(||uuid::Uuid::new_v4().to_string()),"expectedHead":value["refreshedHead"].as_str().unwrap_or("")})).await?,json_output)
+            let review = get_review(&client, &context).await?;
+            let comparison = &review["comparison"]["pullRequest"];
+            if comparison.is_null() {
+                bail!("Local reviews cannot be submitted to GitHub; use session complete");
+            }
+            print_result(&client.call("SubmitReview",json!({"reviewId":review["id"],"outcome":outcome.unwrap_or_else(||"comment".into()),"body":body.unwrap_or_default(),"requestKey":key(request_key),"expectedHead":comparison["headCommit"],"expectedBase":comparison["baseCommit"],"expectedVersion":review["version"]})).await?,json_output)
         }
     }
 }
@@ -317,42 +365,41 @@ pub async fn sessions(args: SessionsArgs, store: &Store, json_output: bool) -> R
     let SessionsCommand::List {
         path,
         repo,
-        all: _,
+        all,
         completed,
     } = args.command;
     let client = Client::new(store)?;
-    let path = path
-        .map(|p| p.canonicalize())
-        .transpose()?
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let result = client
-        .call("ListSessions", json!({"path":path,"completed":completed}))
-        .await?;
-    if let Some(repository) = repo {
-        let mut filtered = result.clone();
-        if let Some(entries) = filtered["entries"].as_array_mut() {
-            entries.retain(|entry| {
-                entry["context"]["key"]["repositoryUrl"].as_str() == Some(&repository)
-            });
-        }
-        print_result(&filtered, json_output)
-    } else {
-        print_result(&result, json_output)
+    let mut reviews = get_reviews(
+        &client,
+        None,
+        if all {
+            None
+        } else if completed {
+            Some("completed")
+        } else {
+            Some("active")
+        },
+    )
+    .await?;
+    if let Some(path) = path {
+        let path = path.canonicalize()?.to_string_lossy().into_owned();
+        reviews.retain(|review| {
+            review["target"]["localGit"]["path"] == path
+                || review["target"]["directory"]["path"] == path
+        });
     }
+    if let Some(repository) = repo {
+        reviews.retain(|review| review["target"]["pullRequest"]["repositoryUrl"] == repository);
+    }
+    print_result(&json!({"reviews":reviews}), json_output)
 }
 
 pub async fn comments(args: CommentsArgs, store: &Store, json_output: bool) -> Result<()> {
     let result = match args.command {
         CommentsCommand::List { context } => {
             let client = Client::new(store)?;
-            let value = get_context(&client, &context).await?;
-            client
-                .call(
-                    "GetConversation",
-                    json!({"contextId":value["id"],"includeDrafts":true}),
-                )
-                .await?
+            let scope = get_scope(&client, &context, None, false).await?;
+            get_conversation(&client, &scope).await?
         }
         CommentsCommand::Add {
             context,
@@ -362,40 +409,33 @@ pub async fn comments(args: CommentsArgs, store: &Store, json_output: bool) -> R
             line,
             end_line,
             side,
+            guard,
         } => {
             let client = client_for_actor(store, &actor).await?;
-            let value = ensure_context(&client, &context).await?;
-            let session = start(&client, &value, &context).await?;
-            let mut anchor = json!({"kind":"general"});
-            if let Some(file) = file {
-                anchor = json!({"kind":"file","path":file});
-                if let Some(line) = line {
-                    let side = side.unwrap_or_else(|| "new".into());
-                    let commit = session["session"][if side == "old" { "base" } else { "head" }]
-                        .as_str()
-                        .unwrap_or("");
-                    let mut hash = String::new();
-                    if commit.is_empty() {
-                        let workspace = client
-                            .call(
-                                "GetWorkspace",
-                                json!({"contextId":value["id"],"includeIgnored":true}),
-                            )
-                            .await?;
-                        hash = workspace["files"]
-                            .as_array()
-                            .and_then(|files| files.iter().find(|f| f["path"] == file))
-                            .and_then(|f| f["contentHash"].as_str())
-                            .context("Cannot anchor a line in an unreadable file")?
-                            .into();
-                    }
-                    anchor = json!({"kind":"line","path":file,"start":line.to_string(),"end":end_line.unwrap_or(line).to_string(),"side":side,"commit":commit,"contentHash":hash});
-                }
-            }
+            let scope = get_scope(&client, &context, file.as_deref(), true).await?;
+            let conversation = get_conversation(&client, &scope).await?;
+            let anchor = capture_anchor(
+                &client,
+                &scope,
+                file.as_deref(),
+                line,
+                end_line,
+                side.as_deref(),
+            )
+            .await?;
+            client.call("AddComment",json!({"scope":scope,"expectedVersion":guard.expected_version.map(Value::String).unwrap_or_else(||conversation["version"].clone()),"requestKey":key(guard.request_key),"body":body,"anchor":anchor})).await?
+        }
+        CommentsCommand::Sync {
+            comment,
+            context,
+            actor,
+        } => {
+            let client = client_for_actor(store, &actor).await?;
+            let review = get_review(&client, &context).await?;
             client
                 .call(
-                    "AddComment",
-                    json!({"sessionId":session["session"]["id"],"body":body,"anchor":anchor}),
+                    "SyncDraftComment",
+                    json!({"reviewId":review["id"],"commentId":comment}),
                 )
                 .await?
         }
@@ -404,64 +444,52 @@ pub async fn comments(args: CommentsArgs, store: &Store, json_output: bool) -> R
             context,
             actor,
             body,
+            guard,
         } => {
-            let (client, id) = active(store, &context, &actor).await?;
-            client
-                .call(
-                    "Reply",
-                    json!({"sessionId":id,"threadId":thread,"body":body}),
-                )
-                .await?
+            let (client, scope, version) =
+                object_guard(store, &context, &actor, &guard, "threads", &thread).await?;
+            client.call("Reply",json!({"scope":scope,"expectedVersion":version,"requestKey":key(guard.request_key),"threadId":thread,"body":body})).await?
         }
         CommentsCommand::Resolve {
             thread,
             context,
             actor,
+            guard,
         } => {
-            let (client, id) = active(store, &context, &actor).await?;
-            client
-                .call(
-                    "ResolveThread",
-                    json!({"sessionId":id,"threadId":thread,"resolved":true}),
-                )
-                .await?
+            let (client, scope, version) =
+                object_guard(store, &context, &actor, &guard, "threads", &thread).await?;
+            client.call("ResolveThread",json!({"scope":scope,"expectedVersion":version,"requestKey":key(guard.request_key),"threadId":thread,"resolved":true})).await?
         }
         CommentsCommand::Reopen {
             thread,
             context,
             actor,
+            guard,
         } => {
-            let (client, id) = active(store, &context, &actor).await?;
-            client
-                .call(
-                    "ResolveThread",
-                    json!({"sessionId":id,"threadId":thread,"resolved":false}),
-                )
-                .await?
+            let (client, scope, version) =
+                object_guard(store, &context, &actor, &guard, "threads", &thread).await?;
+            client.call("ResolveThread",json!({"scope":scope,"expectedVersion":version,"requestKey":key(guard.request_key),"threadId":thread,"resolved":false})).await?
         }
         CommentsCommand::Edit {
             comment,
             context,
             actor,
             body,
+            guard,
         } => {
-            let (client, id) = active(store, &context, &actor).await?;
-            client
-                .call(
-                    "EditComment",
-                    json!({"sessionId":id,"commentId":comment,"body":body}),
-                )
-                .await?
+            let (client, scope, version) =
+                object_guard(store, &context, &actor, &guard, "comments", &comment).await?;
+            client.call("EditComment",json!({"scope":scope,"expectedVersion":version,"requestKey":key(guard.request_key),"commentId":comment,"body":body})).await?
         }
         CommentsCommand::Delete {
             comment,
             context,
             actor,
+            guard,
         } => {
-            let (client, id) = active(store, &context, &actor).await?;
-            client
-                .call("DeleteComment", json!({"sessionId":id,"commentId":comment}))
-                .await?
+            let (client, scope, version) =
+                object_guard(store, &context, &actor, &guard, "comments", &comment).await?;
+            client.call("DeleteComment",json!({"scope":scope,"expectedVersion":version,"requestKey":key(guard.request_key),"commentId":comment})).await?
         }
         CommentsCommand::Promote {
             context,
@@ -472,35 +500,426 @@ pub async fn comments(args: CommentsArgs, store: &Store, json_output: bool) -> R
             file,
             general,
         } => {
-            let anchor = match (file, general) {
-                (Some(path), false) => json!({"kind":"file","path":path}),
-                (None, true) => json!({"kind":"general"}),
-                _ => bail!("Promotion requires explicit --file PATH or --general target mapping"),
-            };
-            let anchors: Vec<_> = comment.iter().map(|_| anchor.clone()).collect();
+            if file.is_none() && !general {
+                bail!("Promotion requires explicit --file PATH or --general target mapping");
+            }
             let client = client_for_actor(store, &actor).await?;
-            let value = ensure_context(&client, &context).await?;
-            client.call("PromoteNotes",json!({"sourceContextId":value["id"],"targetSessionId":target_session,"commentIds":comment,"anchors":anchors,"requestKey":request_key.unwrap_or_else(||uuid::Uuid::new_v4().to_string())})).await?
+            let mut source = get_scope(&client, &context, None, false).await?;
+            if !source["reviewId"].is_null() {
+                let review = client
+                    .call("GetReview", json!({"reviewId":source["reviewId"]}))
+                    .await?;
+                let path = review["review"]["target"]["directory"]["path"]
+                    .as_str()
+                    .context("Promotion source must be local notes")?;
+                source = json!({"notes":{"path":path}});
+            }
+            let source_conversation = get_conversation(&client, &source).await?;
+            let target_scope = json!({"reviewId":target_session});
+            let target_conversation = get_conversation(&client, &target_scope).await?;
+            let anchor =
+                capture_anchor(&client, &target_scope, file.as_deref(), None, None, None).await?;
+            let anchors: Vec<_> = comment.iter().map(|_| anchor.clone()).collect();
+            client.call("PromoteNotes",json!({"source":source,"targetReviewId":target_session,"expectedSourceVersion":source_conversation["version"],"expectedReviewVersion":target_conversation["version"],"commentIds":comment,"anchors":anchors,"requestKey":key(request_key)})).await?
         }
     };
     print_result(&result, json_output)
 }
 
-async fn active(
+async fn object_guard(
     store: &Store,
-    context: &ContextArgs,
+    args: &ContextArgs,
     actor: &ActorArgs,
-) -> Result<(Client, String)> {
+    guard: &MutationArgs,
+    collection: &str,
+    id: &str,
+) -> Result<(Client, Value, Value)> {
     let client = client_for_actor(store, actor).await?;
-    let value = ensure_context(&client, context).await?;
-    let session = start(&client, &value, context).await?;
-    Ok((
-        client,
-        session["session"]["id"]
-            .as_str()
-            .context("Missing session ID")?
-            .into(),
-    ))
+    let scope = get_scope(&client, args, None, false).await?;
+    if let Some(version) = &guard.expected_version {
+        return Ok((client, scope, json!(version)));
+    }
+    let conversation = get_conversation(&client, &scope).await?;
+    let version = conversation[collection]
+        .as_array()
+        .and_then(|objects| objects.iter().find(|object| object["id"] == id))
+        .context("Object is outside the selected scope")?["version"]
+        .clone();
+    Ok((client, scope, version))
+}
+
+fn location(args: &ContextArgs) -> Result<PathBuf> {
+    let supplied = args
+        .notes
+        .as_ref()
+        .or(args.path.as_ref())
+        .cloned()
+        .unwrap_or(std::env::current_dir()?);
+    let path = if supplied.is_absolute() {
+        supplied
+    } else {
+        std::env::current_dir()?.join(supplied)
+    };
+    Ok(path.canonicalize().unwrap_or(path))
+}
+
+fn target_input(args: &ContextArgs) -> Result<Value> {
+    if args.base.is_some() && args.mode != Some(crate::context::ReviewMode::Branch) {
+        bail!("--base is only valid with --mode branch");
+    }
+    if let Some(pr) = &args.pr {
+        let (repository, number) =
+            if let Some((repository, number)) = pr.trim_end_matches('/').rsplit_once("/pull/") {
+                (repository.to_owned(), number.parse::<i64>()?)
+            } else {
+                let repository = args
+                    .repo
+                    .clone()
+                    .or_else(|| {
+                        git_value(
+                            &["remote", "get-url", "origin"],
+                            Some(&location(args).ok()?),
+                        )
+                    })
+                    .context("--pr NUMBER requires --repo URL or a GitHub origin")?;
+                (repository, pr.parse::<i64>()?)
+            };
+        return Ok(
+            json!({"pullRequest":{"repositoryUrl":repository_url(&repository,&args.host)?,"number":number.to_string()}}),
+        );
+    }
+    let path = location(args)?;
+    if args.notes.is_some() {
+        return Ok(json!({"directory":{"path":path}}));
+    }
+    if let Some(root) = git_value(&["rev-parse", "--show-toplevel"], Some(&path)) {
+        let branch = args
+            .branch
+            .clone()
+            .or_else(|| git_value(&["symbolic-ref", "HEAD"], Some(&path)))
+            .context("Check out a branch for local Git review")?;
+        let branch = if branch.starts_with("refs/heads/") {
+            branch
+        } else {
+            format!("refs/heads/{branch}")
+        };
+        Ok(json!({"localGit":{"path":root,"branch":branch}}))
+    } else if args.branch.is_some() {
+        bail!("Branch review requires a Git repository")
+    } else {
+        Ok(json!({"directory":{"path":path}}))
+    }
+}
+
+fn repository_url(input: &str, host: &str) -> Result<String> {
+    let path = input.trim().trim_end_matches('/').trim_end_matches(".git");
+    if path.starts_with("https://") {
+        return Ok(path.into());
+    }
+    let prefix = format!("git@{host}:");
+    let ssh = format!("ssh://git@{host}/");
+    let repository = path
+        .strip_prefix(&prefix)
+        .or_else(|| path.strip_prefix(&ssh))
+        .unwrap_or(path);
+    if repository.split('/').count() != 2 {
+        bail!("Use a complete repository URL or owner/repository");
+    }
+    Ok(format!("https://{host}/{repository}"))
+}
+
+async fn start(client: &Client, args: &ContextArgs) -> Result<Value> {
+    let target = target_input(args)?;
+    if target["directory"].is_object() && !location(args)?.is_dir() {
+        bail!("File notes need no review; use comments add --notes FILE");
+    }
+    let comparison = if target["localGit"].is_object() {
+        let root = std::path::Path::new(
+            target["localGit"]["path"]
+                .as_str()
+                .context("Missing local repository")?,
+        );
+        let head = git_value(&["rev-parse", "HEAD"], Some(root))
+            .context("Repository has no HEAD commit")?;
+        match args.mode.unwrap_or(crate::context::ReviewMode::Working) {
+            crate::context::ReviewMode::Working => json!({"working":{"baseCommit":head}}),
+            crate::context::ReviewMode::Staged => json!({"staged":{"baseCommit":head}}),
+            crate::context::ReviewMode::Branch => {
+                let base = git_value(
+                    &["merge-base", args.base.as_deref().unwrap_or("main"), "HEAD"],
+                    Some(root),
+                )
+                .context("Cannot find a common ancestor with the selected base")?;
+                json!({"branch":{"baseCommit":base,"headCommit":head}})
+            }
+        }
+    } else {
+        Value::Null
+    };
+    let mut input = json!({"target":target,"requestKey":key(None),"resumePolicy":"RESUME_POLICY_MATCHING_ONLY"});
+    if !comparison.is_null() {
+        input["comparison"] = comparison;
+    }
+    if target["pullRequest"].is_object()
+        && let Some(root) = git_value(&["rev-parse", "--show-toplevel"], Some(&location(args)?))
+    {
+        input["localGitPath"] = json!(root);
+    }
+    client.call("StartReview", input).await
+}
+
+async fn get_reviews(
+    client: &Client,
+    target: Option<&Value>,
+    state: Option<&str>,
+) -> Result<Vec<Value>> {
+    let mut reviews = Vec::new();
+    let mut token = String::new();
+    loop {
+        let mut input = json!({"pageToken":token,"pageSize":200});
+        if let Some(target) = target {
+            input["target"] = target.clone();
+        }
+        if let Some(state) = state {
+            input["state"] = json!(state);
+        }
+        let page = client.call("ListReviews", input).await?;
+        reviews.extend(page["reviews"].as_array().into_iter().flatten().cloned());
+        token = page["nextPageToken"].as_str().unwrap_or("").into();
+        if token.is_empty() {
+            break;
+        }
+    }
+    Ok(reviews)
+}
+
+async fn get_review(client: &Client, args: &ContextArgs) -> Result<Value> {
+    let target = target_input(args)?;
+    get_reviews(client, Some(&target), None)
+        .await?
+        .into_iter()
+        .max_by_key(|review| {
+            (
+                review["state"] == "active",
+                review["createdAt"].as_str().unwrap_or("").to_owned(),
+            )
+        })
+        .context("No saved review for this target; run lgtm session start first")
+}
+
+async fn get_scope(
+    client: &Client,
+    args: &ContextArgs,
+    file: Option<&str>,
+    write: bool,
+) -> Result<Value> {
+    if args.notes.is_some() {
+        let path = location(args)?;
+        if !path.is_dir() {
+            return Ok(json!({"notes":{"path":path}}));
+        }
+        let target = target_input(args)?;
+        if let Some(review) = get_reviews(client, Some(&target), None)
+            .await?
+            .into_iter()
+            .max_by_key(|review| {
+                (
+                    review["state"] == "active",
+                    review["createdAt"].as_str().unwrap_or("").to_owned(),
+                )
+            })
+        {
+            return Ok(json!({"reviewId":review["id"]}));
+        }
+        if let Some(file) = file {
+            return Ok(json!({"notes":{"path":path.join(file)}}));
+        }
+        bail!("Use --notes FILE for ordinary notes, or start a directory review first");
+    }
+    match get_review(client, args).await {
+        Ok(review) => Ok(json!({"reviewId":review["id"]})),
+        Err(error) if !write => Err(error),
+        Err(_) => Ok(json!({"reviewId":start(client,args).await?["review"]["id"]})),
+    }
+}
+
+async fn get_conversation(client: &Client, scope: &Value) -> Result<Value> {
+    let mut result = json!({"threads":[],"comments":[]});
+    let mut token = String::new();
+    loop {
+        let page = client
+            .call(
+                "GetConversation",
+                json!({"scope":scope,"includeDrafts":true,"pageToken":token,"pageSize":500}),
+            )
+            .await?;
+        if !result["version"].is_null() && result["version"] != page["version"] {
+            bail!("Conversation changed while loading; try again");
+        }
+        result["version"] = page["version"].clone();
+        for thread in page["threads"].as_array().into_iter().flatten() {
+            if !result["threads"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|existing| existing["id"] == thread["id"])
+            {
+                result["threads"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(thread.clone());
+            }
+        }
+        result["comments"]
+            .as_array_mut()
+            .unwrap()
+            .extend(page["comments"].as_array().into_iter().flatten().cloned());
+        token = page["nextPageToken"].as_str().unwrap_or("").into();
+        if token.is_empty() {
+            break;
+        }
+    }
+    Ok(result)
+}
+
+async fn capture_anchor(
+    client: &Client,
+    scope: &Value,
+    file: Option<&str>,
+    first: Option<i64>,
+    last: Option<i64>,
+    side: Option<&str>,
+) -> Result<Value> {
+    use crate::backend::{
+        database::types::SourceKind,
+        models::{AnchorEvidence, AnchorSource},
+        services::workspace,
+    };
+    let Some(file) = file else {
+        return Ok(json!({"kind":"general"}));
+    };
+    let side = side.unwrap_or("new");
+    let mut path = file.to_owned();
+    let (source, bytes) = if let Some(notes) = scope["notes"]["path"].as_str() {
+        let selected = std::path::Path::new(notes);
+        let root = selected.parent().context("Notes file has no parent")?;
+        path = selected
+            .file_name()
+            .context("Notes file has no name")?
+            .to_string_lossy()
+            .into_owned();
+        workspace::get_source(root, &path, SourceKind::LocalFile, None)?
+    } else {
+        let review = client
+            .call("GetReview", json!({"reviewId":scope["reviewId"]}))
+            .await?["review"]
+            .clone();
+        let target = &review["target"];
+        if let Some(root) = target["directory"]["path"].as_str() {
+            workspace::get_source(
+                std::path::Path::new(root),
+                &path,
+                SourceKind::LocalFile,
+                None,
+            )?
+        } else if let Some(root) = target["localGit"]["path"].as_str() {
+            let comparison = &review["comparison"];
+            let (kind, commit) = if side == "old" {
+                (
+                    SourceKind::Commit,
+                    comparison
+                        .as_object()
+                        .and_then(|c| c.values().next())
+                        .and_then(|c| c["baseCommit"].as_str()),
+                )
+            } else if comparison["staged"].is_object() {
+                (SourceKind::IndexFile, None)
+            } else if comparison["working"].is_object() {
+                (SourceKind::WorkingFile, None)
+            } else {
+                (
+                    SourceKind::Commit,
+                    comparison["branch"]["headCommit"].as_str(),
+                )
+            };
+            let mut selected =
+                workspace::get_source(std::path::Path::new(root), &path, kind, commit)?;
+            if kind == SourceKind::WorkingFile
+                && let Ok(indexed) = workspace::get_source(
+                    std::path::Path::new(root),
+                    &path,
+                    SourceKind::IndexFile,
+                    None,
+                )
+                && selected.1 == indexed.1
+            {
+                selected = indexed;
+            }
+            selected
+        } else {
+            let diff = client
+                .call(
+                    "GetDiff",
+                    json!({"target":target,"comparison":review["comparison"]}),
+                )
+                .await?["diff"]
+                .clone();
+            let selected = client
+                .call("GetFile", json!({"diff":diff,"path":path}))
+                .await?;
+            let value = &selected[if side == "old" { "oldSide" } else { "newSide" }];
+            path = value["path"]
+                .as_str()
+                .context("File does not exist on the selected side")?
+                .into();
+            let wire = &value["source"]["commit"];
+            (
+                AnchorSource::Commit {
+                    sha: wire["sha"]
+                        .as_str()
+                        .context("Missing selected commit")?
+                        .into(),
+                    content_hash: wire["contentHash"]
+                        .as_str()
+                        .context("Missing selected content hash")?
+                        .into(),
+                },
+                value["content"].as_str().unwrap_or("").as_bytes().to_vec(),
+            )
+        }
+    };
+    let evidence = match first {
+        Some(first) => {
+            AnchorEvidence::capture(source.clone(), &bytes, first, last.unwrap_or(first))?
+        }
+        None => AnchorEvidence::capture_file(source.clone(), &bytes)?,
+    };
+    let source = match source {
+        AnchorSource::Commit { sha, content_hash } => {
+            json!({"commit":{"sha":sha,"contentHash":content_hash}})
+        }
+        AnchorSource::IndexFile {
+            blob_oid,
+            content_hash,
+        } => json!({"indexFile":{"blobOid":blob_oid,"contentHash":content_hash}}),
+        AnchorSource::WorkingFile { content_hash } => {
+            json!({"workingFile":{"contentHash":content_hash}})
+        }
+        AnchorSource::LocalFile { content_hash } => {
+            json!({"localFile":{"contentHash":content_hash}})
+        }
+    };
+    let mut anchor = json!({"kind":if first.is_some(){"line"}else{"file"},"path":path,"source":source,"evidence":{"selectedText":evidence.selected_text,"contextBefore":evidence.context_before,"contextAfter":evidence.context_after}});
+    if let Some(first) = first {
+        anchor["start"] = json!(first.to_string());
+        anchor["end"] = json!(last.unwrap_or(first).to_string());
+        anchor["side"] = json!(side);
+    }
+    Ok(anchor)
+}
+
+fn key(supplied: Option<String>) -> String {
+    supplied.unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
 }
 
 async fn client_for_actor(store: &Store, actor: &ActorArgs) -> Result<Client> {
@@ -526,129 +945,6 @@ async fn client_for_actor(store: &Store, actor: &ActorArgs) -> Result<Client> {
             .context("Missing identity ID")?
             .into(),
     ))
-}
-
-fn context_input(args: &ContextArgs) -> Result<Value> {
-    let path = args
-        .notes
-        .as_ref()
-        .or(args.path.as_ref())
-        .cloned()
-        .unwrap_or(std::env::current_dir()?)
-        .canonicalize()?;
-    let key = if let Some(pr) = &args.pr {
-        let (repository, number) =
-            if let Some((repo, n)) = pr.trim_end_matches('/').rsplit_once("/pull/") {
-                (repo.to_owned(), n.parse::<i64>()?)
-            } else {
-                (
-                    args.repo
-                        .clone()
-                        .context("--pr NUMBER requires --repo URL")?,
-                    pr.parse::<i64>()?,
-                )
-            };
-        json!({"kind":"forge_backed","repositoryUrl":repository,"number":number.to_string()})
-    } else if args.notes.is_some() {
-        json!({"kind":"notes","path":path})
-    } else {
-        let git_dir = git_value(
-            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-            Some(&path),
-        );
-        match git_dir {
-            Some(git_dir) => {
-                let branch = args
-                    .branch
-                    .clone()
-                    .or_else(|| git_value(&["symbolic-ref", "HEAD"], Some(&path)))
-                    .context("Detached HEAD requires explicit --branch or --notes")?;
-                let branch = if branch.starts_with("refs/heads/") {
-                    branch
-                } else {
-                    format!("refs/heads/{branch}")
-                };
-                json!({"kind":"branch","gitDir":git_dir,"branch":branch})
-            }
-            None if args.branch.is_none() => json!({"kind":"notes","path":path}),
-            None => bail!("Branch review requires a Git repository"),
-        }
-    };
-    Ok(json!({"key":key,"workspacePath":path}))
-}
-
-async fn ensure_context(client: &Client, args: &ContextArgs) -> Result<Value> {
-    let value = client.call("EnsureContext", context_input(args)?).await?;
-    Ok(value["context"].clone())
-}
-
-async fn get_context(client: &Client, args: &ContextArgs) -> Result<Value> {
-    let input = context_input(args)?;
-    let key = &input["key"];
-    let listed = client
-        .call("ListSessions", json!({"completed":true}))
-        .await?;
-    let entries = listed["entries"]
-        .as_array()
-        .context("No review session exists for this context")?;
-    let entry = entries
-        .iter()
-        .rev()
-        .find(|entry| {
-            let existing = &entry["context"]["key"];
-            if existing["kind"] != key["kind"] {
-                return false;
-            }
-            let fields: &[&str] = match key["kind"].as_str() {
-                Some("notes") => &["path"],
-                Some("branch") => &["gitDir", "branch"],
-                Some("forge_backed") => &["repositoryUrl", "number"],
-                _ => return false,
-            };
-            fields.iter().all(|field| existing[*field] == key[*field])
-        })
-        .context("No review session exists for this context; run lgtm session start first")?;
-    Ok(entry["context"].clone())
-}
-
-async fn start(client: &Client, context: &Value, args: &ContextArgs) -> Result<Value> {
-    let path = args.path.as_deref().unwrap_or(std::path::Path::new("."));
-    let head = if context["key"]["kind"] == "branch" {
-        git_value(
-            &["rev-parse", args.branch.as_deref().unwrap_or("HEAD")],
-            Some(path),
-        )
-        .unwrap_or_default()
-    } else {
-        context["refreshedHead"].as_str().unwrap_or("").into()
-    };
-    client.call("StartSession",json!({"contextId":context["id"],"base":context["refreshedBase"].as_str().unwrap_or(""),"head":head})).await
-}
-
-async fn selected_session(client: &Client, context: &Value) -> Result<String> {
-    let value = client
-        .call(
-            "ListSessions",
-            json!({"path":context["paths"][0].as_str().unwrap_or(""),"completed":true}),
-        )
-        .await?;
-    let entries = value["entries"].as_array().context("No sessions")?;
-    let entry = entries
-        .iter()
-        .filter(|v| v["context"]["id"] == context["id"])
-        .rev()
-        .find(|v| v["session"]["state"] == "active")
-        .or_else(|| {
-            entries
-                .iter()
-                .rev()
-                .find(|v| v["context"]["id"] == context["id"])
-        })
-        .context("No session exists; run lgtm session start first")?;
-    Ok(entry["session"]["id"]
-        .as_str()
-        .context("Missing session ID")?
-        .into())
 }
 
 fn git_value(args: &[&str], path: Option<&std::path::Path>) -> Option<String> {

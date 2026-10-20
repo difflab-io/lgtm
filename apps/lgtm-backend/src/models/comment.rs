@@ -11,7 +11,12 @@ pub struct Comment {
     pub thread_id: uuid::Uuid,
     pub origin_session_id: Option<uuid::Uuid>,
     pub author: Actor,
+    /// Draft ownership is distinct from preserved source attribution.
+    #[serde(default)]
+    pub owner_id: Option<uuid::Uuid>,
     pub body: String,
+    #[serde(default)]
+    pub deleted: bool,
     pub position: i64,
     pub visibility: String,
     pub created_at: String,
@@ -36,6 +41,7 @@ impl Comment {
             thread_id: v.thread_id,
             origin_session_id: v.origin_session_id,
             body: v.body,
+            deleted: v.deleted,
             position: v.position,
             visibility: v.visibility,
             created_at: v.created_at,
@@ -50,8 +56,16 @@ impl Comment {
             posting_request_key: v.posting_request_key,
             payload_hash: v.payload_hash,
             remote_presence: v.remote_presence,
+            owner_id: v.owner_id,
             author,
         })
+    }
+
+    /// Copy feedback to a new review while retaining its source author.
+    pub fn promoted(source: &Self, target: &Session, thread: &Thread, owner: &Actor) -> Self {
+        let mut comment = Self::local(target, thread, &source.author, &source.body, 0);
+        comment.owner_id = Some(owner.id);
+        comment
     }
 
     pub fn validate_body(body: &str) -> Result<()> {
@@ -70,7 +84,9 @@ impl Comment {
             thread_id: t.id,
             origin_session_id: Some(s.id),
             author: actor.clone(),
+            owner_id: Some(actor.id),
             body: body.into(),
+            deleted: false,
             position,
             visibility: "draft".into(),
             created_at: now(),
@@ -97,7 +113,9 @@ impl From<&Comment> for comments::Model {
             thread_id: v.thread_id,
             origin_session_id: v.origin_session_id,
             author_id: v.author.id,
+            owner_id: v.owner_id,
             body: v.body.clone(),
+            deleted: v.deleted,
             position: v.position,
             visibility: v.visibility.clone(),
             created_at: v.created_at.clone(),

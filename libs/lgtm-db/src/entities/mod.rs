@@ -1,6 +1,7 @@
 pub mod comments;
 pub mod common;
 pub mod identities;
+pub mod mutation_receipts;
 pub mod note_promotions;
 pub mod repositories;
 pub mod review_contexts;
@@ -44,6 +45,7 @@ mod tests {
                     id: fixture_id("context"),
                     kind: crate::entities::common::ContextKind::Local,
                     notes_path: Some("/notes".into()),
+                    current_notes_path: None,
                     git_dir: None,
                     branch: None,
                     repository_url: None,
@@ -54,6 +56,7 @@ mod tests {
                     refreshed_base: None,
                     refresh_error: None,
                     refresh_status: "never".into(),
+                    forge_state: None,
                 })
                 .await
                 .unwrap();
@@ -67,6 +70,24 @@ mod tests {
                 side: None,
                 reviewed_commit: None,
                 selected_text: None,
+                source_kind: crate::types::SourceKind::Legacy,
+                source_blob_oid: None,
+                source_commit: None,
+                source_content_hash: None,
+                context_before: None,
+                context_after: None,
+                current_path: None,
+                source_path: None,
+                orphan_reason: None,
+                observed_base: None,
+                observed_head: None,
+                observed_outdated: None,
+                observed_path: None,
+                observed_side: None,
+                observed_start: None,
+                observed_end: None,
+                observed_commit: None,
+
                 start_line: None,
                 end_line: None,
                 state: "resolved".into(),

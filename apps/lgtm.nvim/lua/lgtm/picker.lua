@@ -20,7 +20,7 @@ function M.searchable(title, entries, format, callback)
     vim.bo[buf].bufhidden = "wipe"
     vim.bo[buf].filetype = "lgtmpicker"
   end
-  state.list_win = api.nvim_open_win(state.list_buf, false, {
+  state.list_win = require("lgtm.ui").open(state.list_buf, false, {
     relative = "editor",
     row = row + 3,
     col = col,
@@ -29,7 +29,7 @@ function M.searchable(title, entries, format, callback)
     border = "rounded",
     footer = " Enter select · Esc cancel · Up/Down navigate ",
   })
-  state.win = api.nvim_open_win(state.buf, true, {
+  state.win = require("lgtm.ui").open(state.buf, true, {
     relative = "editor",
     row = row,
     col = col,
@@ -38,6 +38,27 @@ function M.searchable(title, entries, format, callback)
     border = "rounded",
     title = " Search " .. title .. " ",
   })
+  for _, win in ipairs({ state.win, state.list_win }) do
+    vim.wo[win].number = false
+    vim.wo[win].relativenumber = false
+    vim.wo[win].signcolumn = "no"
+    vim.wo[win].foldcolumn = "0"
+    vim.wo[win].wrap = false
+  end
+  local selection_ns = api.nvim_create_namespace("lgtm.picker.selection")
+  vim.wo[state.list_win].cursorline = true
+  local function highlight()
+    api.nvim_buf_clear_namespace(state.list_buf, selection_ns, 0, -1)
+    if #state.filtered > 0 then
+      api.nvim_buf_set_extmark(
+        state.list_buf,
+        selection_ns,
+        state.index - 1,
+        0,
+        { line_hl_group = "LgtmSelection", priority = 200 }
+      )
+    end
+  end
   local function render()
     if state.closed then
       return
@@ -61,6 +82,7 @@ function M.searchable(title, entries, format, callback)
     api.nvim_buf_set_lines(state.list_buf, 0, -1, false, lines)
     vim.bo[state.list_buf].modifiable = false
     api.nvim_win_set_cursor(state.list_win, { state.index, 0 })
+    highlight()
   end
   function state.close()
     if state.closed then
@@ -101,16 +123,23 @@ function M.searchable(title, entries, format, callback)
     end
     state.index = ((state.index - 1 + delta) % #state.filtered) + 1
     api.nvim_win_set_cursor(state.list_win, { state.index, 0 })
+    highlight()
   end
   for _, buf in ipairs({ state.buf, state.list_buf }) do
-    vim.keymap.set({ "n", "i" }, "<CR>", vim.schedule_wrap(choose), { buffer = buf })
-    vim.keymap.set({ "n", "i" }, "<Esc>", vim.schedule_wrap(state.close), { buffer = buf })
+    vim.keymap.set({ "n", "i", "x" }, "<CR>", vim.schedule_wrap(choose), { buffer = buf })
+    vim.keymap.set({ "n", "i", "x" }, "<Esc>", vim.schedule_wrap(state.close), { buffer = buf })
     for key, delta in pairs({ ["<Down>"] = 1, ["<Up>"] = -1, ["<C-n>"] = 1, ["<C-p>"] = -1 }) do
-      vim.keymap.set({ "n", "i" }, key, function()
+      vim.keymap.set({ "n", "i", "x" }, key, function()
         navigate(delta)
       end, { buffer = buf })
     end
   end
+  vim.keymap.set("n", "j", function()
+    navigate(1)
+  end, { buffer = state.list_buf })
+  vim.keymap.set("n", "k", function()
+    navigate(-1)
+  end, { buffer = state.list_buf })
   vim.keymap.set("n", "q", vim.schedule_wrap(state.close), { buffer = state.list_buf })
   api.nvim_buf_attach(state.buf, false, {
     on_lines = function()
@@ -128,9 +157,6 @@ function M.select(title, entries, format, callback)
   if #entries == 0 then
     require("lgtm.notifications").show(title .. ": no results")
     return
-  end
-  if title == "Pull requests" or title == "Local / GitHub sessions" then
-    return M.searchable(title, entries, format, callback)
   end
   vim.ui.select(entries, { prompt = title, format_item = format }, function(item)
     if item then

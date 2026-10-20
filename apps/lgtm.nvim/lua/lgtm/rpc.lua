@@ -1,4 +1,8 @@
-local M = { identity = nil, capabilities = nil }
+local M = {
+  identity = nil,
+  capabilities = nil,
+  required_capabilities = { "review_targets", "feedback_scopes", "anchor_evidence", "diff_service" },
+}
 local initializing, waiting = false, {}
 function M.bootstrap(callback)
   if M.identity then
@@ -29,6 +33,16 @@ function M.bootstrap(callback)
       return
     end
     M.capabilities = result.capabilities
+    for _, name in ipairs(M.required_capabilities) do
+      if not vim.list_contains(result.capabilities or {}, name) then
+        finish({
+          message = "Backend is missing "
+            .. name
+            .. "; update the LGTM CLI/backend to match this plugin",
+        })
+        return
+      end
+    end
     local identity = require("lgtm.config").options.identity
     if not identity then
       finish({
@@ -55,8 +69,9 @@ function M.call(method, input, callback)
       callback(err)
       return
     end
-    cancel =
-      require("lgtm.transport.connect").call("ReviewService", method, input, M.identity, callback)
+    local service = ({ GetDiff = true, GetFiles = true, GetFile = true })[method] and "DiffService"
+      or "ReviewService"
+    cancel = require("lgtm.transport.connect").call(service, method, input, M.identity, callback)
   end)
   return function()
     cancelled = true

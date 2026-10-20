@@ -28,7 +28,12 @@ function M.check()
   end
   for module, functions in pairs({
     ["codediff.ui.view"] = { "create", "update" },
-    ["codediff.ui.lifecycle"] = { "get_session" },
+    ["codediff.ui.lifecycle"] = { "get_session", "get_panel_view" },
+    ["codediff.core.git"] = {
+      "get_diff_revision_with_line_stats",
+      "get_diff_revisions_with_line_stats",
+      "get_diff_staged",
+    },
   }) do
     local available, api = pcall(require, module)
     if available then
@@ -100,7 +105,18 @@ function M.check()
             .. "; rebuild the CLI/backend from this checkout"
         )
       else
-        vim.health.ok("Backend reachable, API " .. capabilities.apiVersion .. ": " .. endpoint)
+        local missing = vim.tbl_filter(function(name)
+          return not vim.list_contains(capabilities.capabilities or {}, name)
+        end, require("lgtm.rpc").required_capabilities)
+        if #missing > 0 then
+          vim.health.error(
+            "Backend is missing "
+              .. table.concat(missing, ", ")
+              .. "; update the LGTM CLI/backend to match this plugin"
+          )
+        else
+          vim.health.ok("Backend reachable, API " .. capabilities.apiVersion .. ": " .. endpoint)
+        end
       end
     end
   else

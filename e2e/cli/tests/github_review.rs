@@ -54,16 +54,18 @@ impl Remote {
             assert!(start.elapsed() < Duration::from_secs(10));
             std::thread::sleep(Duration::from_millis(20));
         };
-        Self {
+        let remote = Self {
             _process: process,
             _temp: temp,
             endpoint_url,
-        }
+        };
+        remote.mode("normal");
+        remote
     }
     fn mode(&self, mode: &str) {
         reqwest::blocking::Client::new()
             .post(format!("{}/__control", self.endpoint_url))
-            .json(&json!({"mode":mode}))
+            .json(&json!({"mode":mode,"base":"a".repeat(40),"head":"b".repeat(40)}))
             .send()
             .unwrap()
             .error_for_status()
@@ -190,16 +192,21 @@ fn should_run_remote_cli_review_and_recover_an_uncertain_submission_without_repl
     let pr = "https://github.com/acme/repo/pull/1";
     for mode in ["normal", "lost", "stale"] {
         let mut fixture = Cli::start();
-        assert!(
-            !fixture
-                .command(&["session", "start", "--pr", pr])
-                .status
-                .success()
+        let started = fixture.json(&["session", "start", "--pr", pr]);
+        assert_eq!(
+            started["review"]["state"], "active",
+            "Starting a PR needs no setup or explicit refresh"
         );
         let refresh = fixture.json(&["session", "refresh", "--pr", pr]);
-        assert_eq!(refresh["context"]["refreshedHead"], "head");
-        let session = fixture.json(&["session", "start", "--pr", pr]);
-        assert_eq!(session["session"]["state"], "active");
+        assert_eq!(
+            refresh["review"]["observedComparison"]["pullRequest"]["headCommit"],
+            "b".repeat(40)
+        );
+        let resumed = fixture.json(&["session", "start", "--pr", pr]);
+        assert_eq!(
+            resumed["review"]["id"], started["review"]["id"],
+            "matching start resumes the same attempt"
+        );
         fixture.json(&[
             "comments",
             "add",
@@ -230,6 +237,12 @@ fn should_run_remote_cli_review_and_recover_an_uncertain_submission_without_repl
             "--body",
             "File CLI comment",
         ]);
+        let pending = fixture.remote.status();
+        assert_eq!(
+            pending["reviews"][0]["state"], "PENDING",
+            "inline/file saves create a pending review before submission"
+        );
+        let writes_before_submit = pending["writes"].clone();
         fixture.remote.mode(mode);
         let submit = [
             "session",
@@ -248,18 +261,18 @@ fn should_run_remote_cli_review_and_recover_an_uncertain_submission_without_repl
             assert!(!output.status.success());
             let error: Value = serde_json::from_slice(&output.stdout).unwrap();
             assert!(error["error"]["message"].as_str().unwrap().contains("head"));
-            assert_eq!(fixture.remote.status()["writes"], 0);
+            assert_eq!(fixture.remote.status()["writes"], writes_before_submit);
             let conversation = fixture.json(&["comments", "list", "--pr", pr]);
             assert_eq!(conversation["comments"].as_array().unwrap().len(), 3);
             assert_eq!(
-                fixture.json(&["session", "show", "--pr", pr])["session"]["state"],
+                fixture.json(&["session", "show", "--pr", pr])["review"]["state"],
                 "active"
             );
             continue;
         }
         let submitted = fixture.json(&submit);
         assert_eq!(
-            submitted["session"]["submissionStatus"],
+            submitted["review"]["submissionStatus"],
             if mode == "lost" {
                 "uncertain"
             } else {
@@ -283,7 +296,7 @@ fn should_run_remote_cli_review_and_recover_an_uncertain_submission_without_repl
         } else {
             fixture.json(&submit)
         };
-        assert_eq!(recovered["session"]["submissionStatus"], "confirmed");
+        assert_eq!(recovered["review"]["submissionStatus"], "confirmed");
         assert_eq!(fixture.remote.status()["writes"], before["writes"]);
         let export = fixture.json(&["session", "export", "--pr", pr]);
         assert!(
@@ -306,8 +319,8 @@ fn should_run_remote_cli_review_and_recover_an_uncertain_submission_without_repl
 fn should_report_json_permission_error_and_keep_remote_review_drafts() {
     let fixture = Cli::start();
     let pr = "https://github.com/acme/repo/pull/1";
-    fixture.json(&["session", "refresh", "--pr", pr]);
     fixture.json(&["session", "start", "--pr", pr]);
+    fixture.json(&["session", "refresh", "--pr", pr]);
     fixture.json(&[
         "comments",
         "add",
@@ -330,4 +343,38 @@ fn should_report_json_permission_error_and_keep_remote_review_drafts() {
     fixture.remote.mode("normal");
     fixture.json(&["session", "refresh", "--pr", pr]);
     assert_eq!(fixture.remote.status()["errors"], json!([]));
+}
+
+#[test]
+fn should_recover_a_saved_pending_draft_without_replaying_the_accepted_comment() {
+    let fixture = Cli::start();
+    let pr = "https://github.com/acme/repo/pull/1";
+    fixture.json(&["session", "start", "--pr", pr]);
+    fixture.json(&["session", "refresh", "--pr", pr]);
+    fixture.remote.mode("draft_lost");
+    let saved = fixture.json(&[
+        "comments",
+        "add",
+        "--pr",
+        pr,
+        "--file",
+        "review.txt",
+        "--line",
+        "2",
+        "--body",
+        "Recover this private draft",
+    ]);
+    assert!(
+        !saved["syncError"].as_str().unwrap().is_empty(),
+        "local save reports failed GitHub confirmation"
+    );
+    assert_eq!(saved["comment"]["postingStatus"], "uncertain");
+    let before = fixture.remote.status()["writes"].clone();
+    fixture.remote.mode("normal");
+    let id = saved["comment"]["id"].as_str().unwrap();
+    let recovered = fixture.json(&["comments", "sync", id, "--pr", pr]);
+    assert_eq!(recovered["comment"]["postingStatus"], "confirmed");
+    assert_eq!(recovered["comment"]["visibility"], "draft");
+    assert_eq!(fixture.remote.status()["writes"], before);
+    assert_eq!(fixture.remote.status()["reviews"][0]["state"], "PENDING");
 }

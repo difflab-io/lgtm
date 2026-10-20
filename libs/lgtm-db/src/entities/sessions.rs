@@ -19,6 +19,8 @@ pub struct Model {
     pub base_commit: Option<String>,
     /// Head commit reviewed by this session; immutable after creation.
     pub head_commit: Option<String>,
+    /// Selected comparison kind; legacy attempts have no recorded mode.
+    pub comparison_kind: crate::entities::common::ComparisonKind,
     /// UTC creation timestamp; immutable after insertion.
     pub created_at: String,
     /// UTC completion time; required only for completed sessions.

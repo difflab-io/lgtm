@@ -3,7 +3,7 @@ use super::super::{
     database::{models::sessions, types::SessionState},
     error::{Result, invalid},
 };
-use super::{Actor, CommitContext};
+use super::{Actor, CommitContext, ComparisonKind};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -12,6 +12,8 @@ pub struct Session {
     pub context_id: uuid::Uuid,
     pub creator: Actor,
     pub commits: CommitContext,
+    /// Recorded selection mode. Legacy attempts do not imply a working or staged source.
+    pub comparison_kind: ComparisonKind,
     pub created_at: String,
     #[serde(flatten)]
     pub status: SessionStatus,
@@ -52,6 +54,47 @@ impl Session {
         }
     }
 
+    /// Freeze completion metadata once. Services persist the transition and enforce target eligibility.
+    pub fn complete(
+        &mut self,
+        by: Actor,
+        outcome: String,
+        body: Option<String>,
+        request_key: String,
+        request_hash: String,
+    ) -> Result<()> {
+        if self.state() != "active" {
+            return Err(crate::error::Error::Conflict(
+                "Review attempt is already complete".into(),
+            ));
+        }
+        if ![
+            "saved",
+            "ready-to-address",
+            "approve",
+            "reject",
+            "comment",
+            "superseded",
+        ]
+        .contains(&outcome.as_str())
+            || request_key.is_empty()
+            || request_hash.is_empty()
+        {
+            return Err(invalid(
+                "Completion requires a valid outcome and retry identity",
+            ));
+        }
+        self.status = SessionStatus::Completed(Box::new(CompletedSession {
+            at: crate::utils::now(),
+            by,
+            outcome,
+            body,
+            request_key,
+            request_hash,
+        }));
+        Ok(())
+    }
+
     pub fn from_db_model(
         row: sessions::Model,
         creator: Actor,
@@ -77,6 +120,7 @@ impl Session {
                 base: row.base_commit,
                 head: row.head_commit,
             },
+            comparison_kind: row.comparison_kind,
             created_at: row.created_at,
             status,
             forge_review_id: row.forge_review_id,
@@ -100,6 +144,7 @@ impl From<&Session> for sessions::Model {
             },
             base_commit: value.commits.base.clone(),
             head_commit: value.commits.head.clone(),
+            comparison_kind: value.comparison_kind,
             created_at: value.created_at.clone(),
             completed_at: completion.map(|v| v.at.clone()),
             completed_by_id: completion.map(|v| v.by.id),

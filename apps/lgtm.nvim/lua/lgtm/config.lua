@@ -5,6 +5,20 @@ M.defaults = {
   timeout = 30,
   prefix = "<leader>r",
   mappings = {},
+  ui = {
+    border = "rounded",
+    highlights = {
+      normal = "NormalFloat",
+      border = "FloatBorder",
+      title = "Title",
+      muted = "Comment",
+      selection = "Visual",
+      info = "DiagnosticInfo",
+      success = "DiagnosticOk",
+      warning = "DiagnosticWarn",
+      error = "DiagnosticError",
+    },
+  },
   max_response_bytes = 16 * 1024 * 1024,
 }
 M.options = vim.deepcopy(M.defaults)

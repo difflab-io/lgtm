@@ -13,6 +13,8 @@ pub struct Model {
     pub kind: crate::entities::common::ContextKind,
     /// Canonical absolute notes path; set only for local notes.
     pub notes_path: Option<String>,
+    /// Confirmed current notes file or directory location. The original lookup key remains immutable.
+    pub current_notes_path: Option<String>,
     /// Canonical absolute Git common directory; set only for local branch reviews.
     pub git_dir: Option<String>,
     /// Full refs/heads/ branch name; set only for local branch reviews.
@@ -33,6 +35,8 @@ pub struct Model {
     pub refresh_error: Option<String>,
     /// Latest refresh result: never, stub, live or failed.
     pub refresh_status: String,
+    /// Lifecycle from the last complete forge observation; absent for local contexts.
+    pub forge_state: Option<crate::entities::common::ForgeState>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

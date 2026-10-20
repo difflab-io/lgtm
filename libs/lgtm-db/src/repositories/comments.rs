@@ -1,8 +1,8 @@
 //! CommentRepository groups reads and writes for comments.
 use super::super::{entities::*, error::Result};
-use sea_orm::QueryOrder;
 use sea_orm::{ActiveModelTrait, IntoActiveModel};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, TransactionTrait};
+use sea_orm::{QueryOrder, QuerySelect, QueryTrait};
 use std::sync::Arc;
 
 /// Repository bound to the owning database connection or transaction.
@@ -11,13 +11,88 @@ pub struct CommentRepository<C = sea_orm::DatabaseConnection> {
     connection: Arc<C>,
 }
 
-impl<C> CommentRepository<C> {
-    pub(crate) fn new(connection: Arc<C>) -> Self {
-        Self { connection }
-    }
-}
-
 impl<C: ConnectionTrait + TransactionTrait> CommentRepository<C> {
+    /// Read bounded conversation records in thread/reply order. A cursor never changes visibility.
+    pub async fn get_conversation_page(
+        &self,
+        context: &uuid::Uuid,
+        paths: Option<&[String]>,
+        include_drafts: bool,
+        after: Option<(uuid::Uuid, i64)>,
+        limit: u64,
+    ) -> Result<Vec<comments::Model>> {
+        let mut roots = comments::Entity::find()
+            .select_only()
+            .column(comments::Column::ThreadId)
+            .filter(comments::Column::ContextId.eq(*context))
+            .filter(comments::Column::Position.eq(0));
+        if !include_drafts {
+            roots = roots.filter(comments::Column::Visibility.eq("published"));
+        }
+        let mut query = comments::Entity::find()
+            .filter(comments::Column::ContextId.eq(*context))
+            .filter(comments::Column::ThreadId.in_subquery(roots.into_query()));
+        if !include_drafts {
+            query = query.filter(comments::Column::Visibility.eq("published"));
+        }
+        if let Some(paths) = paths {
+            let visible = threads::Entity::find()
+                .select_only()
+                .column(threads::Column::Id)
+                .filter(threads::Column::ContextId.eq(*context))
+                .filter(
+                    sea_orm::Condition::any()
+                        .add(threads::Column::CurrentPath.is_in(paths.to_vec()))
+                        .add(
+                            sea_orm::Condition::all()
+                                .add(threads::Column::CurrentPath.is_null())
+                                .add(
+                                    sea_orm::Condition::any()
+                                        .add(threads::Column::SourcePath.is_in(paths.to_vec()))
+                                        .add(
+                                            sea_orm::Condition::all()
+                                                .add(threads::Column::SourcePath.is_null())
+                                                .add(
+                                                    threads::Column::FilePath.is_in(paths.to_vec()),
+                                                ),
+                                        ),
+                                ),
+                        ),
+                );
+            query = query.filter(comments::Column::ThreadId.in_subquery(visible.into_query()));
+        }
+        if let Some((thread, position)) = after {
+            query = query.filter(
+                sea_orm::Condition::any()
+                    .add(comments::Column::ThreadId.gt(thread))
+                    .add(
+                        sea_orm::Condition::all()
+                            .add(comments::Column::ThreadId.eq(thread))
+                            .add(comments::Column::Position.gt(position)),
+                    ),
+            );
+        }
+        Ok(query
+            .order_by_asc(comments::Column::ThreadId)
+            .order_by_asc(comments::Column::Position)
+            .limit(limit.min(501))
+            .all(self.connection.as_ref())
+            .await?)
+    }
+
+    /// Get only the immutable roots and location observations needed by a conversation page.
+    pub async fn get_threads_by_ids(
+        &self,
+        context: &uuid::Uuid,
+        ids: &[uuid::Uuid],
+    ) -> Result<Vec<threads::Model>> {
+        Ok(threads::Entity::find()
+            .filter(threads::Column::ContextId.eq(*context))
+            .filter(threads::Column::Id.is_in(ids.to_vec()))
+            .order_by_asc(threads::Column::Id)
+            .all(self.connection.as_ref())
+            .await?)
+    }
     /// Get a thread UUID within the selected context.
     pub async fn get_thread(
         &self,
@@ -47,6 +122,36 @@ impl<C: ConnectionTrait + TransactionTrait> CommentRepository<C> {
     pub async fn get_threads(&self, context: &uuid::Uuid) -> Result<Vec<threads::Model>> {
         Ok(threads::Entity::find()
             .filter(threads::Column::ContextId.eq(*context))
+            .order_by_asc(threads::Column::Id)
+            .all(self.connection.as_ref())
+            .await?)
+    }
+
+    /// Read a visible-file subset using confirmed current paths, without changing hidden discussions.
+    pub async fn get_threads_for_paths(
+        &self,
+        context: &uuid::Uuid,
+        paths: &[String],
+    ) -> Result<Vec<threads::Model>> {
+        Ok(threads::Entity::find()
+            .filter(threads::Column::ContextId.eq(*context))
+            .filter(
+                sea_orm::Condition::any()
+                    .add(threads::Column::CurrentPath.is_in(paths.to_vec()))
+                    .add(
+                        sea_orm::Condition::all()
+                            .add(threads::Column::CurrentPath.is_null())
+                            .add(
+                                sea_orm::Condition::any()
+                                    .add(threads::Column::SourcePath.is_in(paths.to_vec()))
+                                    .add(
+                                        sea_orm::Condition::all()
+                                            .add(threads::Column::SourcePath.is_null())
+                                            .add(threads::Column::FilePath.is_in(paths.to_vec())),
+                                    ),
+                            ),
+                    ),
+            )
             .order_by_asc(threads::Column::Id)
             .all(self.connection.as_ref())
             .await?)
@@ -180,6 +285,17 @@ impl<C: ConnectionTrait + TransactionTrait> CommentRepository<C> {
                 updated_at: sea_orm::Set(row.updated_at.clone()),
                 forge_thread_id: sea_orm::Set(row.forge_thread_id.clone()),
                 outdated: sea_orm::Set(row.outdated),
+                current_path: sea_orm::Set(row.current_path.clone()),
+                orphan_reason: sea_orm::Set(row.orphan_reason),
+                observed_base: sea_orm::Set(row.observed_base.clone()),
+                observed_head: sea_orm::Set(row.observed_head.clone()),
+                observed_outdated: sea_orm::Set(row.observed_outdated),
+                observed_path: sea_orm::Set(row.observed_path.clone()),
+                observed_side: sea_orm::Set(row.observed_side.clone()),
+                observed_start: sea_orm::Set(row.observed_start),
+                observed_end: sea_orm::Set(row.observed_end),
+                observed_commit: sea_orm::Set(row.observed_commit.clone()),
+
                 ..Default::default()
             })
             .filter(threads::Column::Id.eq(row.id))
@@ -210,11 +326,19 @@ impl<C: ConnectionTrait + TransactionTrait> CommentRepository<C> {
                 remote_presence: sea_orm::Set(row.remote_presence.clone()),
                 ..Default::default()
             })
+            .col_expr(
+                comments::Column::Deleted,
+                sea_orm::sea_query::Expr::value(row.deleted),
+            )
             .filter(comments::Column::Id.eq(row.id))
             .filter(comments::Column::ContextId.eq(row.context_id))
             .exec(self.connection.as_ref())
             .await?
             .rows_affected
             == 1)
+    }
+
+    pub(crate) fn new(connection: Arc<C>) -> Self {
+        Self { connection }
     }
 }

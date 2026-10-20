@@ -1,4 +1,4 @@
-# Server module architecture
+# CLI server — software architecture
 
 ## Overview
 
@@ -8,17 +8,29 @@ The server module serves embedded web assets and backend methods through one loc
 
 ### Functional
 
-- Serve the bundled UI and its static assets.
-- Route browser and native clients to the same backend.
-- Expose a health response with the server PID.
-- Record the actual listening port and clear it after shutdown.
+- FR1: Serve the bundled UI and its static assets.
+- FR2: Route browser and native clients to the same backend.
+- FR3: Expose a health response with the server PID.
+- FR4: Record the actual listening port and clear it after shutdown.
 
 ### Non-Functional
 
-- Serve the installed application without a frontend development server.
-- Limit connection draining to five seconds after a shutdown signal.
+- NFR1: Serve the installed application without a frontend development server.
+- NFR2: Limit connection draining to five seconds after a shutdown signal.
 
 ## Design
+
+### Usage
+
+Call `serve` from an initialized Tokio runtime. Use port `0` to select an available port.
+
+```rust
+let store = Store::new()?;
+serve(0, &store, false).await?;
+```
+
+The call runs until shutdown or failure. Use `detached = true` only after daemon detachment. For foreground CLI use, run `lgtm up --foreground --no-open`.
+
 
 ### Components and Responsibilities
 

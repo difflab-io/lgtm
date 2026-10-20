@@ -10,8 +10,14 @@ vim.o.lines = 40
 vim.o.swapfile = false
 vim.o.shadafile = "NONE"
 vim.g.mapleader = " "
-require("codediff").setup({})
+require("codediff").setup({ explorer = { view_mode = "tree" } })
 require("which-key").setup({})
+if vim.env.LGTM_E2E_KAK == "1" then
+	vim.opt.runtimepath:append(suite .. "/.cache/kak.nvim")
+	-- Match the user's compatible configuration: full mappings load after WhichKey.
+	-- Kak's bundled bridge mutates private WhichKey tables and is not used.
+	require("kak.keybinds").setup(vim.deepcopy(require("kak.defaults")))
+end
 require("notify").setup({ timeout = 5000, stages = "static", render = "minimal", minimum_width = 50, max_width = 50 })
 require("lgtm").setup({ identity = { name = "Neovim E2E", email = "nvim-e2e@example.test" } })
 vim.cmd("runtime plugin/lgtm.lua")

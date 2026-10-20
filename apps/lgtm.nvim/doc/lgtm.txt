@@ -3,14 +3,14 @@
 SETUP                                                        *lgtm-setup*
 
 Requires Neovim 0.11+, lgtm CLI and running backend, curl, CodeDiff including its
-native library, WhichKey and nvim-notify. Git reviews need Git. GitHub reviews
+native library, WhichKey and nvim-notify. Kak is optional. Git reviews need Git. GitHub reviews
 need gh auth login as the backend's local user. See README.md for pinned lazy.nvim
 installation, identity and endpoint settings. Run :checkhealth lgtm.
 
 COMMANDS                                                     *lgtm-commands*
 
-:Lgtm note / notes           Add current-line/range note / inspect directory notes.
-:Lgtm review                 Choose Working, Staged, or PR.
+:Lgtm note / notes           Add current-line/range note / inspect current-file notes.
+:Lgtm review                 Choose Working, Staged, Branch, or PR.
 :Lgtm directory [path]       Includes ignored files and explicit symlink root.
 :Lgtm prs [URL]              List current-branch PRs for the Git remote; optional URL override.
 :Lgtm sessions [completed]   Resume or inspect local/GitHub sessions.
@@ -19,13 +19,15 @@ COMMANDS                                                     *lgtm-commands*
 :Lgtm promote                Confirm note target anchor; keep original note.
 :Lgtm export [notes/review]  Markdown preview, file or clipboard; no mutation.
 :Lgtm save / complete        Confirm durable draft / complete local session.
+:Lgtm sync                   Sync/recover pending PR drafts; never publish.
 :Lgtm submit / reconcile     Remote outcome + optional final body / check result.
 :Lgtm close                  Close UI without completing the review.
 
 KEYS                                                         *lgtm-keys*
 
 <leader>r                    WhichKey review actions (configurable prefix).
-Enter/K                     Open collapsed threads at line and diff side.
+Enter/K                     Open the thread card in a centered modal.
+Tab/Shift-Tab in modal      Select next/previous top-level comment or reply.
 c/e/dd/x                     Reply/edit/delete/resolve in thread popup.
 q/Esc                       Restore source focus/cursor.
 ]c/[c ]n/[n                 Navigate annotations.
@@ -33,12 +35,44 @@ za/zA gH                    Expand cursor/file threads; toggle overlays.
 Ctrl-S                      Save composer; failed saves retain text.
 f                           Toggle persistent review-file pane.
 Enter in file pane          Select file (selected/changed/reviewed marks).
+m in tree / <leader>rm      Toggle selected/current file reviewed (✓).
 ]f/[f Tab/Shift-Tab          Next/previous file or unreviewed file.
+
+Reviewed (seen) marks apply to PR, branch, working-tree, staged and directory
+reviews, not notes. Content changes clear marks. Marks last for the open review;
+they do not survive editor restarts or sync GitHub's Viewed state.
+
+Comments use full-width status/preview cards. Lost selections float above the
+file with their original range and excerpt. Deleted files retain orphaned
+discussions in :Lgtm threads. Staged and branch reviews share local discussions;
+PR discussions remain separate.
+
+The modal labels and indents
+replies, highlights the selected comment, and names the edit/delete target.
+Deletion asks for confirmation.
+
+Set ui.border and ui.highlights in setup options to customize the shared theme.
+Default highlight links follow NormalFloat, FloatBorder, Title, Comment, Visual
+and DiagnosticInfo/Warn/Error/Ok. See README.md for all Lgtm highlight groups.
 
 Select a comment row before editing/deleting; deletion asks for confirmation.
 File/general comments are available in the cross-file thread pane. Confirmed
-backend mutations update overlays. Save never submits to GitHub. A lost submit
+backend mutations update overlays. PR line/file drafts and replies synchronize
+to a private pending GitHub review on save. General comments remain local until
+submission. Use :Lgtm sync (<leader>ry) to sync existing local drafts or recover
+a lost draft response without reposting it. A lost submit
 response must be reconciled before retrying. Notes survive editor/backend
 restart. Saved files are required for content-verified non-Git anchors.
+
+Saved-file notes and directory reviews follow recorded moves. BufFilePre/Post
+and MiniFiles report renames. Other file managers can emit User LgtmPathRenamed
+with data = { from = "/old/path", to = "/new/path" } after moving the file.
+Both paths must be absolute; the old path must be absent. Copies do not move
+comments. :Lgtm refresh retries a saved move without creating another discussion.
+
+Exports contain numbered Markdown feedback, old-side ~ locations, replies and
+final review text. Exporting does not change saved feedback or submit a review.
+A changed PR base/head requires an explicit comparison choice. Closed or merged
+PRs keep saved drafts and history; they cannot accept a new submission.
 
  vim:tw=78:ts=8:noet:ft=help:norl:

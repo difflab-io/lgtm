@@ -1,8 +1,8 @@
 //! SessionRepository groups reads and writes for sessions.
 use super::super::{entities::*, error::Result};
-use sea_orm::QueryOrder;
 use sea_orm::{ActiveModelTrait, IntoActiveModel};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, TransactionTrait};
+use sea_orm::{QueryOrder, QuerySelect, QueryTrait};
 use std::sync::Arc;
 
 /// Repository bound to the owning database connection or transaction.
@@ -11,13 +11,49 @@ pub struct SessionRepository<C = sea_orm::DatabaseConnection> {
     connection: Arc<C>,
 }
 
-impl<C> SessionRepository<C> {
-    pub(crate) fn new(connection: Arc<C>) -> Self {
-        Self { connection }
-    }
-}
-
 impl<C: ConnectionTrait + TransactionTrait> SessionRepository<C> {
+    /// Page visible attempts by target metadata. Ordinary internal notes writers stay hidden.
+    pub async fn get_review_page(
+        &self,
+        context: Option<uuid::Uuid>,
+        path: Option<&str>,
+        branch: Option<&str>,
+        state: Option<common::SessionState>,
+        after: Option<uuid::Uuid>,
+        limit: u64,
+    ) -> Result<Vec<sessions::Model>> {
+        let mut query = sessions::Entity::find()
+            .filter(sessions::Column::ComparisonKind.ne(common::ComparisonKind::Notes));
+        if let Some(context) = context {
+            query = query.filter(sessions::Column::ContextId.eq(context));
+        }
+        if let Some(path) = path {
+            let locations = workspace_paths::Entity::find()
+                .select_only()
+                .column(workspace_paths::Column::ContextId)
+                .filter(workspace_paths::Column::Path.eq(path));
+            let mut contexts = review_contexts::Entity::find()
+                .select_only()
+                .column(review_contexts::Column::Id)
+                .filter(review_contexts::Column::GitDir.is_not_null())
+                .filter(review_contexts::Column::Id.in_subquery(locations.into_query()));
+            if let Some(branch) = branch {
+                contexts = contexts.filter(review_contexts::Column::Branch.eq(branch));
+            }
+            query = query.filter(sessions::Column::ContextId.in_subquery(contexts.into_query()));
+        }
+        if let Some(state) = state {
+            query = query.filter(sessions::Column::State.eq(state));
+        }
+        if let Some(after) = after {
+            query = query.filter(sessions::Column::Id.gt(after));
+        }
+        Ok(query
+            .order_by_asc(sessions::Column::Id)
+            .limit(limit.min(201))
+            .all(self.connection.as_ref())
+            .await?)
+    }
     /// Get a record by its internal UUID; return None when absent or outside the selected context.
     pub async fn get_by_id(&self, id: &uuid::Uuid) -> Result<Option<sessions::Model>> {
         Ok(sessions::Entity::find_by_id(*id)
@@ -123,5 +159,8 @@ impl<C: ConnectionTrait + TransactionTrait> SessionRepository<C> {
             .await?
             .rows_affected
             == 1)
+    }
+    pub(crate) fn new(connection: Arc<C>) -> Self {
+        Self { connection }
     }
 }

@@ -1,7 +1,7 @@
 local M = {}
 function M.run(scope)
   local function export(state)
-    require("lgtm.rpc").call("Export", { sessionId = state.session.id }, function(err, result)
+    require("lgtm.rpc").call("Export", { scope = state.scope }, function(err, result)
       if err then
         require("lgtm.notifications").error(err)
         return

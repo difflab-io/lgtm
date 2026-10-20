@@ -20,38 +20,6 @@ service IdentityService {
   rpc EnsureIdentity(EnsureIdentityRequest) returns (EnsureIdentityResponse);
   rpc GetCapabilities(GetCapabilitiesRequest) returns (GetCapabilitiesResponse);
 }
-// kind: notes, branch, or forge_backed. Notes path and git_dir are absolute.
-message ContextKey {
-  string kind = 1;
-  string path = 2;
-  string git_dir = 3;
-  string branch = 4;
-  string repository_url = 5;
-  int64 number = 6;
-}
-message Context {
-  string id = 1;
-  ContextKey key = 2;
-  repeated string paths = 3;
-  string refreshed_head = 4;
-  string refreshed_base = 5;
-  string refresh_status = 6;
-  string refresh_error = 7;
-}
-message Session {
-  string id = 1;
-  string context_id = 2;
-  Actor creator = 3;
-  string base = 4;
-  string head = 5;
-  string state = 6;
-  string created_at = 7;
-  string outcome = 8;
-  string body = 9;
-  string submission_status = 10;
-  string submission_error = 11;
-  string forge_review_id = 12;
-}
 // kind: general, file or line; side: old/new. content_hash anchors non-Git files.
 message Anchor {
   string kind = 1;
@@ -61,6 +29,8 @@ message Anchor {
   string side = 5;
   string commit = 6;
   string content_hash = 7;
+  AnchorSource source = 8;
+  AnchorEvidence evidence = 9;
 }
 message Comment {
   string id = 1;
@@ -76,89 +46,96 @@ message Comment {
   string updated_at = 11;
   string forge_comment_id = 12;
   string remote_presence = 13;
+  string version = 14;
+  string owner_id = 15;
+  bool deleted = 16;
 }
 message Thread {
   string id = 1;
   Anchor anchor = 2;
   string state = 3;
-  bool outdated = 4;
+  reserved 4;
+  reserved "outdated";
   Actor author = 5;
   string forge_thread_id = 6;
-}
-message EnsureContextRequest {
-  ContextKey key = 1;
-  string workspace_path = 2;
-}
-message StartSessionRequest {
-  string context_id = 1;
-  string base = 2;
-  string head = 3;
-}
-message ListSessionsRequest {
-  string path = 1;
-  string git_dir = 2;
-  bool completed = 3;
-}
-message SessionEntry {
-  Context context = 1;
-  Session session = 2;
-}
-message ListSessionsResponse {
-  repeated SessionEntry entries = 1;
+  string current_path = 7;
+  string orphan_reason = 8;
+  ForgeObservation forge_observation = 9;
+  string version = 10;
+  // Immutable absolute saved-file origin for notes; empty for repository-relative anchors.
+  string source_path = 11;
 }
 message AddCommentRequest {
-  string session_id = 1;
+  reserved 1;
+  reserved "session_id";
   string body = 2;
   Anchor anchor = 3;
+  ReviewScope scope = 4;
+  string expected_version = 5;
+  string request_key = 6;
 }
 message ReplyRequest {
-  string session_id = 1;
+  reserved 1;
+  reserved "session_id";
   string thread_id = 2;
   string body = 3;
+  ReviewScope scope = 4;
+  string expected_version = 5;
+  string request_key = 6;
 }
 message EditCommentRequest {
-  string session_id = 1;
+  reserved 1;
+  reserved "session_id";
   string comment_id = 2;
   string body = 3;
+  ReviewScope scope = 4;
+  string expected_version = 5;
+  string request_key = 6;
 }
 message DeleteCommentRequest {
-  string session_id = 1;
+  reserved 1;
+  reserved "session_id";
   string comment_id = 2;
+  ReviewScope scope = 3;
+  string expected_version = 4;
+  string request_key = 5;
 }
 message ResolveThreadRequest {
-  string session_id = 1;
+  reserved 1;
+  reserved "session_id";
   string thread_id = 2;
   bool resolved = 3;
-}
-message CompleteSessionRequest {
-  string context_id = 1;
-  string outcome = 2;
-  string body = 3;
-  string request_key = 4;
+  ReviewScope scope = 4;
+  string expected_version = 5;
+  string request_key = 6;
 }
 message ExportRequest {
-  string session_id = 1;
+  reserved 1;
+  reserved "session_id";
   repeated string comment_ids = 2;
+  ReviewScope scope = 3;
 }
 message ExportResponse {
   string markdown = 1;
 }
-message WorkspaceFile {
-  string path = 1;
-  string content = 2;
-  string base_content = 3;
-  string content_hash = 4;
-  string status = 5;
-}
 message PromoteNotesRequest {
-  string source_context_id = 1;
-  string target_session_id = 2;
+  reserved 1;
+  reserved "source_context_id";
+  reserved 2;
+  reserved "target_session_id";
   repeated string comment_ids = 3;
   string request_key = 4;
   repeated Anchor anchors = 5;
+  ReviewScope source = 6;
+  string target_review_id = 7;
+  string expected_source_version = 8;
+  string expected_review_version = 9;
 }
+message CommentSyncFailure { string comment_id = 1; string message = 2; }
 message PromoteNotesResponse {
   repeated Comment comments = 1;
+  string accepted_version = 2;
+  repeated CommentSyncFailure sync_errors = 3;
 }
 message ListPullRequestsRequest {
   string repository_url = 1;
@@ -176,33 +153,33 @@ message ListPullRequestsResponse {
   repeated PullRequest pull_requests = 1;
   uint32 next_page = 2;
 }
-message RefreshContextRequest {
-  string context_id = 1;
-}
 message SubmitReviewRequest {
-  string session_id = 1;
+  reserved 1;
+  reserved "session_id";
   string outcome = 2;
   string body = 3;
   string request_key = 4;
   string expected_head = 5;
+  string review_id = 6;
+  string expected_version = 7;
+  string expected_base = 8;
 }
 service ReviewService {
-  rpc EnsureContext(EnsureContextRequest) returns (EnsureContextResponse);
-  rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
-  rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
-  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc StartReview(StartReviewRequest) returns (StartReviewResponse);
+  rpc ListReviews(ListReviewsRequest) returns (ListReviewsResponse);
+  rpc GetReview(GetReviewRequest) returns (GetReviewResponse);
+  rpc RefreshReview(RefreshReviewRequest) returns (RefreshReviewResponse);
+  rpc CompleteReview(CompleteReviewRequest) returns (CompleteReviewResponse);
   rpc GetConversation(GetConversationRequest) returns (GetConversationResponse);
   rpc AddComment(AddCommentRequest) returns (AddCommentResponse);
+  rpc SyncDraftComment(SyncDraftCommentRequest) returns (SyncDraftCommentResponse);
   rpc Reply(ReplyRequest) returns (ReplyResponse);
   rpc EditComment(EditCommentRequest) returns (EditCommentResponse);
   rpc DeleteComment(DeleteCommentRequest) returns (DeleteCommentResponse);
   rpc ResolveThread(ResolveThreadRequest) returns (ResolveThreadResponse);
-  rpc CompleteSession(CompleteSessionRequest) returns (CompleteSessionResponse);
   rpc Export(ExportRequest) returns (ExportResponse);
-  rpc GetWorkspace(GetWorkspaceRequest) returns (GetWorkspaceResponse);
   rpc PromoteNotes(PromoteNotesRequest) returns (PromoteNotesResponse);
   rpc ListPullRequests(ListPullRequestsRequest) returns (ListPullRequestsResponse);
-  rpc RefreshContext(RefreshContextRequest) returns (RefreshContextResponse);
   rpc SubmitReview(SubmitReviewRequest) returns (SubmitReviewResponse);
   rpc ReconcileSubmission(ReconcileSubmissionRequest) returns (ReconcileSubmissionResponse);
 }
@@ -218,82 +195,201 @@ message GetCapabilitiesResponse {
   repeated string capabilities = 2;
 }
 
-message EnsureContextResponse {
-  Context context = 1;
-}
-
-message StartSessionResponse {
-  Session session = 1;
-}
-
-message GetSessionRequest {
-  string session_id = 1;
-}
-
-message GetSessionResponse {
-  Session session = 1;
-}
-
 message GetConversationRequest {
-  string context_id = 1;
-  bool include_drafts = 2;
+  reserved 1;
+  reserved "context_id";
+  optional bool include_drafts = 2;
+  ReviewScope scope = 3;
+  repeated string file_paths = 4;
+  string page_token = 5;
+  uint32 page_size = 6;
 }
 
 message GetConversationResponse {
-  Context context = 1;
-  repeated Session sessions = 2;
+  reserved 1;
+  reserved "context";
+  reserved 2;
+  reserved "sessions";
   repeated Thread threads = 3;
   repeated Comment comments = 4;
+  string version = 5;
+  string next_page_token = 6;
+}
+
+message SyncDraftCommentRequest {
+  reserved 1;
+  reserved "session_id";
+  string comment_id = 2;
+  string review_id = 3;
+  reserved 4;
+  reserved "request_key";
+}
+message SyncDraftCommentResponse {
+  Comment comment = 1;
 }
 
 message AddCommentResponse {
   Comment comment = 1;
+  // Local save succeeded. A nonempty error means GitHub synchronization failed.
+  string sync_error = 2;
 }
 
 message ReplyResponse {
   Comment comment = 1;
+  string sync_error = 2;
 }
 
 message EditCommentResponse {
   Comment comment = 1;
 }
 
-message DeleteCommentResponse {}
+message DeleteCommentResponse { string accepted_version = 1; }
 
 message ResolveThreadResponse {
   Thread thread = 1;
 }
 
-message CompleteSessionResponse {
-  Session session = 1;
-}
-
-message GetWorkspaceRequest {
-  string context_id = 1;
-  string path = 2;
-  bool include_ignored = 3;
-  string base = 4;
-  string head = 5;
-  string mode = 6;
-}
-
-message GetWorkspaceResponse {
-  string root = 1;
-  repeated WorkspaceFile files = 2;
-}
-
-message RefreshContextResponse {
-  Context context = 1;
-}
-
 message SubmitReviewResponse {
-  Session session = 1;
+  reserved 1;
+  reserved "session";
+  Review review = 2;
 }
 
 message ReconcileSubmissionRequest {
-  string session_id = 1;
+  reserved 1;
+  reserved "session_id";
+  string review_id = 2;
+  reserved 3;
+  reserved "request_key";
 }
 
 message ReconcileSubmissionResponse {
-  Session session = 1;
+  reserved 1;
+  reserved "session";
+  Review review = 2;
 }
+
+// Typed consumer intent. Storage records are resolved inside the backend.
+message LocalGitTarget { string path = 1; string branch = 2; }
+message DirectoryTarget { string path = 1; }
+message PullRequestTarget { string repository_url = 1; int64 number = 2; }
+message ReviewTarget {
+  oneof kind {
+    LocalGitTarget local_git = 1;
+    DirectoryTarget directory = 2;
+    PullRequestTarget pull_request = 3;
+  }
+}
+message WorkingComparison { string base_commit = 1; }
+message StagedComparison { string base_commit = 1; }
+message BranchComparison { string base_commit = 1; string head_commit = 2; }
+message DirectoryComparison {}
+message PullRequestComparison { string base_commit = 1; string head_commit = 2; }
+message ReviewComparison {
+  oneof kind {
+    WorkingComparison working = 1;
+    StagedComparison staged = 2;
+    BranchComparison branch = 3;
+    DirectoryComparison directory = 4;
+    PullRequestComparison pull_request = 5;
+  }
+}
+message NotesScope { string path = 1; }
+message ReviewScope {
+  oneof kind { string review_id = 1; NotesScope notes = 2; }
+}
+message CommitSource { string sha = 1; string content_hash = 2; }
+message IndexFileSource { string blob_oid = 1; string content_hash = 2; }
+message WorkingFileSource { string content_hash = 1; }
+message LocalFileSource { string content_hash = 1; }
+message AnchorSource {
+  oneof kind {
+    CommitSource commit = 1;
+    IndexFileSource index_file = 2;
+    WorkingFileSource working_file = 3;
+    LocalFileSource local_file = 4;
+  }
+}
+message AnchorEvidence {
+  string selected_text = 1;
+  string context_before = 2;
+  string context_after = 3;
+}
+message ForgeObservation {
+  string base = 1;
+  string head = 2;
+  bool outdated = 3;
+  Anchor current = 4;
+}
+message Review {
+  string id = 1;
+  ReviewTarget target = 2;
+  ReviewComparison comparison = 3;
+  string state = 4;
+  string version = 5;
+  Actor creator = 6;
+  string created_at = 7;
+  string outcome = 8;
+  string body = 9;
+  string submission_status = 10;
+  string submission_error = 11;
+  string forge_review_id = 12;
+  string forge_state = 13;
+  ReviewComparison observed_comparison = 14;
+}
+enum ResumePolicy {
+  RESUME_POLICY_UNSPECIFIED = 0;
+  RESUME_POLICY_MATCHING_ONLY = 1;
+  RESUME_POLICY_REPLACE_LOCAL = 2;
+  RESUME_POLICY_ACCEPT_PR_COMPARISON = 3;
+}
+message StartReviewRequest {
+  ReviewTarget target = 1;
+  ReviewComparison comparison = 2;
+  string request_key = 3;
+  // MATCHING_ONLY resumes only the same recorded comparison.
+  ResumePolicy resume_policy = 4;
+  string expected_review_id = 5;
+  string expected_version = 6;
+  // Optional local checkout for source validation without forge content downloads.
+  string local_git_path = 7;
+}
+message StartReviewResponse { Review review = 1; }
+message GetReviewRequest { string review_id = 1; }
+message GetReviewResponse { Review review = 1; }
+message ListReviewsRequest {
+  ReviewTarget target = 1;
+  string state = 2;
+  string page_token = 3;
+  uint32 page_size = 4;
+}
+message ListReviewsResponse { repeated Review reviews = 1; string next_page_token = 2; }
+// Only confirmed client observations may change path association or orphan state.
+message PathMove { string thread_id = 1; string previous_path = 2; string current_path = 3; AnchorSource source = 4; }
+message FileDeletion { string thread_id = 1; string path = 2; }
+message WorkingSourceChange { string thread_id = 1; string path = 2; AnchorSource source = 3; }
+message FileRestoration { string thread_id = 1; string path = 2; AnchorSource source = 3; }
+message SourceChange {
+  oneof kind {
+    PathMove moved = 1;
+    FileDeletion deleted = 2;
+    WorkingSourceChange working_source_changed = 3;
+    FileRestoration restored = 4;
+    LocationMove location_moved = 5;
+  }
+}
+message LocationMove { string previous_path = 1; string current_path = 2; }
+message RefreshReviewRequest {
+  ReviewScope scope = 1;
+  string expected_version = 2;
+  repeated SourceChange source_changes = 3;
+  string request_key = 4;
+}
+message RefreshReviewResponse { Review review = 1; string version = 2; }
+message CompleteReviewRequest {
+  string review_id = 1;
+  string body = 2;
+  string expected_version = 3;
+  string request_key = 4;
+}
+message CompleteReviewResponse { Review review = 1; }

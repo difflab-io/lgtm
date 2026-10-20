@@ -1,6 +1,20 @@
 mod common;
 use lgtm_backend::{models::*, services::workspace::get_workspace};
 
+// fixtures --------------------------------------------------------------------
+fn placement(thread: &Thread, content: Option<&str>) -> AnchorPlacement {
+    let source = content.map(|text| AnchorSource::LocalFile {
+        content_hash: AnchorSource::hash(text.as_bytes()),
+    });
+    thread.anchor.get_placement(
+        thread.evidence.as_ref(),
+        "PLAN.md",
+        source.as_ref(),
+        content,
+        true,
+    )
+}
+
 // tests -----------------------------------------------------------------------
 #[tokio::test]
 async fn should_anchor_ignored_non_git_files_and_guard_owned_draft_mutations() {
@@ -32,7 +46,13 @@ async fn should_anchor_ignored_non_git_files_and_guard_owned_draft_mutations() {
             .await
             .unwrap();
         let session = service
-            .start_session(&context, &alice, CommitContext::default())
+            .start_session(
+                &context,
+                &alice,
+                CommitContext::default(),
+                ComparisonKind::Legacy,
+                None,
+            )
             .await
             .unwrap();
         let anchor = Anchor::Line {
@@ -43,39 +63,46 @@ async fn should_anchor_ignored_non_git_files_and_guard_owned_draft_mutations() {
             commit: files[0].content_hash.clone(),
         };
         let note = service
-            .add_comment(&session.id, &alice, "Clarify this", anchor.clone())
+            .add_comment(
+                &session.id,
+                &alice,
+                "Clarify this",
+                anchor.clone(),
+                None,
+                None,
+            )
             .await
             .unwrap();
         assert!(
             service
-                .edit_comment(&session.id, &note.id, &bob, "No")
+                .edit_comment(&session.id, &note.id, &bob, "No", None)
                 .await
                 .is_err()
         );
         assert_eq!(
             service
-                .edit_comment(&session.id, &note.id, &alice, "Updated")
+                .edit_comment(&session.id, &note.id, &alice, "Updated", None)
                 .await
                 .unwrap()
                 .body,
             "Updated"
         );
         let reply = service
-            .reply(&session.id, &note.thread_id, &bob, "Reply")
+            .reply(&session.id, &note.thread_id, &bob, "Reply", None)
             .await
             .unwrap();
         assert!(
             service
-                .delete_comment(&session.id, &note.id, &alice)
+                .delete_comment(&session.id, &note.id, &alice, None)
                 .await
                 .is_err()
         );
         service
-            .delete_comment(&session.id, &reply.id, &bob)
+            .delete_comment(&session.id, &reply.id, &bob, None)
             .await
             .unwrap();
         service
-            .delete_comment(&session.id, &note.id, &alice)
+            .delete_comment(&session.id, &note.id, &alice, None)
             .await
             .unwrap();
         assert!(
@@ -89,7 +116,7 @@ async fn should_anchor_ignored_non_git_files_and_guard_owned_draft_mutations() {
         std::fs::write(root.join(".ignored/plan.md"), "changed\n").unwrap();
         assert!(
             service
-                .add_comment(&session.id, &alice, "Stale", anchor)
+                .add_comment(&session.id, &alice, "Stale", anchor, None, None)
                 .await
                 .is_err()
         );
@@ -158,15 +185,34 @@ async fn should_promote_notes_atomically_with_attribution_and_deleted_target_rec
             .await
             .unwrap();
         let notes = service
-            .start_session(&source, &alice, CommitContext::default())
+            .start_session(
+                &source,
+                &alice,
+                CommitContext::default(),
+                ComparisonKind::Legacy,
+                None,
+            )
             .await
             .unwrap();
         let review = service
-            .start_session(&target, &bob, CommitContext::default())
+            .start_session(
+                &target,
+                &bob,
+                CommitContext::default(),
+                ComparisonKind::Legacy,
+                None,
+            )
             .await
             .unwrap();
         let note = service
-            .add_comment(&notes.id, &alice, "Keep attribution", Anchor::General)
+            .add_comment(
+                &notes.id,
+                &alice,
+                "Keep attribution",
+                Anchor::General,
+                None,
+                None,
+            )
             .await
             .unwrap();
         let selected = [note.id];
@@ -176,9 +222,14 @@ async fn should_promote_notes_atomically_with_attribution_and_deleted_target_rec
                 &source.id,
                 &review.id,
                 &bob,
-                &selected,
-                &anchors,
-                "promote-1",
+                NotePromotion {
+                    comment_ids: selected.to_vec(),
+                    anchors: anchors.to_vec(),
+                    evidence: vec![],
+                    request_key: ("promote-1").to_string(),
+                    expected_source_version: None,
+                    guard: None,
+                },
             )
         };
         // A later invalid note rolls the earlier insertion back.
@@ -188,9 +239,14 @@ async fn should_promote_notes_atomically_with_attribution_and_deleted_target_rec
                     &source.id,
                     &review.id,
                     &bob,
-                    &[note.id, uuid::Uuid::new_v4()],
-                    &[Anchor::General, Anchor::General],
-                    "bad"
+                    NotePromotion {
+                        comment_ids: [note.id, uuid::Uuid::new_v4()].to_vec(),
+                        anchors: [Anchor::General, Anchor::General].to_vec(),
+                        evidence: vec![],
+                        request_key: ("bad").to_string(),
+                        expected_source_version: None,
+                        guard: None
+                    }
                 )
                 .await
                 .is_err()
@@ -214,8 +270,27 @@ async fn should_promote_notes_atomically_with_attribution_and_deleted_target_rec
                 .body,
             "Keep attribution"
         );
+        assert_eq!(first[0].owner_id, Some(bob.id));
+        assert!(
+            service
+                .delete_comment(&review.id, &first[0].id, &alice, None)
+                .await
+                .is_err(),
+            "the source author does not own another actor's promoted draft"
+        );
+        let edited = service
+            .edit_comment(
+                &review.id,
+                &first[0].id,
+                &bob,
+                "Promoter can revise this draft",
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(edited.author.id, alice.id);
         service
-            .delete_comment(&review.id, &first[0].id, &alice)
+            .delete_comment(&review.id, &first[0].id, &bob, None)
             .await
             .unwrap();
         assert!(promote().await.is_err());
@@ -316,7 +391,13 @@ async fn should_relocate_unique_text_and_fall_back_for_ambiguous_or_deleted_text
             .await
             .unwrap();
         let session = service
-            .start_session(&context, &actor, CommitContext::default())
+            .start_session(
+                &context,
+                &actor,
+                CommitContext::default(),
+                ComparisonKind::Legacy,
+                None,
+            )
             .await
             .unwrap();
         let note = service
@@ -331,33 +412,116 @@ async fn should_relocate_unique_text_and_fall_back_for_ambiguous_or_deleted_text
                     side: "new".into(),
                     commit: file.content_hash.clone(),
                 },
+                None,
+                None,
             )
             .await
             .unwrap();
         std::fs::write(root.join("PLAN.md"), "new first\nfirst\nsecond\n").unwrap();
         let reopened = common::service(&url).await.unwrap();
         let conversation = reopened.get_conversation(&context.id, true).await.unwrap();
-        assert!(!conversation.threads[0].outdated);
+        assert!(
+            matches!(
+                &conversation.threads[0].anchor,
+                Anchor::Line {
+                    start: 2,
+                    end: 2,
+                    ..
+                }
+            ),
+            "review reads preserve the original anchor"
+        );
         assert!(matches!(
-            &conversation.threads[0].anchor,
-            Anchor::Line {
-                start: 3,
-                end: 3,
+            placement(&conversation.threads[0], Some("new first\nfirst\nsecond\n")),
+            AnchorPlacement::Relocated {
+                location: Anchor::Line {
+                    start: 3,
+                    end: 3,
+                    ..
+                },
                 ..
             }
         ));
         std::fs::write(root.join("PLAN.md"), "second\nfirst\nsecond\n").unwrap();
         let reopened = common::service(&url).await.unwrap();
         let ambiguous = reopened.get_conversation(&context.id, true).await.unwrap();
-        assert!(ambiguous.threads[0].outdated);
-        assert!(matches!(&ambiguous.threads[0].anchor, Anchor::File { path } if path == "PLAN.md"));
+        assert!(matches!(
+            placement(&ambiguous.threads[0], Some("second\nfirst\nsecond\n")),
+            AnchorPlacement::Outdated { .. }
+        ));
+        assert!(matches!(
+            &ambiguous.threads[0].anchor,
+            Anchor::Line { start: 2, .. }
+        ));
         std::fs::write(root.join("PLAN.md"), "no original text\n").unwrap();
         let deleted = reopened.get_conversation(&context.id, true).await.unwrap();
-        assert!(deleted.threads[0].outdated);
-        assert!(matches!(&deleted.threads[0].anchor, Anchor::File { .. }));
+        assert!(matches!(
+            placement(&deleted.threads[0], Some("no original text\n")),
+            AnchorPlacement::Outdated { .. }
+        ));
+        assert!(matches!(
+            &deleted.threads[0].anchor,
+            Anchor::Line { start: 2, .. }
+        ));
         std::fs::remove_file(root.join("PLAN.md")).unwrap();
+        let version = reopened
+            .get_context_by_id(&context.id)
+            .await
+            .unwrap()
+            .revision;
+        reopened
+            .refresh_locations(
+                &ReviewScope::Review {
+                    review_id: session.id,
+                },
+                &actor,
+                &[SourceChange::Deleted {
+                    thread_id: note.thread_id,
+                    path: "PLAN.md".into(),
+                }],
+                &MutationGuard::new(Some(version), "confirm-deletion".into()),
+            )
+            .await
+            .unwrap();
         let missing = reopened.get_conversation(&context.id, true).await.unwrap();
-        assert!(missing.threads[0].outdated);
+        assert_eq!(
+            missing.threads[0].orphan_reason,
+            Some(OrphanReason::FileDeleted)
+        );
+        assert!(matches!(
+            placement(&missing.threads[0], None),
+            AnchorPlacement::Orphaned { .. }
+        ));
+        std::fs::write(root.join("PLAN.md"), "first\nsecond\n").unwrap();
+        let version = reopened
+            .get_context_by_id(&context.id)
+            .await
+            .unwrap()
+            .revision;
+        reopened
+            .refresh_locations(
+                &ReviewScope::Review {
+                    review_id: session.id,
+                },
+                &actor,
+                &[SourceChange::Restored {
+                    thread_id: note.thread_id,
+                    path: "PLAN.md".into(),
+                    source: AnchorSource::LocalFile {
+                        content_hash: file.content_hash.clone(),
+                    },
+                }],
+                &MutationGuard::new(Some(version), "restore-matching-content".into()),
+            )
+            .await
+            .unwrap();
+        let restored = reopened.get_conversation(&context.id, true).await.unwrap();
+        assert!(restored.threads[0].orphan_reason.is_none());
+        assert_eq!(restored.threads[0].id, note.thread_id);
+        assert!(matches!(
+            placement(&restored.threads[0], Some("first\nsecond\n")),
+            AnchorPlacement::Exact { .. }
+        ));
         let stored = reopened
             .database()
             .comments
@@ -398,4 +562,78 @@ async fn should_keep_a_single_file_notes_context_scoped_to_that_file() {
         assert_eq!(get_workspace(&context, "note.txt").unwrap().1.len(), 1);
         assert!(get_workspace(&context, "sibling.txt").is_err());
     }
+}
+
+#[test]
+fn should_capture_index_bytes_separately_from_working_and_committed_content() {
+    use lgtm_backend::{database::types::SourceKind, services::workspace::get_source};
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap().trim().to_owned()
+    };
+    git(&["init", "-q"]);
+    let file = root.join("file[1].txt");
+    std::fs::write(&file, b"original\r\nselected\r\n").unwrap();
+    git(&["--literal-pathspecs", "add", "--", "file[1].txt"]);
+    git(&[
+        "-c",
+        "user.name=E2E",
+        "-c",
+        "user.email=e2e@example.test",
+        "commit",
+        "-qm",
+        "initial",
+    ]);
+    let head = git(&["rev-parse", "HEAD"]);
+    std::fs::write(&file, b"staged\r\nselected").unwrap();
+    git(&["--literal-pathspecs", "add", "--", "file[1].txt"]);
+    std::fs::write(&file, b"working\nselected\n").unwrap();
+    let before = git(&["status", "--porcelain"]);
+    let (index, bytes) = get_source(root, "file[1].txt", SourceKind::IndexFile, None).unwrap();
+    assert_eq!(bytes, b"staged\r\nselected");
+    assert!(
+        matches!(&index, AnchorSource::IndexFile { blob_oid, .. } if blob_oid == &git(&["rev-parse", ":file[1].txt"]))
+    );
+    let evidence = AnchorEvidence::capture(index.clone(), &bytes, 2, 2).unwrap();
+    assert_eq!(evidence.selected_text, "selected");
+    assert_eq!(evidence.context_before, "staged");
+    let (working, bytes) = get_source(root, "file[1].txt", SourceKind::WorkingFile, None).unwrap();
+    assert_eq!(bytes, b"working\nselected\n");
+    assert_ne!(working.content_hash(), index.content_hash());
+    let (committed, bytes) =
+        get_source(root, "file[1].txt", SourceKind::Commit, Some(&head)).unwrap();
+    assert_eq!(bytes, b"original\r\nselected\r\n");
+    assert!(matches!(committed, AnchorSource::Commit { sha, .. } if sha == head));
+    assert_eq!(
+        git(&["status", "--porcelain"]),
+        before,
+        "source reads must not change the checkout or index"
+    );
+    assert!(get_source(root, "../outside", SourceKind::WorkingFile, None).is_err());
+    assert!(get_source(root, "file[1].txt", SourceKind::Legacy, None).is_err());
+}
+
+#[test]
+fn should_distinguish_line_endings_and_final_newline_in_source_identity() {
+    let first = AnchorSource::hash(b"line\r\n");
+    assert_ne!(first, AnchorSource::hash(b"line\n"));
+    assert_ne!(first, AnchorSource::hash(b"line"));
+    let source = AnchorSource::LocalFile {
+        content_hash: first,
+    };
+    assert!(AnchorEvidence::capture(source.clone(), b"line\r\n", 1, 1).is_ok());
+    assert!(AnchorEvidence::capture(source.clone(), b"line\n", 1, 1).is_err());
+    assert!(AnchorEvidence::capture(source, b"line\r\n", 1, 2).is_err());
 }

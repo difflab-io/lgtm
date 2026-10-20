@@ -10,3 +10,5 @@ mod actor;
 pub mod workspace;
 
 pub mod forge;
+
+pub mod diff;

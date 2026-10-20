@@ -10,23 +10,25 @@ The backend is the library's application client. Backend services own domain val
 
 ### Functional
 
-- Persist identities, forge repository URLs, workspace paths, contexts, sessions, threads and comments.
-- Expose the queries and mutations required by backend services.
-- Support transactions across repositories, with explicit commit and rollback.
-- Apply pending schema migrations before returning a connected client.
-- Enforce record relationships, unique keys and valid field combinations.
+- FR1: Persist identities, forge repository URLs, workspace paths, contexts, sessions, threads and comments.
+- FR2: Expose the queries and mutations required by backend services.
+- FR3: Support transactions across repositories, with explicit commit and rollback.
+- FR4: Apply pending schema migrations before returning a connected client.
+- FR5: Enforce record relationships, unique keys and valid field combinations.
 
 ### Non-Functional
 
-- Share repository implementations and Rust migrations across SQLite and PostgreSQL.
-- Expose SeaORM `Model` values while keeping entity operations and raw connections private.
-- Keep backend services, forge providers and network operations outside the library.
+- NFR1: Share repository implementations and Rust migrations across SQLite and PostgreSQL.
+- NFR2: Expose SeaORM `Model` values while keeping entity operations and raw connections private.
+- NFR3: Keep backend services, forge providers and network operations outside the library.
 
-## Usage
+## Design
+
+### Usage
 
 This mini tutorial shows the API that backend code uses. Start with a connection, insert and query a record, then compose operations in a transaction. The comment-edit example assumes that its context and comment already exist.
 
-### Connect, insert and query
+#### Connect, insert and query
 
 The default feature enables SQLite. A PostgreSQL build must enable the `postgres` feature. Both drivers use the same client and repository API.
 
@@ -58,7 +60,7 @@ async fn example() -> Result<()> {
 }
 ```
 
-### Look up a context
+#### Look up a context
 
 The database `ContextKey` is independent of the backend domain type:
 
@@ -73,7 +75,7 @@ let context = db.review_contexts
     .await?;
 ```
 
-### Change records atomically
+#### Change records atomically
 
 ```mermaid
 sequenceDiagram
@@ -132,7 +134,7 @@ async fn edit_comment(
 }
 ```
 
-### Cancel or nest work
+#### Cancel or nest work
 
 For explicit cancellation, call `tx.rollback().await?`. For a nested boundary, call `let nested = tx.begin().await?`, use `nested` repository fields, then commit or roll back `nested`. The outer transaction still controls the final database commit.
 
@@ -140,13 +142,12 @@ For explicit cancellation, call `tx.rollback().await?`. For a nested boundary, c
 
 The backend can await other fallible work before commit and roll back database changes if that work fails. A database rollback cannot undo a completed network operation. External side effects require a separate application policy.
 
-### Handle startup and shutdown
+#### Handle startup and shutdown
 
 `Database::connect()` applies pending migrations automatically. Callers do not run a separate migration API. If startup or migration fails, the call returns an error instead of a client.
 
 Cloned database clients share their connection pool. Call `db.close().await` after all users finish. Closing one client closes that shared pool.
 
-## Design
 
 ### Components and Responsibilities
 
@@ -180,18 +181,29 @@ flowchart TB
     Schema --> Storage
 ```
 
-| Component | Responsibility |
-| --- | --- |
-| Backend services | Supply validated values, call repository methods and decide transaction boundaries. |
-| `Database<C>` | Bind repository fields to one shared connection or transaction. The default `C` is SeaORM's pool-backed `DatabaseConnection`. |
-| `Transaction` | Alias for `Database<DatabaseTransaction>`. Expose the same repositories, plus consuming `commit()` and `rollback()` methods. |
-| Repository structs | Execute the supported queries and mutations. Select writable columns explicitly. |
-| `models` | Re-export each table's actual SeaORM `Model` type through a public namespace. |
-| Private `entities/` | Define columns and relationships. Shared SeaORM enums live in `entities/common.rs` and are re-exported as `types`. |
-| Private `Migrator` | Apply ordered Rust migrations and maintain the framework's migration history. |
-| SchemaManager and SeaQuery | Build schema operations for the selected database driver. |
+- Backend services: Supply validated values, call repository methods and decide transaction boundaries.
+- `Database<C>`: Bind repository fields to one shared connection or transaction. The default `C` is SeaORM's pool-backed `DatabaseConnection`.
+- `Transaction`: Alias for `Database<DatabaseTransaction>`. Expose the same repositories, plus consuming `commit()` and `rollback()` methods.
+- Repository structs: Execute the supported queries and mutations. Select writable columns explicitly.
+- `models`: Re-export each table's actual SeaORM `Model` type through a public namespace.
+- Private `entities/`: Define columns and relationships. Shared SeaORM enums live in `entities/common.rs` and are re-exported as `types`.
+- Private `Migrator`: Apply ordered Rust migrations and maintain the framework's migration history.
+- SchemaManager and SeaQuery: Build schema operations for the selected database driver.
 
 The client exposes five fields: `identities`, `review_contexts`, `workspace`, `sessions` and `comments`. The comment repository also owns thread operations. Callers use `db.sessions.get_active(&context_id)` directly.
+
+### Data and Control Flow
+
+```mermaid
+flowchart LR
+    Caller["Backend service"] --> Handle["Database or transaction handle"]
+    Handle --> Repository["Named repository operation"]
+    Repository --> SQL["SQLite or PostgreSQL"]
+    SQL --> Rows["SeaORM models or error"]
+    Rows --> Caller
+```
+
+The caller chooses the transaction boundary. All operations on its transaction use the same SQL transaction. Repositories return records. Backend services apply domain rules to those records.
 
 ### Interfaces and Contracts
 
@@ -456,7 +468,7 @@ To add a schema change, add a migration under `src/migration/` and register it i
 
 SQLite startup uses a sibling filesystem lock to serialize migration attempts. PostgreSQL deployments must complete startup migrations before launching parallel backend instances. The library exposes no public migrate, downgrade or reset method.
 
-The current initial migration targets a fresh development database. Desktop upgrade policy and local/remote synchronization remain [future ADR topics](../../../adr/README.md).
+Additive migrations preserve populated databases and their original anchors. Desktop distribution upgrade policy and local/remote synchronization remain [future ADR topics](../../../adr/README.md).
 
 ### Drivers and verification
 
@@ -467,14 +479,6 @@ SQLite uses one connection per pool. PostgreSQL permits up to eight connections 
 SQLite enables foreign keys and uses the driver's five-second busy timeout with its default journal mode. Updating the context revision serializes dependent writes. PostgreSQL acquires the corresponding row lock through that update.
 
 Private tests cover entity relationships and migration history. Public integration tests compose repository queries and mutations, transactions, rollback and savepoints. The contracts run on real SQLite and PostgreSQL databases.
-
-## References
-
-- [Client and transaction implementation](../../../libs/lgtm-db/src/connection.rs).
-- [Repository implementations](../../../libs/lgtm-db/src/repositories/mod.rs) and [public models](../../../libs/lgtm-db/src/models.rs).
-- [Shared entity types](../../../libs/lgtm-db/src/entities/common.rs) and [initial migration](../../../libs/lgtm-db/src/migration/m20261015_220400_review.rs).
-- [Migration runner](../../../libs/lgtm-db/src/migration/mod.rs) and [public integration tests](../../../libs/lgtm-db/tests).
-- [Backend architecture](../backend/index.md) and [CLI review flows](../cli/index.md#review-situation-flows).
 
 ### Review workflow additions
 
@@ -487,3 +491,26 @@ For non-Git notes, `threads.reviewed_commit` also accepts a `sha256:`-prefixed c
 `CommentRepository::delete_draft` and `delete_empty_thread` support owned unposted draft deletion under the service's context transaction. A root with replies must have its replies removed first. Submission receipt/state updates use the existing session columns and named repository methods; no second submission store exists.
 
 The additive `m20261018_210000_selected_text` migration adds nullable `threads.selected_text`. It contains only the original selected lines for new non-Git line notes. Domain relocation accepts one exact match in current content and otherwise leaves an outdated file-level fallback. The original line/commit columns and excerpt are immutable after insertion; this is not full-file snapshot history. Existing rows with no excerpt retain hash-only fallback behavior.
+
+### Source evidence and mutation receipts
+
+Additive migrations 090–093 extend existing review records. They do not replace contexts, sessions, or submission ownership.
+
+```mermaid
+flowchart LR
+    Origin["Immutable original anchor, source identity, and excerpt"] --> Thread["Existing thread"]
+    Thread --> Current["Mutable current path and orphan reason"]
+    Thread --> Forge["Separate provider comparison and coordinates"]
+    Context["Immutable notes lookup key"] --> Root["Unique current notes root"]
+    Context --> Receipt["Actor, operation, payload, and saved result"]
+```
+
+The database constrains source shapes, forge-state shapes, unique current notes locations, and unresolved mutation ownership. Named repository updates preserve original evidence and saved-file source paths. A confirmed move changes current associations, not the original anchor or thread ID. A later comment records its own actual source location. Legacy unknown evidence stays unknown. Real SQLite and PostgreSQL contracts cover populated upgrades, immutable origins, unique locations, transaction rollback, and durable retry receipts.
+
+## References
+
+- [Client and transaction implementation](../../../libs/lgtm-db/src/connection.rs).
+- [Repository implementations](../../../libs/lgtm-db/src/repositories/mod.rs) and [public models](../../../libs/lgtm-db/src/models.rs).
+- [Shared entity types](../../../libs/lgtm-db/src/entities/common.rs) and [initial migration](../../../libs/lgtm-db/src/migration/m20261015_220400_review.rs).
+- [Migration runner](../../../libs/lgtm-db/src/migration/mod.rs) and [public integration tests](../../../libs/lgtm-db/tests).
+- [Backend architecture](../backend/index.md) and [CLI review flows](../cli/index.md#review-situation-flows).
