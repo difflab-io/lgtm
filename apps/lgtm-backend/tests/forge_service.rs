@@ -870,14 +870,12 @@ async fn should_keep_original_anchors_and_refresh_current_provider_locations_ind
         assert_eq!(current.anchor, thread.anchor);
         assert_eq!(current.state, "resolved");
         assert!(current.outdated);
-        assert!(
-            current
-                .forge_observation
-                .as_ref()
-                .unwrap()
-                .current
-                .is_none(),
-            "original lines must not become current coordinates"
+        assert_eq!(
+            current.forge_observation.as_ref().unwrap().current,
+            Some(Anchor::File {
+                path: "file.txt".into()
+            }),
+            "a known file may remain current, but original lines must not become current coordinates"
         );
         assert_eq!(refreshed.comments[0].id, first.comments[0].id);
     }
@@ -1063,6 +1061,17 @@ async fn should_recover_remote_edits_resolution_and_deletion_after_response_loss
             .sync_draft(&session.id, &draft.id, &actor)
             .await
             .unwrap();
+        {
+            let mut remote = state.lock().unwrap();
+            remote.review.as_mut().unwrap()["state"] = json!("COMMENTED");
+            remote.review.as_mut().unwrap()["body"] = json!("");
+            for thread in &mut remote.threads {
+                for comment in thread["comments"]["nodes"].as_array_mut().unwrap() {
+                    comment["pullRequestReview"]["state"] = json!("COMMENTED");
+                }
+            }
+        }
+        forge.refresh(&context.id).await.unwrap();
         for (key, input) in [
             (
                 "edit",
@@ -1423,6 +1432,19 @@ async fn should_use_targeted_actions_and_never_restore_confirmed_remote_deletion
             state.requests.clear();
         }
 
+        // Resolution applies only after the provider publishes the thread.
+        {
+            let mut state = remote.lock().unwrap();
+            state.review.as_mut().unwrap()["state"] = json!("COMMENTED");
+            state.review.as_mut().unwrap()["body"] = json!("");
+            for thread in &mut state.threads {
+                for comment in thread["comments"]["nodes"].as_array_mut().unwrap() {
+                    comment["pullRequestReview"]["state"] = json!("COMMENTED");
+                }
+            }
+        }
+        forge.refresh(&context.id).await.unwrap();
+        remote.lock().unwrap().requests.clear();
         // Resolution is acknowledged by the mutation itself: no /user or whole-PR scans.
         forge
             .change(

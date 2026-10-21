@@ -111,6 +111,15 @@ impl ForgeService {
                         .into_iter()
                         .find(|t| t.id == *thread_id)
                         .ok_or_else(|| Error::NotFound("Thread".into()))?;
+                    if !conversation.comments.iter().any(|comment| {
+                        comment.thread_id == *thread_id
+                            && !comment.deleted
+                            && comment.visibility != "draft"
+                    }) {
+                        return Err(invalid(
+                            "Publish draft comments before resolving their thread",
+                        ));
+                    }
                     if thread.forge_thread_id.is_none() {
                         return Ok(ForgeChangeObject::Thread(Box::new(
                             self.reviews

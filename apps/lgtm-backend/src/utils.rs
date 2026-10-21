@@ -42,6 +42,9 @@ pub struct RemoteThread {
     #[serde(default)]
     pub observation: Option<ForgeObservation>,
     pub resolved: bool,
+    /// A provider-confirmed missing source file; unknown placement alone is not deletion.
+    #[serde(default)]
+    pub orphan_reason: Option<crate::models::OrphanReason>,
     pub comments: Vec<RemoteComment>,
 }
 

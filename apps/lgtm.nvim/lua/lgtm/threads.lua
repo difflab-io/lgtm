@@ -77,6 +77,18 @@ function M.at(state, path, side, line)
   return result
 end
 
+local function can_resolve(state, thread)
+  if state.kind ~= "pr" then
+    return true
+  end
+  for _, comment in ipairs(comments(state, thread)) do
+    if comment.visibility ~= "draft" then
+      return true
+    end
+  end
+  return false
+end
+
 local function comment_status(comment)
   if comment.visibility ~= "draft" then
     return comment.visibility or ""
@@ -538,7 +550,9 @@ function M.open(state, threads, pane)
       api.nvim_win_set_config(win, {
         footer = " "
           .. label
-          .. " · Tab next · c reply · e edit · dd delete · x resolve · q close ",
+          .. " · Tab next · c reply · e edit · dd delete"
+          .. (entry and can_resolve(state, entry.thread) and " · x resolve" or "")
+          .. " · q close ",
       })
     end
   end
@@ -649,6 +663,10 @@ function M.open(state, threads, pane)
   map("x", function()
     local row = selected()
     if not row then
+      return
+    end
+    if not can_resolve(state, row.thread) then
+      require("lgtm.notifications").show("Publish draft comments before resolving their thread")
       return
     end
     M.mutate(

@@ -252,6 +252,7 @@ impl Github {
                     id,
                     anchor,
                     observation,
+                    orphan_reason: None,
                     resolved: node["isResolved"] == true,
                     comments: mapped,
                 });
@@ -280,9 +281,52 @@ impl Github {
                     id: format!("{kind}:{}", c.id),
                     anchor: Anchor::General,
                     observation: None,
+                    orphan_reason: None,
                     resolved: false,
                     comments: vec![c],
                 });
+            }
+        }
+        // Outdated coordinates alone cannot prove a deleted file. Read changed-file
+        // metadata only for these threads; never fetch file bodies during refresh.
+        if threads.iter().any(|thread| {
+            thread
+                .observation
+                .as_ref()
+                .is_some_and(|observation| observation.outdated)
+        }) {
+            let files = self
+                .get_all(&format!("{}/pulls/{pr}/files", repo.route()))
+                .await?;
+            for thread in &mut threads {
+                let Some(observation) = &mut thread.observation else {
+                    continue;
+                };
+                if !observation.outdated {
+                    continue;
+                }
+                let original_path = match &thread.anchor {
+                    Anchor::File { path } | Anchor::Line { path, .. } => path,
+                    Anchor::General => continue,
+                };
+                let Some(file) = files.iter().find(|file| {
+                    file["filename"].as_str() == Some(original_path.as_str())
+                        || file["previous_filename"].as_str() == Some(original_path.as_str())
+                }) else {
+                    continue;
+                };
+                if file["status"] == "removed" {
+                    thread.orphan_reason = Some(crate::models::OrphanReason::FileDeleted);
+                    observation.current = None;
+                } else {
+                    let current_path = text(file, "filename")?;
+                    match &mut observation.current {
+                        Some(Anchor::File { path } | Anchor::Line { path, .. }) => {
+                            *path = current_path
+                        }
+                        _ => observation.current = Some(Anchor::File { path: current_path }),
+                    }
+                }
             }
         }
         let latest = self.get_pull_request(repo, pr).await?;

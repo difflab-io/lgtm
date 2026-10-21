@@ -2682,6 +2682,7 @@ impl ReviewService {
             thread.updated_by = None;
             thread.updated_at = now();
             thread.forge_observation = remote_thread.observation.clone();
+            thread.orphan_reason = remote_thread.orphan_reason;
             if let Some(observation) = &thread.forge_observation {
                 thread.outdated = observation.outdated;
                 thread.current_path = match &observation.current {

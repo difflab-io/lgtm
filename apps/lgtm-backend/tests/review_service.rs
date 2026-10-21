@@ -240,6 +240,7 @@ mod review_service {
                 base: Some("base".into()),
                 threads: vec![RemoteThread {
                     observation: None,
+                    orphan_reason: None,
                     id: "thread-1".into(),
                     anchor: Anchor::General,
                     resolved: false,
@@ -289,6 +290,47 @@ mod review_service {
         }
 
         // tests --------------------------------------------------------------
+
+        #[tokio::test]
+        async fn should_preserve_provider_confirmed_orphans_and_clear_them_after_restoration() {
+            for (db, _, _) in databases().await {
+                let context = db
+                    .ensure_context(
+                        ContextKey::ForgeBacked {
+                            repository_url: ForgeRepositoryUrl::parse(
+                                "https://github.com/acme/repo",
+                            )
+                            .unwrap(),
+                            number: 42,
+                        },
+                        None,
+                    )
+                    .await
+                    .unwrap();
+                let mut observed = snapshot("head");
+                observed.threads[0].anchor = Anchor::File {
+                    path: "deleted.rs".into(),
+                };
+                observed.threads[0].orphan_reason = Some(OrphanReason::FileDeleted);
+                db.refresh(&context, &FixtureProvider(observed.clone()))
+                    .await
+                    .unwrap();
+                let orphaned = db.get_conversation(&context.id, true).await.unwrap();
+                assert_eq!(
+                    orphaned.threads[0].orphan_reason,
+                    Some(OrphanReason::FileDeleted)
+                );
+                observed.threads[0].orphan_reason = None;
+                let current = db.get_context(&context.key).await.unwrap().unwrap();
+                db.refresh(&current, &FixtureProvider(observed))
+                    .await
+                    .unwrap();
+                let restored = db.get_conversation(&context.id, true).await.unwrap();
+                assert_eq!(restored.threads[0].orphan_reason, None);
+                assert_eq!(restored.threads[0].anchor, orphaned.threads[0].anchor);
+                db.database().close().await;
+            }
+        }
 
         #[tokio::test]
         async fn should_reconcile_forge_refreshes_and_preserve_attribution_on_post_failures() {
@@ -372,6 +414,7 @@ mod review_service {
                 let mut remote = snapshot("head");
                 remote.threads.push(RemoteThread {
                     observation: None,
+                    orphan_reason: None,
                     id: "agent-thread".into(),
                     anchor: Anchor::General,
                     resolved: false,
