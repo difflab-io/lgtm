@@ -1,2 +1,2 @@
 import { suiteConfig } from '../common/config.js'
-export default suiteConfig(import.meta.dirname, { exclude: ['**/live-github.spec.ts'] })
+export default suiteConfig(import.meta.dirname)

@@ -4,12 +4,13 @@ import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { decodeMultiStream, encode } from '@msgpack/msgpack'
-import { ROOT, Runtime, stop, waitFor, type Json } from './runtime.js'
+import { ROOT, Runtime, stop, waitFor, type Json } from '../common/runtime.js'
 
 /** Operates a real editor. Helpers perform actions; specifications own assertions. */
 export class Editor {
   private child?: ChildProcess
   private errors = ''
+  timeoutMs = 10_000
   private sequence = 0
   private pending = new Map<
     number,
@@ -21,6 +22,7 @@ export class Editor {
   ) {}
 
   async start() {
+    this.errors = ''
     this.child = spawn(
       'nvim',
       ['--embed', '--headless', '-u', join(ROOT, 'e2e/nvim/init.lua'), '-i', 'NONE', '-n'],
@@ -98,19 +100,12 @@ export class Editor {
   async choose(...choices: (string | number)[]) {
     await this.lua('_G.e2e.choices = ...', choices)
   }
-  async input(...values: string[]) {
-    await this.lua('_G.e2e.inputs = ...', values)
-  }
   async wait(expression: string, description: string) {
-    return waitFor(description, () => this.value(expression))
+    return waitFor(description, () => this.value(expression), Boolean, this.timeoutMs)
   }
   async edit(path: string) {
     await this.lua('vim.cmd.edit(vim.fn.fnameescape(...))', path)
   }
-  async cd(path: string) {
-    await this.lua('vim.cmd.cd(...)', path)
-  }
-
   async state(): Promise<Json | null> {
     return this.lua(`local s = require("lgtm.context").current; if not s then return vim.NIL end
       return {review=s.review, scope=s.scope, target=s.target, comparison=s.comparison, conversation=s.conversation,
@@ -182,6 +177,7 @@ export class Editor {
       `${count} comments`,
       () => this.state(),
       (s) => (s?.conversation?.comments?.length ?? 0) === count,
+      this.timeoutMs,
     )
   }
 
@@ -216,25 +212,6 @@ export class Editor {
     return this.value('require("lgtm.threads").last')
   }
 
-  async openPr(number: number) {
-    await this.lua(
-      `local number=...; require("lgtm.rpc").call("StartReview", {
-      target={pullRequest={repositoryUrl="https://github.com/acme/repo",number=tostring(number)}},
-      requestKey=require("lgtm.context").request_key()},function(err,result)
-      if err then _G.e2e.open_error=err else local s=require("lgtm.context").apply({},result.review); require("lgtm.review").open(s) end end)`,
-      number,
-    )
-    await waitFor(
-      `PR ${number}`,
-      () => this.state(),
-      (s) =>
-        Number(s?.target?.pullRequest?.number) === number &&
-        Boolean(s?.render_ready && s?.conversation && !s?.initializing),
-    )
-    await this.pane('new', 2)
-    return (await this.state())!
-  }
-
   async openLocal(mode: string, replace = false) {
     if (await this.state()) await this.command('Lgtm close')
     const before = (await this.notices()).length
@@ -260,10 +237,6 @@ export class Editor {
 
   async close() {
     await stop(this.child)
-  }
-  async restart() {
-    await this.close()
-    await this.start()
   }
   async diagnostics() {
     if (!this.child || this.child.exitCode !== null || this.child.signalCode)

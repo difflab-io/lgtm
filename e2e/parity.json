@@ -2,631 +2,1022 @@
   {
     "legacy": "nvim/pending_resume.lua",
     "behavior": "Restart editor and backend, resume pending drafts, then submit the same review with a final comment",
-    "replacement": "nvim/github-review.spec.ts",
-    "steps": [
-      "Then restart resumes the same pending review and submission includes final text without reposting its saved draft"
+    "replacements": [
+      {
+        "file": "nvim/pr-review.spec.ts",
+        "scenarios": [
+          "Reopening the branch PR restores its pending cards and allows further comments",
+          "The submit shortcut uses the active PR and publishes a final message"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/anchor_resume.lua",
     "behavior": "Restart the editor and backend with preserved moved discussions and unstaged orphans",
-    "replacement": "nvim/anchor-lifecycle.spec.ts",
-    "steps": [
-      "And backend/editor restart preserves moved evidence, reply identity and unstaged orphans in the same review"
+    "replacements": [
+      {
+        "file": "nvim/local-review.spec.ts",
+        "scenarios": [
+          "Resuming after restart preserves renamed anchors, replies and unstaged orphan states"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/notes_moves.lua",
     "behavior": "Move a saved note between parents through editor file events and preserve its original evidence",
-    "replacement": "nvim/notes-and-directory.spec.ts",
-    "steps": [
-      "Given a saved note, editor rename events move the same discussion while copy events leave it in place"
+    "replacements": [
+      {
+        "file": "nvim/notes.spec.ts",
+        "scenarios": [
+          "The note follows real renames, rejects copy events and survives restart"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/notes_moves.lua",
     "behavior": "Move an ignored review directory twice and add feedback after the first root move",
-    "replacement": "nvim/notes-and-directory.spec.ts",
-    "steps": [
-      "When an ignored review root moves twice, cards remain visible and new feedback records the intermediate source"
+    "replacements": [
+      {
+        "file": "nvim/local-review.spec.ts",
+        "scenarios": [
+          "Confirmed root moves preserve discussions and remain usable after restart"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/notes_moves_resume.lua",
     "behavior": "Restart the backend and editor and resume moved notes and ignored-directory feedback",
-    "replacement": "nvim/notes-and-directory.spec.ts",
-    "steps": [
-      "Then editor/backend restart resumes both notes and the same ignored review"
+    "replacements": [
+      {
+        "file": "nvim/notes.spec.ts",
+        "scenarios": [
+          "The note follows real renames, rejects copy events and survives restart"
+        ]
+      },
+      {
+        "file": "nvim/local-review.spec.ts",
+        "scenarios": [
+          "Confirmed root moves preserve discussions and remain usable after restart"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/github_review.lua",
     "behavior": "Select a current-branch PR, comment on both sides and file/review scopes, then submit approval with a final body",
-    "replacement": "nvim/github-review.spec.ts",
-    "steps": [
-      "Given inferred origin and branch, Review offers working, staged, branch and PR; the searchable PR picker needs no repository prompt",
-      "When both diff sides, a file and the whole review receive feedback, inline Enter opens all threads at the selected line"
+    "replacements": [
+      {
+        "file": "nvim/pr-review.spec.ts",
+        "scenarios": [
+          "The PR option infers the branch and opens its review in the native CodeDiff tree",
+          "Old-side, file-level and general feedback retain their scopes in the editor and GitHub",
+          "The submit shortcut uses the active PR and publishes a final message"
+        ]
+      },
+      {
+        "file": "backend/pr-review.spec.ts",
+        "scenarios": [
+          "User can submit %s on another author’s PR"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/github_review.lua",
     "behavior": "Keep the draft and final body after permission and stale-head failures",
-    "replacement": "nvim/github-review.spec.ts",
-    "steps": [
-      "Then permission and stale-head errors retain the draft and final composer text until refresh permits an explicit retry"
-    ]
+    "replacements": [
+      {
+        "file": "nvim/pr-review.spec.ts",
+        "scenarios": [
+          "A rejected self-review leaves the final message editable and allows a corrected outcome",
+          "Refresh displays the new commit and retains the pending review and comment card"
+        ]
+      },
+      {
+        "file": "backend/pr-review.spec.ts",
+        "scenarios": [
+          "User can recover authentication failure without losing feedback"
+        ]
+      }
+    ],
+    "note": "Live tests cover rejected self-reviews and real authentication failures; stale commits now auto-refresh instead of blocking the session."
   },
   {
     "legacy": "nvim/github_review.lua",
     "behavior": "Recover an accepted submission after a lost response without posting it twice",
-    "replacement": "nvim/github-review.spec.ts",
-    "steps": [
-      "When GitHub accepts submission but loses its response, reconciliation is read-only and export includes the final body"
-    ]
+    "replacements": [
+      {
+        "file": "backend/pr-review.spec.ts",
+        "scenarios": [
+          "Retrying an accepted submission after restart does not publish twice"
+        ]
+      },
+      {
+        "file": "../apps/lgtm-backend/tests/forge_service.rs",
+        "scenarios": [
+          "should_submit_final_body_and_comments_once_and_reconcile_lost_response"
+        ]
+      }
+    ],
+    "note": "Lost provider responses are injected only in Rust integration tests. Live E2E checks accepted-request replay after restart."
   },
   {
     "legacy": "nvim/pending_drafts.lua",
     "behavior": "Save, edit, reply to and delete GitHub pending drafts through the comment modal",
-    "replacement": "nvim/github-review.spec.ts",
-    "steps": [
-      "Given a PR, saving, editing and replying use the same private GitHub pending review",
-      "When resolve and delete wait for GitHub, progress appears before confirmation and only scoped requests are sent"
+    "replacements": [
+      {
+        "file": "nvim/pr-review.spec.ts",
+        "scenarios": [
+          "Lowercase c creates a remote draft shown as a full-width card with status and preview text",
+          "Replies show nesting and their own selection label, and can be edited and deleted",
+          "Deleting the final comment removes its card and shows request progress"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/pending_drafts.lua",
     "behavior": "Recover an accepted draft after a lost response without reposting it",
-    "replacement": "nvim/github-review.spec.ts",
-    "steps": [
-      "When a draft or pending-review creation response is lost, sync discovers the accepted object instead of duplicating it"
-    ]
+    "replacements": [
+      {
+        "file": "backend/pr-review.spec.ts",
+        "scenarios": [
+          "Retrying an accepted draft after a push and restart does not create another remote comment"
+        ]
+      },
+      {
+        "file": "../apps/lgtm-backend/tests/forge_service.rs",
+        "scenarios": [
+          "should_finalize_only_verified_pending_review_and_never_replay_missing_comment"
+        ]
+      }
+    ],
+    "note": "Lost provider responses remain a Rust integration contract; live E2E verifies draft replay after a real push and restart."
   },
   {
     "legacy": "nvim/pending_drafts.lua",
     "behavior": "Recover pending review creation after a lost response without creating another review",
-    "replacement": "nvim/github-review.spec.ts",
-    "steps": [
-      "When a draft or pending-review creation response is lost, sync discovers the accepted object instead of duplicating it"
-    ]
+    "replacements": [
+      {
+        "file": "../apps/lgtm-backend/tests/forge_service.rs",
+        "scenarios": [
+          "should_finalize_only_verified_pending_review_and_never_replay_missing_comment"
+        ]
+      }
+    ],
+    "note": "Provider-response loss is a Rust integration test, not a simulated E2E provider."
   },
   {
     "legacy": "nvim/pending_drafts.lua",
     "behavior": "Remove externally deleted GitHub drafts from the diff, export and reopened review",
-    "replacement": "nvim/github-review.spec.ts",
-    "steps": [
-      "Then externally discarded drafts disappear from cards, export and reopen without being recreated"
+    "replacements": [
+      {
+        "file": "nvim/pr-review.spec.ts",
+        "scenarios": [
+          "Drafts removed on GitHub disappear from the diff and exported Markdown"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/pending_drafts.lua",
     "behavior": "Delete a thread's original comment while keeping its replies visible, then remove its last reply",
-    "replacement": "nvim/github-review.spec.ts",
-    "steps": [
-      "When a remote root is deleted, surviving replies keep their role and accept more replies until the final deletion removes the card"
-    ]
+    "replacements": [
+      {
+        "file": "backend/pr-review.spec.ts",
+        "scenarios": [
+          "Deleting a published root leaves its reply visible after restart without a placeholder"
+        ]
+      }
+    ],
+    "note": "Live API tests cover published root deletion with surviving replies. Editor cases cover selected reply and final-comment deletion."
   },
   {
     "legacy": "nvim/pending_drafts.lua",
     "behavior": "Keep self-reviews and rejected submissions editable, retain final text, then submit as a comment",
-    "replacement": "nvim/github-review.spec.ts",
-    "steps": [
-      "Then invalid self-reviews and definite final-event rejection retain editable drafts and final text for a corrected Comment submission"
+    "replacements": [
+      {
+        "file": "nvim/pr-review.spec.ts",
+        "scenarios": [
+          "A rejected self-review leaves the final message editable and allows a corrected outcome"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/anchor_lifecycle.lua",
     "behavior": "Comment on exact staged CRLF bytes while the working copy differs",
-    "replacement": "nvim/anchor-lifecycle.spec.ts",
-    "steps": [
-      "Given CRLF index bytes and a different working copy, lowercase c captures stage zero exactly"
+    "replacements": [
+      {
+        "file": "nvim/local-review.spec.ts",
+        "scenarios": [
+          "Comments capture exact index bytes and a reply remains attached to its original discussion"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/anchor_lifecycle.lua",
     "behavior": "Carry staged comments and replies into a committed branch comparison",
-    "replacement": "nvim/anchor-lifecycle.spec.ts",
-    "steps": [
-      "When the staged source is committed and later shifts, the branch view keeps IDs and immutable index evidence"
+    "replacements": [
+      {
+        "file": "nvim/local-review.spec.ts",
+        "scenarios": [
+          "Completing the staged review and committing preserves the anchor and replies in a branch review"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/anchor_lifecycle.lua",
     "behavior": "Follow a confirmed directory rename without copying threads or rewriting origins",
-    "replacement": "nvim/anchor-lifecycle.spec.ts",
-    "steps": [
-      "Then a confirmed directory rename moves one discussion without copying it or rewriting its origin"
+    "replacements": [
+      {
+        "file": "nvim/local-review.spec.ts",
+        "scenarios": [
+          "Renaming the reviewed directory moves its cards and keeps replies attached"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/anchor_lifecycle.lua",
     "behavior": "Float a lost selection above the file and open its original evidence in a centered thread",
-    "replacement": "nvim/anchor-lifecycle.spec.ts",
-    "steps": [
-      "When selected text disappears, the card floats to the file header and its centered modal shows the lost original lines"
+    "replacements": [
+      {
+        "file": "nvim/local-review.spec.ts",
+        "scenarios": [
+          "Losing the selected text floats an outdated card above the file with original line evidence"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/anchor_lifecycle.lua",
     "behavior": "Retain deleted-file discussions as orphaned items and reconnect matching restored text",
-    "replacement": "nvim/anchor-lifecycle.spec.ts",
-    "steps": [
-      "Then deleted files retain orphaned discussions and matching restoration reconnects them to their current line"
+    "replacements": [
+      {
+        "file": "nvim/local-review.spec.ts",
+        "scenarios": [
+          "Deleting the file keeps orphaned discussions available in the thread list",
+          "Restoring matching source reconnects the same discussion to its original selection"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/anchor_lifecycle.lua",
     "behavior": "Hide discussions outside the staged diff without orphaning them or losing exports",
-    "replacement": "nvim/anchor-lifecycle.spec.ts",
-    "steps": [
-      "When a staged diff hides another file’s feedback, it remains in the context and export rather than becoming orphaned"
+    "replacements": [
+      {
+        "file": "nvim/local-review.spec.ts",
+        "scenarios": [
+          "Selecting a diff without the commented file hides its card without orphaning the discussion"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/anchor_lifecycle.lua",
     "behavior": "Orphan changed unstaged anchors while preserving feedback and readable exports",
-    "replacement": "nvim/anchor-lifecycle.spec.ts",
-    "steps": [
-      "Then changed unstaged anchors become labeled orphans while exports and normal-file mappings remain intact"
+    "replacements": [
+      {
+        "file": "nvim/local-review.spec.ts",
+        "scenarios": [
+          "Changing the working file orphans its unstaged comment instead of moving it without proof",
+          "Export contains preserved replies and orphaned feedback without internal IDs or source hashes"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/notifications.lua",
     "behavior": "Notifications, cards and modals inherit the theme and accept user highlight overrides",
-    "replacement": "nvim/editor-services.spec.ts",
-    "steps": [
-      "Then the real notification renderer uses fixed dimensions and LGTM semantic colors, and custom borders apply to cards and modals",
-      "And a searchable picker has a clear no-results state and Escape cancels without selecting an item"
+    "replacements": [
+      {
+        "file": "nvim/editor-services.spec.ts",
+        "scenarios": [
+          "Notifications use the plugin accent, compact geometry and user highlight overrides",
+          "Composer borders and comment cards follow the same user configuration"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/native_pr.lua",
     "behavior": "Recover a failed PR load through refresh without leaving comments stuck on loading",
-    "replacement": "nvim/native-review.spec.ts",
-    "steps": [
-      "Given a provider failure after PR selection, the native diff remains usable and refresh ends the failed loading state"
-    ]
+    "replacements": [
+      {
+        "file": "nvim/pr-review.spec.ts",
+        "scenarios": [
+          "Refresh recovers from authentication failure and re-enables commenting"
+        ]
+      }
+    ],
+    "note": "A real authentication failure during refresh is recovered after restoring credentials; the comment action is checked afterward."
   },
   {
     "legacy": "nvim/native_pr.lua",
     "behavior": "Infer the branch PR, navigate the picker, and open the native tree before delayed comment loading",
-    "replacement": "nvim/native-review.spec.ts",
-    "steps": [
-      "When the branch PR picker opens, arrows move its highlighted selection and CodeDiff renders before slow comments finish"
+    "replacements": [
+      {
+        "file": "nvim/pr-review.spec.ts",
+        "scenarios": [
+          "The PR option infers the branch and opens its review in the native CodeDiff tree",
+          "Typing filters branch PRs, arrow keys change selection and Escape cancels without starting a review"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/native_pr.lua",
     "behavior": "Mark and unmark PR files with checkmarks, targeting the selected tree file",
-    "replacement": "nvim/native-review.spec.ts",
-    "steps": [
-      "Then marking a tree selection loads and checks the correct file, survives redraw and toggles cleanly"
+    "replacements": [
+      {
+        "file": "nvim/pr-review.spec.ts",
+        "scenarios": [
+          "The mark shortcut toggles the checkmark in the native CodeDiff tree"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/native_pr.lua",
     "behavior": "Navigate the native tree and create a collapsed comment that opens in a centered modal",
-    "replacement": "nvim/native-review.spec.ts",
-    "steps": [
-      "When lowercase c adds feedback, full-width collapsed cards show status and one preview line without changing read-only code"
+    "replacements": [
+      {
+        "file": "nvim/pr-review.spec.ts",
+        "scenarios": [
+          "Lowercase c creates a remote draft shown as a full-width card with status and preview text",
+          "Enter opens a centered modal that identifies the selected top-level comment"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/native_pr.lua",
     "behavior": "Keep provider-outdated PR comments above the file even when their original text still exists",
-    "replacement": "nvim/native-review.spec.ts",
-    "steps": [
-      "Then provider-outdated comments float above the file with original evidence even when their old text still exists"
-    ]
+    "replacements": [
+      {
+        "file": "nvim/pr-review.spec.ts",
+        "scenarios": [
+          "An outdated card floats above the file even if matching text remains elsewhere"
+        ]
+      }
+    ],
+    "note": "The live editor case changes the target hunk while keeping matching text elsewhere in the file."
   },
   {
     "legacy": "nvim/native_pr.lua",
     "behavior": "Follow new PR commits on reopen and refresh while retaining the same review and pending drafts",
-    "replacement": "nvim/native-review.spec.ts",
-    "steps": [
-      "When commits arrive on reopen or during composition, the same PR and pending review follow the selected text"
+    "replacements": [
+      {
+        "file": "nvim/pr-review.spec.ts",
+        "scenarios": [
+          "Refresh displays the new commit and retains the pending review and comment card",
+          "Reopening the branch PR restores its pending cards and allows further comments"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/native_pr.lua",
     "behavior": "Review and complete a local branch from its merge base without GitHub",
-    "replacement": "nvim/native-review.spec.ts",
-    "steps": [
-      "Then branch review uses the merge base locally and clean working/staged views have clear empty states"
+    "replacements": [
+      {
+        "file": "nvim/diffs.spec.ts",
+        "scenarios": [
+          "A branch review opens native revision buffers and its checkmark can be toggled"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/native_pr.lua",
     "behavior": "Show clear empty states for clean working and staged comparisons",
-    "replacement": "nvim/native-review.spec.ts",
-    "steps": [
-      "Then branch review uses the merge base locally and clean working/staged views have clear empty states"
+    "replacements": [
+      {
+        "file": "nvim/diffs.spec.ts",
+        "scenarios": [
+          "An empty %s comparison reports its state and remains completable"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/native_pr.lua",
     "behavior": "Review saved working changes in the native CodeDiff explorer",
-    "replacement": "nvim/native-review.spec.ts",
-    "steps": [
-      "When working buffers are shared with ordinary tabs, review mappings and overlays follow the active tab"
+    "replacements": [
+      {
+        "file": "nvim/diffs.spec.ts",
+        "scenarios": [
+          "Working-file changes invalidate its checkmark"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/native_pr.lua",
     "behavior": "Restore ordinary-file mappings while a shared working buffer is outside its review tab",
-    "replacement": "nvim/native-review.spec.ts",
-    "steps": [
-      "When working buffers are shared with ordinary tabs, review mappings and overlays follow the active tab"
+    "replacements": [
+      {
+        "file": "nvim/diffs.spec.ts",
+        "scenarios": [
+          "Ordinary tabs keep note cards and original keys while review tabs keep review comments and keys"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/native_pr.lua",
     "behavior": "Refresh native file metadata and invalidate changed hidden files without rereading their bodies",
-    "replacement": "nvim/native-review.spec.ts",
-    "steps": [
-      "Then hidden working and staged source changes invalidate only their own reviewed checkmarks"
+    "replacements": [
+      {
+        "file": "nvim/diffs.spec.ts",
+        "scenarios": [
+          "A changed %s file loses its checkmark while another file keeps it"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/native_pr.lua",
     "behavior": "Review staged changes from the native Git index buffer",
-    "replacement": "nvim/native-review.spec.ts",
-    "steps": [
-      "Then hidden working and staged source changes invalidate only their own reviewed checkmarks"
+    "replacements": [
+      {
+        "file": "nvim/local-review.spec.ts",
+        "scenarios": [
+          "Comments capture exact index bytes and a reply remains attached to its original discussion"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/native_pr.lua",
     "behavior": "Resume saved commits or explicitly complete them before changing the branch comparison",
-    "replacement": "nvim/native-review.spec.ts",
-    "steps": [
-      "Then hidden working and staged source changes invalidate only their own reviewed checkmarks"
+    "replacements": [
+      {
+        "file": "nvim/diffs.spec.ts",
+        "scenarios": [
+          "User can resume the saved comparison or explicitly replace it with the current branch comparison"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/native_pr.lua",
     "behavior": "Show a clean native comparison after the last working change is restored",
-    "replacement": "nvim/native-review.spec.ts",
-    "steps": [
-      "Then hidden working and staged source changes invalidate only their own reviewed checkmarks"
+    "replacements": [
+      {
+        "file": "nvim/diffs.spec.ts",
+        "scenarios": [
+          "Refresh clears the selected file and stale source observers while keeping the native diff session open"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/workflow.lua",
     "behavior": "Browse a file, add a range note, manage replies, and export notes",
-    "replacement": "nvim/notes-and-directory.spec.ts",
-    "steps": [
-      "Given an ordinary file, a range note appears as a collapsed card and Enter opens a centered thread",
-      "When replies are edited, resolved, reopened and deleted, the modal identifies the selected role and preserves the root"
+    "replacements": [
+      {
+        "file": "nvim/notes.spec.ts",
+        "scenarios": [
+          "The note composer is centered and the saved selection has a visible card",
+          "Nested replies identify the selected reply and edit its own text",
+          "User can promote notes into the active review and export readable feedback"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/workflow.lua",
     "behavior": "Review ignored plan files, navigate, invalidate reviewed marks, and complete the local review",
-    "replacement": "nvim/notes-and-directory.spec.ts",
-    "steps": [
-      "When an ignored directory is reviewed, its persistent file pane supports navigation, checkmarks and content invalidation",
-      "Then line, file and review-level feedback use cards, expandable folds and a completion notification"
+    "replacements": [
+      {
+        "file": "nvim/local-review.spec.ts",
+        "scenarios": [
+          "The explorer navigates files and invalidates changed-file checkmarks",
+          "The session picker restores the completed discussion and export does not create another review"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/workflow.lua",
     "behavior": "Review working changes with old-side comments and switch CodeDiff layouts",
-    "replacement": "nvim/notes-and-directory.spec.ts",
-    "steps": [
-      "When the reader opens working changes, old-side comments and replies survive CodeDiff layout switches"
-    ]
+    "replacements": [
+      {
+        "file": "nvim/diffs.spec.ts",
+        "scenarios": [
+          "Old-side working comments and replies remain attached when switching CodeDiff layouts"
+        ]
+      }
+    ],
+    "note": "Both inline and side-by-side CodeDiff layouts are exercised."
   },
   {
     "legacy": "nvim/workflow.lua",
     "behavior": "Promote a standalone note into a review and export it to a file and clipboard",
-    "replacement": "nvim/notes-and-directory.spec.ts",
-    "steps": [
-      "Then promotion, file export and clipboard export retain readable Markdown without mutating saved feedback"
+    "replacements": [
+      {
+        "file": "nvim/notes.spec.ts",
+        "scenarios": [
+          "User can promote notes into the active review and export readable feedback"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/review_api.rs",
     "behavior": "should_advertise_target_based_contracts_and_reject_retired_setup_operations",
-    "replacement": "backend/local-review.spec.ts",
-    "steps": [
-      "Given the target-based API, consumers need no context or session setup"
+    "replacements": [
+      {
+        "file": "backend/identity.spec.ts",
+        "scenarios": [
+          "Consumers can discover the supported review contracts without creating reviews",
+          "Retired workspace and session RPCs are unavailable"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/review_api.rs",
     "behavior": "should_add_notes_by_location_and_retry_after_source_changes_without_a_visible_review",
-    "replacement": "backend/local-review.spec.ts",
-    "steps": [
-      "When a reader adds a range note, a lost response can be retried even after its file disappears"
+    "replacements": [
+      {
+        "file": "backend/notes.spec.ts",
+        "scenarios": [
+          "User can persist an exact line selection without creating a review",
+          "Retrying a saved note succeeds even when its source file is temporarily missing"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/review_api.rs",
     "behavior": "should_page_and_filter_one_conversation_while_preserving_moved_and_deleted_discussions",
-    "replacement": "backend/local-review.spec.ts",
-    "steps": [
-      "When a review has line feedback, a reply and file feedback, pages contain each comment once and filters preserve discussions",
-      "Then confirmed file moves and deletion preserve root/reply identity and immutable anchors"
+    "replacements": [
+      {
+        "file": "backend/local-review.spec.ts",
+        "scenarios": [
+          "Consumers can page discussions and filter them by the selected files",
+          "User feedback follows a confirmed file move while preserving its original anchor",
+          "User feedback remains orphaned with its original selection when a file is deleted"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/review_api.rs",
     "behavior": "should_reject_stale_object_edits_and_replay_deletion_without_recreating_feedback",
-    "replacement": "backend/local-review.spec.ts",
-    "steps": [
-      "Then guarded edits reject another editor’s stale body, and a retry returns the accepted result",
-      "Then backend restart preserves the moved discussion and repeated deletion cannot recreate feedback"
+    "replacements": [
+      {
+        "file": "backend/notes.spec.ts",
+        "scenarios": [
+          "User can edit a note while stale or mixed versions cannot overwrite it",
+          "User can delete replies and then delete the root without duplicating a retried deletion"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/review_api.rs",
     "behavior": "should_replace_only_the_selected_local_attempt_and_share_its_conversation",
-    "replacement": "backend/local-review.spec.ts",
-    "steps": [
-      "Given an active staged review, switching views requires an explicit guarded replacement",
-      "Then observations from an unrelated checkout branch cannot orphan this branch’s discussions"
+    "replacements": [
+      {
+        "file": "backend/local-review.spec.ts",
+        "scenarios": [
+          "User explicitly replaces the comparison while retaining feedback in the shared local context"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/review_api.rs",
     "behavior": "should_read_ignored_directory_diffs_and_derive_placements_without_starting_a_review",
-    "replacement": "backend/local-review.spec.ts",
-    "steps": [
-      "Given an ignored directory, DiffService reads exact bytes without creating a review",
-      "When content shifts or vanishes, fresh descriptors relocate uniquely or report an outdated selection"
+    "replacements": [
+      {
+        "file": "backend/diffs.spec.ts",
+        "scenarios": [
+          "Consumers can read ignored content without creating a review",
+          "A uniquely identifiable selection follows inserted lines"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/review_api.rs",
     "behavior": "should_promote_selected_notes_and_export_without_copying_or_changing_the_source_feedback",
-    "replacement": "backend/local-review.spec.ts",
-    "steps": [
-      "When a standalone note is promoted, the source remains intact and repeated promotion creates one target comment",
-      "Then moving the review root retains the review, and completion is idempotent across restart"
+    "replacements": [
+      {
+        "file": "backend/local-review.spec.ts",
+        "scenarios": [
+          "User can copy selected notes into a review without losing their author or modifying the source"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/review_api.rs",
     "behavior": "should_preserve_file_level_identity_and_reconnect_only_matching_restored_notes",
-    "replacement": "backend/local-review.spec.ts",
-    "steps": [
-      "And file-level notes reconnect only to the matching restored source"
+    "replacements": [
+      {
+        "file": "backend/notes.spec.ts",
+        "scenarios": [
+          "User keeps file-level feedback orphaned until the original bytes return"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/review_api.rs",
     "behavior": "should_export_actionable_markdown_with_replies_lost_locations_and_overall_feedback_without_database_metadata",
-    "replacement": "backend/local-review.spec.ts",
-    "steps": [
-      "When sources move or disappear, exports show original locations, replies and final feedback without database metadata"
+    "replacements": [
+      {
+        "file": "backend/local-review.spec.ts",
+        "scenarios": [
+          "Export describes moved and deleted files, replies and final feedback without internal state"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/review_api.rs",
     "behavior": "should_follow_notes_between_parents_and_keep_directory_review_identity_after_root_moves",
-    "replacement": "backend/local-review.spec.ts",
-    "steps": [
-      "When a file moves between parents, copies are rejected and a confirmed move preserves IDs and original evidence",
-      "Then moving the review root retains the review, and completion is idempotent across restart"
+    "replacements": [
+      {
+        "file": "backend/notes.spec.ts",
+        "scenarios": [
+          "User keeps original anchors and can add notes at the new location after restart"
+        ]
+      },
+      {
+        "file": "backend/local-review.spec.ts",
+        "scenarios": [
+          "Moving the review directory preserves its review identity and discussions"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/local_review.rs",
     "behavior": "should_persist_notes_replies_resolution_and_export_through_rpc",
-    "replacement": "backend/local-review.spec.ts",
-    "steps": [
-      "When the reader replies and resolves the thread, numbered Markdown retains the discussion without exposing IDs"
+    "replacements": [
+      {
+        "file": "backend/notes.spec.ts",
+        "scenarios": [
+          "User can reply, resolve and export a note without changing its stored discussion"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/github_review.rs",
     "behavior": "should_select_remote_content_submit_and_reconcile_without_checkout_or_duplicate_writes",
-    "replacement": "backend/github-review.spec.ts",
-    "steps": [
-      "Given a PR selection, start reads conversation metadata before downloading any file bodies",
-      "When selected remote content is requested, line, file and general comments retain their intended scope",
-      "When a final response is lost, restart and reconciliation confirm the same submission without another write",
-      "And a normal final response confirms directly and remains idempotent",
-      "Given pending feedback, refresh, reopen and later edits follow pushes without replacing the review or pending drafts"
+    "replacements": [
+      {
+        "file": "backend/pr-review.spec.ts",
+        "scenarios": [
+          "User can immediately persist an inline draft on the %s diff side",
+          "Retrying an accepted submission after restart does not publish twice"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/github_review.rs",
     "behavior": "should_preserve_drafts_when_github_permission_is_denied",
-    "replacement": "backend/github-review.spec.ts",
-    "steps": [
-      "When GitHub denies refresh or rate-limits it, saved feedback remains readable and no writes are replayed"
-    ]
+    "replacements": [
+      {
+        "file": "backend/pr-review.spec.ts",
+        "scenarios": [
+          "User can recover authentication failure without losing feedback"
+        ]
+      }
+    ],
+    "note": "A real invalid credential exercises authentication rejection. A valid account lacking repository permission is not separately provisioned."
   },
   {
     "legacy": "backend/tests/github_review.rs",
     "behavior": "should_review_a_pr_through_typed_scopes_and_recover_submission_after_restart",
-    "replacement": "backend/github-review.spec.ts",
-    "steps": [
-      "Given a PR selection, start reads conversation metadata before downloading any file bodies",
-      "Then edits and deletions are idempotent, resolution takes one provider request, and deleting a root leaves its replies usable",
-      "When a final response is lost, restart and reconciliation confirm the same submission without another write"
+    "replacements": [
+      {
+        "file": "backend/pr-review.spec.ts",
+        "scenarios": [
+          "User continues to see existing GitHub drafts after a backend restart",
+          "Retrying an accepted submission after restart does not publish twice"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/github_review.rs",
     "behavior": "should_keep_pr_feedback_readable_after_close_merge_and_reopen_without_completing_the_attempt",
-    "replacement": "backend/github-review.spec.ts",
-    "steps": [
-      "When the PR closes, merges or reopens, its feedback remains readable and its local attempt stays active"
+    "replacements": [
+      {
+        "file": "backend/pr-review.spec.ts",
+        "scenarios": [
+          "Closing and reopening a PR preserves its pending feedback and review identity",
+          "Merged PR feedback remains readable and exportable after restart"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/github_review.rs",
     "behavior": "should_promote_agent_notes_as_remotely_saved_drafts_owned_by_the_promoter",
-    "replacement": "backend/github-review.spec.ts",
-    "steps": [
-      "Then promoting agent notes preserves authorship, assigns the promoter ownership and saves one attributed pending draft"
+    "replacements": [
+      {
+        "file": "backend/pr-review.spec.ts",
+        "scenarios": [
+          "Agent notes can be promoted as remote drafts without changing the original note"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/github_review.rs",
     "behavior": "should_validate_pr_selection_bytes_locally_or_with_only_selected_remote_content_and_retry_without_the_source",
-    "replacement": "backend/github-review.spec.ts",
-    "steps": [
-      "Given local or remote PR sources, a wrong hash changes nothing and accepted retries need no surviving source"
-    ]
+    "replacements": [
+      {
+        "file": "backend/pr-review.spec.ts",
+        "scenarios": [
+          "User can immediately persist an inline draft on the %s diff side",
+          "Retrying an accepted draft after a push and restart does not create another remote comment"
+        ]
+      }
+    ],
+    "note": "Live API cases cover exact diff-side selections and replay after source changes. Selected-file HTTP request counts remain an integration concern."
   },
   {
     "legacy": "backend/tests/github_review.rs",
     "behavior": "should_preserve_pending_review_and_final_text_after_rejection_then_accept_a_corrected_outcome",
-    "replacement": "backend/github-review.spec.ts",
-    "steps": [
-      "Then self-approval and self-request-changes fail before writes, while an explicit final rejection preserves editable drafts and text"
+    "replacements": [
+      {
+        "file": "backend/pr-review.spec.ts",
+        "scenarios": [
+          "User cannot submit %s on their own PR"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/github_review.rs",
     "behavior": "should_delete_remote_roots_without_placeholders_and_keep_surviving_replies_after_restart",
-    "replacement": "backend/github-review.spec.ts",
-    "steps": [
-      "Then edits and deletions are idempotent, resolution takes one provider request, and deleting a root leaves its replies usable"
+    "replacements": [
+      {
+        "file": "backend/pr-review.spec.ts",
+        "scenarios": [
+          "Deleting a published root leaves its reply visible after restart without a placeholder"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/github_review.rs",
     "behavior": "should_follow_pushes_on_refresh_and_reopen_without_replacing_the_review_or_pending_drafts",
-    "replacement": "backend/github-review.spec.ts",
-    "steps": [
-      "Given pending feedback, refresh, reopen and later edits follow pushes without replacing the review or pending drafts"
+    "replacements": [
+      {
+        "file": "backend/pr-review.spec.ts",
+        "scenarios": [
+          "User comment placement is preserved when %s",
+          "User continues to see existing GitHub drafts after a backend restart"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/github_review.rs",
     "behavior": "should_follow_a_push_that_becomes_visible_during_draft_preflight_without_replaying_a_write",
-    "replacement": "backend/github-review.spec.ts",
-    "steps": [
-      "When a push lands during draft preflight, the bounded observation retry creates exactly one pending review and comment"
+    "replacements": [
+      {
+        "file": "backend/pr-review.spec.ts",
+        "scenarios": [
+          "Saving a selection after an unseen push automatically updates the PR without replacing the review"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/github_review.rs",
     "behavior": "should_map_unsent_selections_after_a_push_and_preserve_original_evidence",
-    "replacement": "backend/github-review.spec.ts",
-    "steps": [
-      "When an old composer selection meets inserted, renamed, missing or ambiguous text, posting relocates safely or floats to file feedback"
+    "replacements": [
+      {
+        "file": "backend/pr-review.spec.ts",
+        "scenarios": [
+          "Saving a selection after an unseen push automatically updates the PR without replacing the review"
+        ]
+      }
     ]
   },
   {
     "legacy": "backend/tests/github_review.rs",
     "behavior": "should_recover_a_lost_pending_review_response_after_a_push_and_backend_restart_without_duplicate_writes",
-    "replacement": "backend/github-review.spec.ts",
-    "steps": [
-      "Then a lost pending-creation response survives a push and backend restart without creating a second review"
-    ]
+    "replacements": [
+      {
+        "file": "backend/pr-review.spec.ts",
+        "scenarios": [
+          "Retrying an accepted draft after a push and restart does not create another remote comment"
+        ]
+      },
+      {
+        "file": "../apps/lgtm-backend/tests/forge_service.rs",
+        "scenarios": [
+          "should_finalize_only_verified_pending_review_and_never_replay_missing_comment"
+        ]
+      }
+    ],
+    "note": "Lost pending-review responses are checked by Rust integration tests, with live replay covered after a real commit and restart."
   },
   {
     "legacy": "cli/tests/local_review.rs",
     "behavior": "should_export_numbered_markdown_with_old_side_replies_and_final_feedback_without_mutation",
-    "replacement": "cli/review.spec.ts",
-    "steps": [
-      "Given working changes, old-side comments, Markdown and replies survive completion and export without mutation"
+    "replacements": [
+      {
+        "file": "cli/local-review.spec.ts",
+        "scenarios": [
+          "User gets readable old-side feedback, replies and final text without internal state"
+        ]
+      }
     ]
   },
   {
     "legacy": "cli/tests/local_review.rs",
     "behavior": "should_review_ignored_directory_export_and_resume_after_restart",
-    "replacement": "cli/review.spec.ts",
-    "steps": [
-      "When ignored plan feedback is edited and promoted, exports are readable and the source feedback remains intact",
-      "Then restart resumes the same attempt, completion creates a successor only when requested, and conversation feedback survives"
+    "replacements": [
+      {
+        "file": "cli/local-review.spec.ts",
+        "scenarios": [
+          "User can review ignored content and edit its feedback",
+          "User can resume, complete and start a successor while retaining discussions"
+        ]
+      }
     ]
   },
   {
     "legacy": "cli/tests/local_review.rs",
     "behavior": "should_return_json_error_without_starting_backend",
-    "replacement": "cli/review.spec.ts",
-    "steps": [
-      "Given no running backend, JSON commands report a useful error without starting one"
+    "replacements": [
+      {
+        "file": "cli/notes.spec.ts",
+        "scenarios": [
+          "User gets a JSON error without starting a backend"
+        ]
+      }
     ]
   },
   {
     "legacy": "cli/tests/local_review.rs",
     "behavior": "should_add_file_notes_without_a_visible_review_and_replay_exact_guarded_mutations",
-    "replacement": "cli/review.spec.ts",
-    "steps": [
-      "When a reader adds a file note twice with one request key, it saves one exact source selection and creates no review"
+    "replacements": [
+      {
+        "file": "cli/notes.spec.ts",
+        "scenarios": [
+          "User can persist exact selections, retry writes and delete a note after its file disappears"
+        ]
+      }
     ]
   },
   {
     "legacy": "cli/tests/local_review.rs",
     "behavior": "should_preserve_staged_source_and_discussion_when_committing_and_selecting_a_branch_review",
-    "replacement": "cli/review.spec.ts",
-    "steps": [
-      "When the index differs from the working tree, comments capture stage-zero bytes rather than HEAD or working content"
+    "replacements": [
+      {
+        "file": "cli/local-review.spec.ts",
+        "scenarios": [
+          "User retains exact index evidence and feedback across the commit"
+        ]
+      }
     ]
   },
   {
     "legacy": "cli/tests/local_review.rs",
     "behavior": "should_record_confirmed_saved_file_and_ignored_directory_moves_without_changing_discussion_ids",
-    "replacement": "cli/review.spec.ts",
-    "steps": [
-      "When a saved note moves, the guarded move can be retried and preserves its discussion identity",
-      "And moving the ignored review root preserves its review ID, feedback and read-only export"
+    "replacements": [
+      {
+        "file": "cli/notes.spec.ts",
+        "scenarios": [
+          "User keeps the note identity at its new location and can retry the move"
+        ]
+      },
+      {
+        "file": "cli/local-review.spec.ts",
+        "scenarios": [
+          "User can resume the same review at its new location"
+        ]
+      }
     ]
   },
   {
     "legacy": "cli/tests/github_review.rs",
     "behavior": "should_run_remote_cli_review_and_recover_an_uncertain_submission_without_replay",
-    "replacement": "cli/review.spec.ts",
-    "steps": [
-      "Given ${mode} final-response behavior, start, refresh and reopen select the same PR review"
-    ]
+    "replacements": [
+      {
+        "file": "cli/pr-review.spec.ts",
+        "scenarios": [
+          "User can submit comments and export the final review message"
+        ]
+      },
+      {
+        "file": "../apps/lgtm-backend/tests/forge_service.rs",
+        "scenarios": [
+          "should_submit_final_body_and_comments_once_and_reconcile_lost_response"
+        ]
+      }
+    ],
+    "note": "CLI publication uses real GitHub. Provider-response loss is checked by Rust integration tests."
   },
   {
     "legacy": "cli/tests/github_review.rs",
     "behavior": "should_report_json_permission_error_and_keep_remote_review_drafts",
-    "replacement": "cli/review.spec.ts",
-    "steps": [
-      "When refresh is denied, JSON reports the error and preserves unsent general feedback for recovery"
-    ]
+    "replacements": [
+      {
+        "file": "cli/pr-review.spec.ts",
+        "scenarios": [
+          "Authentication failure returns a JSON error, retains drafts and allows recovery"
+        ]
+      }
+    ],
+    "note": "The CLI receives a real authentication rejection, preserves its draft, and succeeds after credentials are restored."
   },
   {
     "legacy": "cli/tests/github_review.rs",
     "behavior": "should_recover_a_saved_pending_draft_after_a_push_without_replaying_the_accepted_comment",
-    "replacement": "cli/review.spec.ts",
-    "steps": [
-      "Then an accepted draft with a lost response remains the same pending comment after a push and sync"
-    ]
+    "replacements": [
+      {
+        "file": "cli/pr-review.spec.ts",
+        "scenarios": [
+          "User can refresh and continue commenting after new commits without replacing the review"
+        ]
+      },
+      {
+        "file": "backend/pr-review.spec.ts",
+        "scenarios": [
+          "Retrying an accepted draft after a push and restart does not create another remote comment"
+        ]
+      }
+    ],
+    "note": "CLI refresh and backend exact-request replay are separate public-boundary cases."
   },
   {
     "legacy": "nvim/health.lua",
     "behavior": "should_check_real_backend_and_dependencies",
-    "replacement": "nvim/editor-services.spec.ts",
-    "steps": [
-      "Given the required plugins and real backend, health reports a loaded CodeDiff library and a reachable API"
+    "replacements": [
+      {
+        "file": "nvim/editor-services.spec.ts",
+        "scenarios": [
+          "Health reports the installed native diff library and a reachable compatible backend"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/transport.lua",
     "behavior": "should_suppress_cancelled_transport_responses",
-    "replacement": "nvim/editor-services.spec.ts",
-    "steps": [
-      "When individual and global transport cancellation race with responses, callbacks are suppressed and later requests still work"
+    "replacements": [
+      {
+        "file": "nvim/editor-services.spec.ts",
+        "scenarios": [
+          "Cancelled requests do not call their callbacks and later requests still succeed"
+        ]
+      }
     ]
   },
   {
     "legacy": "nvim/persistence.lua",
     "behavior": "should_support_persistence",
-    "replacement": "nvim/notes-and-directory.spec.ts",
-    "steps": [
-      "And restarting editor and backend restores ordinary-file cards and searchable completed sessions without creating a successor"
+    "replacements": [
+      {
+        "file": "nvim/notes.spec.ts",
+        "scenarios": [
+          "The editor restores saved note cards and their thread modal after restart"
+        ]
+      },
+      {
+        "file": "nvim/local-review.spec.ts",
+        "scenarios": [
+          "The session picker restores the completed discussion and export does not create another review"
+        ]
+      }
     ]
   },
   {
     "legacy": "scripts/test-github-review",
     "behavior": "Live GitHub review lifecycle; repository creation and archival deliberately replaced by permanent private fixture reuse",
-    "replacement": "backend/live-github.spec.ts",
-    "steps": [
-      "Given a remote-only PR, save line, file, general and reply feedback privately before submission",
-      "When a push moves an open composer selection, the same pending review posts it at the current line",
-      "Then invalid self-review outcomes leave drafts pending, and Comment submits the existing review with a final body",
-      "And posted feedback supports resolve, reopen, edit and deletion without placeholders; export remains read-only"
-    ]
+    "replacements": [
+      {
+        "file": "backend/pr-review.spec.ts",
+        "scenarios": [
+          "User can submit comments with a final message",
+          "User continues to see existing GitHub drafts after a backend restart"
+        ]
+      }
+    ],
+    "note": "Repository provisioning and archival are intentionally removed. Every PR case validates and reuses the configured existing private repository."
   }
 ]

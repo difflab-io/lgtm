@@ -109,6 +109,7 @@ jobs:
           retention-days: 7
 
   e2e:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     strategy:
       fail-fast: false
       matrix:
@@ -125,7 +126,11 @@ jobs:
         with:
           setup-only: true
           install-premise: build
-      - name: Run isolated E2E suite
+      - name: Run real E2E suite
+        env:
+          GH_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_TOKEN }}
+          LGTM_E2E_GITHUB_SECONDARY_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
+          LGTM_E2E_GITHUB_REPOSITORY: ${{ vars.LGTM_E2E_GITHUB_REPOSITORY || 'skapoor8/lgtm-e2e' }}
         run: premise run e2e:${{ matrix.suite }}
 
   publish-release:

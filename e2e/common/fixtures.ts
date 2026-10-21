@@ -1,27 +1,25 @@
-import { test as base } from 'vitest'
-import { Github } from './github.js'
+import { beforeEach, afterEach } from 'vitest'
 import { Runtime } from './runtime.js'
 
-export function suite(kind: 'backend' | 'cli') {
-  return base.extend<{ github: Github; runtime: Runtime }>({
-    github: async ({ task }, use) => {
-      const github = await Github.start()
-      console.info(`Given isolated GitHub fixture for ${task.name}`)
-      try {
-        await use(github)
-      } finally {
-        await github.close()
-      }
-      if (github.errors.length)
-        throw new Error(`Unexpected provider requests: ${github.errors.join('\n')}`)
-    },
-    runtime: async ({ github, task }, use) => {
-      const runtime = await Runtime.create(kind, github)
-      try {
-        await use(runtime)
-      } finally {
-        await runtime.dispose(task.result?.state === 'fail')
-      }
-    },
+/** Own the backend process and database for one case. Consumers can add narrower fixtures. */
+export function useRuntime(
+  kind: 'backend' | 'cli',
+  seed?: (home: string) => Promise<void>,
+  environment?: () => NodeJS.ProcessEnv,
+) {
+  let runtime: Runtime | undefined
+  beforeEach(async () => {
+    runtime = await Runtime.create(kind, seed, environment?.())
   })
+  afterEach(async ({ task }) => {
+    try {
+      await runtime?.dispose(task.result?.state === 'fail')
+    } finally {
+      runtime = undefined
+    }
+  })
+  return () => {
+    if (!runtime) throw new Error('Runtime fixture requested outside a test')
+    return { runtime }
+  }
 }

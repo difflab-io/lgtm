@@ -6,9 +6,8 @@ import { once } from 'node:events'
 import { join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { expect } from 'vitest'
-import type { Github } from './github.js'
 
-// Connect JSON and the simulated provider intentionally accept arbitrary wire fields.
+// Connect JSON accepts arbitrary wire fields at the process boundary.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Json = Record<string, any>
 export const ROOT = resolve(import.meta.dirname, '../..')
@@ -16,15 +15,6 @@ export const binary = (name: string) =>
   join(process.env.CARGO_TARGET_DIR ?? join(ROOT, 'target'), 'debug', name)
 export const hash = (bytes: string | Buffer) =>
   `sha256:${createHash('sha256').update(bytes).digest('hex')}`
-
-export async function step(name: string, run: () => Promise<void>) {
-  console.info(`  ${name}`)
-  try {
-    await run()
-  } catch (error) {
-    throw new Error(name, { cause: error })
-  }
-}
 
 export async function waitFor<T>(
   description: string,
@@ -62,6 +52,7 @@ export function isolatedEnv(home: string): NodeJS.ProcessEnv {
   for (const key of [
     'GH_TOKEN',
     'GITHUB_TOKEN',
+    'LGTM_E2E_GITHUB_SECONDARY_TOKEN',
     'LGTM_RPC_URL',
     'LGTM_DATABASE_URL',
     'LGTM_BACKEND_ADDR',
@@ -117,7 +108,7 @@ export async function stop(child?: ChildProcess) {
 export class Runtime {
   endpoint = ''
   actor = ''
-  rpcTimeoutMs = 10_000
+  rpcTimeoutMs = 40_000
   child?: ChildProcess
   env: NodeJS.ProcessEnv
   log = ''
@@ -126,16 +117,10 @@ export class Runtime {
     readonly home: string,
     readonly workspace: string,
     readonly kind: 'backend' | 'cli',
-    readonly github?: Github,
   ) {
     this.env = isolatedEnv(home)
     this.env.GIT_CEILING_DIRECTORIES = directory
     this.env.GH_CONFIG_DIR = join(home, 'gh')
-    if (github)
-      Object.assign(this.env, {
-        LGTM_GITHUB_TEST_MODE: '1',
-        LGTM_GITHUB_TEST_API_URL: github.endpoint,
-      })
   }
 
   async launch() {
@@ -200,13 +185,6 @@ export class Runtime {
     return body
   }
 
-  async reject(method: string, input: Json, code = 'failed_precondition', actor = this.actor) {
-    const response = await this.response(method, input, actor)
-    expect(response.status, `${method} must fail`).toBeGreaterThanOrEqual(400)
-    expect(response.body.code).toBe(code)
-    return response.body
-  }
-
   async identify(input: Json = { name: 'E2E reviewer', email: 'e2e@example.test' }) {
     this.actor = (await this.rpc('EnsureIdentity', input, '')).actor.id
     return this.actor
@@ -221,6 +199,7 @@ export class Runtime {
         LGTM_NAME: 'E2E reviewer',
         LGTM_EMAIL: 'e2e@example.test',
       },
+      timeout: 60_000,
     })
   }
 
@@ -265,7 +244,6 @@ export class Runtime {
 
   static async create(
     kind: 'backend' | 'cli' = 'backend',
-    github?: Github,
     seed?: (home: string) => Promise<void>,
     env: NodeJS.ProcessEnv = {},
   ) {
@@ -276,7 +254,7 @@ export class Runtime {
       workspace = join(directory, 'workspace')
     await mkdir(home)
     await mkdir(workspace)
-    const runtime = new Runtime(directory, home, workspace, kind, github)
+    const runtime = new Runtime(directory, home, workspace, kind)
     Object.assign(runtime.env, env)
     try {
       if (seed) await seed(home)

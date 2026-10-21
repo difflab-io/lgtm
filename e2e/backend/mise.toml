@@ -16,11 +16,6 @@ run = "bun x prettier --write e2e/backend/**/*.ts e2e/common/**/*.ts"
 dir = "{{config_root}}/../.."
 run = "bun x prettier --check e2e/backend/**/*.ts e2e/common/**/*.ts"
 
-[tasks."test:github:live"]
-depends = ["//apps/lgtm-backend:build"]
-dir = "{{config_root}}/../.."
-run = "bun x vitest run --config e2e/backend/vitest.live.config.ts"
-
 [tasks.list]
 description = "List the backend BDD journeys without running them"
 dir = "{{config_root}}/../.."

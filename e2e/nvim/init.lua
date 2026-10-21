@@ -13,19 +13,33 @@ if vim.env.LGTM_E2E_KAK == "1" then
   vim.opt.runtimepath:append(suite .. "/.cache/kak.nvim")
   require("kak.keybinds").setup(vim.deepcopy(require("kak.defaults")))
 end
-require("notify").setup({ timeout = 5000, stages = "static", render = "minimal", minimum_width = 50, max_width = 50 })
+require("notify").setup({
+  timeout = 5000,
+  stages = "static",
+  render = "minimal",
+  minimum_width = 50,
+  max_width = 50,
+})
 require("lgtm").setup({ identity = { name = "Neovim E2E", email = "nvim-e2e@example.test" } })
 vim.cmd("runtime plugin/lgtm.lua")
-_G.e2e = { choices = {}, inputs = {} }
+_G.e2e = { choices = {} }
 vim.ui.select = function(items, opts, callback)
   _G.e2e.last_select = { items = items, prompt = opts.prompt }
   local selected = table.remove(_G.e2e.choices, 1) or 1
   local item = type(selected) == "number" and items[selected] or nil
-  for _, entry in ipairs(items) do if entry == selected then item = entry end end
-  vim.schedule(function() callback(item) end)
+  for _, entry in ipairs(items) do
+    if entry == selected then
+      item = entry
+    end
+  end
+  vim.schedule(function()
+    callback(item)
+  end)
 end
 vim.ui.input = function(opts, callback)
   _G.e2e.last_input = opts
-  local value = table.remove(_G.e2e.inputs, 1) or opts.default or ""
-  vim.schedule(function() callback(value) end)
+  local value = opts.default or ""
+  vim.schedule(function()
+    callback(value)
+  end)
 end

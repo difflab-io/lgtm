@@ -28,19 +28,19 @@ depends = ["//apps/lgtm-cli:bundle"]
 run = ["cargo build --workspace", "bun run --filter lgtm-web build"]
 
 [tasks.test]
-depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:test"]
+depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:test", "e2e:typecheck", "e2e:parity"]
 run = ["cargo test --workspace", "bun run --filter lgtm-web test"]
 
 [tasks.lint]
-depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:lint"]
+depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:lint", "e2e:lint"]
 run = ["cargo clippy --workspace --all-targets --all-features -- -D warnings", "mise run //apps/lgtm-web:lint"]
 
 [tasks.format]
-depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:format", "//e2e/nvim:format"]
+depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:format", "e2e:format"]
 run = ["cargo fmt --all", "mise run //apps/lgtm-web:format"]
 
 [tasks."format:check"]
-depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:format:check", "//e2e/nvim:format:check"]
+depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:format:check", "e2e:format:check"]
 run = ["cargo fmt --all --check", "mise run //apps/lgtm-web:format:check"]
 
 [tasks."run:cli"]
@@ -91,8 +91,8 @@ description = "Run nvim E2E suite via its own Mise configuration"
 depends = ["//e2e/nvim:test"]
 
 [tasks.e2e]
-description = "Run all E2E suites"
-depends = ["e2e:backend", "e2e:cli", "e2e:nvim"]
+description = "Run every E2E suite and complete cleanup even if a suite fails"
+run = "mise run --continue-on-error //e2e/backend:test ::: //e2e/cli:test ::: //e2e/nvim:test"
 
 [tasks."nvim:lint"]
 depends = ["//apps/lgtm.nvim:lint"]
@@ -112,9 +112,6 @@ run = "bun x prettier --write 'e2e/{common,backend,cli,nvim}/**/*.ts' e2e/tsconf
 [tasks."e2e:format:check"]
 run = "bun x prettier --check 'e2e/{common,backend,cli,nvim}/**/*.ts' e2e/tsconfig.json"
 
-[tasks."e2e:github:live"]
-depends = ["//e2e/backend:test:github:live"]
-
 [tasks."e2e:typecheck"]
 run = "bun x tsc -p e2e/tsconfig.json"
 
@@ -131,3 +128,11 @@ run = "bun run e2e/common/check-parity.ts"
 [tasks."e2e:list"]
 description = "List local BDD journeys without running them"
 depends = ["//e2e/backend:list", "//e2e/cli:list", "//e2e/nvim:list"]
+
+[tasks."e2e:backend:run"]
+description = "Run backend journeys against existing binaries without rebuilding"
+run = "bun x vitest run --config e2e/backend/vitest.config.ts"
+
+[tasks."e2e:cli:run"]
+description = "Run CLI journeys against existing binaries without rebuilding"
+run = "bun x vitest run --config e2e/cli/vitest.config.ts"

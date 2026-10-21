@@ -1,41 +1,76 @@
 # End-to-end specifications
 
-Backend, CLI and Neovim journeys use TypeScript and Vitest, the Vite test runner. Each suite has its own `mise.toml`. There is no `e2e/mise.toml`. Rust unit and integration tests remain in their apps and libraries.
+Backend, CLI and Neovim journeys use TypeScript and Vitest. Each suite has its own `mise.toml`. There is no `e2e/mise.toml`.
 
-| Suite | Read first | Public boundary | Run |
+| Suite | Features | Public boundary | Run |
 | --- | --- | --- | --- |
-| Backend | [Local feedback](backend/local-review.spec.ts), [GitHub reviews](backend/github-review.spec.ts) | Real standalone backend and Connect JSON | `premise run e2e:backend` |
-| CLI | [Review lifecycle](cli/review.spec.ts) | Real CLI commands and bundled backend | `premise run e2e:cli` |
-| Neovim | [Notes](nvim/notes-and-directory.spec.ts), [CodeDiff](nvim/native-review.spec.ts), [anchors](nvim/anchor-lifecycle.spec.ts), [GitHub](nvim/github-review.spec.ts), [editor services](nvim/editor-services.spec.ts) | Real editor, keys, modals, CodeDiff and backend | `premise run e2e:nvim` |
+| Backend | [Notes](backend/notes.spec.ts), [local reviews](backend/local-review.spec.ts), [PR reviews](backend/pr-review.spec.ts), [diff data](backend/diffs.spec.ts) | Standalone backend and Connect JSON | `premise run e2e:backend` |
+| CLI | [Notes](cli/notes.spec.ts), [local reviews](cli/local-review.spec.ts), [PR reviews](cli/pr-review.spec.ts) | CLI commands and bundled backend | `premise run e2e:cli` |
+| Neovim | [Notes](nvim/notes.spec.ts), [local reviews](nvim/local-review.spec.ts), [PR reviews](nvim/pr-review.spec.ts), [CodeDiff](nvim/diffs.spec.ts), [editor services](nvim/editor-services.spec.ts) | Editor, keys, modals, CodeDiff and backend | `premise run e2e:nvim` |
 
-The local suites contain 23 journey runs: six backend, three CLI and seven editor journeys in each of two profiles. Named Given/When/Then steps explain each stage. Dashed Arrange, Act and Assert sections separate setup, actions and checks. Long journeys repeat these sections for each checkpoint; writes are kept outside `expect(...)` so the action is visible. A failed assertion reports the journey and active step. Journeys cover complete lifecycles rather than starting a process for each operation.
+Native Vitest `describe` groups name states, such as `When resuming an existing draft review`. Each `it` names one visible behavior. Suite and feature names come from Vitest tags. Plain `// Arrange`, `// Act` and `// Assert` comments separate setup, actions and assertions. Tests use Vitest directly, without custom test aliases or step runners.
 
-## Shared fixtures
+Each PR state group shares one PR through `beforeAll` and `afterAll`. Each case gets a fresh database. Cleanup removes its draft feedback and restores the original head commit between cases. A merged PR requires another PR because GitHub cannot reopen it. GitHub retains submitted review records and their final messages. Cases identify their own feedback instead of relying on array order or counting all review records.
+
+## Test boundaries
+
+PR E2E uses real GitHub. There is no simulated provider option, opt-in live mode or separate live spec file. Notes and local reviews use temporary local files, Git repositories and real databases. Each suite checks its own public boundary; backend RPCs, CLI commands and editor actions are different contracts.
 
 ```text
 e2e/
 ├── common/
-│   ├── runtime.ts          # Processes, isolated environments, Git, CLI and RPC
-│   ├── github.ts           # Local GitHub HTTP simulator
-│   ├── editor.ts           # Real Neovim MessagePack connection and editor actions
-│   ├── live-github.ts      # Existing private repository; run-owned PRs and refs
-│   ├── fixtures.ts         # Vitest lifecycle and cleanup
-│   ├── config.ts           # Common Vitest settings
-│   ├── check-parity.ts     # Historical coverage-map validation
-│   └── anchor_cases.json   # Shared source-placement examples
-├── backend/                # Specifications, Vitest config, mise.toml
-├── cli/                    # Specifications, Vitest config, mise.toml
-├── nvim/                   # Specifications, dependency lock, setup, mise.toml
-├── PARITY.md               # Historical behavior-to-journey map
-├── parity.json             # Machine-readable map
+│   ├── runtime.ts                 # Processes, isolated environments, Git, CLI and RPC
+│   ├── github.ts                  # Existing private repository; run-owned PRs and refs
+│   ├── fixtures.ts                # Local process lifecycle
+│   ├── pr-runtime.ts              # PR group lifecycle, composed with the runtime fixture
+│   ├── config.ts
+│   ├── check-parity.ts
+│   └── anchor_cases.json
+├── backend/
+│   ├── notes.spec.ts
+│   ├── local-review.spec.ts
+│   ├── pr-review.spec.ts
+│   ├── diffs.spec.ts
+│   ├── identity.spec.ts
+│   ├── anchors.ts
+│   ├── local-review.fixtures.ts
+│   ├── pr-review.fixtures.ts
+│   ├── vitest.config.ts
+│   └── mise.toml
+├── cli/
+│   ├── notes.spec.ts
+│   ├── local-review.spec.ts
+│   ├── pr-review.spec.ts
+│   ├── vitest.config.ts
+│   └── mise.toml
+├── nvim/
+│   ├── notes.spec.ts
+│   ├── local-review.spec.ts
+│   ├── pr-review.spec.ts
+│   ├── diffs.spec.ts
+│   ├── editor-services.spec.ts
+│   ├── assertions.ts
+│   ├── editor.ts
+│   ├── fixtures.ts
+│   ├── local-review.fixtures.ts
+│   ├── pr-review.fixtures.ts
+│   ├── init.lua
+│   ├── install.ts
+│   ├── dependencies.lock.json
+│   ├── vitest.config.ts
+│   └── mise.toml
+├── PARITY.md
+├── parity.json
 └── tsconfig.json
 ```
 
-Normal runs use temporary local Git repositories, isolated databases and the local GitHub simulator. They do not use GitHub credentials or create remote repositories. Fixture controls exercise permission denial, rate limits, slow responses, paused mutations, lost responses, commits, renames, deleted selections and external draft removal. The simulator records requests so tests can assert that recovery does not repeat writes.
+The editor profiles pin CodeDiff, WhichKey and nvim-notify. The second profile adds Kak with compatible keys; Kak remains optional for users. Both exercise native CodeDiff views and an upgrade from the installed database schema. Lua contains editor runtime setup. TypeScript owns the scenarios, input, assertions and process lifecycle.
 
-The editor profiles pin CodeDiff, WhichKey and nvim-notify. The second profile adds Kak with the same compatible key setup used locally; Kak remains optional for users. Both use real native CodeDiff views and an upgraded installed database. Lua contains only runtime setup and commands needed to operate Neovim. TypeScript contains the scenarios, orchestration and assertions.
+`common/` owns processes, credentials, GitHub resources and test configuration. Backend fixtures construct API states. Neovim fixtures perform editor actions. Large feature setups live beside their spec as `*.fixtures.ts`. Small setups used by one file stay private in that file. Tests keep the actions and assertions that describe the behavior under test.
 
-Failed runs retain their database, workspace, backend log and editor log under `target/e2e/`. Successful runs remove their temporary state. Child processes are stopped in fixture teardown. All waits and RPC requests have deadlines.
+Fixture hooks compose in stack order. Setup creates the PR, starts the backend, then opens the editor. Cleanup closes the editor, stops the backend, resets the PR, then removes the group’s refs. The local and PR editor fixtures share the same editor lifecycle.
+
+Failed runs retain their workspace, database and logs under `target/e2e/`. Successful runs remove temporary local state. Fixture hooks stop processes after each case. Waits, subprocesses and RPC requests have deadlines.
 
 ## Run and inspect
 
@@ -49,35 +84,38 @@ premise run e2e:format:check
 premise run e2e:parity
 ```
 
-Build once with `premise run e2e:nvim`, then use `premise run e2e:nvim:run` while changing editor tests. To run one specification against those existing binaries:
+The `e2e` task builds the binaries before it runs the suites. After a build, use the `:run` tasks for focused tests. Select a feature file and profile with native Vitest arguments:
 
 ```sh
-LGTM_E2E_SPEC=native-review.spec.ts premise run e2e:nvim:run
+premise run e2e:nvim:run -- diffs.spec.ts --tags-filter=required
+premise run e2e:backend:run -- pr-review.spec.ts -t "When resuming"
 ```
 
-Do not repeat passing suites when their inputs have not changed. Use one complete local gate after changes to shared fixtures.
+Run focused checks while iterating. Use one complete gate after changing shared fixtures. Do not repeat passing suites whose inputs have not changed.
 
 ## Permanent private GitHub fixture
 
-The default is [skapoor8/lgtm-e2e](https://github.com/skapoor8/lgtm-e2e). This is the same existing repository previously used by a smoke test, renamed once for permanent reuse. Repository creation is not part of setup or testing.
+The default is [skapoor8/lgtm-e2e](https://github.com/skapoor8/lgtm-e2e). Tests never create, recreate, rename, archive or delete repositories. The fixture must already exist, be private, have an initial commit and be active. Invalid fixtures fail before writes.
 
-The live journey is opt-in and uses local `gh` credentials:
+Locally, log in to both GitHub accounts with `gh auth login`. The fixture reads each stored token by account name. It never switches your active account. The primary account creates the PR. The second account acts as another reviewer and needs write access to the same private repository.
+
+The primary account defaults to `skapoor8`. Override it with `LGTM_E2E_GITHUB_PRIMARY_USER`. The second account defaults to `skapoor81`. Override it with `LGTM_E2E_GITHUB_SECONDARY_USER`. For CI, supply the primary token through `GH_TOKEN` and the second token through `LGTM_E2E_GITHUB_SECONDARY_TOKEN`.
+
+A repository-scoped primary token needs Contents, Issues and Pull requests read/write, plus Metadata read access. Tests need no repository administration permission. Keep tokens in local credential storage or CI secrets.
+
+GitHub does not support fine-grained tokens for a collaborator on another personal account’s repository. The second CI account therefore needs a classic token with the broader `repo` scope for this fixture. See [GitHub’s token limitations](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#fine-grained-personal-access-tokens-limitations). Local runs use the existing account logins and do not need new tokens.
 
 ```sh
-LGTM_LIVE_GITHUB_E2E=1 premise run e2e:github:live
-
 # Use another existing private fixture repository:
-LGTM_E2E_GITHUB_REPOSITORY=owner/private-fixture LGTM_LIVE_GITHUB_E2E=1 premise run e2e:github:live
+LGTM_E2E_GITHUB_REPOSITORY=owner/private-fixture premise run e2e
 ```
 
-The configured repository must exist, be private, have an initial commit and be active. Missing, public or archived repositories fail before any writes. The runner never creates, recreates, renames, archives or deletes repositories. Do not point it at a production repository.
+Each PR state group creates unique base/head branches and one PR in that same repository. Cleanup closes its PR and removes only its own branches. Parallel runs use separate refs; no global lock branch is needed. The default branch remains unchanged. If a process is killed, use its logged PR and run identifier to inspect and clean up that run's refs.
 
-An atomic `lgtm-e2e-lock` branch serializes live runs across machines. Each run creates uniquely named base/head branches and one PR. Cleanup closes that PR and removes only those branches and the acquired lock. The default branch and repository remain. If a process is killed before cleanup, inspect its logged PR and branches before removing its stale lock; the runner does not steal locks or delete other runs' objects.
-
-The live flow checks actual private pending drafts, edits, replies, pushes, lost-line fallback, self-review validation, final Comment submission, resolve/reopen, deletion and Markdown export. It has a separate Vitest config and stays outside routine local runs and ordinary CI, even if the opt-in environment variable is inherited.
+CI reads the repository secrets `LGTM_E2E_GITHUB_TOKEN` and `LGTM_E2E_GITHUB_SECONDARY_TOKEN`. Both are required for cross-account review cases. The optional Actions variable `LGTM_E2E_GITHUB_REPOSITORY` selects a different permanent private fixture. The ordinary workflow `GITHUB_TOKEN` cannot write to another private repository. Real PR E2E runs on trusted branches; fork PRs do not receive the fixture credential. Keep the secret renewed before its expiry.
 
 ## Coverage history
 
-The legacy Rust, Lua and Python E2E suites have been removed from the checkout after review. [PARITY.md](PARITY.md) preserves the migration map of 76 legacy behaviors to active journey steps. `premise run e2e:parity` checks that those replacement steps still exist. It validates references, not assertion equivalence, and does not substitute for running the tests.
+The legacy Rust, Lua and Python E2E suites were removed after review. [PARITY.md](PARITY.md) maps 76 historical behaviors to current E2E scenarios and Rust integration tests. Retired source files remain archived outside the checkout. Provider fault injection belongs in Rust integration tests. Real GitHub E2E tests cover accepted-request retries, authentication failures, commits and restarts. The map records these boundary changes explicitly. `premise run e2e:parity` checks that referenced scenarios exist; it does not prove assertion equivalence or replace running the suites.
 
-Lua remains in `nvim/init.lua` for editor setup. The plugin’s separate Lua unit tests remain under `apps/lgtm.nvim/tests/`.
+Private Rust unit tests, database integration tests and the plugin's Lua unit contracts remain in their existing app and library locations.

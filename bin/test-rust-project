@@ -2,8 +2,9 @@
 # Normal project test hook: local SQLite, and SQLite/PostgreSQL on Linux CI or with an explicit URL.
 set -euo pipefail
 project=$1
+shift
 root=$(git rev-parse --show-toplevel)
 if [[ -n "${LGTM_TEST_POSTGRES_URL:-}" || ( "${CI:-}" == true && "$(uname -s)" == Linux ) ]]; then
-  exec "$root/bin/with-postgres" cargo test --locked -p "$project" --all-features
+  exec "$root/bin/with-postgres" cargo test --locked -p "$project" --all-features "$@"
 fi
-exec cargo test --locked -p "$project"
+exec cargo test --locked -p "$project" "$@"
