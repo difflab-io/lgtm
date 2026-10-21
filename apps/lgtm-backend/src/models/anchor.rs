@@ -206,6 +206,8 @@ pub enum AnchorPlacement {
     },
 }
 
+/// The original discussion location: general, whole file, or a line range.
+/// Exact byte identity and bounded relocation text belong to AnchorEvidence, not this location.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Anchor {

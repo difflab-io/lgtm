@@ -13,40 +13,44 @@ const secondaryUser = process.env.LGTM_E2E_GITHUB_SECONDARY_USER ?? 'skapoor81'
 describe('When starting a fresh draft review', () => {
   const fixture = usePrRuntime('cli')
 
-  it('User can select a PR and immediately persist an inline draft', async () => {
-    // Arrange
-    const { runtime, github } = fixture()
-    const pr = `${github.repositoryUrl}/pull/${github.number}`
+  it(
+    'User can select a PR and immediately persist an inline draft',
+    { tags: ['smoke'] },
+    async () => {
+      // Arrange
+      const { runtime, github } = fixture()
+      const pr = `${github.repositoryUrl}/pull/${github.number}`
 
-    // Act
-    const started = await runtime.json(['session', 'start', '--pr', pr])
-    const saved = await runtime.json([
-      'comments',
-      'add',
-      '--pr',
-      pr,
-      '--file',
-      github.path,
-      '--line',
-      '2',
-      '--body',
-      'CLI inline feedback',
-    ])
-    const current = (await runtime.json(['session', 'show', '--pr', pr])).review
-    const remote = await github.api(
-      `repos/${github.repository}/pulls/${github.number}/reviews/${current.forgeReviewId}/comments`,
-    )
+      // Act
+      const started = await runtime.json(['session', 'start', '--pr', pr])
+      const saved = await runtime.json([
+        'comments',
+        'add',
+        '--pr',
+        pr,
+        '--file',
+        github.path,
+        '--line',
+        '2',
+        '--body',
+        'CLI inline feedback',
+      ])
+      const current = (await runtime.json(['session', 'show', '--pr', pr])).review
+      const remote = await github.api(
+        `repos/${github.repository}/pulls/${github.number}/reviews/${current.forgeReviewId}/comments`,
+      )
 
-    // Assert
-    expect(started.review.state).toBe('active')
-    expect(saved.syncError).toBeFalsy()
-    expect(saved.comment.visibility).toBe('draft')
-    expect(remote).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ body: expect.stringContaining('CLI inline feedback') }),
-      ]),
-    )
-  })
+      // Assert
+      expect(started.review.state).toBe('active')
+      expect(saved.syncError).toBeFalsy()
+      expect(saved.comment.visibility).toBe('draft')
+      expect(remote).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ body: expect.stringContaining('CLI inline feedback') }),
+        ]),
+      )
+    },
+  )
 
   it('User can reply to a draft comment', async () => {
     // Arrange

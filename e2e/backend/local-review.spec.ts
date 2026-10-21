@@ -20,32 +20,36 @@ import {
 describe('When starting a local directory review', () => {
   const fixture = useRuntime('backend')
 
-  it('User can review ignored files and immediately persist local draft comments', async () => {
-    // Arrange
-    const { runtime } = fixture()
-    const { scope, bytes, review } = await prepareDirectory(runtime)
+  it(
+    'User can review ignored files and immediately persist local draft comments',
+    { tags: ['smoke'] },
+    async () => {
+      // Arrange
+      const { runtime } = fixture()
+      const { scope, bytes, review } = await prepareDirectory(runtime)
 
-    // Act
-    const root = (
-      await runtime.rpc('AddComment', {
-        scope,
-        anchor: line(bytes, 'PLAN.md'),
-        body: 'Handle this case',
-        expectedVersion: review.version,
-        requestKey: randomUUID(),
-      })
-    ).comment
-    const conversation = await runtime.rpc('GetConversation', { scope })
+      // Act
+      const root = (
+        await runtime.rpc('AddComment', {
+          scope,
+          anchor: line(bytes, 'PLAN.md'),
+          body: 'Handle this case',
+          expectedVersion: review.version,
+          requestKey: randomUUID(),
+        })
+      ).comment
+      const conversation = await runtime.rpc('GetConversation', { scope })
 
-    // Assert
-    expect(review.state).toBe('active')
-    expect(conversation.comments).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: root.id, visibility: 'draft', body: 'Handle this case' }),
-      ]),
-    )
-    expect(conversation.threads[0].anchor.path).toBe('PLAN.md')
-  })
+      // Assert
+      expect(review.state).toBe('active')
+      expect(conversation.comments).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: root.id, visibility: 'draft', body: 'Handle this case' }),
+        ]),
+      )
+      expect(conversation.threads[0].anchor.path).toBe('PLAN.md')
+    },
+  )
 
   it('Consumers can page discussions and filter them by the selected files', async () => {
     // Arrange

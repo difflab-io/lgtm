@@ -565,8 +565,10 @@ function M.comment(kind, range)
         input.requestKey = contexts.request_key()
       end
       input.body = body
+      local saving = notice.show("Saving draft…")
       rpc.call("AddComment", input, function(error, result)
         if error then
+          notice.error(error, saving)
           done(error)
           return
         end
@@ -575,7 +577,8 @@ function M.comment(kind, range)
             notice.error(
               "Draft saved locally; GitHub sync failed: "
                 .. result.syncError
-                .. ". Use :Lgtm sync to recover."
+                .. ". Use :Lgtm sync to recover.",
+              saving
             )
           else
             notice.show(
@@ -583,7 +586,9 @@ function M.comment(kind, range)
                   and result.comment.forgeCommentId
                   and result.comment.forgeCommentId ~= ""
                   and "Draft saved on GitHub"
-                or "Draft saved locally"
+                or "Draft saved locally",
+              nil,
+              saving
             )
           end
           done(refresh_error)
@@ -759,13 +764,10 @@ end
 
 function M.submission_result(state, err, result, pending, done)
   if err then
-    notice.error(
-      (
-        err.uncertain and "Submission response lost. Use :Lgtm reconcile before retrying. "
-        or "Submission failed. "
-      ) .. (err.message or "Unknown error"),
-      pending
-    )
+    local message = (
+      err.uncertain and "Submission response lost. Use :Lgtm reconcile before retrying. "
+      or "Submission failed. "
+    ) .. (err.message or "Unknown error")
     local draft = M.submission_drafts[state.review.id]
     if draft then
       draft.uncertain = err.uncertain
@@ -773,6 +775,7 @@ function M.submission_result(state, err, result, pending, done)
     -- Learn durable intent state without observing GitHub again or repeating a write.
     state.refresh(function()
       done(err)
+      notice.error(message, pending)
     end)
     return
   end
@@ -780,8 +783,20 @@ function M.submission_result(state, err, result, pending, done)
   local status = result.review.submissionStatus
   if status == "confirmed" then
     M.submission_drafts[state.review.id] = nil
-    notice.show("Review submitted", nil, pending)
-    done()
+    -- Submission already persisted the published visibility. Read local data;
+    -- do not leave draft cards on screen or start another provider observation.
+    contexts.conversation(state, function(read_error)
+      if not read_error and state.render then
+        state.render()
+      end
+      notice.show("Review submitted", nil, pending)
+      done()
+      if read_error then
+        notice.error(
+          "Review published; reload comments with :Lgtm refresh. " .. (read_error.message or "")
+        )
+      end
+    end)
   elseif status == "unsubmitted" then
     local draft = M.submission_drafts[state.review.id]
     if draft then
@@ -792,9 +807,9 @@ function M.submission_result(state, err, result, pending, done)
       message = "Review is editable; drafts and final text are saved. Choose an outcome with :Lgtm submit. "
         .. message,
     }
-    notice.error(error, pending)
     state.refresh(function()
       done(error)
+      notice.error(error, pending)
     end)
   elseif
     status == "uncertain"

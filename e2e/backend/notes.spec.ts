@@ -30,37 +30,41 @@ async function prepareNote(runtime: Runtime) {
 describe('When taking notes while browsing files', () => {
   const fixture = useRuntime('backend')
 
-  it('User can persist an exact line selection without creating a review', async () => {
-    // Arrange
-    const { runtime } = fixture()
-    await runtime.identify()
-    const bytes = 'before\r\nselected\r\nafter'
-    const file = await runtime.write('notes/one.md', bytes)
-    const scope = { notes: { path: file } }
+  it(
+    'User can persist an exact line selection without creating a review',
+    { tags: ['smoke'] },
+    async () => {
+      // Arrange
+      const { runtime } = fixture()
+      await runtime.identify()
+      const bytes = 'before\r\nselected\r\nafter'
+      const file = await runtime.write('notes/one.md', bytes)
+      const scope = { notes: { path: file } }
 
-    // Act
-    const empty = await runtime.rpc('GetConversation', { scope })
-    const saved = await runtime.rpc('AddComment', {
-      scope,
-      anchor: line(bytes),
-      body: 'Explain this case',
-      expectedVersion: empty.version,
-      requestKey: randomUUID(),
-    })
-    await runtime.restart()
-    const conversation = await runtime.rpc('GetConversation', { scope })
+      // Act
+      const empty = await runtime.rpc('GetConversation', { scope })
+      const saved = await runtime.rpc('AddComment', {
+        scope,
+        anchor: line(bytes),
+        body: 'Explain this case',
+        expectedVersion: empty.version,
+        requestKey: randomUUID(),
+      })
+      await runtime.restart()
+      const conversation = await runtime.rpc('GetConversation', { scope })
 
-    // Assert
-    expect(empty.version).toBe('0')
-    expect(conversation.comments).toHaveLength(1)
-    expect(conversation.comments[0].id).toBe(saved.comment.id)
-    expect(conversation.threads[0].anchor).toMatchObject({
-      start: '2',
-      evidence: { selectedText: 'selected' },
-      source: { localFile: { contentHash: hash(bytes) } },
-    })
-    expect((await runtime.rpc('ListReviews')).reviews ?? []).toEqual([])
-  })
+      // Assert
+      expect(empty.version).toBe('0')
+      expect(conversation.comments).toHaveLength(1)
+      expect(conversation.comments[0].id).toBe(saved.comment.id)
+      expect(conversation.threads[0].anchor).toMatchObject({
+        start: '2',
+        evidence: { selectedText: 'selected' },
+        source: { localFile: { contentHash: hash(bytes) } },
+      })
+      expect((await runtime.rpc('ListReviews')).reviews ?? []).toEqual([])
+    },
+  )
 
   it('Retrying a saved note succeeds even when its source file is temporarily missing', async () => {
     // Arrange

@@ -36,21 +36,25 @@ for (const profile of profiles) {
   describe(`When reviewing staged changes [${profile}]`, { tags: [profile] }, () => {
     const fixture = useEditor(profile)
 
-    it('Comments capture exact index bytes and a reply remains attached to its original discussion', async () => {
-      // Arrange
-      const { editor: e, runtime: r } = fixture()
+    it(
+      'Comments capture exact index bytes and a reply remains attached to its original discussion',
+      { tags: profile === 'required' ? ['smoke'] : [] },
+      async () => {
+        // Arrange
+        const { editor: e, runtime: r } = fixture()
 
-      // Act
-      const { original, oid, stagedBytes, replyId } = await prepareStagedFeedback(e, r)
+        // Act
+        const { original, oid, stagedBytes, replyId } = await prepareStagedFeedback(e, r)
 
-      // Assert
-      expect(original.source.indexFile).toMatchObject({
-        blobOid: oid,
-        contentHash: hash(stagedBytes),
-      })
-      expect(original.evidence.selectedText).toBe('selected')
-      expect(replyId).toBeTruthy()
-    })
+        // Assert
+        expect(original.source.indexFile).toMatchObject({
+          blobOid: oid,
+          contentHash: hash(stagedBytes),
+        })
+        expect(original.evidence.selectedText).toBe('selected')
+        expect(replyId).toBeTruthy()
+      },
+    )
 
     it('Completing the staged review and committing preserves the anchor and replies in a branch review', async () => {
       // Arrange

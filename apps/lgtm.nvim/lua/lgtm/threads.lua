@@ -126,6 +126,9 @@ local function blocks(state, buf, path, side, width)
           end
         end
       end
+      if not status and state.kind == "pr" then
+        status = "Published"
+      end
       vim.list_extend(
         groups[line].rows,
         require("lgtm.cards").render(thread, cs, status, width, M.expanded[thread.id], placement)

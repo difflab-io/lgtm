@@ -1,4 +1,5 @@
 //! Remote review orchestration. All network calls happen outside database transactions.
+use crate::extensions::gh;
 mod changes;
 
 use super::ReviewService;
@@ -191,7 +192,7 @@ impl ForgeService {
                     .get_pending(&github, &repo, pr, &session, &account)
                     .await?
                 {
-                    let id = crate::forge::github::opaque(&pending, "id")?;
+                    let id = gh::opaque(&pending, "id")?;
                     if !self
                         .reviews
                         .database()
@@ -372,7 +373,7 @@ impl ForgeService {
                 }
             }
         };
-        let review_id = crate::forge::github::opaque(&pending, "id")?;
+        let review_id = gh::opaque(&pending, "id")?;
         let current = self.reviews.get_session(session_id).await?;
         if !self
             .reviews
@@ -396,19 +397,15 @@ impl ForgeService {
                     "Comment belongs to another pending review".into(),
                 ));
             }
-            let remote = github
-                .get_all(&format!(
-                    "{}/pulls/{pr}/reviews/{review_id}/comments",
-                    repo.route()
-                ))
-                .await?;
+            let remote = gh::get_all(
+                &github.client,
+                &format!("{}/pulls/{pr}/reviews/{review_id}/comments", repo.route()),
+            )
+            .await?;
             if !remote.iter().any(|v| {
-                crate::forge::github::opaque(v, "id").ok().as_ref() == Some(id)
+                gh::opaque(v, "id").ok().as_ref() == Some(id)
                     && v["body"].as_str() == comment.forge_body.as_deref()
-                    && crate::forge::github::opaque(&v["user"], "id")
-                        .ok()
-                        .as_deref()
-                        == Some(account.as_str())
+                    && gh::opaque(&v["user"], "id").ok().as_deref() == Some(account.as_str())
             }) {
                 return Err(Error::Conflict(
                     "GitHub draft changed or disappeared; refresh before continuing".into(),
@@ -512,17 +509,16 @@ impl ForgeService {
         session: &Session,
         account: &str,
     ) -> Result<Option<Value>> {
-        let reviews = github
-            .get_all(&format!("{}/pulls/{pr}/reviews", repo.route()))
-            .await?;
+        let reviews = gh::get_all(
+            &github.client,
+            &format!("{}/pulls/{pr}/reviews", repo.route()),
+        )
+        .await?;
         let owned: Vec<_> = reviews
             .into_iter()
             .filter(|v| {
                 v["state"] == "PENDING"
-                    && crate::forge::github::opaque(&v["user"], "id")
-                        .ok()
-                        .as_deref()
-                        == Some(account)
+                    && gh::opaque(&v["user"], "id").ok().as_deref() == Some(account)
             })
             .collect();
         if owned.len() > 1 {
@@ -533,7 +529,7 @@ impl ForgeService {
         let Some(pending) = owned.into_iter().next() else {
             return Ok(None);
         };
-        let id = crate::forge::github::opaque(&pending, "id")?;
+        let id = gh::opaque(&pending, "id")?;
         if session.forge_review_id.as_ref() != Some(&id)
             && (pending["commit_id"].as_str() != session.commits.head.as_deref()
                 || pending["body"].as_str() != Some(&review_marker(session.id)))
@@ -788,7 +784,7 @@ impl ForgeService {
             ..
         } = *submission;
         self.validate_comparison(github, repo, pr, session).await?;
-        let review_id = crate::forge::github::opaque(pending, "id")?;
+        let review_id = gh::opaque(pending, "id")?;
         let node_id = pending["node_id"]
             .as_str()
             .ok_or_else(|| invalid("Pending review receipt lacks node ID"))?;
@@ -814,7 +810,7 @@ impl ForgeService {
                 .ok_or_else(|| invalid("Reply thread has no verified GitHub node ID"))?;
             let response = github.graphql(json!({"query":"mutation($input:AddPullRequestReviewThreadReplyInput!){addPullRequestReviewThreadReply(input:$input){comment{databaseId}}}","variables":{"input":{"pullRequestReviewId":node_id,"pullRequestReviewThreadId":thread_id,"body":body}}})).await?;
             PostReceipt {
-                comment_id: crate::forge::github::opaque(
+                comment_id: gh::opaque(
                     &response["addPullRequestReviewThreadReply"]["comment"],
                     "databaseId",
                 )?,
@@ -833,7 +829,7 @@ impl ForgeService {
                         )
                         .await?;
                     PostReceipt {
-                        comment_id: crate::forge::github::opaque(&response, "id")?,
+                        comment_id: gh::opaque(&response, "id")?,
                         kind: "conversation_comment".into(),
                         thread_id: None,
                         review_id: None,
@@ -868,10 +864,7 @@ impl ForgeService {
                     let response=github.graphql(json!({"query":"mutation($input:AddPullRequestReviewThreadInput!){addPullRequestReviewThread(input:$input){thread{id comments(first:1){nodes{databaseId}}}}}","variables":{"input":input}})).await?;
                     let t = &response["addPullRequestReviewThread"]["thread"];
                     PostReceipt {
-                        comment_id: crate::forge::github::opaque(
-                            &t["comments"]["nodes"][0],
-                            "databaseId",
-                        )?,
+                        comment_id: gh::opaque(&t["comments"]["nodes"][0], "databaseId")?,
                         kind: "review_comment".into(),
                         thread_id: Some(
                             t["id"]
@@ -913,7 +906,7 @@ impl ForgeService {
         let review = if let Some(id) = &session.forge_review_id {
             self.get_pending(github, repo, pr, session, account)
                 .await?
-                .filter(|v| crate::forge::github::opaque(v, "id").ok().as_ref() == Some(id))
+                .filter(|v| gh::opaque(v, "id").ok().as_ref() == Some(id))
                 .ok_or_else(|| {
                     Error::Conflict(
                         "Pending review changed or disappeared; refresh before submitting".into(),
@@ -927,7 +920,7 @@ impl ForgeService {
                 )
                 .await?
         };
-        let review_id = crate::forge::github::opaque(&review, "id")?;
+        let review_id = gh::opaque(&review, "id")?;
         if !self
             .reviews
             .database()
@@ -958,15 +951,12 @@ impl ForgeService {
             } else {
                 format!("{}/issues/{pr}/comments", repo.route())
             };
-            let remote = github.get_all(&route).await?;
+            let remote = gh::get_all(&github.client, &route).await?;
             for comment in confirmed {
                 if !remote.iter().any(|value| {
-                    crate::forge::github::opaque(value, "id").ok() == comment.forge_comment_id
+                    gh::opaque(value, "id").ok() == comment.forge_comment_id
                         && value["body"].as_str() == comment.forge_body.as_deref()
-                        && crate::forge::github::opaque(&value["user"], "id")
-                            .ok()
-                            .as_deref()
-                            == Some(account)
+                        && gh::opaque(&value["user"], "id").ok().as_deref() == Some(account)
                 }) {
                     return Err(Error::Conflict(
                         "A synchronized comment changed on GitHub; refresh before submitting"
@@ -1015,9 +1005,11 @@ impl ForgeService {
         }
         let github = self.get_provider().await?;
         let account = github.get_account_id().await?;
-        let reviews = github
-            .get_all(&format!("{}/pulls/{pr}/reviews", repo.route()))
-            .await?;
+        let reviews = gh::get_all(
+            &github.client,
+            &format!("{}/pulls/{pr}/reviews", repo.route()),
+        )
+        .await?;
         let marker = review_marker(*session_id);
         let completion = session
             .completion()
@@ -1029,12 +1021,9 @@ impl ForgeService {
                 (v["body"].as_str() == Some(expected_body.as_str())
                     || (v["state"] == "PENDING"
                         && session.forge_review_id.as_deref()
-                            == crate::forge::github::opaque(v, "id").ok().as_deref()
+                            == gh::opaque(v, "id").ok().as_deref()
                         && v["body"].as_str() == Some(marker.as_str())))
-                    && crate::forge::github::opaque(&v["user"], "id")
-                        .ok()
-                        .as_deref()
-                        == Some(account.as_str())
+                    && gh::opaque(&v["user"], "id").ok().as_deref() == Some(account.as_str())
             })
             .collect();
         if matches.len() != 1 {
@@ -1043,7 +1032,7 @@ impl ForgeService {
             ));
         }
         let remote = matches[0];
-        let id = crate::forge::github::opaque(remote, "id")?;
+        let id = gh::opaque(remote, "id")?;
         if session
             .forge_review_id
             .as_ref()
@@ -1066,15 +1055,16 @@ impl ForgeService {
         }
         // Confirm exact staged payload plus account and a unique provider receipt.
         let conversation = self.reviews.get_conversation(&context.id, true).await?;
-        let line = github
-            .get_all(&format!(
-                "{}/pulls/{pr}/reviews/{id}/comments",
-                repo.route()
-            ))
-            .await?;
-        let general = github
-            .get_all(&format!("{}/issues/{pr}/comments", repo.route()))
-            .await?;
+        let line = gh::get_all(
+            &github.client,
+            &format!("{}/pulls/{pr}/reviews/{id}/comments", repo.route()),
+        )
+        .await?;
+        let general = gh::get_all(
+            &github.client,
+            &format!("{}/issues/{pr}/comments", repo.route()),
+        )
+        .await?;
         for c in conversation
             .comments
             .iter()
@@ -1090,10 +1080,7 @@ impl ForgeService {
                 .chain(general.iter().map(|v| (v, "conversation_comment")))
                 .filter(|(v, _)| {
                     v["body"].as_str() == Some(payload)
-                        && crate::forge::github::opaque(&v["user"], "id")
-                            .ok()
-                            .as_deref()
-                            == Some(account.as_str())
+                        && gh::opaque(&v["user"], "id").ok().as_deref() == Some(account.as_str())
                 })
                 .collect();
             if found.len() != 1 {
@@ -1102,7 +1089,7 @@ impl ForgeService {
                 ));
             }
             let (v, kind) = found[0];
-            let remote_id = crate::forge::github::opaque(v, "id")?;
+            let remote_id = gh::opaque(v, "id")?;
             if c.forge_comment_id
                 .as_ref()
                 .is_some_and(|stored| stored != &remote_id)
@@ -1117,7 +1104,7 @@ impl ForgeService {
                     &c.id,
                     &comment_key(session_id, &c.id),
                     PostReceipt {
-                        comment_id: crate::forge::github::opaque(v, "id")?,
+                        comment_id: gh::opaque(v, "id")?,
                         kind: kind.into(),
                         thread_id: None,
                         review_id: (kind == "review_comment").then(|| id.clone()),
@@ -1236,17 +1223,17 @@ impl ForgeService {
             .find(|t| t.id == comment.thread_id)
             .and_then(|t| t.forge_thread_id.as_deref())
             .ok_or_else(|| invalid("Review comment has no verified GitHub thread"))?;
-        github
-            .get_review_comment(
-                thread_id,
-                comment
-                    .forge_comment_id
-                    .as_deref()
-                    .ok_or_else(|| invalid("Missing GitHub comment receipt"))?,
-            )
-            .await?
-            .and_then(|comment| comment["id"].as_str().map(str::to_owned))
-            .ok_or_else(|| invalid("GitHub review comment missing from selected thread"))
+        gh::get_review_comment(
+            &github.client,
+            thread_id,
+            comment
+                .forge_comment_id
+                .as_deref()
+                .ok_or_else(|| invalid("Missing GitHub comment receipt"))?,
+        )
+        .await?
+        .and_then(|comment| comment["id"].as_str().map(str::to_owned))
+        .ok_or_else(|| invalid("GitHub review comment missing from selected thread"))
     }
 
     pub async fn edit_comment(

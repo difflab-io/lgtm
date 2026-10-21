@@ -2,6 +2,7 @@
 
 pub use lgtm_db as database;
 pub mod error;
+pub mod extensions;
 pub mod forge;
 pub mod models;
 pub mod rpc;

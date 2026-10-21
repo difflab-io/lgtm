@@ -28,31 +28,38 @@ for (const profile of profiles) {
   describe(`When opening a local diff [${profile}]`, { tags: [profile] }, () => {
     const fixture = useEditor(profile)
 
-    it('A branch review opens native revision buffers and its checkmark can be toggled', async () => {
-      // Arrange
-      const { editor, runtime } = fixture()
-      const { base, head } = await prepareNativeCheckout(runtime)
+    it(
+      'A branch review opens native revision buffers and its checkmark can be toggled',
+      { tags: profile === 'required' ? ['smoke'] : [] },
+      async () => {
+        // Arrange
+        const { editor, runtime } = fixture()
+        const { base, head } = await prepareNativeCheckout(runtime)
 
-      // Act
-      const state = await editor.openLocal('branch')
-      await editor.pane()
-      await editor.keys(' rm')
-      await expectFileSeen(editor, state.file.path, true)
-      await editor.keys(' rm')
-      await expectFileSeen(editor, state.file.path, false)
-      await editor.command('Lgtm complete')
-      await editor.wait(
-        'require("lgtm.context").current.review.state == "completed"',
-        'branch completed',
-      )
+        // Act
+        const state = await editor.openLocal('branch')
+        await editor.pane()
+        await editor.keys(' rm')
+        await expectFileSeen(editor, state.file.path, true)
+        await editor.keys(' rm')
+        await expectFileSeen(editor, state.file.path, false)
+        await editor.command('Lgtm complete')
+        await editor.wait(
+          'require("lgtm.context").current.review.state == "completed"',
+          'branch completed',
+        )
 
-      // Assert
-      expect(state).toMatchObject({ kind: 'git', base, head })
-      expect(state.native_explorer).toBe(true)
-      expect(
-        await editor.value('vim.api.nvim_buf_get_name(...)', (await editor.state())!.panes.new.buf),
-      ).toMatch(/^codediff:\/\//)
-    })
+        // Assert
+        expect(state).toMatchObject({ kind: 'git', base, head })
+        expect(state.native_explorer).toBe(true)
+        expect(
+          await editor.value(
+            'vim.api.nvim_buf_get_name(...)',
+            (await editor.state())!.panes.new.buf,
+          ),
+        ).toMatch(/^codediff:\/\//)
+      },
+    )
 
     it.each(['working', 'staged'])(
       'An empty %s comparison reports its state and remains completable',

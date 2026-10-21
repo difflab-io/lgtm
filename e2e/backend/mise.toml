@@ -20,3 +20,9 @@ run = "bun x prettier --check e2e/backend/**/*.ts e2e/common/**/*.ts"
 description = "List the backend BDD journeys without running them"
 dir = "{{config_root}}/../.."
 run = "bun x vitest list --config e2e/backend/vitest.config.ts"
+
+[tasks.smoke]
+depends = ["//apps/lgtm-backend:build"]
+description = "Run representative backend E2E flows for local iteration"
+dir = "{{config_root}}/../.."
+run = "bun x vitest run --config e2e/backend/vitest.config.ts --tags-filter=smoke --hideSkippedTests"

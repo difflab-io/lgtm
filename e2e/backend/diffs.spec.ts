@@ -24,26 +24,30 @@ async function prepareSource(runtime: Runtime) {
 describe('When reading diff metadata and source bytes', () => {
   const fixture = useRuntime('backend')
 
-  it('Consumers can read ignored content without creating a review', async () => {
-    // Arrange
-    const { runtime } = fixture()
-    const { bytes, diff } = await prepareSource(runtime)
+  it(
+    'Consumers can read ignored content without creating a review',
+    { tags: ['smoke'] },
+    async () => {
+      // Arrange
+      const { runtime } = fixture()
+      const { bytes, diff } = await prepareSource(runtime)
 
-    // Act
-    const files = await runtime.rpc('GetFiles', { diff, pageSize: 1 })
-    const loaded = await runtime.rpc('GetFile', {
-      diff,
-      path: 'PLAN.md',
-      anchors: [{ original: line(bytes, 'PLAN.md') }],
-    })
-    const reviews = await runtime.rpc('ListReviews')
+      // Act
+      const files = await runtime.rpc('GetFiles', { diff, pageSize: 1 })
+      const loaded = await runtime.rpc('GetFile', {
+        diff,
+        path: 'PLAN.md',
+        anchors: [{ original: line(bytes, 'PLAN.md') }],
+      })
+      const reviews = await runtime.rpc('ListReviews')
 
-    // Assert
-    expect(files.files[0].path).toBe('PLAN.md')
-    expect(loaded.newSide.content).toBe(bytes)
-    expect(loaded.placements[0].exact.location.start).toBe('2')
-    expect(reviews.reviews ?? []).toEqual([])
-  })
+      // Assert
+      expect(files.files[0].path).toBe('PLAN.md')
+      expect(loaded.newSide.content).toBe(bytes)
+      expect(loaded.placements[0].exact.location.start).toBe('2')
+      expect(reviews.reviews ?? []).toEqual([])
+    },
+  )
 
   it('A stale diff descriptor cannot silently return changed source bytes', async () => {
     // Arrange

@@ -1,4 +1,5 @@
 //! Content comparisons and selected-file reads. This service has no review database handle.
+use crate::extensions::gh;
 use crate::{
     error::{Error, Result, invalid},
     forge::{Github, Repository},
@@ -304,9 +305,11 @@ impl DiffService {
                 "PR head changed; refresh before reading content".into(),
             ));
         }
-        let files = github
-            .get_all(&format!("{}/pulls/{pr}/files", repo.route()))
-            .await?;
+        let files = gh::get_all(
+            &github.client,
+            &format!("{}/pulls/{pr}/files", repo.route()),
+        )
+        .await?;
         if files.len() >= 3000 {
             return Err(invalid(
                 "GitHub file listing may be truncated; narrow the review before proceeding",

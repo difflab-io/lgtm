@@ -39,7 +39,7 @@ async function prepareDirectoryDiscussion(r: Runtime) {
 
 describe('When starting a local directory review', () => {
   const fixture = useRuntime('cli')
-  it('User can review ignored content and edit its feedback', async () => {
+  it('User can review ignored content and edit its feedback', { tags: ['smoke'] }, async () => {
     // Arrange
     const { runtime: r } = fixture()
     const { plans, review } = await prepareDirectory(r)

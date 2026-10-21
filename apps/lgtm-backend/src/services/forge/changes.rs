@@ -1,5 +1,6 @@
 //! Remote object writes with durable intent and observation-based recovery.
 use super::{ForgeService, check_owner, comment_marker, comment_route, definite_rejection, render};
+use crate::extensions::gh;
 use crate::{
     error::{Error, Result, invalid},
     forge::{Github, Repository},
@@ -292,7 +293,7 @@ impl ForgeService {
                         response[mutation]["thread"]["id"] == id
                             && response[mutation]["thread"]["isResolved"].as_bool() == Some(*resolved)
                     } else {
-                        github.get_thread_resolution(id).await? == Some(*resolved)
+                        gh::get_thread_resolution(&github.client, id).await? == Some(*resolved)
                     };
                     if !confirmed {
                         return Ok(None);
@@ -319,7 +320,7 @@ impl ForgeService {
                             .ok_or_else(|| invalid("Comment thread missing"))?;
                         let thread_id = thread.forge_thread_id.as_deref()
                             .ok_or_else(|| invalid("Comment thread has no GitHub receipt"))?;
-                        let remote = github.get_review_comment(
+                        let remote = gh::get_review_comment(&github.client,
                             thread_id,
                             comment.forge_comment_id.as_deref()
                                 .ok_or_else(|| invalid("Comment has no GitHub receipt"))?,

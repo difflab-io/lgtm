@@ -38,37 +38,43 @@ async function prepareNote(e: Editor, r: Runtime, body: string, reply?: string) 
 for (const profile of profiles) {
   describe(`When adding notes while browsing files [${profile}]`, { tags: [profile] }, () => {
     const fixture = useEditor(profile)
-    it('The note composer is centered and the saved selection has a visible card', async () => {
-      // Arrange
-      const { editor: e, runtime: r } = fixture()
-      const file = await prepareBrowsingFile(r)
+    it(
+      'The note composer is centered and the saved selection has a visible card',
+      { tags: profile === 'required' ? ['smoke'] : [] },
+      async () => {
+        // Arrange
+        const { editor: e, runtime: r } = fixture()
+        const file = await prepareBrowsingFile(r)
 
-      // Act
-      await e.edit(file)
-      await e.command('1,2Lgtm note')
-      const composer = await e.composer()
+        // Act
+        await e.edit(file)
+        await e.command('1,2Lgtm note')
+        const composer = await e.composer()
 
-      // Assert
-      const config = await e.lua(
-        'local c=vim.api.nvim_win_get_config(...); return {width=c.width,height=c.height,row=c.row,col=c.col}',
-        composer.win,
-      )
-      expect(config).toMatchObject({ width: 80, height: 12, row: 13, col: 19 })
+        // Assert
+        const config = await e.lua(
+          'local c=vim.api.nvim_win_get_config(...); return {width=c.width,height=c.height,row=c.row,col=c.col}',
+          composer.win,
+        )
+        expect(config).toMatchObject({ width: 80, height: 12, row: 13, col: 19 })
 
-      // Act
-      await e.compose('Original standalone note')
+        // Act
+        await e.compose('Original standalone note')
 
-      // Assert
-      const note = await e.value(
-        'require("lgtm.notes").states[vim.api.nvim_get_current_buf()].conversation',
-      )
-      expect(note.comments).toHaveLength(1)
-      expect(note.threads[0].anchor).toMatchObject({ start: '1', end: '2' })
-      expect(
-        await e.value('vim.api.nvim_buf_get_extmarks(0,require("lgtm.threads").namespace,0,-1,{})'),
-      ).toHaveLength(1)
-      await e.lua('vim.api.nvim_win_set_cursor(0,{2,0})')
-    })
+        // Assert
+        const note = await e.value(
+          'require("lgtm.notes").states[vim.api.nvim_get_current_buf()].conversation',
+        )
+        expect(note.comments).toHaveLength(1)
+        expect(note.threads[0].anchor).toMatchObject({ start: '1', end: '2' })
+        expect(
+          await e.value(
+            'vim.api.nvim_buf_get_extmarks(0,require("lgtm.threads").namespace,0,-1,{})',
+          ),
+        ).toHaveLength(1)
+        await e.lua('vim.api.nvim_win_set_cursor(0,{2,0})')
+      },
+    )
   })
   describe(`When discussing notes [${profile}]`, { tags: [profile] }, () => {
     const fixture = useEditor(profile)
@@ -144,9 +150,20 @@ for (const profile of profiles) {
         'require("lgtm.notes").states[vim.api.nvim_get_current_buf()].conversation.threads[1].state == "resolved"',
         'note resolved',
       )
+      const cards = await e.value(
+        'vim.api.nvim_buf_get_extmarks(0,require("lgtm.threads").namespace,0,-1,{details=true})',
+      )
+      expect(JSON.stringify(cards)).toContain('Resolved')
+      expect(JSON.stringify(cards)).toContain('Edited standalone note')
 
       // Act
       await e.popup()
+
+      // Assert
+      expect((await e.text()).toUpperCase()).toContain('RESOLVED')
+      expect(await e.text()).toContain('Edited note reply')
+
+      // Act
       await e.keys('x')
 
       // Assert

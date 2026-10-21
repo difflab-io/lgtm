@@ -91,7 +91,18 @@ premise run e2e:nvim:run -- diffs.spec.ts --tags-filter=required
 premise run e2e:backend:run -- pr-review.spec.ts -t "When resuming"
 ```
 
-Run focused checks while iterating. Use one complete gate after changing shared fixtures. Do not repeat passing suites whose inputs have not changed.
+For a quick local check, run the existing scenarios tagged `smoke`:
+
+```sh
+premise run e2e:smoke
+# Or run one suite, with native Vitest filters when needed:
+premise run //e2e/nvim:smoke
+premise run e2e:nvim:run -- --tags-filter=smoke
+```
+
+The smoke selection has 11 cases: four backend, three CLI and four Neovim cases. It covers notes, local reviews, diff data and native CodeDiff, plus remote draft creation through each public boundary. The editor smoke cases use the required dependency profile; the full suite also covers Kak. These are the same tests used by the full suite. PR cases use real GitHub and clean up their run-owned PRs and refs. The smoke tasks build changed binaries and install missing editor dependencies; the `:run` example uses existing binaries.
+
+During development, run only the tests relevant to the changed behavior. Use a spec path, test name or tag for focused checks. Use smoke when a quick check across features is useful. Reserve the full suite for final validation or changes to shared fixtures or behavior that require all suites. Do not repeat passing suites whose inputs have not changed. CI continues to run the full suites.
 
 ## Permanent private GitHub fixture
 

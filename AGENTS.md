@@ -13,6 +13,9 @@
 
 ## Code Style
 
+- Keep stateless SDK and CLI adapters in `apps/lgtm-backend/src/extensions/` (for example, `extensions/gh.rs`). Call existing library features directly and share external-tool wrappers here instead of duplicating them in services or providers. Keep domain mapping and review behavior in their existing model and service modules.
+- Name mutating operations and factories with imperative verbs (for example, `promote`, not `promoted`).
+
 - Name public repository and service reads `get_*`.
 - Use one inherent `impl` block per type per file. Put instance methods first, associated functions after them, and required trait implementations after the inherent block.
 - Separate functions with a blank line. Keep unit tests last, after a `// tests ---` separator padded to column 80.
@@ -34,7 +37,7 @@ These rules apply to every app and library in the workspace.
 - Test multi-operation transactions and full review lifecycles against real SQLite and PostgreSQL. Use dummy external services.
 - Run checks through project Mise tasks invoked by Premise. Keep their source scripts tracked; generated output stays ignored.
 - PR E2E tests must use real GitHub and the permanent private fixture repository. Keep TypeScript E2E tests under e2e/, outside Rust app test directories. Do not add a mocked E2E mode or separate live spec files.
-- Run focused checks while iterating. Repeat broad suites only when changes or failures justify them; reuse passing evidence for unchanged code.
+- During development, run only tests relevant to the changed behavior, feature or suite. Use `premise run e2e:smoke` for a quick check across features; use a spec path, test name or Vitest tag for narrower checks. Do not run the full E2E suite on each iteration. Reserve a full run for final validation or changes to shared fixtures or behavior that require all suites, and reuse passing evidence for unchanged code.
 - Write new E2E suites in TypeScript with Vitest. Use native Vitest `describe` and `it` groups for feature contexts and independent lifecycle journeys, with explicit assertions and shared runtime fixtures. Keep notes, local reviews, PR reviews and diffs in separate spec files where those boundaries exist; import Vitest `it` directly and use shared `beforeEach`/`afterEach` fixtures instead of custom step runners or test aliases. Keep each suite's Mise config; do not add a root `e2e/mise.toml`.
 - Use the permanent private GitHub fixture selected by `LGTM_E2E_GITHUB_REPOSITORY`. Test runners must never create, recreate, rename, archive or delete repositories. Verify private visibility before writes and clean up only run-owned PRs and refs.
 - Visually separate Arrange, Act and Assert blocks in E2E tests with section comments. Repeat the sections within long journeys when the next action needs another check.

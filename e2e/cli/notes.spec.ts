@@ -33,71 +33,75 @@ describe('When the backend is unavailable', () => {
 
 describe('When taking notes while browsing files', () => {
   const fixture = useRuntime('cli')
-  it('User can persist exact selections, retry writes and delete a note after its file disappears', async () => {
-    // Arrange
-    const { runtime: r } = fixture()
-    await r.git('init', '-q', '-b', 'main')
-    const file = await r.write('notes ü.md', 'before\r\nselected\r\nafter')
+  it(
+    'User can persist exact selections, retry writes and delete a note after its file disappears',
+    { tags: ['smoke'] },
+    async () => {
+      // Arrange
+      const { runtime: r } = fixture()
+      await r.git('init', '-q', '-b', 'main')
+      const file = await r.write('notes ü.md', 'before\r\nselected\r\nafter')
 
-    // Arrange
-    const args = [
-      'comments',
-      'add',
-      '--notes',
-      file,
-      '--file',
-      'notes ü.md',
-      '--line',
-      '2',
-      '--body',
-      'Explain the fallback',
-      '--expected-version',
-      '0',
-      '--request-key',
-      'note-once',
-    ]
+      // Arrange
+      const args = [
+        'comments',
+        'add',
+        '--notes',
+        file,
+        '--file',
+        'notes ü.md',
+        '--line',
+        '2',
+        '--body',
+        'Explain the fallback',
+        '--expected-version',
+        '0',
+        '--request-key',
+        'note-once',
+      ]
 
-    // Act
-    const saved = await r.json(args)
-    const replayedComment = await r.json(args)
+      // Act
+      const saved = await r.json(args)
+      const replayedComment = await r.json(args)
 
-    // Assert
-    expect(replayedComment.comment.id).toBe(saved.comment.id)
-    const notes = await r.json(['comments', 'list', '--notes', file])
-    expect(notes.comments).toHaveLength(1)
-    expect(notes.threads[0].anchor.evidence.selectedText).toBe('selected')
-    expect(notes.threads[0].anchor.source.localFile.contentHash).toMatch(/^sha256:/)
-    expect((await r.json(['sessions', 'list', '--all'])).reviews).toEqual([])
-    expect((await r.json(['session', 'export', '--notes', file])).markdown).toContain(
-      '1. **[NOTE]**',
-    )
+      // Assert
+      expect(replayedComment.comment.id).toBe(saved.comment.id)
+      const notes = await r.json(['comments', 'list', '--notes', file])
+      expect(notes.comments).toHaveLength(1)
+      expect(notes.threads[0].anchor.evidence.selectedText).toBe('selected')
+      expect(notes.threads[0].anchor.source.localFile.contentHash).toMatch(/^sha256:/)
+      expect((await r.json(['sessions', 'list', '--all'])).reviews).toEqual([])
+      expect((await r.json(['session', 'export', '--notes', file])).markdown).toContain(
+        '1. **[NOTE]**',
+      )
 
-    // Act
-    await rm(file)
+      // Act
+      await rm(file)
 
-    // Arrange
-    const deletion = [
-      'comments',
-      'delete',
-      saved.comment.id,
-      '--notes',
-      file,
-      '--expected-version',
-      notes.comments[0].version,
-      '--request-key',
-      'delete-once',
-    ]
+      // Arrange
+      const deletion = [
+        'comments',
+        'delete',
+        saved.comment.id,
+        '--notes',
+        file,
+        '--expected-version',
+        notes.comments[0].version,
+        '--request-key',
+        'delete-once',
+      ]
 
-    // Act
-    const acceptedDeletion = await r.json(deletion)
-    const replayedDeletion = await r.json(deletion)
+      // Act
+      const acceptedDeletion = await r.json(deletion)
+      const replayedDeletion = await r.json(deletion)
 
-    // Assert
-    expect(acceptedDeletion).toEqual(replayedDeletion)
-    expect((await r.json(['comments', 'list', '--notes', file])).comments).toEqual([])
+      // Assert
+      expect(acceptedDeletion).toEqual(replayedDeletion)
+      expect((await r.json(['comments', 'list', '--notes', file])).comments).toEqual([])
 
-    // Act
-  })
+      // Act
+    },
+  )
 })
 
 describe('When a note file moves', () => {

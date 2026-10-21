@@ -1,5 +1,5 @@
 local M = {}
--- Keep failed drafts in the same buffer. Confirmation alone closes the composer.
+-- Keep pending text until confirmation, while the editor remains available during the request.
 function M.open(title, initial, submit, options)
   local origin = vim.api.nvim_get_current_win()
   local buf = vim.api.nvim_create_buf(false, true)
@@ -27,10 +27,11 @@ function M.open(title, initial, submit, options)
   vim.wo[win].linebreak = true
   local pending = false
   local function close()
+    local focused = vim.api.nvim_get_current_win() == win
     if vim.api.nvim_win_is_valid(win) then
       vim.api.nvim_win_close(win, true)
     end
-    if vim.api.nvim_win_is_valid(origin) then
+    if focused and vim.api.nvim_win_is_valid(origin) then
       vim.api.nvim_set_current_win(origin)
     end
   end
@@ -39,10 +40,18 @@ function M.open(title, initial, submit, options)
       return
     end
     pending = true
+    vim.api.nvim_win_set_config(win, { hide = true })
+    if vim.api.nvim_win_is_valid(origin) then
+      vim.api.nvim_set_current_win(origin)
+    end
     local body = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
     submit(body, function(err)
       pending = false
       if err then
+        if vim.api.nvim_win_is_valid(win) then
+          vim.api.nvim_win_set_config(win, { hide = false })
+          vim.api.nvim_set_current_win(win)
+        end
         require("lgtm.notifications").error(err)
         return
       end

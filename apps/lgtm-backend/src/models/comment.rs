@@ -62,7 +62,7 @@ impl Comment {
     }
 
     /// Copy feedback to a new review while retaining its source author.
-    pub fn promoted(source: &Self, target: &Session, thread: &Thread, owner: &Actor) -> Self {
+    pub fn promote(source: &Self, target: &Session, thread: &Thread, owner: &Actor) -> Self {
         let mut comment = Self::local(target, thread, &source.author, &source.body, 0);
         comment.owner_id = Some(owner.id);
         comment

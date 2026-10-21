@@ -93,7 +93,7 @@ describe('When starting a fresh draft review', () => {
     },
   )
 
-  it('User can immediately persist a file-level draft comment', async () => {
+  it('User can immediately persist a file-level draft comment', { tags: ['smoke'] }, async () => {
     // Arrange
     const { runtime, github } = fixture()
     const { scope } = await prepareReview(runtime, github)

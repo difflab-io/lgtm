@@ -714,9 +714,10 @@ apps/lgtm-backend/
 │   │   ├── review.rs                Persistence and conversation workflows
 │   │   ├── workspace.rs             Scoped source checks used by review validation
 │   │   └── forge.rs                 Drafts, submissions, and reconciliation
+│   ├── extensions/
+│   │   └── gh.rs                    Stateless Octocrab and gh CLI helpers
 │   └── forge/
-│       ├── github.rs                Octocrab REST and GraphQL adapter
-│       └── credentials.rs           Backend-local GitHub credentials
+│       └── github.rs                GitHub review mapping and complete snapshots
 └── tests/                          Service, RPC, and adapter contracts
 
 libs/lgtm-db/src/repositories/       Named persistence operations

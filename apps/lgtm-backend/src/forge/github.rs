@@ -1,4 +1,5 @@
 //! Octocrab-backed GitHub REST/GraphQL API with complete paginated snapshots.
+use crate::extensions::gh::{self, COMMENTS_QUERY, number, opaque, request, text};
 use crate::{
     error::{Error, Result, invalid},
     models::{Anchor, ContextKey, ForgeRepositoryUrl},
@@ -6,7 +7,6 @@ use crate::{
 };
 use octocrab::Octocrab;
 use serde_json::{Value, json};
-use std::time::Duration;
 
 /// Validated github.com repository scope. IDs remain scoped opaque strings.
 #[derive(Clone, Debug)]
@@ -66,8 +66,7 @@ impl Repository {
 /// Cloneable provider. Test construction always uses an inert fixture token.
 #[derive(Clone)]
 pub struct Github {
-    client: Octocrab,
-    api_url: String,
+    pub(crate) client: Octocrab,
 }
 
 impl Github {
@@ -266,7 +265,7 @@ impl Github {
             (format!("/issues/{pr}/comments"), "conversation_comment"),
             (format!("/pulls/{pr}/reviews"), "review"),
         ] {
-            for item in self.get_all(&format!("{}{}", repo.route(), suffix)).await? {
+            for item in gh::get_all(&self.client, &format!("{}{}", repo.route(), suffix)).await? {
                 if kind == "review" && item["state"] == "PENDING" {
                     continue;
                 }
@@ -295,9 +294,8 @@ impl Github {
                 .as_ref()
                 .is_some_and(|observation| observation.outdated)
         }) {
-            let files = self
-                .get_all(&format!("{}/pulls/{pr}/files", repo.route()))
-                .await?;
+            let files =
+                gh::get_all(&self.client, &format!("{}/pulls/{pr}/files", repo.route())).await?;
             for thread in &mut threads {
                 let Some(observation) = &mut thread.observation else {
                     continue;
@@ -347,106 +345,29 @@ impl Github {
         })
     }
 
-    /// Read one comment within its previously verified thread, including private drafts.
-    /// A missing node is not an authorization receipt; callers verify scope before deletion recovery.
-    pub async fn get_review_comment(
-        &self,
-        thread_id: &str,
-        comment_id: &str,
-    ) -> Result<Option<Value>> {
-        let mut cursor = Value::Null;
-        loop {
-            let response = self
-                .graphql(
-                    json!({"query":COMMENTS_QUERY,"variables":{"id":thread_id,"cursor":cursor}}),
-                )
-                .await?;
-            if response.get("node") == Some(&Value::Null) {
-                return Ok(None);
-            }
-            let connection = &response["node"]["comments"];
-            let nodes = connection["nodes"]
-                .as_array()
-                .ok_or_else(|| invalid("Review thread comments unavailable"))?;
-            for comment in nodes {
-                if opaque(comment, "databaseId")? == comment_id {
-                    return Ok(Some(comment.clone()));
-                }
-            }
-            if !connection["pageInfo"]["hasNextPage"]
-                .as_bool()
-                .ok_or_else(|| invalid("Review comment pagination is incomplete"))?
-            {
-                return Ok(None);
-            }
-            cursor = Value::String(text(&connection["pageInfo"], "endCursor")?);
-        }
-    }
-
-    /// Observe only the selected thread when recovering an uncertain resolution.
-    pub async fn get_thread_resolution(&self, thread_id: &str) -> Result<Option<bool>> {
-        let response = self.graphql(json!({"query":"query($id:ID!){node(id:$id){... on PullRequestReviewThread{id isResolved}}}","variables":{"id":thread_id}})).await?;
-        if response.get("node") == Some(&Value::Null) {
-            return Ok(None);
-        }
-        if response["node"]["id"] != thread_id {
-            return Err(invalid("Thread observation returned another object"));
-        }
-        response["node"]["isResolved"]
-            .as_bool()
-            .map(Some)
-            .ok_or_else(|| invalid("Thread resolution unavailable"))
-    }
-
-    pub async fn get_all(&self, route: &str) -> Result<Vec<Value>> {
-        let mut entries = vec![];
-        for page in 1..=1000 {
-            let response = self
-                .get(route, Some(&json!({"per_page":100,"page":page})))
-                .await?;
-            let items = response
-                .as_array()
-                .ok_or_else(|| invalid("Malformed GitHub page"))?;
-            entries.extend(items.clone());
-            if items.len() < 100 {
-                return Ok(entries);
-            }
-        }
-        Err(invalid(
-            "GitHub pagination exceeded safety limit; snapshot not applied",
-        ))
-    }
-
     pub async fn get(&self, route: &str, params: Option<&Value>) -> Result<Value> {
-        timed(self.client.get(route, params)).await
+        request(self.client.get(route, params)).await
     }
 
     pub async fn post(&self, route: &str, body: &Value) -> Result<Value> {
-        timed(self.client.post(route, Some(body))).await
+        request(self.client.post(route, Some(body))).await
     }
 
     pub async fn patch(&self, route: &str, body: &Value) -> Result<Value> {
-        timed(self.client.patch(route, Some(body))).await
+        request(self.client.patch(route, Some(body))).await
     }
 
     pub async fn delete(&self, route: &str) -> Result<()> {
-        let response = timed(self.client._delete(
-            format!("{}{}", self.api_url.trim_end_matches('/'), route),
-            None::<&()>,
-        ))
-        .await?;
-        if response.status().is_success() {
+        request(async {
+            let response = self.client._delete(route, None::<&()>).await?;
+            octocrab::map_github_error(response).await?;
             Ok(())
-        } else {
-            Err(invalid(format!(
-                "GitHub HTTP {}: deletion rejected",
-                response.status()
-            )))
-        }
+        })
+        .await
     }
 
     pub async fn graphql(&self, body: Value) -> Result<Value> {
-        timed(self.client.graphql(&body)).await
+        request(self.client.graphql(&body)).await
     }
 
     pub async fn from_environment() -> Result<Self> {
@@ -457,15 +378,12 @@ impl Github {
             return Self::for_test(&endpoint);
         }
         let account = std::env::var("LGTM_GITHUB_ACCOUNT").ok();
-        let token = super::credentials::get_token(account.as_deref()).await?;
+        let token = gh::get_token(account.as_deref()).await?;
         let client = Octocrab::builder()
             .personal_token(token)
             .build()
             .map_err(|_| invalid("Could not initialize GitHub client"))?;
-        Ok(Self {
-            client,
-            api_url: "https://api.github.com".into(),
-        })
+        Ok(Self { client })
     }
 
     /// Explicit HTTP fixture boundary; refuses remote hosts and never reads real credentials.
@@ -488,55 +406,10 @@ impl Github {
             .personal_token("lgtm-test-fixture-only".to_owned())
             .build()
             .map_err(|_| invalid("Could not initialize test GitHub client"))?;
-        Ok(Self {
-            client,
-            api_url: endpoint.trim_end_matches('/').into(),
-        })
+        Ok(Self { client })
     }
 }
 
-async fn timed<T>(future: impl std::future::Future<Output = octocrab::Result<T>>) -> Result<T> {
-    tokio::time::timeout(Duration::from_secs(30), future)
-        .await
-        .map_err(|_| invalid("GitHub request timed out; reconcile before retrying writes"))?
-        .map_err(|e| {
-            // Do not forward HTTP request bodies, tokens, or provider diagnostics.
-            if let octocrab::Error::GitHub { source, .. } = &e {
-                let reason = if source.status_code.as_u16() == 422 {
-                    "review data was rejected; check the review outcome and comment locations"
-                } else {
-                    "request rejected; check account permissions/rate limits"
-                };
-                invalid(format!("GitHub HTTP {}: {reason}", source.status_code))
-            } else {
-                invalid("GitHub transport failed; reconcile before retrying writes")
-            }
-        })
-}
-
-fn text(v: &Value, key: &str) -> Result<String> {
-    v[key]
-        .as_str()
-        .filter(|v| !v.is_empty())
-        .map(str::to_owned)
-        .ok_or_else(|| invalid(format!("GitHub response missing {key}")))
-}
-fn number(v: &Value, key: &str) -> Result<i64> {
-    v[key]
-        .as_i64()
-        .ok_or_else(|| invalid(format!("GitHub response missing {key}")))
-}
-pub(crate) fn opaque(v: &Value, key: &str) -> Result<String> {
-    if let Some(v) = v[key].as_str()
-        && !v.is_empty()
-    {
-        return Ok(v.into());
-    }
-    v[key]
-        .as_u64()
-        .map(|n| n.to_string())
-        .ok_or_else(|| invalid(format!("GitHub response missing {key}")))
-}
 fn pull_request(repo: &Repository, v: &Value) -> Result<PullRequest> {
     Ok(PullRequest {
         number: number(v, "number")?,
@@ -601,4 +474,3 @@ fn remote_rest_comment(v: &Value, kind: &str) -> Result<RemoteComment> {
     })
 }
 const THREADS_QUERY: &str = r#"query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$cursor){nodes{id path line startLine originalLine originalStartLine diffSide startDiffSide subjectType isResolved isOutdated comments(first:100){nodes{id databaseId path body updatedAt commit{oid} originalCommit{oid} author{login ... on User{databaseId} ... on Bot{databaseId}} pullRequestReview{databaseId state}} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}}}}}"#;
-const COMMENTS_QUERY: &str = r#"query($id:ID!,$cursor:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$cursor){nodes{id databaseId viewerDidAuthor path body updatedAt commit{oid} originalCommit{oid} author{login ... on User{databaseId} ... on Bot{databaseId}} pullRequestReview{databaseId state}} pageInfo{hasNextPage endCursor}}}}}"#;

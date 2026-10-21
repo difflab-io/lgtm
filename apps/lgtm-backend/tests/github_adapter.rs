@@ -174,3 +174,42 @@ async fn should_repeat_only_the_observation_when_commits_change_while_loading_pa
         "two bounded complete observations"
     );
 }
+
+#[tokio::test]
+async fn should_follow_sdk_next_page_links_even_when_the_page_is_not_full() {
+    let endpoint = Arc::new(Mutex::new(String::new()));
+    let base = endpoint.clone();
+    let requests = Arc::new(Mutex::new(vec![]));
+    let captured = requests.clone();
+    let fixture = Fixture::with_headers(move |request| {
+        captured.lock().unwrap().push(request.path.clone());
+        if request.path.contains("cursor=second") {
+            (200, json!([{"id":2}]), vec![])
+        } else {
+            (
+                200,
+                json!([{"id":1}]),
+                vec![(
+                    "link",
+                    format!(
+                        "<{}/comments?cursor=second>; rel=\"next\"",
+                        base.lock().unwrap()
+                    ),
+                )],
+            )
+        }
+    });
+    *endpoint.lock().unwrap() = fixture.endpoint.clone();
+    let client = octocrab::Octocrab::builder()
+        .base_uri(&fixture.endpoint)
+        .unwrap()
+        .personal_token("lgtm-test-fixture-only".to_owned())
+        .build()
+        .unwrap();
+    let entries = lgtm_backend::extensions::gh::get_all(&client, "/comments")
+        .await
+        .unwrap();
+    assert_eq!(entries, vec![json!({"id":1}), json!({"id":2})]);
+    assert_eq!(requests.lock().unwrap().len(), 2);
+    assert!(requests.lock().unwrap()[1].contains("cursor=second"));
+}

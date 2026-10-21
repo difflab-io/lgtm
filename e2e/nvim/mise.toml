@@ -28,3 +28,9 @@ run = "bun run e2e/nvim/install.ts"
 description = "List the nvim BDD journeys without running them"
 dir = "{{config_root}}/../.."
 run = "bun x vitest list --config e2e/nvim/vitest.config.ts"
+
+[tasks.smoke]
+depends = ["install", "//apps/lgtm-cli:build"]
+description = "Run representative nvim E2E flows for local iteration"
+dir = "{{config_root}}/../.."
+run = "bun x vitest run --config e2e/nvim/vitest.config.ts --tags-filter=smoke --hideSkippedTests"

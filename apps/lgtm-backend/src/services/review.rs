@@ -1979,7 +1979,7 @@ impl ReviewService {
                 forge_thread_id: None,
                 outdated: false,
             };
-            let comment = Comment::promoted(&source, &target, &thread, actor);
+            let comment = Comment::promote(&source, &target, &thread, actor);
             tx.comments
                 .insert_thread(&threads::Model::from(&thread))
                 .await?;

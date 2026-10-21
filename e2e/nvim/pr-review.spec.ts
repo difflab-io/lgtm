@@ -7,9 +7,33 @@
 import { describe, it, expect } from 'vitest'
 import { profiles } from './fixtures.js'
 import { usePrEditor, selectBranchPr } from './pr-review.fixtures.js'
+import type { GithubFixture } from '../common/github.js'
 import { githubCredentials } from '../common/github.js'
 import { waitFor } from '../common/runtime.js'
 import { expectFileSeen } from './assertions.js'
+
+async function publishConcerns(
+  github: GithubFixture,
+  bodies = ['Published concern from another reviewer'],
+) {
+  const account = process.env.LGTM_E2E_GITHUB_SECONDARY_USER ?? 'skapoor81'
+  await github.api(
+    `repos/${github.repository}/pulls/${github.number}/reviews`,
+    'POST',
+    {
+      event: 'REQUEST_CHANGES',
+      body: 'Please address this concern',
+      comments: bodies.map((body, index) => ({
+        path: github.path,
+        line: 2 + index,
+        side: 'RIGHT',
+        body,
+      })),
+    },
+    await githubCredentials(account),
+  )
+  return account
+}
 
 for (const profile of profiles) {
   describe(`When choosing a PR from :Lgtm review [${profile}]`, { tags: [profile] }, () => {
@@ -93,34 +117,109 @@ for (const profile of profiles) {
   describe(`When creating draft comments [${profile}]`, { tags: [profile] }, () => {
     const fixture = usePrEditor(profile)
 
-    it('Lowercase c creates a remote draft shown as a full-width card with status and preview text', async () => {
+    it(
+      'Lowercase c creates a remote draft shown as a full-width card with status and preview text',
+      { tags: profile === 'required' ? ['smoke'] : [] },
+      async () => {
+        // Arrange
+        const { editor, github } = fixture()
+        await selectBranchPr(editor, github)
+        await editor.pane('new', 2)
+
+        // Act
+        await editor.keys('c')
+        const composer = await editor.composer()
+        await editor.body('Please explain this line')
+        const savedAt = performance.now()
+        await editor.keys('<C-s>')
+        const focus = await editor.value('vim.api.nvim_get_current_win()')
+        const focusMs = performance.now() - savedAt
+
+        // Assert
+        expect(focus).toBe((await editor.state())!.panes.new.win)
+        expect(focusMs, 'Ctrl-S returns to the diff without waiting for GitHub').toBeLessThan(500)
+        await editor.keys('l')
+        expect(await editor.value('vim.api.nvim_win_get_cursor(0)[2]')).toBe(1)
+
+        // Act
+        await editor.pane('old', 2)
+
+        // Assert
+        const state = await editor.comments(1)
+        await editor.wait(`not vim.api.nvim_win_is_valid(${composer.win})`, 'draft save confirmed')
+        expect(await editor.value('vim.api.nvim_get_current_win()')).toBe(state!.panes.old.win)
+        const marks = await editor.marks()
+        const remote = await github.api(
+          `repos/${github.repository}/pulls/${github.number}/reviews/${state!.review.forgeReviewId}/comments`,
+        )
+
+        // Assert
+        expect(remote).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ body: expect.stringContaining('Please explain this line') }),
+          ]),
+        )
+        expect(marks).toHaveLength(1)
+        expect(marks[0][3].virt_lines.length).toBeGreaterThan(0)
+        expect(JSON.stringify(marks)).toContain('Please explain this line')
+        expect(JSON.stringify(marks)).toContain('GitHub draft')
+        expect(
+          (await editor.notices()).some((notice) => notice.message === 'Draft saved on GitHub'),
+        ).toBe(true)
+      },
+    )
+
+    it('User can save a file-level draft with a file card and no fabricated line number', async () => {
       // Arrange
       const { editor, github } = fixture()
       await selectBranchPr(editor, github)
       await editor.pane('new', 2)
 
       // Act
-      await editor.keys('c')
-      await editor.compose('Please explain this line')
+      await editor.command('Lgtm comment file')
+      await editor.compose('Concern about the whole file')
       const state = await editor.comments(1)
       const marks = await editor.marks()
-      const remote = await github.api(
-        `repos/${github.repository}/pulls/${github.number}/reviews/${state!.review.forgeReviewId}/comments`,
-      )
+      const remote = await github.api('graphql', 'POST', {
+        query:
+          'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{subjectType line path comments(first:100){nodes{body state}}}}}}}',
+        variables: {
+          owner: github.repository.split('/')[0],
+          name: github.repository.split('/')[1],
+          number: github.number,
+        },
+      })
+      await editor.pane('new', 1)
+      await editor.popup('Concern about the whole file')
+      const modal = await editor.text()
 
       // Assert
-      expect(remote).toEqual(
+      expect(state!.conversation.threads[0].anchor).toMatchObject({
+        kind: 'file',
+        path: github.path,
+      })
+      expect(state!.conversation.threads[0].anchor.start ?? '0').toBe('0')
+      expect(marks).toHaveLength(1)
+      expect(marks[0][3].virt_lines_above).toBe(true)
+      expect(JSON.stringify(marks)).toContain('File · GitHub draft')
+      expect(JSON.stringify(marks)).toContain('Concern about the whole file')
+      expect(modal).toContain('Concern about the whole file')
+      expect(remote.data.repository.pullRequest.reviewThreads.nodes).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ body: expect.stringContaining('Please explain this line') }),
+          expect.objectContaining({
+            subjectType: 'FILE',
+            path: github.path,
+            comments: {
+              nodes: [
+                expect.objectContaining({
+                  body: expect.stringContaining('Concern about the whole file'),
+                  state: 'PENDING',
+                }),
+              ],
+            },
+          }),
         ]),
       )
-      expect(marks).toHaveLength(1)
-      expect(marks[0][3].virt_lines.length).toBeGreaterThan(0)
-      expect(JSON.stringify(marks)).toContain('Please explain this line')
-      expect(JSON.stringify(marks)).toContain('GitHub draft')
-      expect(
-        (await editor.notices()).some((notice) => notice.message === 'Draft saved on GitHub'),
-      ).toBe(true)
     })
 
     it('Old-side, file-level and general feedback retain their scopes in the editor and GitHub', async () => {
@@ -335,6 +434,55 @@ for (const profile of profiles) {
       expect(markdown).not.toContain('Externally removed feedback')
       expect(markdown).not.toContain('comment deleted')
     })
+    it('Resuming shows earlier published and resolved comments with their visible states', async () => {
+      // Arrange
+      const { editor, github, runtime } = fixture()
+      await publishConcerns(github, ['Earlier resolved concern', 'Earlier open concern'])
+      const initial = await selectBranchPr(editor, github)
+      await editor.pane('new', 2)
+      await editor.popup('Earlier resolved concern')
+      await editor.keys('x')
+      const resolved = await waitFor(
+        'resolved concern',
+        () => editor.state(),
+        (state) =>
+          state?.conversation.threads.some(
+            (thread: { state: string }) => thread.state === 'resolved',
+          ),
+        40_000,
+      )
+      const threadId = resolved!.conversation.threads.find(
+        (thread: { state: string }) => thread.state === 'resolved',
+      ).id
+      await editor.close()
+      await runtime.restart()
+      await editor.start()
+
+      // Act
+      const resumed = await selectBranchPr(editor, github)
+      const cards = JSON.stringify(await editor.marks())
+      await editor.pane('new', 2)
+      await editor.popup('Earlier resolved concern')
+      const modal = await editor.text()
+
+      // Assert
+      expect(resumed.review.id).toBe(initial.review.id)
+      expect(resumed.conversation.threads).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: threadId, state: 'resolved' }),
+          expect.objectContaining({ state: 'open' }),
+        ]),
+      )
+      for (const text of [
+        'Earlier resolved concern',
+        'Earlier open concern',
+        'Published',
+        'Resolved',
+      ])
+        expect(cards).toContain(text)
+      expect(modal.toUpperCase()).toContain('RESOLVED')
+      expect(modal).toContain('Earlier resolved concern')
+    })
   })
 
   describe(`When the PR changes during review [${profile}]`, { tags: [profile] }, () => {
@@ -456,9 +604,14 @@ for (const profile of profiles) {
       // Arrange
       const { editor, github } = fixture()
       const initial = await selectBranchPr(editor, github)
+      await editor.pane('new', 2)
+      await editor.keys('c')
+      await editor.compose('Inline editor feedback')
+      await editor.comments(1)
+      expect(JSON.stringify(await editor.marks())).toContain('GitHub draft')
       await editor.command('Lgtm comment general')
       await editor.compose('Overall editor feedback')
-      await editor.comments(1)
+      await editor.comments(2)
       await editor.pane('new')
 
       // Act
@@ -475,7 +628,17 @@ for (const profile of profiles) {
       // Assert
       expect(JSON.stringify(title)).toContain('Final review body')
       expect(submitted.review.id).toBe(initial.review.id)
+      expect(submitted.panes.new.buf).toBe(initial.panes.new.buf)
       expect(submitted.review.submissionStatus).toBe('confirmed')
+      const cards = JSON.stringify(await editor.marks())
+      expect(cards).toContain('Inline editor feedback')
+      expect(cards).toContain('Published')
+      expect(cards).not.toContain('GitHub draft')
+      expect(
+        submitted.conversation.comments.find(
+          (comment: { body: string }) => comment.body === 'Inline editor feedback',
+        ).visibility,
+      ).toBe('published')
       expect(remote).toMatchObject({
         state: 'COMMENTED',
         body: expect.stringContaining('Final editor message'),
@@ -545,25 +708,7 @@ for (const profile of profiles) {
 
     async function openPublishedConcern() {
       const { editor, github } = fixture()
-      const account = process.env.LGTM_E2E_GITHUB_SECONDARY_USER ?? 'skapoor81'
-      const secondary = await githubCredentials(account)
-      await github.api(
-        `repos/${github.repository}/pulls/${github.number}/reviews`,
-        'POST',
-        {
-          event: 'REQUEST_CHANGES',
-          body: 'Please address this concern',
-          comments: [
-            {
-              path: github.path,
-              line: 2,
-              side: 'RIGHT',
-              body: 'Published concern from another reviewer',
-            },
-          ],
-        },
-        secondary,
-      )
+      const account = await publishConcerns(github)
       const state = await selectBranchPr(editor, github)
       return { editor, github, account, state }
     }
@@ -638,6 +783,15 @@ for (const profile of profiles) {
       expect(JSON.stringify(footer)).toContain('x resolve')
       expect(notices.some((notice) => notice.message.includes('Only your own comments'))).toBe(true)
       expect(remote.data.node.isResolved).toBe(true)
+      const cards = JSON.stringify(await editor.marks())
+      expect(cards).toContain('Published concern')
+      expect(cards).toContain('Resolved')
+      expect(cards).toContain('LgtmCommentResolved')
+      await editor.pane('new', 2)
+      await editor.popup('Published concern from another reviewer')
+      const modal = await editor.text()
+      expect(modal).toContain('Published concern from another reviewer')
+      expect(modal.toUpperCase()).toContain('RESOLVED')
       expect(
         (await editor.notices()).some((notice) => notice.message === 'Resolving thread…'),
       ).toBe(true)

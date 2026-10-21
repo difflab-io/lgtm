@@ -15,6 +15,15 @@ pub struct Fixture {
 }
 impl Fixture {
     pub fn new(handler: impl Fn(Request) -> (u16, Value) + Send + Sync + 'static) -> Self {
+        Self::with_headers(move |request| {
+            let (status, body) = handler(request);
+            (status, body, vec![])
+        })
+    }
+
+    pub fn with_headers(
+        handler: impl Fn(Request) -> (u16, Value, Vec<(&'static str, String)>) + Send + Sync + 'static,
+    ) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
         listener.set_nonblocking(true).unwrap();
@@ -39,15 +48,19 @@ impl Fixture {
                                 } else {
                                     serde_json::from_slice(&bytes).unwrap()
                                 };
-                                let (status, body) = handler(Request {
+                                let (status, body, headers) = handler(Request {
                                     method: parts.method.to_string(),
                                     path: parts.uri.to_string(),
                                     body,
                                     headers: format!("{:?}", parts.headers),
                                 });
-                                axum::http::Response::builder()
+                                let mut response = axum::http::Response::builder()
                                     .status(status)
-                                    .header("content-type", "application/json")
+                                    .header("content-type", "application/json");
+                                for (name, value) in headers {
+                                    response = response.header(name, value);
+                                }
+                                response
                                     .body(axum::body::Body::from(if status == 204 {
                                         String::new()
                                     } else {
