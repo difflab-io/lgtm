@@ -49,6 +49,7 @@ function M.open(state, on_loaded)
   state.closed = false
   contexts.set(state)
   state.refresh = function(done)
+    local comparison = vim.deepcopy(state.comparison)
     contexts.refresh(state, function(err)
       if contexts.current ~= state then
         return
@@ -57,6 +58,13 @@ function M.open(state, on_loaded)
         done(err)
       elseif err then
         notice.error(err)
+      end
+      if not err and state.kind == "pr" and not vim.deep_equal(comparison, state.comparison) then
+        vim.schedule(function()
+          if contexts.current == state and not state.closed then
+            M.reopen_pr(state)
+          end
+        end)
       end
     end)
   end
@@ -135,7 +143,7 @@ function M.open(state, on_loaded)
     notice.error(
       "Saved review has no recorded comparison. Use :Lgtm threads or export; select an explicit comparison for a new review."
     )
-    if not state.initializing then
+    if not state.initializing and not state.load_error then
       state.refresh(on_loaded)
     end
     return
@@ -147,7 +155,7 @@ function M.open(state, on_loaded)
     state.browsing = true
     if state.git_root then
       require("lgtm.codediff").open_native(state)
-    elseif not state.initializing then
+    elseif not state.initializing and not state.load_error then
       M.load_diff(state, function(err)
         if contexts.current ~= state then
           return
@@ -166,6 +174,7 @@ function M.open(state, on_loaded)
     state.git_root = state.root
   end
   if state.kind == "pr" and not state.git_checked then
+    local comparison = vim.deepcopy(state.comparison)
     state.git_checked, state.git_pending = true, true
     vim.system({
       "git",
@@ -177,7 +186,11 @@ function M.open(state, on_loaded)
       state.head .. "^{commit}",
     }, { text = true }, function(result)
       vim.schedule(function()
-        if contexts.current ~= state then
+        if
+          state.closed
+          or contexts.current ~= state
+          or not vim.deep_equal(comparison, state.comparison)
+        then
           return
         end
         state.git_pending = false
@@ -190,9 +203,80 @@ function M.open(state, on_loaded)
   else
     browse()
   end
-  if not state.initializing then
+  if not state.initializing and not state.load_error then
     state.refresh(on_loaded)
   end
+end
+
+-- Reuse the tab so an open composer keeps its buffer when a push changes the diff.
+function M.reopen_pr(state)
+  local comparison = vim.deepcopy(state.comparison)
+  local function current()
+    return contexts.current == state
+      and not state.closed
+      and vim.deep_equal(comparison, state.comparison)
+  end
+  local function open_current()
+    if not current() then
+      return
+    end
+    local composer = require("lgtm.composer").last
+    if composer and vim.api.nvim_win_is_valid(composer.win) then
+      -- Replacing a remote snapshot tab must not discard an open composer.
+      vim.api.nvim_create_autocmd("WinClosed", {
+        pattern = tostring(composer.win),
+        once = true,
+        callback = function()
+          vim.schedule(open_current)
+        end,
+      })
+      return
+    end
+    require("lgtm.codediff").close(state)
+    state.tab, state.browsing, state.native_explorer, state.git_checked, state.git_pending, state.git_root =
+      nil, nil, nil, nil, nil, nil
+    state.file, state.files, state.diff, state.empty = nil, {}, nil, nil
+    M.open(state)
+  end
+  local session = state.tab and require("codediff.ui.lifecycle").get_session(state.tab)
+  if state.native_explorer and session and session.panel then
+    state.render_ready = false
+    vim.system({
+      "git",
+      "-C",
+      state.git_root,
+      "rev-parse",
+      state.base .. "^{commit}",
+      state.head .. "^{commit}",
+    }, { text = true }, function(result)
+      vim.schedule(function()
+        if not current() then
+          return
+        end
+        if result.code ~= 0 then
+          open_current()
+          return
+        end
+        local refresh = require("codediff.ui.refresh")
+        session.panel.data.source_revisions = { original = state.base, modified = state.head }
+        refresh.request(state.tab, { full = true }, function()
+          if not current() then
+            return
+          end
+          -- CodeDiff selects its current regular, added, removed, or empty layout.
+          refresh.select(
+            state.tab,
+            session.panel.data.current_selection,
+            { force = true, no_jump = true }
+          )
+          state.wait_ready()
+        end)
+      end)
+    end)
+  else
+    open_current()
+  end
+  notice.show("PR updated; pending comments retained")
 end
 
 function M.files()
@@ -258,7 +342,7 @@ end
 
 function M.sync()
   local state = contexts.current
-  if not state or state.initializing then
+  if not state or state.initializing or state.load_error then
     notice.error("Open a review and wait for Review ready before synchronizing drafts")
     return
   end
@@ -420,11 +504,13 @@ end
 
 function M.comment(kind, range)
   local state = contexts.current
-  if not state or state.initializing then
-    notice.show(
-      state and "PR comments are still loading; wait for Review ready"
-        or "Select a review first, or use :Lgtm note"
-    )
+  if not state then
+    notice.show("Select a review first, or use :Lgtm note")
+    return
+  end
+  local unavailable = contexts.readiness_error(state)
+  if unavailable then
+    notice.error(unavailable)
     return
   end
   kind = kind or "line"
@@ -469,6 +555,11 @@ function M.comment(kind, range)
       anchor = anchor,
     }
     require("lgtm.composer").open("Review comment", "", function(body, done)
+      -- Capture the latest review version on first save; an open PR composer can
+      -- retain verified source bytes across an explicit comparison refresh.
+      if not input.body then
+        input.expectedVersion = state.version
+      end
       -- Keep the exact source, version, and operation key when an uncertain save is retried.
       if input.body and input.body ~= body then
         input.requestKey = contexts.request_key()
@@ -549,7 +640,11 @@ end
 
 function M.refresh()
   local state = contexts.current
-  if not state or state.initializing then
+  if state and state.load_error and state.retry_load then
+    state.retry_load()
+    return
+  end
+  if not state or state.initializing or state.load_error then
     return
   end
   if state.pending_location then
@@ -560,6 +655,7 @@ function M.refresh()
     end)
     return
   end
+  local comparison = vim.deepcopy(state.comparison)
   local pending = notice.show("Refreshing review…")
   rpc.call(
     "RefreshReview",
@@ -583,11 +679,8 @@ function M.refresh()
           end
           if state.native_explorer then
             state.render_ready = false
-            require("codediff.ui.refresh").request(state.tab, { full = true }, function()
-              if contexts.current == state then
-                state.bind_panes()
-              end
-            end)
+            require("codediff.ui.refresh").request(state.tab, { full = true })
+            state.wait_ready()
           else
             local path = state.file and state.file.path
             M.load_diff(state, function(load_error)
@@ -603,34 +696,15 @@ function M.refresh()
           notice.show("Review refreshed", nil, pending)
         end)
       end
-      local observed = state.review.observedComparison
-      if state.kind == "pr" and observed and not vim.deep_equal(observed, state.comparison) then
-        state.reviewed = {}
-        require("lgtm.picker").select(
-          "PR comparison changed; saved feedback is retained",
-          { "Keep reviewing saved comparison", "Accept current PR comparison" },
-          tostring,
-          function(choice)
-            if choice == "Keep reviewing saved comparison" then
-              content()
-              return
-            end
-            contexts.start(state.target, observed, state.root, function(accept_error, replacement)
-              if accept_error then
-                notice.error(accept_error, pending)
-                return
-              end
-              require("lgtm.codediff").close(state)
-              M.open(replacement)
-              notice.show("Current PR comparison accepted", nil, pending)
-            end, {
-              resumePolicy = "RESUME_POLICY_ACCEPT_PR_COMPARISON",
-              expectedReviewId = state.review.id,
-              expectedVersion = state.version,
-              localGitPath = state.git_root,
-            })
+      if state.kind == "pr" and not vim.deep_equal(comparison, state.comparison) then
+        state.refresh(function(refresh_error)
+          if refresh_error then
+            notice.error(refresh_error, pending)
+            return
           end
-        )
+          M.reopen_pr(state)
+          notice.show("PR updated; pending comments retained", nil, pending)
+        end)
       else
         content()
       end
@@ -640,7 +714,7 @@ end
 
 function M.save()
   local state = contexts.current
-  if not state or state.initializing then
+  if not state or state.initializing or state.load_error then
     return
   end
   state.refresh(function(err)
@@ -708,6 +782,20 @@ function M.submission_result(state, err, result, pending, done)
     M.submission_drafts[state.review.id] = nil
     notice.show("Review submitted", nil, pending)
     done()
+  elseif status == "unsubmitted" then
+    local draft = M.submission_drafts[state.review.id]
+    if draft then
+      draft.uncertain, draft.fingerprint = false, nil
+    end
+    local message = result.review.submissionError or ""
+    local error = {
+      message = "Review is editable; drafts and final text are saved. Choose an outcome with :Lgtm submit. "
+        .. message,
+    }
+    notice.error(error, pending)
+    state.refresh(function()
+      done(error)
+    end)
   elseif
     status == "uncertain"
     or status == "pending"
@@ -728,9 +816,23 @@ function M.submission_result(state, err, result, pending, done)
   end
 end
 
+local function can_recover_rejected(state)
+  if
+    state.review.submissionStatus == "failed"
+    and not vim.list_contains(rpc.capabilities or {}, "rejected_submission_recovery")
+  then
+    notice.error(
+      "Update the LGTM CLI/backend before recovering this rejected submission. Your drafts are preserved."
+    )
+    return false
+  end
+  return true
+end
+
 function M.submit()
-  if contexts.current and contexts.current.initializing then
-    notice.show("PR comments are still loading; wait for Review ready")
+  local unavailable = contexts.current and contexts.readiness_error(contexts.current)
+  if unavailable then
+    notice.error(unavailable)
     return
   end
   local state = contexts.current
@@ -738,7 +840,7 @@ function M.submit()
     return
   end
   local retained = M.submission_drafts[state.review.id]
-  if retained and retained.uncertain then
+  if retained and retained.uncertain and state.review.submissionStatus ~= "failed" then
     notice.error("Submission response was lost. Use :Lgtm reconcile before retrying.")
     return
   end
@@ -752,9 +854,34 @@ function M.submit()
     or state.review.submissionStatus == "posting"
     or state.review.submissionStatus == "sending"
     or state.review.submissionStatus == "reconciling"
-    or state.review.submissionStatus == "failed"
   then
     notice.error("Submission is pending or uncertain. Use :Lgtm reconcile before retrying.")
+    return
+  end
+  if state.review.submissionStatus == "failed" then
+    if not can_recover_rejected(state) then
+      return
+    end
+    local pending = notice.show("Checking rejected submission…")
+    rpc.call("ReconcileSubmission", { reviewId = state.review.id }, function(err, result)
+      if not err and result.review.submissionStatus == "unsubmitted" then
+        contexts.apply(state, result.review)
+        local draft = M.submission_drafts[state.review.id]
+        if draft then
+          draft.uncertain, draft.fingerprint = false, nil
+        end
+        notice.show("Drafts recovered; choose a review outcome", nil, pending)
+        state.refresh(function(refresh_err)
+          if refresh_err then
+            notice.error(refresh_err)
+          else
+            M.submit()
+          end
+        end)
+      else
+        M.submission_result(state, err, result, pending, function() end)
+      end
+    end)
     return
   end
   if state.kind ~= "pr" then
@@ -797,6 +924,14 @@ end
 function M.reconcile()
   local state = contexts.current
   if not state then
+    return
+  end
+  local unavailable = contexts.readiness_error(state)
+  if unavailable then
+    notice.error(unavailable)
+    return
+  end
+  if not can_recover_rejected(state) then
     return
   end
   local pending = notice.show("Checking submission status…")

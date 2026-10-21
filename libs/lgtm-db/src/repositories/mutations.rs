@@ -26,6 +26,19 @@ impl<C: ConnectionTrait + TransactionTrait> MutationRepository<C> {
         )
     }
 
+    /// Completed delete receipts let imports reject stale provider copies without retaining deleted text.
+    pub async fn get_remote_delete_receipts(
+        &self,
+        context: &uuid::Uuid,
+    ) -> Result<Vec<mutation_receipts::Model>> {
+        Ok(mutation_receipts::Entity::find()
+            .filter(mutation_receipts::Column::ContextId.eq(*context))
+            .filter(mutation_receipts::Column::Method.eq("remote_delete_comment"))
+            .filter(mutation_receipts::Column::Pending.eq(false))
+            .all(self.connection.as_ref())
+            .await?)
+    }
+
     /// An unresolved remote intent blocks another write to the same object and review submission.
     pub async fn get_pending(
         &self,

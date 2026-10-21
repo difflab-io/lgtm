@@ -6,7 +6,9 @@ local api = vim.api
 function M.sync_files(state, status)
   local previous = {}
   for _, file in ipairs(state.files or {}) do
-    previous[file.group .. ":" .. file.path] = file
+    if file.group then
+      previous[file.group .. ":" .. file.path] = file
+    end
   end
   local files = {}
   for _, group in ipairs({ "unstaged", "staged" }) do
@@ -102,6 +104,7 @@ function M.open(state, file, native_config)
         local was_empty = state.empty
         M.suspend(state)
         state.file, state.empty = nil, true
+        state.render_ready = true
         state.views, state.observe_sources = {}, nil
         state.render = function()
           require("lgtm.files").render(state)
@@ -130,6 +133,26 @@ function M.open(state, file, native_config)
     state.tab = api.nvim_win_get_tabpage(visible_win)
     require("lgtm.context").tabs[state.tab] = state
     state.bind_panes = ready
+    if state.native_explorer and session.panel.view and not state.panel_observer then
+      local panel = session.panel.view
+      local original = panel.on_data
+      local function changed(data, changes)
+        if original then
+          original(data, changes)
+        end
+        if changes.list then
+          -- CodeDiff changes refresh generations when a selection disappears. Its old
+          -- completion callback can be discarded; panel data still publishes the empty list.
+          vim.schedule(function()
+            if not state.closed and state.tab == api.nvim_get_current_tabpage() then
+              state.wait_ready()
+            end
+          end)
+        end
+      end
+      state.panel_observer = { panel = panel, original = original, changed = changed }
+      panel.on_data = changed
+    end
     state.layout = session.layout
     state.panes = {
       old = { buf = session.original_bufnr, win = session.original_win },
@@ -277,7 +300,14 @@ function M.open(state, file, native_config)
     if
       session
       and (session.stored_diff_result or state.native_explorer and session.panel and not session.panel.data.current_selection)
-      and (not session.refresh or not session.refresh.loading)
+      and (
+        not session.refresh
+        or (
+          not session.refresh.loading
+          and not session.refresh.running
+          and not next(session.refresh.pending)
+        )
+      )
     then
       ready()
     elseif vim.uv.hrtime() < deadline then
@@ -337,6 +367,7 @@ function M.open(state, file, native_config)
 end
 
 function M.open_native(state)
+  local comparison = vim.deepcopy(state.comparison)
   require("lgtm.git_metadata").install()
   local git = require("codediff.core.git")
   local base = state.base
@@ -345,7 +376,11 @@ function M.open_native(state)
     or state.head
   local function loaded(err, status)
     vim.schedule(function()
-      if require("lgtm.context").current ~= state then
+      if
+        state.closed
+        or require("lgtm.context").current ~= state
+        or not vim.deep_equal(comparison, state.comparison)
+      then
         return
       end
       if err then
@@ -416,6 +451,11 @@ function M.suspend(state)
 end
 
 function M.release(state)
+  local observer = state.panel_observer
+  if observer and observer.panel.on_data == observer.changed then
+    observer.panel.on_data = observer.original
+  end
+  state.panel_observer = nil
   M.suspend(state)
   state.closed = true
   state.render_generation = (state.render_generation or 0) + 1

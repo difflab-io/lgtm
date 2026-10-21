@@ -99,7 +99,9 @@ saved = ListReviews({
 })
 ```
 
-The client obtains `base_sha` from its selected comparison. `StartReview` creates or resumes a matching review. A different active comparison returns a conflict. `ListReviews` reads saved reviews without creating anything. Use the returned review ID for later actions.
+The client obtains `base_sha` from its selected local comparison. `StartReview` creates or resumes a matching local review. A different active local comparison returns a conflict. `ListReviews` reads saved reviews without creating anything. Use the returned review ID for later actions.
+
+For a PR, supply its repository URL and number. `StartReview` and `RefreshReview` follow the current PR commits while retaining its active review ID and pending provider review. Use the returned comparison to reload displayed content. A supplied comparison that aged during selection can be omitted on the next start request. Frozen submissions and completed reviews retain their comparison.
 
 ```mermaid
 sequenceDiagram
@@ -111,7 +113,7 @@ sequenceDiagram
     Content-->>Client: Baseline and source metadata
     Client->>API: StartReview(target, comparison)
     API->>Service: Resolve context and session internally
-    Service-->>API: Matching review or conflict
+    Service-->>API: Review and comparison, or local conflict
     API-->>Client: Review ID, version, and state
     Client->>Content: Select and load a file
     Content-->>Client: Displayed content and anchor evidence
@@ -223,7 +225,7 @@ Use explicit refresh when needed. Clients do not need a continuous refresh loop 
 | PR review | `SubmitReview(reviewId, outcome, body, expectedVersion, requestKey)` | Publish the pending review with its final comment. |
 | Uncertain PR submission | `ReconcileSubmission(reviewId, requestKey)` | Find remote evidence and finish the saved submission intent when safe. |
 
-PR outcomes are `approve`, `comment`, and `request_changes`. The final body can be empty. Closing the editor view does not complete or submit a review. Reconciliation is an explicit recovery action. It can finish a previously staged remote submission.
+PR outcomes are `approve`, `comment`, and `request_changes`. GitHub self-reviews support `comment`. Reject self-approval and self-request-changes before freezing any intent. The final body can be empty. Closing the editor view does not complete or submit a review. Reconciliation is an explicit recovery action. It can finish a previously staged remote submission.
 
 #### Promote notes or export
 
@@ -331,6 +333,41 @@ sequenceDiagram
 ```
 
 Commit local intent before the external write. A database rollback cannot undo a GitHub write. A partial remote read cannot prove that a comment was deleted.
+
+#### Resolve and delete remote feedback
+
+```mermaid
+sequenceDiagram
+    actor Client
+    participant API as Review workflow
+    participant DB as Database
+    participant Forge as GitHub
+    Client->>API: ResolveThread or DeleteComment
+    API->>DB: Save scoped intent and retry key
+    opt Deleting a review comment
+        API->>Forge: Find comment in its own thread
+        Forge-->>API: Comment identity, author permission, current body
+    end
+    API->>Forge: Targeted mutation
+    Forge-->>API: Confirmed result or uncertain response
+    alt Confirmed result
+        API->>DB: Save resolution or remove cached comment
+        API-->>Client: Confirmed result
+    else Uncertain response
+        API-->>Client: Keep intent for read-only recovery
+        Client->>API: Retry the same key
+        API->>Forge: Observe only the saved target
+        Forge-->>API: Target state
+        API->>DB: Finish receipt when confirmed
+    end
+```
+
+Resolve and reopen need one provider mutation. Review-comment deletion needs a thread-scoped comment lookup and one mutation. They do not load the full PR conversation or check the current account through a separate request on the normal path. The provider enforces remote permissions. Missing private comments require account and PR-access checks during recovery so an account switch cannot look like deletion.
+
+Show progress as soon as the action starts. Apply a confirmed result immediately, then refresh local versions. Do not wait for a full PR refresh before updating the card or closing the modal. An uncertain response is not success and must not trigger another write.
+
+Confirmed remote deletions remove cached text from conversations, cards, modals, and exports. Keep surviving replies under the same thread and anchor without a deleted-root placeholder. A successful local deletion keeps only an identity receipt so stale provider pages cannot restore it. A complete remote refresh also removes comments deleted elsewhere, including discarded GitHub drafts. Preserve comments that were never posted and comments with unresolved mutation intents. Failed or partial reads never infer deletion.
+
 
 ### Interfaces and Contracts
 
@@ -509,10 +546,10 @@ Use a current provider location only when its comparison matches the displayed s
 | Delete a file | Keep its comments as orphaned discussions in the review or notes list. Do not attach them to another file. |
 | Restore deleted content | Automatically reconnect when path and content evidence establish the same discussion location. |
 | Reopen after edits made outside Neovim | Resolve from persisted source and text evidence. Extmarks from an old buffer are insufficient. |
-| Switch PR base or head | Invalidate placements for the old comparison and refresh forge observations. Keep the review's pinned comparison until explicit acceptance. |
+| Switch PR base or head | Follow the complete provider observation within the same active review. Keep the owned pending review and original anchors. Invalidate placements and reviewed marks for the old comparison. |
 | Merge or close a PR | Preserve original anchors and the last complete observation. Lifecycle changes do not resolve threads or confirm draft publication. |
 
-The preservation rules apply to staged, committed, notes, directory, and PR sources. Unstaged Git anchors have the explicit orphaning exception above. A changed comparison can require a new review attempt while the context keeps the same discussion.
+The preservation rules apply to staged, committed, notes, directory, and PR sources. Unstaged Git anchors have the explicit orphaning exception above. A changed local comparison can require a new review attempt. A changed PR comparison keeps its active review and pending review identity. Frozen submission intents and completed reviews keep their recorded comparison.
 
 #### Response contracts
 
@@ -526,7 +563,7 @@ The preservation rules apply to staged, committed, notes, directory, and PR sour
 
 Versions are opaque to clients. They guard saved review and object state against concurrent changes. Content identities describe displayed text separately. A review version does not prove that local file content is unchanged. Review writes also enforce the recorded comparison. PR submission checks both compared sides and lifecycle.
 
-Before accepting a new line anchor, validate its source, range, selected text, and scope using bounded source evidence. If the composer remains open while content changes, return a conflict and preserve its text. Do not retarget the comment silently. A later mapping helps display the saved discussion. It does not authorize moving a private remote draft to different reviewed content.
+Before accepting a new line anchor, validate its source, range, selected text, and scope using bounded source evidence. For local content, return a conflict and preserve composer text if its source changes. For PR content, accept an earlier composer source only after verifying its exact bytes and evidence. Derive a separate posting location against the current PR: use a unique match or file-level feedback with the original range and excerpt. Keep stored original anchors unchanged. Confirmed remote comments use provider observations; do not repost them to move a thread.
 
 #### RPC method design and contracts
 
@@ -536,17 +573,17 @@ The request shapes define client responsibilities. Final message fields follow t
 | --- | --- | --- |
 | `GetCapabilities` | Empty → API version and supported features | Report implemented features only. |
 | `EnsureIdentity` | Human or agent fields → actor | Humans require email. Agents require model and provider without email. |
-| `StartReview` | Target, comparison, resume policy, request key → review | Resolve storage internally. Resume only a compatible review. |
+| `StartReview` | Target, comparison, resume policy, request key → review | Resolve storage internally. Resume a compatible local review. For a PR, observe current commits and retain its active review ID. |
 | `ListReviews` | Target and lifecycle filters, page token → reviews | Read saved reviews without creating contexts or sessions. |
 | `GetReview` | Review ID → review | Read saved state without implicit refresh or submission. |
-| `RefreshReview` | Review or notes scope, version, optional source changes, request key → refreshed scope state | Validate moves and deletions, update path associations or orphan state, and reconcile forge observations. Keep the selected comparison. |
+| `RefreshReview` | Review or notes scope, version, optional source changes, request key → refreshed scope state | Validate moves and deletions, update path associations or orphan state, and reconcile forge observations. Keep local and frozen comparisons; update an active PR comparison after a complete provider observation. |
 | `GetConversation` | Scope, optional file-path filter, page token → conversation | Read the shared context conversation or its visible-file subset. Return original anchors and separate forge observations. Filtering changes no stored state. |
 | `AddComment` | Scope, anchor evidence, body, optional review version, request key → comment and save states | Validate the selected source and range before accepting the anchor. Resolve notes storage internally and synchronize eligible PR drafts. |
 | `Reply` | Scope, thread ID, body, version, request key → comment and save states | Check scope and allocate reply order transactionally. |
 | `EditComment` | Scope, comment ID, body, version, request key → comment | Enforce ownership and remote permissions. Preserve authorship and anchor. |
-| `DeleteComment` | Scope, comment ID, version, request key → receipt | Enforce ownership. Define root deletion conflicts when replies exist. |
-| `ResolveThread` | Scope, thread ID, resolved, version, request key → thread | Resolve or reopen locally or remotely according to thread origin. |
-| `SyncDraftComment` | Review ID, comment ID, request key → save state | Recover a known draft using receipts. Reject stale target anchors before a new remote write. Keep saved drafts. |
+| `DeleteComment` | Scope, comment ID, version, request key → receipt | Enforce ownership and provider permissions. Confirmed remote deletion removes the cached comment; surviving replies keep their thread. Local roots require deleting replies first. |
+| `ResolveThread` | Scope, thread ID, resolved, version, request key → thread | Resolve or reopen according to thread origin. Confirm remote resolution from the targeted mutation response. |
+| `SyncDraftComment` | Review ID, comment ID → save state | Recover a known draft using receipts. Detect changed PR commits, update the active comparison, and derive safe placement before a new private write. Reuse its pending review. Keep saved drafts on failure. |
 | `CompleteReview` | Review ID, final body, version, request key → review | Complete a local review. Reject PR targets. Keep discussion and resolution. |
 | `Export` | Scope, optional selected roots → Markdown | Export notes or reviews without changing state. Selected roots include their threads. |
 | `PromoteNotes` | Notes location, root IDs, target review ID, anchors, source and target versions, request key → comments | Keep source notes and provenance. Synchronize eligible PR drafts. |
@@ -561,19 +598,40 @@ Mutations use `x-lgtm-identity` for local attribution. This header is not networ
 | Event | Required result |
 | --- | --- |
 | Same target and comparison | Resume its compatible active review. |
-| Another comparison is active | Return a conflict. Never silently reinterpret existing drafts. |
+| Another local comparison is active | Return a conflict. Never reinterpret existing local drafts. |
 | User chooses a new local review | Complete the old attempt and create its successor internally as one workflow. |
 | Pending PR submission is uncertain | Require recovery before replacing its attempt. Never discard its intent. |
 | Local branch or worktree changes | Reject writes against the wrong source. Retain the saved review. |
 | Index or committed content changes | Retain comment identity. Map preserved sources with evidence or float lost selections to the file header. |
 | Unstaged content changes | Retain the discussion. Its anchor can become orphaned. |
 | Selected diff omits a file | Hide its inline comments from that view. Keep them in the shared context, thread list, and export. |
-| PR base or head changes | Block stale submission and report the changed comparison. Require explicit acceptance. Clients clear affected reviewed marks. |
+| PR base or head changes | Update the active comparison during refresh, reopen, or draft posting without replacing its review or pending provider review. Clients reload the diff and clear reviewed marks. Final submission still checks the displayed comparison and rejects a racing push. |
 | PR closes or merges | Retain discussions, private drafts, and exports. Block new submission. Do not invent a review outcome. |
 | PR reopens | Observe current lifecycle and comparison before enabling new actions. |
 | Another client submits or discards a pending review | Reconcile remote evidence. Do not silently recreate the pending review. |
 
 Clients clear reviewed-file marks when either compared side changes. These marks are UI progress and are outside the review service. Notes have no reviewed-file mark. Completed attempts retain their metadata. Later discussion changes do not turn exports into historical snapshots.
+
+#### PR continuity across commits
+
+The context key is the repository URL and PR number. Commits describe the current comparison, not the context identity. Active reviews with no frozen final submission follow complete provider observations on refresh, reopen, and draft synchronization. Keep the review ID, authorship, comments, replies, and bound pending-review ID. Never submit, discard, or recreate a pending review merely because its creation commit is old.
+
+```mermaid
+flowchart TD
+    A["Refresh, reopen, or save PR draft"] --> B["Observe PR state, base, head, and comments"]
+    B --> C{"Active and unfrozen?"}
+    C -->|Yes| D["Update comparison in the same review"]
+    C -->|No| E["Keep completed or frozen comparison"]
+    D --> F{"Unsent selection has a unique match?"}
+    F -->|Yes| G["Post private draft at current path and lines"]
+    F -->|No| H["Post file feedback with original location and excerpt"]
+    G --> I["Retain original anchor and pending review ID"]
+    H --> I
+```
+
+Recover uncertain pending-review creation by exact marker, account, and original commit before advancing its comparison. If those receipts do not prove ownership, keep uncertainty and do not repeat creation. Confirmed remote comments keep provider-owned coordinates. Original anchors stay immutable. Follow only confirmed file renames. Deleted or unavailable files retain their discussions without inventing a new location.
+
+Final submission checks the explicitly reviewed base and head against the provider before staging and immediately before publication. A push during submission must not turn an old approval into approval of unseen content. Once a final intent is frozen, recover that exact intent rather than changing its comparison or payload.
 
 #### Draft visibility and recovery
 
@@ -598,8 +656,31 @@ flowchart TD
 | Local persistence fails | Report no local save. Do not start an external write. |
 | Remote save fails | Return the local comment and a separate remote error. |
 | Remote write succeeds but its response is lost | Retain uncertainty. Recover by identity and receipts before retrying. |
+| Final review event is definitely rejected | Keep the same review editable, preserve its pending comments and final text, and allow a new outcome with a new request key. A rejected key cannot publish later. |
 | Content version changes | Return a conflict before writing against stale content. |
 | Refresh is partial | Keep existing remote objects. Do not infer deletion. |
+
+### Rejected submission recovery
+
+```mermaid
+flowchart TD
+    A["Validate outcome, account, and current PR"] --> B{"Own PR and non-comment outcome?"}
+    B -->|"Yes"| C["Explain valid outcome; leave review editable"]
+    B -->|"No"| D["Freeze intent and account for pending comments"]
+    D --> E["Submit final review event"]
+    E -->|"Confirmed"| F["Complete review"]
+    E -->|"Definite rejection"| G["Return same review to editing; retain final text and pending review"]
+    E -->|"Response uncertain"| H["Keep frozen intent; recover provider receipts"]
+    G --> I["User selects a new outcome and request key"]
+    I --> A
+```
+
+The session's existing body column retains final text while the review is active. Clearing a rejected completion does not delete comment receipts or the pending provider review. Keep the rejected key in the mutation ledger so a delayed retry cannot publish the rejected outcome. Restore private review comments to draft visibility; do not hide conversation comments that were already published.
+
+`GetCapabilities` advertises `rejected_submission_recovery` for this contract. Clients require that capability before recovering a failed submission: an older backend may retry its final event. This check does not change recovery of an uncertain submission.
+
+For an older frozen `failed` attempt, `ReconcileSubmission` first verifies the owning account, unique pending review, and all staged comment receipts. A known rejection then resumes editing without retrying its final event. Missing receipts preserve the frozen intent. Recovery of an uncertain write still follows the existing receipt rules; it must not guess rejection or change an outcome that may already have been published.
+
 
 ## Implementation
 
@@ -665,7 +746,7 @@ Keep transport changes in the RPC boundary and domain changes in their existing 
 | Exact byte identity | Distinguish working and index bytes, CRLF, and a missing final newline. Hash the actual selected source. |
 | GitHub current and historical locations | Import an outdated thread with no current line. Preserve original coordinates and refresh existing observations without drawing a false current placement. |
 | Placement isolation | Switch files and comparisons during mapping. Discard stale asynchronous results and invalidate old overlays. |
-| Composer conflict | Change saved content while composing. Keep the body and reject the stale new anchor before publication. |
+| Composer source changes | Reject changed local bytes while retaining text. For a PR push, verify the captured source and derive a unique current placement or explicit file-level feedback. Keep original evidence. |
 | Commit, amend, and rebase | Preserve stable comments and original evidence. Return verified mappings or explicit outdated fallbacks. |
 | Rename and directory move | Move a file or its parent directory. Find all the same discussion IDs at the new path after reopening and restarting. |
 | Lost selected lines | Delete or replace a selected range while keeping the file. Show its entire discussion at the file header with an original-location-lost label. |

@@ -320,7 +320,13 @@ function M.observe(state, file, views, callback)
     callback()
     return
   end
-  if state.kind == "pr" or state.initializing or state.moving or not state.conversation then
+  if
+    state.kind == "pr"
+    or state.initializing
+    or state.load_error
+    or state.moving
+    or not state.conversation
+  then
     callback()
     return
   end

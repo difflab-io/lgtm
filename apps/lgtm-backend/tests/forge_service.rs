@@ -27,17 +27,28 @@ struct Remote {
     snapshot_unavailable: bool,
     event_failure: Option<u16>,
     missing_comment: bool,
+    requests: Vec<String>,
+    other_viewer: bool,
+    deny_mutation: bool,
+    account_switched: bool,
+    author_is_viewer: bool,
 }
 fn fixture(state: Arc<Mutex<Remote>>) -> Fixture {
     Fixture::new(move |r: Request| {
         let mut state = state.lock().unwrap();
+        state.requests.push(format!(
+            "{} {} {}",
+            r.method,
+            r.path,
+            r.body["query"].as_str().unwrap_or("")
+        ));
         let path = r.path.split('?').next().unwrap();
         if r.method == "GET" {
             return match path {
-                "/user" => (200, json!({"id":1})),
+                "/user" => (200, json!({"id":if state.account_switched {2} else {1}})),
                 "/repos/acme/repo/pulls/1" => (
                     200,
-                    json!({"number":1,"title":"PR","head":{"sha":if state.head_changed{"changed"}else{"head"}},"base":{"sha":if state.base_changed {"new-base"} else {"base"}},"state":if state.lifecycle == "closed" || state.lifecycle == "merged" {"closed"} else {"open"},"merged":state.lifecycle == "merged"}),
+                    json!({"number":1,"title":"PR","user":{"id":if state.author_is_viewer {1} else {2}},"head":{"sha":if state.head_changed{"changed"}else{"head"}},"base":{"sha":if state.base_changed {"new-base"} else {"base"}},"state":if state.lifecycle == "closed" || state.lifecycle == "merged" {"closed"} else {"open"},"merged":state.lifecycle == "merged"}),
                 ),
                 "/repos/acme/repo/pulls/1/files" => {
                     (200, json!([{"filename":"file.txt","status":"modified"}]))
@@ -61,7 +72,7 @@ fn fixture(state: Arc<Mutex<Remote>>) -> Fixture {
                             .threads
                             .iter()
                             .flat_map(|t| t["comments"]["nodes"].as_array().unwrap())
-                            .map(|c| json!({"id":c["databaseId"],"body":c["body"],"user":{"id":1}}))
+                            .map(|c| json!({"id":c["databaseId"],"body":c["body"],"user":{"id":1,"login":"fixture"}}))
                             .collect::<Vec<_>>()
                     ),
                 ),
@@ -70,6 +81,9 @@ fn fixture(state: Arc<Mutex<Remote>>) -> Fixture {
         }
         if path == "/graphql" {
             let query = r.body["query"].as_str().unwrap();
+            if query.starts_with("mutation") && state.deny_mutation {
+                return (403, json!({"message":"Not permitted"}));
+            }
             if query.contains("updatePullRequestReviewComment") {
                 state.writes += 1;
                 state.threads[0]["comments"]["nodes"][0]["body"] =
@@ -85,7 +99,15 @@ fn fixture(state: Arc<Mutex<Remote>>) -> Fixture {
             }
             if query.contains("deletePullRequestReviewComment") {
                 state.writes += 1;
-                state.threads.clear();
+                for thread in &mut state.threads {
+                    thread["comments"]["nodes"]
+                        .as_array_mut()
+                        .unwrap()
+                        .retain(|comment| comment["id"] != r.body["variables"]["id"]);
+                }
+                state
+                    .threads
+                    .retain(|thread| !thread["comments"]["nodes"].as_array().unwrap().is_empty());
                 if state.lose_mutation_response {
                     state.snapshot_unavailable = true;
                     return (500, json!({"message":"accepted deletion response lost"}));
@@ -104,13 +126,23 @@ fn fixture(state: Arc<Mutex<Remote>>) -> Fixture {
                 }
                 return (
                     200,
-                    json!({"data":{"resolveReviewThread":{"thread":state.threads[0]}}}),
+                    json!({"data":{(if query.contains("unresolveReviewThread(") {"unresolveReviewThread"} else {"resolveReviewThread"}):{"thread":state.threads[0]}}}),
                 );
             }
             if query.contains("node(id:") {
+                if state.snapshot_unavailable {
+                    return (
+                        503,
+                        json!({"message":"target observation temporarily unavailable"}),
+                    );
+                }
+                let node = state
+                    .threads
+                    .iter()
+                    .find(|t| t["id"] == r.body["variables"]["id"]);
                 return (
                     200,
-                    json!({"data":{"node":{"comments":state.threads[0]["comments"]}}}),
+                    json!({"data":{"node":node.map(|t| {let mut t=t.clone(); for c in t["comments"]["nodes"].as_array_mut().unwrap() {c["viewerDidAuthor"]=json!(!state.other_viewer);}t})}}),
                 );
             }
             if query.contains("addPullRequestReviewThread(") {
@@ -162,7 +194,7 @@ fn fixture(state: Arc<Mutex<Remote>>) -> Fixture {
         match path {
             "/repos/acme/repo/pulls/1/reviews" => {
                 assert!(r.body.get("event").is_none());
-                let review = json!({"id":5,"node_id":"PRR_fixture","state":"PENDING","body":r.body["body"],"commit_id":r.body["commit_id"],"user":{"id":1}});
+                let review = json!({"id":5,"node_id":"PRR_fixture","state":"PENDING","body":r.body["body"],"commit_id":r.body["commit_id"],"user":{"id":1,"login":"fixture"}});
                 state.review = Some(review.clone());
                 (200, review)
             }
@@ -576,7 +608,7 @@ async fn should_finalize_only_verified_pending_review_and_never_replay_missing_c
             assert_eq!(
                 failed.submission_status,
                 if failure == 403 {
-                    "failed"
+                    "unsubmitted"
                 } else {
                     "uncertain"
                 }
@@ -599,6 +631,26 @@ async fn should_finalize_only_verified_pending_review_and_never_replay_missing_c
                         .submission_status,
                     "uncertain"
                 );
+            } else if failure == 403 {
+                assert_eq!(recovered.unwrap().submission_status, "unsubmitted");
+                assert_eq!(
+                    state.lock().unwrap().writes,
+                    writes,
+                    "a rejection is not an uncertain write to replay"
+                );
+                let resumed = forge
+                    .submit(
+                        &session.id,
+                        &actor,
+                        "comment",
+                        "Changed final body",
+                        "new-submit",
+                        "head",
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(resumed.submission_status, "confirmed");
+                assert_eq!(resumed.forge_review_id.as_deref(), Some("5"));
             } else {
                 assert_eq!(recovered.unwrap().submission_status, "confirmed");
                 assert_eq!(
@@ -832,7 +884,8 @@ async fn should_keep_original_anchors_and_refresh_current_provider_locations_ind
 }
 
 #[tokio::test]
-async fn should_reject_changed_base_and_closed_or_merged_publication_without_losing_drafts() {
+async fn should_follow_a_changed_base_but_reject_closed_or_merged_publication_without_losing_drafts()
+ {
     for (reviews, _, _temp) in common::databases().await {
         let state = Arc::new(Mutex::new(Remote::default()));
         let server = fixture(state.clone());
@@ -883,7 +936,17 @@ async fn should_reject_changed_base_and_closed_or_merged_publication_without_los
             )
             .await
             .unwrap();
-        for (base_changed, lifecycle) in [(true, "open"), (false, "closed"), (false, "merged")] {
+        state.lock().unwrap().base_changed = true;
+        let posted = forge
+            .sync_draft(&session.id, &saved.id, &actor)
+            .await
+            .unwrap();
+        assert_eq!(posted.posting.state().as_str(), "confirmed");
+        let followed = reviews.get_session(&session.id).await.unwrap();
+        assert_eq!(followed.id, session.id);
+        assert_eq!(followed.commits.base.as_deref(), Some("new-base"));
+        assert!(followed.forge_review_id.is_some());
+        for (base_changed, lifecycle) in [(true, "closed"), (true, "merged")] {
             {
                 let mut remote = state.lock().unwrap();
                 remote.base_changed = base_changed;
@@ -1076,8 +1139,22 @@ async fn should_recover_remote_edits_resolution_and_deletion_after_response_loss
                 ("resolve", ForgeChangeObject::Thread(thread)) => {
                     assert_eq!(thread.state, "resolved")
                 }
-                ("delete", ForgeChangeObject::Comment(comment)) => {
-                    assert_eq!(comment.remote_presence, "missing")
+                ("delete", ForgeChangeObject::Deleted { comment_id }) => {
+                    assert_eq!(comment_id, draft.id);
+                    assert!(
+                        reopened
+                            .get_conversation(&context.id, true)
+                            .await
+                            .unwrap()
+                            .comments
+                            .is_empty()
+                    );
+                    assert!(
+                        reopened
+                            .get_comment(&context.id, &comment_id)
+                            .await
+                            .is_err()
+                    );
                 }
                 _ => panic!("unexpected remote result"),
             }
@@ -1097,6 +1174,580 @@ async fn should_recover_remote_edits_resolution_and_deletion_after_response_loss
                 state.lock().unwrap().writes,
                 writes,
                 "response loss and accepted retries must never repeat the mutation"
+            );
+            reopened.database().close().await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn should_keep_pr_identity_and_pending_review_across_pushes_but_freeze_completed_comparisons()
+{
+    for (reviews, _, _temp) in common::databases().await {
+        let remote = Arc::new(Mutex::new(Remote::default()));
+        let server = fixture(remote.clone());
+        let forge = ForgeService::with_provider(
+            reviews.clone(),
+            Github::for_test(&server.endpoint).unwrap(),
+        );
+        let actor = reviews
+            .auth()
+            .ensure_human("Reviewer", "continuity@example.test")
+            .await
+            .unwrap();
+        let context = reviews
+            .ensure_context(
+                ContextKey::ForgeBacked {
+                    repository_url: ForgeRepositoryUrl::parse("https://github.com/acme/repo")
+                        .unwrap(),
+                    number: 1,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        let context = forge.refresh(&context.id).await.unwrap();
+        let session = reviews
+            .start_session(
+                &context,
+                &actor,
+                CommitContext {
+                    base: Some("base".into()),
+                    head: Some("head".into()),
+                },
+                ComparisonKind::PullRequest,
+                None,
+            )
+            .await
+            .unwrap();
+        let comment = reviews
+            .add_comment(
+                &session.id,
+                &actor,
+                "Keep this pending feedback",
+                Anchor::File {
+                    path: "file.txt".into(),
+                },
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let saved = forge
+            .sync_draft(&session.id, &comment.id, &actor)
+            .await
+            .unwrap();
+        let pending_id = reviews
+            .get_session(&session.id)
+            .await
+            .unwrap()
+            .forge_review_id;
+        remote.lock().unwrap().head_changed = true;
+        let writes = remote.lock().unwrap().writes;
+        forge.refresh(&context.id).await.unwrap();
+        let current = reviews.get_session(&session.id).await.unwrap();
+        assert_eq!(current.id, session.id);
+        assert_eq!(current.commits.head.as_deref(), Some("changed"));
+        assert_eq!(current.forge_review_id, pending_id);
+        assert_eq!(current.state(), "active");
+        assert_eq!(remote.lock().unwrap().writes, writes);
+        let same = forge
+            .sync_draft(&session.id, &comment.id, &actor)
+            .await
+            .unwrap();
+        assert_eq!(same.forge_comment_id, saved.forge_comment_id);
+        assert_eq!(same.body, saved.body);
+        assert_eq!(
+            remote.lock().unwrap().writes,
+            writes,
+            "confirmed drafts are never reposted"
+        );
+        let completed = forge
+            .submit(
+                &session.id,
+                &actor,
+                "comment",
+                "Final review",
+                "complete-current",
+                "changed",
+            )
+            .await
+            .unwrap();
+        assert_eq!(completed.submission_status, "confirmed");
+        assert_eq!(completed.forge_review_id, pending_id);
+        remote.lock().unwrap().head_changed = false;
+        forge.refresh(&context.id).await.unwrap();
+        let retained = reviews.get_session(&session.id).await.unwrap();
+        assert_eq!(
+            retained.commits, completed.commits,
+            "completed comparison is historical evidence"
+        );
+        assert_eq!(retained.forge_review_id, pending_id);
+    }
+}
+
+#[tokio::test]
+async fn should_use_targeted_actions_and_never_restore_confirmed_remote_deletions() {
+    use lgtm_backend::models::{ForgeChangeInput, ForgeChangeObject, MutationGuard};
+    for (reviews, url, _temp) in common::databases().await {
+        let remote = Arc::new(Mutex::new(Remote::default()));
+        let server = fixture(remote.clone());
+        let forge = ForgeService::with_provider(
+            reviews.clone(),
+            Github::for_test(&server.endpoint).unwrap(),
+        );
+        let actor = reviews
+            .auth()
+            .ensure_human("Reviewer", "reviewer@example.test")
+            .await
+            .unwrap();
+        let context = reviews
+            .ensure_context(
+                ContextKey::ForgeBacked {
+                    repository_url: ForgeRepositoryUrl::parse("https://github.com/acme/repo")
+                        .unwrap(),
+                    number: 1,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        let context = forge.refresh(&context.id).await.unwrap();
+        let session = reviews
+            .start_session(
+                &context,
+                &actor,
+                CommitContext {
+                    base: Some("base".into()),
+                    head: Some("head".into()),
+                },
+                ComparisonKind::PullRequest,
+                None,
+            )
+            .await
+            .unwrap();
+        let draft = reviews
+            .add_comment(
+                &session.id,
+                &actor,
+                "Delete this remote feedback",
+                Anchor::File {
+                    path: "file.txt".into(),
+                },
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        forge
+            .sync_draft(&session.id, &draft.id, &actor)
+            .await
+            .unwrap();
+        let delete = ForgeChangeInput::Delete {
+            comment_id: draft.id,
+        };
+
+        // Another account cannot see private drafts; their absence must not erase cached feedback.
+        let private_threads = {
+            let mut state = remote.lock().unwrap();
+            state.account_switched = true;
+            std::mem::take(&mut state.threads)
+        };
+        assert!(forge.refresh(&context.id).await.is_err());
+        assert!(reviews.get_comment(&context.id, &draft.id).await.is_ok());
+        {
+            let mut state = remote.lock().unwrap();
+            state.account_switched = false;
+            state.threads = private_threads;
+            let mut reply = state.threads[0]["comments"]["nodes"][0].clone();
+            reply["id"] = json!("C_11");
+            reply["databaseId"] = json!(11);
+            reply["body"] = json!("Surviving feedback");
+            state.threads[0]["comments"]["nodes"]
+                .as_array_mut()
+                .unwrap()
+                .push(reply);
+        }
+        forge.refresh(&context.id).await.unwrap();
+
+        // An account switch and an explicit permission rejection preserve the comment and release the intent.
+        remote.lock().unwrap().other_viewer = true;
+        assert!(
+            forge
+                .change(
+                    &session.id,
+                    &actor,
+                    delete.clone(),
+                    Some(&MutationGuard::new(None, "wrong-viewer".into()))
+                )
+                .await
+                .is_err()
+        );
+        assert!(
+            !reviews
+                .database()
+                .mutations
+                .get_pending(&context.id, Some(&draft.id))
+                .await
+                .unwrap()
+        );
+        assert!(reviews.get_comment(&context.id, &draft.id).await.is_ok());
+        {
+            let mut state = remote.lock().unwrap();
+            state.other_viewer = false;
+            state.deny_mutation = true;
+        }
+        assert!(
+            forge
+                .change(
+                    &session.id,
+                    &actor,
+                    delete.clone(),
+                    Some(&MutationGuard::new(None, "denied-delete".into()))
+                )
+                .await
+                .is_err()
+        );
+        assert!(
+            !reviews
+                .database()
+                .mutations
+                .get_pending(&context.id, Some(&draft.id))
+                .await
+                .unwrap()
+        );
+        assert!(reviews.get_comment(&context.id, &draft.id).await.is_ok());
+        {
+            let mut state = remote.lock().unwrap();
+            state.deny_mutation = false;
+            state.requests.clear();
+        }
+
+        // Resolution is acknowledged by the mutation itself: no /user or whole-PR scans.
+        forge
+            .change(
+                &session.id,
+                &actor,
+                ForgeChangeInput::Resolve {
+                    thread_id: draft.thread_id,
+                    resolved: true,
+                },
+                Some(&MutationGuard::new(None, "resolve-fast".into())),
+            )
+            .await
+            .unwrap();
+        {
+            let state = remote.lock().unwrap();
+            assert_eq!(state.requests.len(), 1, "{:?}", state.requests);
+            assert!(state.requests[0].contains("resolveReviewThread("));
+        }
+        let stale_threads = {
+            let mut state = remote.lock().unwrap();
+            state.requests.clear();
+            state.threads.clone()
+        };
+        let guard = MutationGuard::new(None, "delete-fast".into());
+        assert!(
+            matches!(forge.change(&session.id, &actor, delete.clone(), Some(&guard)).await.unwrap(), ForgeChangeObject::Deleted {comment_id} if comment_id == draft.id)
+        );
+        {
+            let state = remote.lock().unwrap();
+            assert_eq!(state.requests.len(), 2, "{:?}", state.requests);
+            assert!(state.requests[0].contains("node(id:"));
+            assert!(state.requests[1].contains("deletePullRequestReviewComment("));
+        }
+        assert!(reviews.get_comment(&context.id, &draft.id).await.is_err());
+        let conversation = reviews.get_conversation(&context.id, true).await.unwrap();
+        assert_eq!(conversation.comments.len(), 1);
+        assert_eq!(conversation.comments[0].body, "Surviving feedback");
+        assert_eq!(conversation.threads[0].id, draft.thread_id);
+        // Only an identity receipt survives, never a deleted body or display placeholder.
+        let receipt = reviews
+            .database()
+            .mutations
+            .get_remote_delete_receipts(&context.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|r| r.request_key == "delete-fast")
+            .unwrap();
+        assert!(!receipt.result_json.contains("Delete this remote feedback"));
+        let requests = remote.lock().unwrap().requests.len();
+        let reopened = common::service(&url).await.unwrap();
+        let restarted = ForgeService::with_provider(
+            reopened.clone(),
+            Github::for_test(&server.endpoint).unwrap(),
+        );
+        restarted
+            .change(&session.id, &actor, delete, Some(&guard))
+            .await
+            .unwrap();
+        assert_eq!(
+            remote.lock().unwrap().requests.len(),
+            requests,
+            "retry after restart uses the receipt without a network request"
+        );
+        remote.lock().unwrap().threads = stale_threads;
+        restarted.refresh(&context.id).await.unwrap();
+        let conversation = reopened.get_conversation(&context.id, true).await.unwrap();
+        assert_eq!(
+            conversation.comments.len(),
+            1,
+            "a stale provider page cannot resurrect a confirmed deletion"
+        );
+        assert_eq!(conversation.comments[0].body, "Surviving feedback");
+        reopened.database().close().await;
+    }
+}
+
+#[tokio::test]
+async fn should_keep_self_review_validation_and_rejected_submissions_editable_without_duplicate_publication()
+ {
+    use lgtm_backend::models::Completion;
+    for legacy in [false, true] {
+        for (reviews, url, _temp) in common::databases().await {
+            let remote = Arc::new(Mutex::new(Remote {
+                author_is_viewer: true,
+                ..Default::default()
+            }));
+            let server = fixture(remote.clone());
+            let forge = ForgeService::with_provider(
+                reviews.clone(),
+                Github::for_test(&server.endpoint).unwrap(),
+            );
+            let actor = reviews
+                .auth()
+                .ensure_human("Reviewer", "self@example.test")
+                .await
+                .unwrap();
+            let context = reviews
+                .ensure_context(
+                    ContextKey::ForgeBacked {
+                        repository_url: ForgeRepositoryUrl::parse("https://github.com/acme/repo")
+                            .unwrap(),
+                        number: 1,
+                    },
+                    None,
+                )
+                .await
+                .unwrap();
+            let context = forge.refresh(&context.id).await.unwrap();
+            let session = reviews
+                .start_session(
+                    &context,
+                    &actor,
+                    CommitContext {
+                        base: Some("base".into()),
+                        head: Some("head".into()),
+                    },
+                    ComparisonKind::PullRequest,
+                    None,
+                )
+                .await
+                .unwrap();
+            let comment = reviews
+                .add_comment(
+                    &session.id,
+                    &actor,
+                    "Keep my pending feedback",
+                    Anchor::File {
+                        path: "file.txt".into(),
+                    },
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+            forge
+                .sync_draft(&session.id, &comment.id, &actor)
+                .await
+                .unwrap();
+            let writes = remote.lock().unwrap().writes;
+            for outcome in ["approve", "request_changes"] {
+                let error = forge
+                    .submit(
+                        &session.id,
+                        &actor,
+                        outcome,
+                        "Keep final text",
+                        outcome,
+                        "head",
+                    )
+                    .await
+                    .unwrap_err();
+                assert!(error.to_string().contains("own PR"));
+                assert_eq!(
+                    reviews.get_session(&session.id).await.unwrap().state(),
+                    "active"
+                );
+                assert_eq!(
+                    remote.lock().unwrap().writes,
+                    writes,
+                    "self-review validation precedes freezing and all provider writes"
+                );
+            }
+            if legacy {
+                // Reproduce an installed older backend's frozen, definitely rejected attempt.
+                reviews
+                    .prepare_submission(
+                        &session.id,
+                        &actor,
+                        Completion {
+                            outcome: Some("reject".into()),
+                            body: Some("Keep final text".into()),
+                            submit: true,
+                        },
+                        "rejected",
+                        &[],
+                        None,
+                    )
+                    .await
+                    .unwrap();
+                assert!(
+                    reviews
+                        .database()
+                        .sessions
+                        .update_submission(
+                            &session.id,
+                            "sending",
+                            "failed",
+                            Some("GitHub HTTP 422 Unprocessable Entity: request rejected"),
+                            Some("5")
+                        )
+                        .await
+                        .unwrap()
+                );
+                let recovered = forge.reconcile(&session.id, &actor).await.unwrap();
+                assert_eq!(recovered.state(), "active");
+                assert_eq!(
+                    remote.lock().unwrap().writes,
+                    writes,
+                    "recovering a known rejection must not retry its event"
+                );
+            } else {
+                remote.lock().unwrap().author_is_viewer = false;
+                remote.lock().unwrap().event_failure = Some(422);
+                let rejected = forge
+                    .submit(
+                        &session.id,
+                        &actor,
+                        "request_changes",
+                        "Keep final text",
+                        "rejected",
+                        "head",
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(rejected.state(), "active");
+                assert_eq!(rejected.submission_status, "unsubmitted");
+                assert!(rejected.submission_error.unwrap().contains("422"));
+            }
+            let reopened = common::service(&url).await.unwrap();
+            let forge = ForgeService::with_provider(
+                reopened.clone(),
+                Github::for_test(&server.endpoint).unwrap(),
+            );
+            let current = reopened.get_session(&session.id).await.unwrap();
+            assert_eq!(current.forge_review_id.as_deref(), Some("5"));
+            assert_eq!(
+                current.draft_body.as_deref(),
+                Some("Keep final text"),
+                "final text survives backend restart"
+            );
+            assert_eq!(
+                reopened
+                    .get_comment(&context.id, &comment.id)
+                    .await
+                    .unwrap()
+                    .visibility,
+                "draft"
+            );
+            let writes = remote.lock().unwrap().writes;
+            assert!(
+                forge
+                    .submit(
+                        &session.id,
+                        &actor,
+                        "request_changes",
+                        "Keep final text",
+                        "rejected",
+                        "head"
+                    )
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                remote.lock().unwrap().writes,
+                writes,
+                "a delayed rejected retry cannot publish"
+            );
+            // Both persistence entry points must recheck the receipt under their context lock.
+            // An earlier API read can race recovery; it cannot freeze this rejected key again.
+            let old_input = Completion {
+                outcome: Some("reject".into()),
+                body: Some("Keep final text".into()),
+                submit: true,
+            };
+            assert!(
+                reopened
+                    .prepare_submission(
+                        &session.id,
+                        &actor,
+                        old_input.clone(),
+                        "rejected",
+                        &[],
+                        None
+                    )
+                    .await
+                    .is_err()
+            );
+            assert!(
+                reopened
+                    .complete(
+                        &context.id,
+                        &actor,
+                        old_input,
+                        "rejected",
+                        Some(&session.id),
+                        None
+                    )
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                reopened.get_session(&session.id).await.unwrap().state(),
+                "active"
+            );
+            assert_eq!(
+                forge
+                    .reconcile(&session.id, &actor)
+                    .await
+                    .unwrap()
+                    .submission_status,
+                "unsubmitted"
+            );
+            assert_eq!(
+                remote.lock().unwrap().writes,
+                writes,
+                "repeated recovery is read-only"
+            );
+            let published = forge
+                .submit(
+                    &session.id,
+                    &actor,
+                    "comment",
+                    "Keep final text",
+                    "corrected-outcome",
+                    "head",
+                )
+                .await
+                .unwrap();
+            assert_eq!(published.submission_status, "confirmed");
+            assert_eq!(published.forge_review_id, current.forge_review_id);
+            assert_eq!(
+                remote.lock().unwrap().writes,
+                writes + 1,
+                "reuse the same pending review and comments; send only its final event"
             );
             reopened.database().close().await;
         }

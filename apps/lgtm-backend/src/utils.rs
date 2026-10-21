@@ -86,6 +86,9 @@ pub struct PullRequest {
     pub head: String,
     pub base: String,
     pub repository_url: String,
+    /// Provider account that opened this PR; absent in legacy import contracts.
+    #[serde(default)]
+    pub author_account_id: Option<String>,
 }
 
 /// Hash a domain response without relying on timestamps to distinguish concurrent edits.
@@ -192,7 +195,7 @@ pub fn export_feedback(
         value
     }
     fn visible(comment: &crate::models::Comment) -> bool {
-        !comment.deleted && (comment.remote_presence != "missing" || comment.visibility == "draft")
+        !comment.deleted && comment.remote_presence != "missing"
     }
     let observed_overall = conversation.comments.iter().find(|comment| {
         comment.forge_object_kind.as_deref() == Some("review")
@@ -212,11 +215,12 @@ pub fn export_feedback(
         .comments
         .iter()
         .filter(|comment| {
-            comment.position == 0
-                && (visible(comment)
-                    || conversation.comments.iter().any(|reply| {
-                        reply.thread_id == comment.thread_id && reply.position > 0 && visible(reply)
-                    }))
+            visible(comment)
+                && !conversation.comments.iter().any(|other| {
+                    other.thread_id == comment.thread_id
+                        && visible(other)
+                        && other.position < comment.position
+                })
         })
         .collect();
     roots.retain(|comment| {
@@ -327,11 +331,7 @@ pub fn export_feedback(
         } else {
             ""
         };
-        let value = if visible(comment) {
-            without_receipt(comment, &conversation.sessions)
-        } else {
-            "_Original comment deleted._".into()
-        };
+        let value = without_receipt(comment, &conversation.sessions);
         let mut lines = value.split('\n');
         out.push_str(&format!(
             "{}. **[{label}]** {}{resolved} - {}\n",
@@ -348,14 +348,6 @@ pub fn export_feedback(
             out.push_str(&indent);
             out.push_str(line);
             out.push('\n');
-        }
-        if comment.remote_presence == "missing" && !comment.deleted {
-            out.push('\n');
-            body(
-                &mut out,
-                "Private draft is no longer on GitHub; saved feedback is retained.",
-                &indent,
-            );
         }
         if let Some(hint) = hint {
             out.push('\n');
@@ -379,7 +371,9 @@ pub fn export_feedback(
         let mut replies: Vec<_> = conversation
             .comments
             .iter()
-            .filter(|reply| reply.thread_id == thread.id && reply.position > 0 && visible(reply))
+            .filter(|reply| {
+                reply.thread_id == thread.id && reply.position > comment.position && visible(reply)
+            })
             .collect();
         replies.sort_by_key(|reply| (reply.position, reply.id));
         for reply in replies {

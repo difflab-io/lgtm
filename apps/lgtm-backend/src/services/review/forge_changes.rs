@@ -8,6 +8,103 @@ use crate::{
 use uuid::Uuid;
 
 impl ReviewService {
+    /// Reopen only after the forge confirms the final event was rejected and all drafts are accounted for.
+    pub(crate) async fn resume_rejected_submission(
+        &self,
+        session_id: &Uuid,
+        actor: &Actor,
+    ) -> Result<crate::models::Session> {
+        let actor = self.auth.validate_requester(actor).await?;
+        let seed = self.get_session(session_id).await?;
+        let tx = self.database.begin().await?;
+        self.lock_context(&tx, &seed.context_id).await?;
+        let row = tx
+            .sessions
+            .get_by_id(session_id)
+            .await?
+            .ok_or_else(|| Error::NotFound("Review".into()))?;
+        let mut session = Self::session_from_db_model(row.clone(), &tx).await?;
+        if session.creator.id != actor.id
+            || !self
+                .load_context(&tx, &session.context_id)
+                .await?
+                .key
+                .is_forge_backed()
+        {
+            return Err(invalid(
+                "Only the PR review owner can recover its rejected submission",
+            ));
+        }
+        if session.state() == "active" && session.submission_status == "unsubmitted" {
+            tx.commit().await?;
+            return self.get_session(session_id).await;
+        }
+        let completion = session
+            .completion()
+            .ok_or_else(|| invalid("No frozen submission to recover"))?
+            .clone();
+        if tx.sessions.get_active(&session.context_id).await?.is_some() {
+            return Err(Error::Conflict(
+                "Another review is active; the rejected review was preserved".into(),
+            ));
+        }
+        let comments =
+            Self::comments_from_db_models(tx.comments.get_all(&session.context_id).await?, &tx)
+                .await?;
+        for comment in comments
+            .iter()
+            .filter(|c| c.origin_session_id == Some(session.id))
+        {
+            if comment.forge_comment_id.is_none()
+                || ["sending", "uncertain"].contains(&comment.posting.state().as_str())
+            {
+                return Err(Error::Conflict(
+                    "Recover unconfirmed comment writes before reopening the rejected review"
+                        .into(),
+                ));
+            }
+        }
+        session.resume_rejected_submission()?;
+        tx.review_contexts
+            .advance_revision(&session.context_id, None)
+            .await?;
+        let version = tx
+            .review_contexts
+            .get_by_id(&session.context_id)
+            .await?
+            .ok_or_else(|| Error::NotFound("Context".into()))?
+            .revision;
+        // A delayed retry of the rejected key must never publish a second outcome.
+        tx.mutations
+            .insert_result(&mutation_receipts::Model {
+                context_id: session.context_id,
+                actor_id: actor.id,
+                request_key: completion.request_key,
+                method: "rejected_submission".into(),
+                request_hash: completion.request_hash,
+                result_json: serde_json::to_string(&seed)?,
+                version,
+                object_id: Some(session.id),
+                pending: false,
+            })
+            .await?;
+        if !tx.sessions.reopen_rejected_submission(&row).await? {
+            return Err(Error::Conflict(
+                "Submission state changed during recovery".into(),
+            ));
+        }
+        for mut comment in comments {
+            if comment.origin_session_id == Some(session.id)
+                && comment.forge_object_kind.as_deref() == Some("review_comment")
+            {
+                comment.visibility = "draft".into();
+                tx.comments.update(&comments::Model::from(&comment)).await?;
+            }
+        }
+        tx.commit().await?;
+        self.get_session(session_id).await
+    }
+
     pub(crate) async fn get_forge_change(
         &self,
         session_id: &Uuid,
@@ -96,6 +193,9 @@ impl ReviewService {
                 let thread = self
                     .load_thread(&tx, thread_id, &session.context_id)
                     .await?;
+                if matches!(thread.anchor, crate::models::Anchor::General) {
+                    return Err(invalid("GitHub only supports resolving review threads"));
+                }
                 guard.validate_object(crate::models::ObjectKind::Thread, thread.id, &thread)?;
                 ForgeChangeObject::Thread(Box::new(thread))
             }
@@ -105,6 +205,7 @@ impl ReviewService {
             original,
             result: None,
             rejection: None,
+            deleted_remote: None,
         };
         let version = tx
             .review_contexts
@@ -135,7 +236,7 @@ impl ReviewService {
         actor: &Actor,
         input: &ForgeChangeInput,
         guard: &MutationGuard,
-        result: Option<ForgeChangeObject>,
+        mut result: Option<ForgeChangeObject>,
         rejection: Option<String>,
     ) -> Result<ForgeChange> {
         if result.is_none() && rejection.is_none() {
@@ -162,6 +263,17 @@ impl ReviewService {
             tx.commit().await?;
             return Ok(saved);
         }
+        if let Some(ForgeChangeObject::Thread(updated)) = &result {
+            let mut current = self
+                .load_thread(&tx, &updated.id, &session.context_id)
+                .await?;
+            current.state = updated.state.clone();
+            current.updated_at = updated.updated_at.clone();
+            current.resolved_at = updated.resolved_at.clone();
+            current.resolved_by = updated.resolved_by.clone();
+            current.updated_by = updated.updated_by.clone();
+            result = Some(ForgeChangeObject::Thread(Box::new(current)));
+        }
         match &result {
             Some(ForgeChangeObject::Comment(comment)) => {
                 tx.comments
@@ -173,8 +285,29 @@ impl ReviewService {
                     .update_thread(&threads::Model::from(thread.as_ref()))
                     .await?;
             }
-            Some(ForgeChangeObject::Deleted { .. }) => {
-                return Err(invalid("A remote receipt requires a saved object"));
+            Some(ForgeChangeObject::Deleted { comment_id }) => {
+                let thread_id = match &saved.original {
+                    ForgeChangeObject::Comment(comment) if comment.id == *comment_id => {
+                        comment.thread_id
+                    }
+                    _ => return Err(invalid("Deletion receipt names another comment")),
+                };
+                tx.comments
+                    .delete_remote(&session.context_id, comment_id)
+                    .await?;
+                tx.comments
+                    .delete_empty_thread(&session.context_id, &thread_id)
+                    .await?;
+                if let ForgeChangeObject::Comment(comment) = &saved.original {
+                    saved.deleted_remote = comment
+                        .forge_object_kind
+                        .clone()
+                        .zip(comment.forge_comment_id.clone());
+                }
+                // Keep only the retry receipt, not a copy of the deleted text.
+                saved.original = ForgeChangeObject::Deleted {
+                    comment_id: *comment_id,
+                };
             }
             None => {}
         }

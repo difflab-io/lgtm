@@ -159,7 +159,133 @@ impl DiffService {
         })
     }
 
-    /// Read PR metadata or one selected file at a pinned comparison, without review storage.
+    /// Resolve an unsent PR anchor against current bytes, without changing its original evidence.
+    /// Lost or ambiguous selections become file feedback; only confirmed renames change the path.
+    pub async fn get_posting_anchor(
+        &self,
+        paths: &[String],
+        target: ReviewTarget,
+        comparison: ReviewComparison,
+        anchor: &Anchor,
+        evidence: Option<&crate::models::AnchorEvidence>,
+        current_path: Option<&str>,
+    ) -> Result<Anchor> {
+        use crate::models::AnchorPlacement;
+        let ReviewComparison::PullRequest {
+            base_commit,
+            head_commit,
+        } = &comparison
+        else {
+            return Err(invalid("Draft placement requires a PR comparison"));
+        };
+        let (original, old, original_commit) = match anchor {
+            Anchor::General => return Ok(anchor.clone()),
+            Anchor::File { path } => (
+                path.as_str(),
+                false,
+                evidence.and_then(|e| match &e.source {
+                    AnchorSource::Commit { sha, .. } => Some(sha.as_str()),
+                    _ => None,
+                }),
+            ),
+            Anchor::Line {
+                path, side, commit, ..
+            } => (path.as_str(), side == "old", Some(commit.as_str())),
+        };
+        if matches!(anchor, Anchor::File { .. }) && original_commit.is_none() {
+            return Ok(Anchor::File {
+                path: current_path.unwrap_or(original).into(),
+            });
+        }
+        let commit = if old { base_commit } else { head_commit };
+        if original_commit == Some(commit.as_str()) && current_path.is_none_or(|p| p == original) {
+            return Ok(anchor.clone());
+        }
+        let place = |path: &str, source: &AnchorSource, bytes: &[u8]| -> Result<Anchor> {
+            let content =
+                std::str::from_utf8(bytes).map_err(|_| invalid("Draft source is not UTF-8"))?;
+            match anchor.get_placement(evidence, path, Some(source), Some(content), true) {
+                AnchorPlacement::Exact { location, .. }
+                | AnchorPlacement::Relocated { location, .. } => Ok(location),
+                _ => Ok(Anchor::File { path: path.into() }),
+            }
+        };
+        for root in paths {
+            let mut path = current_path.unwrap_or(original).to_owned();
+            if let Some(previous) = original_commit {
+                let diff = DiffComparison {
+                    target: ReviewTarget::LocalGit {
+                        path: root.clone(),
+                        branch: None,
+                    },
+                    comparison: ReviewComparison::Branch {
+                        base_commit: previous.into(),
+                        head_commit: commit.clone(),
+                    },
+                    root: Some(root.clone()),
+                    observation_token: String::new(),
+                };
+                if let Ok(files) = self.get_metadata(&diff).await {
+                    if let Some(moved) = files
+                        .iter()
+                        .find(|f| f.status == "renamed" && f.previous_path == path)
+                    {
+                        path = moved.path.clone();
+                    }
+                    if files
+                        .iter()
+                        .any(|f| f.path == path && f.status == "deleted")
+                    {
+                        return Ok(Anchor::File { path });
+                    }
+                }
+            }
+            if matches!(anchor, Anchor::File { .. }) {
+                return Ok(Anchor::File { path });
+            }
+            let (root, selected, sha) = (PathBuf::from(root), path.clone(), commit.clone());
+            let loaded = tokio::task::spawn_blocking(move || {
+                super::workspace::get_source(
+                    &root,
+                    &selected,
+                    crate::database::types::SourceKind::Commit,
+                    Some(&sha),
+                )
+            })
+            .await
+            .map_err(|_| invalid("Draft source read failed"))?;
+            if let Ok((source, bytes)) = loaded {
+                return place(&path, &source, &bytes);
+            }
+        }
+        let diff = self.get_diff(target, Some(comparison)).await?;
+        let files = self.get_files(&diff).await?;
+        let selected = current_path.unwrap_or(original);
+        let file = files
+            .iter()
+            .find(|f| f.path == selected || (f.status == "renamed" && f.previous_path == selected))
+            .ok_or_else(|| {
+                Error::Conflict(
+                    "Draft file is absent from the current PR; its original feedback is retained"
+                        .into(),
+                )
+            })?;
+        if matches!(anchor, Anchor::File { .. }) {
+            return Ok(Anchor::File {
+                path: file.path.clone(),
+            });
+        }
+        let loaded = self.get_file(&diff, &file.path).await?;
+        let source = if old { loaded.old } else { loaded.new };
+        if let Some(source) = source {
+            place(&source.path, &source.source, source.content.as_bytes())
+        } else {
+            Ok(Anchor::File {
+                path: file.path.clone(),
+            })
+        }
+    }
+
     pub async fn get_remote_workspace(
         &self,
         repo: &Repository,

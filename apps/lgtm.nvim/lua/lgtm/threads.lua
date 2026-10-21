@@ -6,21 +6,11 @@ local M = {
 }
 local api = vim.api
 local function comments(state, thread)
-  local result, deleted_root = {}, nil
+  local result = {}
   for _, c in ipairs(state.conversation.comments or {}) do
-    if c.threadId == thread.id then
-      if c.deleted and tonumber(c.position or 0) == 0 then
-        deleted_root = c
-      end
-      if not c.deleted and (c.remotePresence ~= "missing" or c.visibility == "draft") then
-        result[#result + 1] = c
-      end
+    if c.threadId == thread.id and not c.deleted and c.remotePresence ~= "missing" then
+      result[#result + 1] = c
     end
-  end
-  if deleted_root and #result > 0 then
-    local placeholder = vim.deepcopy(deleted_root)
-    placeholder.body, placeholder.read_only = "[Top-level comment deleted]", true
-    result[#result + 1] = placeholder
   end
   table.sort(result, function(a, b)
     return tonumber(a.position or 0) < tonumber(b.position or 0)
@@ -93,9 +83,6 @@ local function comment_status(comment)
   end
   if comment.postingStatus == "uncertain" or comment.postingStatus == "sending" then
     return "Sync uncertain"
-  end
-  if comment.remotePresence == "missing" then
-    return "Saved draft · removed on GitHub"
   end
   return comment.forgeCommentId and comment.forgeCommentId ~= "" and "GitHub draft" or "Local draft"
 end
@@ -251,8 +238,8 @@ function M.render_review(state, panes, path)
 end
 
 function M.mutate(state, method, input, done)
-  if state.initializing then
-    local err = { message = "PR comments are still loading; wait for Review ready" }
+  local err = require("lgtm.context").readiness_error(state)
+  if err then
     if done then
       done(err)
     else
@@ -290,16 +277,65 @@ function M.mutate(state, method, input, done)
     input.requestKey = require("lgtm.context").request_key()
     state.pending_mutations[fingerprint] = input
   end
+  state.mutation_in_flight = state.mutation_in_flight or {}
+  if state.mutation_in_flight[fingerprint] then
+    return
+  end
+  state.mutation_in_flight[fingerprint] = true
+  local notice = require("lgtm.notifications")
+  local action = method == "DeleteComment" and "Deleting comment…"
+    or method == "ResolveThread"
+      and (input.resolved and "Resolving thread…" or "Reopening thread…")
+  local pending = action and notice.show(action)
   require("lgtm.rpc").call(method, input, function(err, result)
+    state.mutation_in_flight[fingerprint] = nil
     if err then
+      if err.message and err.message:find("Request rejected:", 1, true) then
+        state.pending_mutations[fingerprint] = nil
+      end
+      if pending then
+        notice.error(err, pending)
+      end
       if done then
-        done(err)
-      else
+        done(err, pending ~= nil)
+      elseif not pending then
         require("lgtm.notifications").error(err)
       end
       return
     end
     state.pending_mutations[fingerprint] = nil
+    local applied = method == "DeleteComment" or method == "ResolveThread"
+    if applied then
+      if method == "DeleteComment" then
+        state.conversation.comments = vim.tbl_filter(function(c)
+          return c.id ~= input.commentId
+        end, state.conversation.comments)
+        state.conversation.threads = vim.tbl_filter(function(thread)
+          return vim.iter(state.conversation.comments):any(function(c)
+            return c.threadId == thread.id
+          end)
+        end, state.conversation.threads)
+      elseif result.thread then
+        for i, thread in ipairs(state.conversation.threads) do
+          if thread.id == result.thread.id then
+            state.conversation.threads[i] = result.thread
+          end
+        end
+      end
+      if state.render then
+        state.render()
+      end
+      notice.show(
+        method == "DeleteComment" and "Comment deleted"
+          or input.resolved and "Thread resolved"
+          or "Thread reopened",
+        nil,
+        pending
+      )
+      if done then
+        done()
+      end
+    end
     state.refresh(function(refresh_err)
       if not refresh_err then
         if result and result.syncError and result.syncError ~= "" then
@@ -308,11 +344,15 @@ function M.mutate(state, method, input, done)
               .. result.syncError
               .. ". Use :Lgtm sync to recover."
           )
-        else
+        elseif not applied then
           require("lgtm.notifications").show("Comment updated")
         end
       end
-      if done then
+      if applied then
+        if refresh_err then
+          notice.error(refresh_err)
+        end
+      elseif done then
         done(refresh_err)
       end
     end)
@@ -352,10 +392,16 @@ function M.open(state, threads, pane)
   local width = math.max(20, math.min(pane and 42 or 86, vim.o.columns - 6))
   for index, t in ipairs(threads) do
     local cs = comments(state, t)
+    local replies = 0
+    for _, comment in ipairs(cs) do
+      if tonumber(comment.position or 0) > 0 then
+        replies = replies + 1
+      end
+    end
     local banner = (t.state == "resolved" and "RESOLVED" or "OPEN")
       .. " · "
-      .. (#cs - 1)
-      .. (#cs == 2 and " reply" or " replies")
+      .. replies
+      .. (replies == 1 and " reply" or " replies")
     if #threads > 1 then
       banner = "THREAD " .. index .. " / " .. #threads .. " · " .. banner
     end
@@ -393,7 +439,8 @@ function M.open(state, threads, pane)
       lines[#lines + 1] = ""
     end
     for i, c in ipairs(cs) do
-      local role = tonumber(c.position or 0) == 0 and "top-level comment" or "reply " .. (i - 1)
+      local position = tonumber(c.position or 0)
+      local role = position == 0 and "top-level comment" or "reply " .. position
       local entry =
         { thread = t, comment = c, role = role, line = #lines + 1, index = #entries + 1 }
       entries[#entries + 1] = entry
@@ -522,10 +569,6 @@ function M.open(state, threads, pane)
       require("lgtm.notifications").show("Select a comment first")
       return false
     end
-    if row.comment.read_only then
-      require("lgtm.notifications").show("This comment was deleted; replies remain available")
-      return false
-    end
     local owner = row.comment.ownerId
     if not owner or owner == "" then
       owner = row.comment.author and row.comment.author.id
@@ -591,10 +634,11 @@ function M.open(state, threads, pane)
       { prompt = "Delete " .. row.role .. "?" },
       function(choice)
         if choice == "Delete" then
-          M.mutate(state, "DeleteComment", { commentId = row.comment.id }, function(err)
-            if err then
+          M.mutate(state, "DeleteComment", { commentId = row.comment.id }, function(err, reported)
+            if err and not reported then
               require("lgtm.notifications").error(err)
-            else
+            end
+            if not err then
               close()
             end
           end)
@@ -611,10 +655,11 @@ function M.open(state, threads, pane)
       state,
       "ResolveThread",
       { threadId = row.thread.id, resolved = row.thread.state ~= "resolved" },
-      function(err)
-        if err then
+      function(err, reported)
+        if err and not reported then
           require("lgtm.notifications").error(err)
-        else
+        end
+        if not err then
           close()
         end
       end

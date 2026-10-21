@@ -46,4 +46,7 @@ pub struct ForgeChange {
     pub result: Option<ForgeChangeObject>,
     /// A definite provider rejection can release the object without replaying this intent.
     pub rejection: Option<String>,
+    /// Identity-only deletion receipt prevents stale provider pages from restoring deleted feedback.
+    #[serde(default)]
+    pub deleted_remote: Option<(String, String)>,
 }

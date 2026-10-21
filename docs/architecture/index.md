@@ -86,7 +86,7 @@ The installed application serves web assets and backend methods in the same proc
 | Target | What the caller wants to annotate or review, such as a directory, local branch, or PR. |
 | Comparison | The selected content pair, such as baseline versus working files, index, or a branch head. |
 | Context | Durable ownership of a conversation. Context resolution is an internal service responsibility in the public API. |
-| Session | One review attempt with immutable reviewed commits and explicit completion metadata. |
+| Session | One review attempt. Active PR comparisons follow pushes; local and completed comparisons stay pinned. Completion metadata is explicit. |
 | Thread | A root comment, ordered replies, an anchor, and an independent open or resolved state. |
 | Comment | Saved text and attribution with stable identity, origin session, local visibility, and remote posting evidence. |
 | Anchor | Immutable evidence of the content discussed, including original path, side, range, source identity, and selected text. |
@@ -178,13 +178,13 @@ The following invariants apply:
 - Keep one active session per context, shared by local clients and identities.
 - Keep threads and comments in their context across successor sessions.
 - Keep the original author, original anchor, and origin session when content changes.
-- Keep session commits and completion metadata immutable after creation or completion.
+- Keep local comparisons pinned. Let active, unfrozen PR comparisons follow complete provider observations; keep frozen submissions and completed comparisons immutable.
 - Persist each comment mutation before reporting a local save.
 - Keep local completion separate from confirmed GitHub submission.
 - Keep remote review state separate from session state and comment posting state.
 - Keep reads and exports free of submission, promotion, and completion side effects.
 
-A review records its comparison kind and commits. Starting with a different comparison requires an explicit choice. Mutations check saved versions and source evidence before changing data.
+A review records its comparison kind and commits. Changing a local comparison requires an explicit choice. A PR context is the repository and PR number, independent of any commit. Refresh, reopen, and draft posting follow current provider commits within the same active review. Mutations check saved versions and source evidence before changing data.
 
 ### Changes to local content
 
@@ -218,7 +218,7 @@ These lifecycle rules prevent a stale review from approving different content. T
 flowchart TD
     Observation["Observe PR lifecycle and comparison"] --> Eligible{"State and comparison permit submission?"}
     Eligible -->|"Open and unchanged"| Ready["Permit explicit submission"]
-    Eligible -->|"Base or head changed"| Changed["Retain drafts and require review of changed content"]
+    Eligible -->|"Base or head changed"| Changed["Update active comparison and retain the pending review"]
     Eligible -->|"Closed or merged"| Closed["Retain drafts and history; block new submissions"]
     Observation -->|"Observation failed"| Unknown["Keep last confirmed state; report unavailable information"]
 ```
@@ -226,9 +226,9 @@ flowchart TD
 | Event | Expected handling |
 | --- | --- |
 | Another user comments, replies, resolves, or reopens a thread | Reconcile a complete observation with stable local IDs. Update the conversation after confirmation. |
-| A remote comment disappears | Mark its remote presence as missing after a complete observation. Do not treat a failed fetch as deletion. |
-| Add commits or force-push the PR head | Record the new observed head. Keep the existing session pinned and reject stale draft synchronization or submission. |
-| Change the PR base or target branch | Treat the comparison as changed, even when the head stays equal. Require review of the new comparison before submission. |
+| A remote comment disappears | Remove the cached comment after a complete observation confirms absence. Keep surviving replies and unsent local drafts. A failed fetch cannot prove deletion. |
+| Add commits or force-push the PR head | Update the active comparison on refresh, reopen, or draft posting. Keep the review ID, pending review, and original anchors. Map unsent selections uniquely; retain lost selections as file-level feedback. |
+| Change the PR base or target branch | Follow the new complete comparison within the active review, even when the head stays equal. Invalidate old placements and reviewed marks. Final submission verifies both current sides. |
 | Merge the PR | Retain conversations, receipts, and unsent drafts. Block new pending-review creation and new review submissions. |
 | Close the PR without merging | Retain drafts and history. Block new review submission while closed. |
 | Reopen the PR | Refresh lifecycle and comparison data. Require an explicit review of current content before permitting submission. |

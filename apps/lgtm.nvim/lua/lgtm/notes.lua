@@ -193,7 +193,13 @@ end
 
 function M.promote()
   local target = contexts.current
-  if not target or target.initializing or not target.file or not target.panes then
+  if
+    not target
+    or target.initializing
+    or target.load_error
+    or not target.file
+    or not target.panes
+  then
     notice.error(
       "Open the target review file first, then open the source note and use :Lgtm promote"
     )

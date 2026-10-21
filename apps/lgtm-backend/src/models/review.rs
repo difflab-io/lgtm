@@ -20,7 +20,7 @@ pub enum ReviewTarget {
     },
 }
 
-/// Immutable selection for one attempt. Mutable file sources are identified by each anchor.
+/// Selected comparison. Active PR reviews follow provider updates; local and completed comparisons stay pinned.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ReviewComparison {
@@ -79,7 +79,7 @@ impl ReviewComparison {
 pub struct Review {
     pub target: ReviewTarget,
     pub comparison: Option<ReviewComparison>,
-    /// Latest complete provider comparison; acceptance never changes the pinned comparison implicitly.
+    /// Latest complete provider comparison; active PR reviews follow it before further draft writes.
     pub observed_comparison: Option<ReviewComparison>,
     pub session: Session,
     pub version: i64,

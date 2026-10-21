@@ -124,7 +124,16 @@ impl Github {
         opaque(&self.get("/user", None).await?, "id")
     }
 
+    /// Retry one complete observation if commits move while its pages are loading.
+    /// Provider writes are never retried by this read path.
     pub async fn get_snapshot(&self, repo: &Repository, pr: i64) -> Result<ForgeSnapshot> {
+        match self.get_snapshot_once(repo, pr).await {
+            Err(Error::Conflict(_)) => self.get_snapshot_once(repo, pr).await,
+            result => result,
+        }
+    }
+
+    async fn get_snapshot_once(&self, repo: &Repository, pr: i64) -> Result<ForgeSnapshot> {
         let initial = self.get_pull_request(repo, pr).await?;
         let mut threads = vec![];
         let mut cursor = Value::Null;
@@ -211,10 +220,14 @@ impl Github {
                         .as_i64()
                         .or_else(|| (!outdated).then(|| node["line"].as_i64()).flatten())
                         .ok_or_else(|| invalid("Missing GitHub thread line"))?;
-                    let start = node["originalStartLine"]
-                        .as_i64()
-                        .or_else(|| (!outdated).then(|| node["startLine"].as_i64()).flatten())
-                        .unwrap_or(end);
+                    // Original and current coordinates can differ after a push.
+                    // A single-line original has no originalStartLine, even when
+                    // GitHub supplies a relocated current startLine.
+                    let start = if node["originalLine"].as_i64().is_some() {
+                        node["originalStartLine"].as_i64().unwrap_or(end)
+                    } else {
+                        node["startLine"].as_i64().unwrap_or(end)
+                    };
                     let old = node["diffSide"] == "LEFT";
                     Anchor::Line {
                         path: original_path,
@@ -290,12 +303,13 @@ impl Github {
         })
     }
 
-    /// Resolve the GraphQL node for one scoped review comment, including private drafts.
-    pub async fn get_review_comment_node_id(
+    /// Read one comment within its previously verified thread, including private drafts.
+    /// A missing node is not an authorization receipt; callers verify scope before deletion recovery.
+    pub async fn get_review_comment(
         &self,
         thread_id: &str,
         comment_id: &str,
-    ) -> Result<String> {
+    ) -> Result<Option<Value>> {
         let mut cursor = Value::Null;
         loop {
             let response = self
@@ -303,23 +317,41 @@ impl Github {
                     json!({"query":COMMENTS_QUERY,"variables":{"id":thread_id,"cursor":cursor}}),
                 )
                 .await?;
+            if response.get("node") == Some(&Value::Null) {
+                return Ok(None);
+            }
             let connection = &response["node"]["comments"];
             let nodes = connection["nodes"]
                 .as_array()
                 .ok_or_else(|| invalid("Review thread comments unavailable"))?;
             for comment in nodes {
                 if opaque(comment, "databaseId")? == comment_id {
-                    return text(comment, "id");
+                    return Ok(Some(comment.clone()));
                 }
             }
-            if connection["pageInfo"]["hasNextPage"] != true {
-                break;
+            if !connection["pageInfo"]["hasNextPage"]
+                .as_bool()
+                .ok_or_else(|| invalid("Review comment pagination is incomplete"))?
+            {
+                return Ok(None);
             }
             cursor = Value::String(text(&connection["pageInfo"], "endCursor")?);
         }
-        Err(Error::NotFound(
-            "GitHub review comment in selected thread".into(),
-        ))
+    }
+
+    /// Observe only the selected thread when recovering an uncertain resolution.
+    pub async fn get_thread_resolution(&self, thread_id: &str) -> Result<Option<bool>> {
+        let response = self.graphql(json!({"query":"query($id:ID!){node(id:$id){... on PullRequestReviewThread{id isResolved}}}","variables":{"id":thread_id}})).await?;
+        if response.get("node") == Some(&Value::Null) {
+            return Ok(None);
+        }
+        if response["node"]["id"] != thread_id {
+            return Err(invalid("Thread observation returned another object"));
+        }
+        response["node"]["isResolved"]
+            .as_bool()
+            .map(Some)
+            .ok_or_else(|| invalid("Thread resolution unavailable"))
     }
 
     pub async fn get_all(&self, route: &str) -> Result<Vec<Value>> {
@@ -426,10 +458,12 @@ async fn timed<T>(future: impl std::future::Future<Output = octocrab::Result<T>>
         .map_err(|e| {
             // Do not forward HTTP request bodies, tokens, or provider diagnostics.
             if let octocrab::Error::GitHub { source, .. } = &e {
-                invalid(format!(
-                    "GitHub HTTP {}: request rejected; check account permissions/rate limits",
-                    source.status_code
-                ))
+                let reason = if source.status_code.as_u16() == 422 {
+                    "review data was rejected; check the review outcome and comment locations"
+                } else {
+                    "request rejected; check account permissions/rate limits"
+                };
+                invalid(format!("GitHub HTTP {}: {reason}", source.status_code))
             } else {
                 invalid("GitHub transport failed; reconcile before retrying writes")
             }
@@ -473,6 +507,7 @@ fn pull_request(repo: &Repository, v: &Value) -> Result<PullRequest> {
         head: text(&v["head"], "sha")?,
         base: text(&v["base"], "sha")?,
         repository_url: repo.repository_url.clone(),
+        author_account_id: v.get("user").map(|user| opaque(user, "id")).transpose()?,
     })
 }
 fn remote_author(user: &Value) -> Result<RemoteAuthor> {
@@ -522,4 +557,4 @@ fn remote_rest_comment(v: &Value, kind: &str) -> Result<RemoteComment> {
     })
 }
 const THREADS_QUERY: &str = r#"query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$cursor){nodes{id path line startLine originalLine originalStartLine diffSide startDiffSide subjectType isResolved isOutdated comments(first:100){nodes{id databaseId path body updatedAt commit{oid} originalCommit{oid} author{login ... on User{databaseId} ... on Bot{databaseId}} pullRequestReview{databaseId state}} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}}}}}"#;
-const COMMENTS_QUERY: &str = r#"query($id:ID!,$cursor:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$cursor){nodes{id databaseId path body updatedAt commit{oid} originalCommit{oid} author{login ... on User{databaseId} ... on Bot{databaseId}} pullRequestReview{databaseId state}} pageInfo{hasNextPage endCursor}}}}}"#;
+const COMMENTS_QUERY: &str = r#"query($id:ID!,$cursor:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$cursor){nodes{id databaseId viewerDidAuthor path body updatedAt commit{oid} originalCommit{oid} author{login ... on User{databaseId} ... on Bot{databaseId}} pullRequestReview{databaseId state}} pageInfo{hasNextPage endCursor}}}}}"#;

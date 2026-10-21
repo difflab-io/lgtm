@@ -8,6 +8,9 @@ pub enum Error {
     NotFound(String),
     #[error("{0}")]
     Conflict(String),
+    /// The final review event was explicitly rejected after all comment writes were confirmed.
+    #[error("{0}")]
+    ReviewRejected(String),
     #[error(transparent)]
     Sql(#[from] sea_orm::DbErr),
     #[error(transparent)]

@@ -151,11 +151,15 @@ function M.pr_page(url, query, page)
         local pending = notice.show("Loading PR comments…", nil, pr_notice)
         -- The native tree opens from the picker metadata while the backend loads comments.
         require("lgtm.review").open(state)
-        local function start(checkout)
+        local checkout
+        local request_key = contexts.request_key()
+        local function start()
+          state.initializing, state.load_error = true, nil
           contexts.start(state.target, state.comparison, nil, function(error, loaded)
-            if contexts.current ~= state then
+            if state.closed then
               return
             end
+            state.initializing = false
             if error then
               state.load_error = error
               notice.error(error, pending)
@@ -163,7 +167,9 @@ function M.pr_page(url, query, page)
             end
             local old_base, old_head = state.base, state.head
             contexts.apply(state, loaded.review)
-            state.initializing = false
+            if contexts.current ~= state then
+              return
+            end
             if old_base ~= state.base or old_head ~= state.head then
               require("lgtm.codediff").close(state)
               state.tab, state.browsing, state.native_explorer = nil, nil, nil
@@ -172,7 +178,11 @@ function M.pr_page(url, query, page)
               if refresh_error then
                 notice.error(refresh_error, pending)
               else
-                notice.show("Review ready", nil, pending)
+                notice.show(
+                  loaded.resume_notice or "Review ready",
+                  loaded.resume_notice and vim.log.levels.WARN or nil,
+                  pending
+                )
               end
             end
             if not state.browsing and not state.git_pending then
@@ -180,14 +190,25 @@ function M.pr_page(url, query, page)
             else
               state.refresh(ready)
             end
-          end, { localGitPath = checkout })
+          end, { localGitPath = checkout, requestKey = request_key })
+        end
+        state.retry_load = function()
+          if state.initializing then
+            return
+          end
+          pending = notice.show("Loading PR comments…", nil, pending)
+          start()
         end
         vim.system(
           { "git", "-C", vim.fn.getcwd(), "rev-parse", "--show-toplevel" },
           { text = true },
           function(result)
             vim.schedule(function()
-              start(result.code == 0 and vim.trim(result.stdout) or nil)
+              if state.closed then
+                return
+              end
+              checkout = result.code == 0 and vim.trim(result.stdout) or nil
+              start()
             end)
           end
         )

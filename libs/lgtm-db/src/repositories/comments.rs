@@ -21,17 +21,10 @@ impl<C: ConnectionTrait + TransactionTrait> CommentRepository<C> {
         after: Option<(uuid::Uuid, i64)>,
         limit: u64,
     ) -> Result<Vec<comments::Model>> {
-        let mut roots = comments::Entity::find()
-            .select_only()
-            .column(comments::Column::ThreadId)
-            .filter(comments::Column::ContextId.eq(*context))
-            .filter(comments::Column::Position.eq(0));
-        if !include_drafts {
-            roots = roots.filter(comments::Column::Visibility.eq("published"));
-        }
         let mut query = comments::Entity::find()
             .filter(comments::Column::ContextId.eq(*context))
-            .filter(comments::Column::ThreadId.in_subquery(roots.into_query()));
+            .filter(comments::Column::Deleted.eq(false))
+            .filter(comments::Column::RemotePresence.ne("missing"));
         if !include_drafts {
             query = query.filter(comments::Column::Visibility.eq("published"));
         }
@@ -249,6 +242,19 @@ impl<C: ConnectionTrait + TransactionTrait> CommentRepository<C> {
             .filter(comments::Column::Id.eq(*id))
             .filter(comments::Column::Visibility.eq("draft"))
             .filter(comments::Column::ForgeCommentId.is_null())
+            .exec(self.connection.as_ref())
+            .await?
+            .rows_affected
+            == 1)
+    }
+
+    /// Forget one confirmed remote deletion within its owning conversation.
+    /// Unposted local drafts are never eligible for this operation.
+    pub async fn delete_remote(&self, context: &uuid::Uuid, id: &uuid::Uuid) -> Result<bool> {
+        Ok(comments::Entity::delete_many()
+            .filter(comments::Column::ContextId.eq(*context))
+            .filter(comments::Column::Id.eq(*id))
+            .filter(comments::Column::ForgeCommentId.is_not_null())
             .exec(self.connection.as_ref())
             .await?
             .rows_affected

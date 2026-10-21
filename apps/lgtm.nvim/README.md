@@ -128,12 +128,11 @@ PR and local-session selection use a built-in searchable picker. Type to filter,
 use Up/Down (or Ctrl-N/Ctrl-P) to move, Enter to select and Esc to cancel. No
 additional fuzzy-picker plugin is needed; an empty result keeps the search open.
 
-Git reviews use CodeDiff's native file tree and Git revision buffers. The first
-local diff opens while PR comments load in the background. PR reviews
-read local base/head commits when those commits exist in the checkout. The
-backend loads metadata and comments. It does not download local PR file contents.
-If the commits are unavailable locally, the backend loads only the selected
-remote file. Snapshot buffers do not start language servers.
+Git reviews use CodeDiff's native file tree and Git revision buffers. The first local diff opens while PR comments load. If base/head commits exist in the checkout, the backend loads only metadata and comments. Otherwise, it loads only the selected remote file. Snapshot buffers do not start language servers.
+
+If PR loading fails, LGTM shows the cause and keeps the diff open. After you fix the cause, run `:Lgtm refresh` to retry. Commenting, submission and reconciliation stay blocked until the review loads.
+
+The PR identifies your review. Reopening, refreshing, or saving a PR draft detects new base or head commits and updates the current comparison. LGTM keeps the same review ID and pending GitHub review. Unsent selections follow a unique text match; lost or ambiguous selections become file-level feedback with the original location and excerpt. Existing remote comments use GitHub’s current locations. No refresh submits or discards a review. Review the displayed comparison before explicit submission; a push that races submission requires another refresh.
 
 Branch review compares the common ancestor of a base branch with the current
 HEAD. Working compares HEAD with saved working files. Staged compares HEAD with

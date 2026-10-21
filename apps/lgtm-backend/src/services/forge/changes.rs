@@ -3,9 +3,7 @@ use super::{ForgeService, check_owner, comment_marker, comment_route, definite_r
 use crate::{
     error::{Error, Result, invalid},
     forge::{Github, Repository},
-    models::{
-        Actor, Anchor, ForgeChange, ForgeChangeInput, ForgeChangeObject, MutationGuard, Session,
-    },
+    models::{Actor, Anchor, ForgeChange, ForgeChangeInput, ForgeChangeObject, MutationGuard},
     utils::{ForgeSnapshot, now},
 };
 use serde_json::json;
@@ -19,7 +17,6 @@ impl ForgeService {
         input: ForgeChangeInput,
         guard: Option<&MutationGuard>,
     ) -> Result<ForgeChangeObject> {
-        let _write = self.writes.lock().await;
         let actor = self.reviews.auth().validate_requester(actor).await?;
         let session = self.reviews.get_session(session_id).await?;
         let context = self.reviews.get_context_by_id(&session.context_id).await?;
@@ -124,14 +121,21 @@ impl ForgeService {
                 }
             }
         }
+        if matches!(
+            input,
+            ForgeChangeInput::Resolve { .. } | ForgeChangeInput::Delete { .. }
+        ) {
+            return self
+                .change_target(&session.id, &actor, &input, &owned_guard, saved)
+                .await;
+        }
+        let _write = self.writes.lock().await;
         let (repo, pr) = Repository::from_context(&context.key)?;
         let github = self.get_provider().await?;
         let account = github.get_account_id().await?;
         let (saved, first) = if let Some(saved) = saved {
             (saved, false)
         } else {
-            self.validate_comparison(&github, &repo, pr, &session)
-                .await?;
             let original = match &input {
                 ForgeChangeInput::Edit { comment_id, .. }
                 | ForgeChangeInput::Delete { comment_id } => {
@@ -194,7 +198,7 @@ impl ForgeService {
                 .await?
         };
         if first {
-            let rejected = match self.send_change(&github, &repo, pr, &session, &saved).await {
+            let rejected = match self.send_change(&github, &repo, pr, &saved).await {
                 Err(error) => Some(error), // Failed before any provider mutation was attempted.
                 Ok(Err(error)) if definite_rejection(&error) => Some(error),
                 _ => None,
@@ -219,11 +223,155 @@ impl ForgeService {
                 .reviews
                 .finish_forge_change(session_id, &actor, &input, &owned_guard, Some(result), None)
                 .await?;
+            if session.state() == "active"
+                && (session.commits.head.as_deref() != Some(snapshot.head.as_str())
+                    || session.commits.base != snapshot.base)
+                && let Err(error) = self.refresh_context(&context.id, None).await
+            {
+                // The object mutation is already confirmed. Preserve its receipt and
+                // let the next explicit refresh retry this read-only synchronization.
+                tracing::warn!(%error, "PR comparison refresh after confirmed change failed");
+            }
             return confirmed
                 .result
                 .ok_or_else(|| invalid("Remote result was not recorded"));
         }
         Err(Error::Conflict("Remote result is uncertain. Retry the same saved action to inspect its receipt; no write will be repeated".into()))
+    }
+
+    /// Confirm resolve/delete from their own provider response. Recovery observes only that object.
+    /// The database ledger serializes conflicting writes to one object without a global network lock.
+    async fn change_target(
+        &self,
+        session_id: &Uuid,
+        actor: &Actor,
+        input: &ForgeChangeInput,
+        guard: &MutationGuard,
+        saved: Option<ForgeChange>,
+    ) -> Result<ForgeChangeObject> {
+        let github = self.get_provider().await?;
+        let (saved, first) = match saved {
+            Some(saved) => (saved, false),
+            None => {
+                self.reviews
+                    .prepare_forge_change(session_id, actor, input, guard)
+                    .await?
+            }
+        };
+        if let Some(result) = saved.result {
+            return Ok(result);
+        }
+        if let Some(rejection) = saved.rejection {
+            return Err(Error::Conflict(rejection));
+        }
+        let session = self.reviews.get_session(session_id).await?;
+        let context = self.reviews.get_context_by_id(&session.context_id).await?;
+        let (repo, pr) = Repository::from_context(&context.key)?;
+        let mut attempted = false;
+        let result: Result<Option<ForgeChangeObject>> = async {
+            match (&saved.input, &saved.original) {
+                (ForgeChangeInput::Resolve { resolved, .. }, ForgeChangeObject::Thread(thread)) => {
+                    let id = thread.forge_thread_id.as_deref()
+                        .ok_or_else(|| invalid("Thread has no GitHub receipt"))?;
+                    let confirmed = if first {
+                        let mutation = if *resolved { "resolveReviewThread" } else { "unresolveReviewThread" };
+                        attempted = true;
+                        let response = github.graphql(json!({
+                            "query": format!("mutation($id:ID!){{{mutation}(input:{{threadId:$id}}){{thread{{id isResolved}}}}}}"),
+                            "variables": {"id": id}
+                        })).await?;
+                        response[mutation]["thread"]["id"] == id
+                            && response[mutation]["thread"]["isResolved"].as_bool() == Some(*resolved)
+                    } else {
+                        github.get_thread_resolution(id).await? == Some(*resolved)
+                    };
+                    if !confirmed {
+                        return Ok(None);
+                    }
+                    let mut updated = thread.clone();
+                    updated.state = if *resolved { "resolved" } else { "open" }.into();
+                    updated.updated_at = now();
+                    updated.resolved_at = None;
+                    updated.resolved_by = None;
+                    updated.updated_by = None;
+                    Ok(Some(ForgeChangeObject::Thread(updated)))
+                }
+                (ForgeChangeInput::Delete { comment_id }, ForgeChangeObject::Comment(comment)) => {
+                    if comment.origin_session_id.is_some() && comment.owner_id != Some(actor.id) {
+                        return Err(invalid("Only the draft owner may delete this feedback"));
+                    }
+                    if comment.forge_object_kind.as_deref() == Some("review") {
+                        return Err(invalid("Submitted reviews cannot be deleted as comments"));
+                    }
+                    let route = comment_route(&repo, pr, comment)?;
+                    if comment.forge_object_kind.as_deref() == Some("review_comment") {
+                        let thread = self.reviews.database().comments
+                            .get_thread(&context.id, &comment.thread_id).await?
+                            .ok_or_else(|| invalid("Comment thread missing"))?;
+                        let thread_id = thread.forge_thread_id.as_deref()
+                            .ok_or_else(|| invalid("Comment thread has no GitHub receipt"))?;
+                        let remote = github.get_review_comment(
+                            thread_id,
+                            comment.forge_comment_id.as_deref()
+                                .ok_or_else(|| invalid("Comment has no GitHub receipt"))?,
+                        ).await?;
+                        if let Some(remote) = remote {
+                            if !first {
+                                return Ok(None);
+                            }
+                            if remote["viewerDidAuthor"] != true
+                                || remote["body"].as_str() != comment.forge_body.as_deref()
+                            {
+                                return Err(invalid("Comment changed or belongs to another GitHub account; refresh before deleting"));
+                            }
+                            let node = remote["id"].as_str()
+                                .ok_or_else(|| invalid("Comment node ID missing"))?;
+                            attempted = true;
+                            let response = github.graphql(json!({
+                                "query": "mutation($id:ID!){deletePullRequestReviewComment(input:{id:$id}){clientMutationId}}",
+                                "variables": {"id": node}
+                            })).await?;
+                            if !response.get("deletePullRequestReviewComment").is_some_and(serde_json::Value::is_object) {
+                                return Ok(None);
+                            }
+                        } else {
+                            // A hidden pending comment must not look deleted after an account switch.
+                            check_owner(comment, actor, &github.get_account_id().await?)?;
+                            github.get_pull_request(&repo, pr).await?;
+                        }
+                    } else {
+                        // REST comments have no viewer-author field; verify the posting account.
+                        check_owner(comment, actor, &github.get_account_id().await?)?;
+                        if first {
+                            attempted = true;
+                            github.delete(&route).await?;
+                        } else {
+                            match github.get(&route, None).await {
+                                Ok(_) => return Ok(None),
+                                Err(error) if error.to_string().starts_with("GitHub HTTP 404 ") => {
+                                    github.get_pull_request(&repo, pr).await?;
+                                }
+                                Err(error) => return Err(error),
+                            }
+                        }
+                    }
+                    Ok(Some(ForgeChangeObject::Deleted { comment_id: *comment_id }))
+                }
+                _ => Err(invalid("Unsupported targeted change")),
+            }
+        }.await;
+        match result {
+            Ok(Some(result)) => self.reviews
+                .finish_forge_change(session_id, actor, input, guard, Some(result), None)
+                .await?.result.ok_or_else(|| invalid("Mutation receipt was not persisted")),
+            Err(error) if first && (!attempted || definite_rejection(&error)) => {
+                let message = format!("Request rejected: {error}");
+                self.reviews.finish_forge_change(session_id, actor, input, guard, None, Some(message.clone())).await?;
+                Err(Error::Conflict(message))
+            }
+            Err(error) => Err(Error::Conflict(format!("Remote result is uncertain. Retry the same action to inspect its receipt; no write will be repeated. {error}"))),
+            Ok(None) => Err(Error::Conflict("Remote result is uncertain. Retry the same action to inspect its receipt; no write will be repeated".into())),
+        }
     }
 
     /// The outer error means no mutation was attempted; the inner result is the provider write.
@@ -232,10 +380,8 @@ impl ForgeService {
         github: &Github,
         repo: &Repository,
         pr: i64,
-        session: &Session,
         saved: &ForgeChange,
     ) -> Result<Result<()>> {
-        self.validate_comparison(github, repo, pr, session).await?;
         let result = match (&saved.input, &saved.original) {
             (ForgeChangeInput::Edit { body, .. }, ForgeChangeObject::Comment(comment)) => {
                 let rendered = Self::get_change_body(comment, body);
@@ -327,11 +473,9 @@ impl ForgeService {
                 }) {
                     return Ok(None);
                 }
-                let mut deleted = comment.clone();
-                deleted.remote_presence = "missing".into();
-                deleted.deleted = true;
-                deleted.updated_at = now();
-                Ok(Some(ForgeChangeObject::Comment(deleted)))
+                Ok(Some(ForgeChangeObject::Deleted {
+                    comment_id: comment.id,
+                }))
             }
             (ForgeChangeInput::Resolve { resolved, .. }, ForgeChangeObject::Thread(thread)) => {
                 let Some(remote) = snapshot.threads.iter().find(|t| {

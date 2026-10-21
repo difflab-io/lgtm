@@ -357,7 +357,10 @@ fn review(v: m::Review) -> Review {
             .as_ref()
             .map(|c| c.outcome.clone())
             .unwrap_or_default(),
-        body: completion.and_then(|c| c.body).unwrap_or_default(),
+        body: completion
+            .and_then(|c| c.body)
+            .or(v.session.draft_body)
+            .unwrap_or_default(),
         submission_status: v.session.submission_status,
         submission_error: v.session.submission_error.unwrap_or_default(),
         forge_review_id: v.session.forge_review_id.unwrap_or_default(),
@@ -615,6 +618,7 @@ impl IdentityService for Api {
                 "feedback_scopes".into(),
                 "anchor_evidence".into(),
                 "diff_service".into(),
+                "rejected_submission_recovery".into(),
             ],
             ..Default::default()
         })

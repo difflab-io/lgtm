@@ -6,6 +6,7 @@ use super::super::{
 };
 mod forge_changes;
 mod locations;
+mod pr_updates;
 
 use super::AuthService;
 use super::actor::{get_actor, load_actors};
@@ -1058,7 +1059,12 @@ impl ReviewService {
                 let root = conversation
                     .comments
                     .iter()
-                    .find(|c| c.id == *id && c.position == 0)
+                    .find(|c| {
+                        c.id == *id
+                            && !conversation.comments.iter().any(|earlier| {
+                                earlier.thread_id == c.thread_id && earlier.position < c.position
+                            })
+                    })
                     .ok_or_else(|| Error::NotFound("Selected root feedback in scope".into()))?;
                 ids.insert(root.thread_id);
             }
@@ -1091,22 +1097,19 @@ impl ReviewService {
         context: &uuid::Uuid,
         include_drafts: bool,
     ) -> Result<Conversation> {
-        let all = Self::comments_from_db_models(
+        let comments: Vec<Comment> = Self::comments_from_db_models(
             self.database.comments.get_all(context).await?,
             &self.database,
         )
-        .await?;
-        let visible: std::collections::HashSet<_> = all
-            .iter()
-            .filter(|c| c.position == 0 && (include_drafts || c.visibility == "published"))
-            .map(|c| c.thread_id)
-            .collect();
-        let comments = all
-            .into_iter()
-            .filter(|c| {
-                visible.contains(&c.thread_id) && (include_drafts || c.visibility == "published")
-            })
-            .collect();
+        .await?
+        .into_iter()
+        .filter(|c| {
+            !c.deleted
+                && c.remote_presence != "missing"
+                && (include_drafts || c.visibility == "published")
+        })
+        .collect();
+        let visible: std::collections::HashSet<_> = comments.iter().map(|c| c.thread_id).collect();
         let threads: Vec<Thread> = Self::threads_from_db_models(
             self.database.comments.get_threads(context).await?,
             &self.database,
@@ -1182,9 +1185,12 @@ impl ReviewService {
         };
         if kind == SourceKind::Commit {
             let matches = if range.is_some() {
-                source_commit.as_deref() == expected_commit && source_commit.as_deref() == commit
+                (context.key.is_forge_backed() || source_commit.as_deref() == expected_commit)
+                    && source_commit.as_deref() == commit
             } else {
-                source_commit == session.commits.base || source_commit == session.commits.head
+                context.key.is_forge_backed()
+                    || source_commit == session.commits.base
+                    || source_commit == session.commits.head
             };
             if !matches {
                 return Err(Error::Conflict(
@@ -1311,6 +1317,16 @@ impl ReviewService {
         else {
             return Err(invalid("Expected a PR context"));
         };
+        // An open composer can still refer to verified bytes from before a PR refresh.
+        // Verify that exact source; posting derives a separate current placement.
+        let mut commits = session.commits.clone();
+        if let AnchorSource::Commit { sha, .. } = &evidence.source {
+            if matches!(anchor, Anchor::Line {side, ..} if side == "old") {
+                commits.base = Some(sha.clone());
+            } else {
+                commits.head = Some(sha.clone());
+            }
+        }
         self.sources
             .get_anchor_evidence(
                 &context.paths,
@@ -1319,13 +1335,11 @@ impl ReviewService {
                     number: *number,
                 },
                 ReviewComparison::PullRequest {
-                    base_commit: session
-                        .commits
+                    base_commit: commits
                         .base
                         .clone()
                         .ok_or_else(|| invalid("PR base unavailable"))?,
-                    head_commit: session
-                        .commits
+                    head_commit: commits
                         .head
                         .clone()
                         .ok_or_else(|| invalid("PR head unavailable"))?,
@@ -1524,39 +1538,22 @@ impl ReviewService {
             } else {
                 saved.comparison_kind
             };
-            if selection.replace_local
-                || (selection.accept_pr_comparison
-                    && (effective_kind != comparison_kind || saved.commits != commits))
-            {
-                if selection.accept_pr_comparison
-                    && (saved.creator.id != actor.id
-                        || saved.submission_status != "unsubmitted"
-                        || tx.mutations.get_pending(&context.id, None).await?)
+            if selection.replace_local {
+                for mut comment in Self::comments_from_db_models(
+                    tx.comments.get_session_drafts(&saved.id).await?,
+                    &tx,
+                )
+                .await?
                 {
-                    return Err(Error::Conflict(
-                        "Recover the selected PR attempt before accepting another comparison"
-                            .into(),
-                    ));
-                }
-                if selection.replace_local {
-                    for mut comment in Self::comments_from_db_models(
-                        tx.comments.get_session_drafts(&saved.id).await?,
-                        &tx,
-                    )
-                    .await?
-                    {
-                        comment.visibility = "published".into();
-                        comment.updated_at = now();
-                        tx.comments.update(&comments::Model::from(&comment)).await?;
-                    }
+                    comment.visibility = "published".into();
+                    comment.updated_at = now();
+                    tx.comments.update(&comments::Model::from(&comment)).await?;
                 }
                 let guard =
                     guard.ok_or_else(|| invalid("Replacement requires its retry identity"))?;
                 saved.complete(
                     actor.clone(),
-                    if selection.accept_pr_comparison {
-                        "superseded"
-                    } else if context.key.is_notes() {
+                    if context.key.is_notes() {
                         "saved"
                     } else {
                         "ready-to-address"
@@ -1566,9 +1563,6 @@ impl ReviewService {
                     format!("replace:{}:{}", actor.id, guard.request_key),
                     guard.payload_hash.clone(),
                 )?;
-                if selection.accept_pr_comparison {
-                    saved.submission_status = "superseded".into();
-                }
                 if !tx.sessions.complete(&sessions::Model::from(&saved)).await? {
                     return Err(Error::Conflict("Selected local attempt changed".into()));
                 }
@@ -1635,6 +1629,7 @@ impl ReviewService {
             }
             .into(),
             submission_error: None,
+            draft_body: None,
         };
         tx.sessions.insert(&sessions::Model::from(&s)).await?;
         // Original anchors are immutable; only mark their current applicability.
@@ -2303,6 +2298,16 @@ impl ReviewService {
             return Err(invalid("Only forge-backed reviews can be submitted"));
         }
         if tx
+            .mutations
+            .get_result(context_id, &actor.id, request_key)
+            .await?
+            .is_some()
+        {
+            return Err(Error::Conflict(
+                "Submission retry key was already used; choose a new submission attempt".into(),
+            ));
+        }
+        if tx
             .sessions
             .get_completion_by_key(context_id, request_key)
             .await?
@@ -2423,6 +2428,18 @@ impl ReviewService {
             tx.commit().await?;
             return Ok(saved);
         }
+        if input.submit
+            && tx
+                .mutations
+                .get_result(context_id, &actor.id, request_key)
+                .await?
+                .is_some_and(|receipt| receipt.method == "rejected_submission")
+        {
+            return Err(Error::Conflict(
+                "Rejected submission cannot be completed again; choose a new submission attempt"
+                    .into(),
+            ));
+        }
         let row = tx
             .sessions
             .get_completion_by_key(context_id, request_key)
@@ -2515,7 +2532,7 @@ impl ReviewService {
     pub async fn apply_remote(
         &self,
         context: &Context,
-        snapshot: ForgeSnapshot,
+        mut snapshot: ForgeSnapshot,
         stub: bool,
     ) -> Result<Context> {
         tracing::debug!("Review action: apply_remote");
@@ -2534,6 +2551,31 @@ impl ReviewService {
             ));
         }
         let tx = self.database.begin().await?;
+        let mut deleted = HashSet::new();
+        for receipt in tx.mutations.get_remote_delete_receipts(&context.id).await? {
+            let saved: ForgeChange = serde_json::from_str(&receipt.result_json)?;
+            if let Some(key) = saved.deleted_remote {
+                deleted.insert(key);
+            }
+        }
+        for thread in &mut snapshot.threads {
+            let previous_root = thread.comments.first().map(|comment| comment.id.clone());
+            thread
+                .comments
+                .retain(|comment| !deleted.contains(&(comment.kind.clone(), comment.id.clone())));
+            if let Some(root) = thread.comments.first().map(|comment| comment.id.clone())
+                && previous_root.as_ref() != Some(&root)
+            {
+                for (index, comment) in thread.comments.iter_mut().enumerate() {
+                    if comment.reply_to == previous_root {
+                        comment.reply_to = (index > 0).then(|| root.clone());
+                    }
+                }
+            }
+        }
+        snapshot
+            .threads
+            .retain(|thread| !thread.comments.is_empty());
         let mut seen = HashSet::new();
         let mut thread_ids = HashSet::new();
         let mut authors = vec![];
@@ -2714,6 +2756,7 @@ impl ReviewService {
                 comment.forge_updated_at = Some(remote.updated_at.clone());
                 comment.forge_review_id = remote.review_id.clone();
                 comment.remote_presence = "present".into();
+                comment.deleted = false;
                 comment.updated_at = now();
                 if existing {
                     tx.comments.update(&comments::Model::from(&comment)).await?;
@@ -2723,13 +2766,18 @@ impl ReviewService {
             }
         }
         let rows = tx.comments.get_remote(&context.id).await?;
-        for mut c in Self::comments_from_db_models(rows, &tx).await? {
+        for c in Self::comments_from_db_models(rows, &tx).await? {
             if !seen.contains(&(
                 c.forge_object_kind.clone().unwrap_or_default(),
                 c.forge_comment_id.clone().unwrap_or_default(),
             )) {
-                c.remote_presence = "missing".into();
-                tx.comments.update(&comments::Model::from(&c)).await?;
+                if tx.mutations.get_pending(&context.id, Some(&c.id)).await? {
+                    continue;
+                }
+                tx.comments.delete_remote(&context.id, &c.id).await?;
+                tx.comments
+                    .delete_empty_thread(&context.id, &c.thread_id)
+                    .await?;
             }
         }
         let mut current = context.clone();

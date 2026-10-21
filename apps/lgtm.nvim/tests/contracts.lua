@@ -153,6 +153,23 @@ local function should_validate_plugin_contracts()
     "unknown legacy comparisons keep discussion access without guessing content"
   )
   assert(message:find("no recorded comparison", 1, true))
+  local previous_caps = rpc.capabilities
+  rpc.capabilities = {}
+  contexts.set({ kind = "pr", review = { id = "rejected-upgrade", submissionStatus = "failed" } })
+  rpc.call = function()
+    error("An older backend's recovery method may publish; never invoke it automatically")
+  end
+  require("lgtm.review").submit()
+  assert(
+    message:find("Update the LGTM CLI/backend", 1, true),
+    "a plugin-only update cannot automatically publish an old rejected outcome"
+  )
+  require("lgtm.review").reconcile()
+  assert(
+    message:find("Update the LGTM CLI/backend", 1, true),
+    "failed-recovery semantics require explicit backend support"
+  )
+  rpc.capabilities = previous_caps
   notifications.error = previous_error
   rpc.call = previous_rpc
   contexts.set(previous_state)

@@ -43,7 +43,12 @@ function M.render(thread, comments, status, width, expanded, placement)
   if fallback then
     heading = placement.status:sub(1, 1):upper() .. placement.status:sub(2) .. " · " .. heading
   end
-  local replies = #comments - 1
+  local replies = 0
+  for _, comment in ipairs(comments) do
+    if tonumber(comment.position or 0) > 0 then
+      replies = replies + 1
+    end
+  end
   heading = heading .. " · " .. replies .. (replies == 1 and " reply" or " replies")
   local status_hl = resolved and "LgtmCommentResolved" or "LgtmCommentStatus"
   local rows = {

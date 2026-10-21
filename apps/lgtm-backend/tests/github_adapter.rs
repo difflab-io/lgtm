@@ -93,3 +93,84 @@ async fn should_accept_empty_delete_response() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn should_keep_original_single_line_coordinates_separate_from_relocated_current_ranges() {
+    use lgtm_backend::models::Anchor;
+    let fixture = Fixture::new(|r| {
+        if r.path == "/repos/acme/repo/pulls/1" {
+            return (
+                200,
+                json!({"number":1,"title":"PR","head":{"sha":"current"},"base":{"sha":"base"},"state":"open"}),
+            );
+        }
+        if r.path == "/graphql" {
+            return (
+                200,
+                json!({"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{
+                "id":"T1","path":"file.txt","line":3,"startLine":3,"originalLine":2,"originalStartLine":null,
+                "diffSide":"RIGHT","subjectType":"LINE","isResolved":false,"isOutdated":false,
+                "comments":{"nodes":[{"databaseId":1,"body":"Existing private draft","updatedAt":"2026-10-20T00:00:00Z",
+                    "originalCommit":{"oid":"original"},"commit":{"oid":"current"},"author":{"databaseId":1,"login":"fixture"},"pullRequestReview":{"databaseId":5,"state":"PENDING"}}],"pageInfo":{"hasNextPage":false}}
+            }],"pageInfo":{"hasNextPage":false}}}}}}),
+            );
+        }
+        (200, json!([]))
+    });
+    let snapshot = Github::for_test(&fixture.endpoint)
+        .unwrap()
+        .get_snapshot(
+            &Repository::parse("https://github.com/acme/repo").unwrap(),
+            1,
+        )
+        .await
+        .unwrap();
+    let thread = &snapshot.threads[0];
+    assert!(
+        matches!(&thread.anchor, Anchor::Line {start:2,end:2,commit,..} if commit == "original")
+    );
+    assert!(
+        matches!(&thread.observation.as_ref().unwrap().current, Some(Anchor::Line {start:3,end:3,commit,..}) if commit == "current")
+    );
+}
+
+#[tokio::test]
+async fn should_repeat_only_the_observation_when_commits_change_while_loading_pages() {
+    let reads = Arc::new(Mutex::new(0));
+    let observed = reads.clone();
+    let fixture = Fixture::new(move |r| {
+        if r.path == "/repos/acme/repo/pulls/1" {
+            let mut count = observed.lock().unwrap();
+            *count += 1;
+            return (
+                200,
+                json!({"number":1,"title":"PR","head":{"sha":if *count == 1 {"old"} else {"current"}},"base":{"sha":"base"},"state":"open"}),
+            );
+        }
+        if r.path == "/graphql" {
+            return (
+                200,
+                json!({"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":false}}}}}}),
+            );
+        }
+        assert_eq!(
+            r.method, "GET",
+            "observation recovery must never write to GitHub"
+        );
+        (200, json!([]))
+    });
+    let snapshot = Github::for_test(&fixture.endpoint)
+        .unwrap()
+        .get_snapshot(
+            &Repository::parse("https://github.com/acme/repo").unwrap(),
+            1,
+        )
+        .await
+        .unwrap();
+    assert_eq!(snapshot.head, "current");
+    assert_eq!(
+        *reads.lock().unwrap(),
+        4,
+        "two bounded complete observations"
+    );
+}

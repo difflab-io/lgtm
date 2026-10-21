@@ -27,7 +27,7 @@ Open Neovim in the repository that you want to review, then run `:Lgtm review`. 
 | Branch | Changes since the current branch diverged from a selected base branch. |
 | PR | An open GitHub pull request associated with the current branch. |
 
-For Branch, enter the base branch when prompted. The default is `main`. A clean Working or Staged comparison reports that there are no changes. A resumed review keeps its original comparison until you explicitly choose another review.
+For Branch, enter the base branch when prompted. The default is `main`. A clean Working or Staged comparison reports that there are no changes. A resumed local review keeps its original comparison. A PR review follows the current PR commits when you reopen, refresh, or save a draft.
 
 ### Select a pull request
 
@@ -89,7 +89,7 @@ The edit title and selected highlight identify whether you are editing the top-l
 
 Use `:Lgtm threads` or `<leader>rt` to read threads across all files, including general comments. Select a file thread in that pane and press Enter to visit its file. From a diff pane, use `]c` / `[c` to visit comments and `]n` / `[n` to visit notes.
 
-Use `za` to expand the card at the cursor, `zA` for cards across the file, and `gH` to toggle overlays. Replying, editing, committing, and closing a review do not automatically resolve its threads. Resolve a discussion explicitly with `x` when you consider it addressed.
+Use `za` to expand the card at the cursor, `zA` for cards across the file, and `gH` to toggle overlays. Replying, editing, committing, and closing a review do not automatically resolve its threads. Resolve a discussion explicitly with `x` when you consider it addressed. Resolving and deleting show progress immediately. The card changes after GitHub confirms the action. Deleted GitHub comments disappear from the diff, thread window, and export. Replies remain visible when the original comment is deleted. A refresh also removes comments deleted on GitHub; comments that have never been posted remain local.
 
 ## Add notes while browsing
 
@@ -129,6 +129,8 @@ Lowercase `<leader>rs` submits the active PR review. Uppercase `<leader>rS` open
 5. Press Ctrl-S to submit.
 6. Wait for the review-submitted notification.
 
+For your own PR, choose `comment`; GitHub rejects self-approval and self-request-changes. A rejected submission keeps your review editable and retains its pending comments and final text. Choose another outcome and submit again. For a frozen failure saved by an older backend, `:Lgtm reconcile` checks GitHub and restores editing when rejection is confirmed.
+
 The pending GitHub draft becomes the submitted review. Closing the view or saving a comment alone does not submit it. If submission fails, retain the final text and follow the recovery notification before trying again.
 
 ## Recover a save or submission
@@ -139,6 +141,7 @@ The pending GitHub draft becomes the submitted review. Closing the view or savin
 | A draft save lost its confirmation | Inspect the existing thread, then use `:Lgtm sync`. Avoid adding the same text again immediately. |
 | Submission has an uncertain result | Run `:Lgtm reconcile` before another submission attempt. |
 | A composer reports a failed save | Keep its text and correct the reported problem before saving again. |
+| PR comments failed to load | Fix the reported backend or GitHub error, then run `:Lgtm refresh`. The diff stays open while you retry. |
 | The displayed discussion is stale | Run `:Lgtm refresh`. Existing drafts remain if the refresh fails. |
 
 Synchronizing drafts does not submit the review. Reconciliation can finish a submission that you already requested, so use it as an explicit recovery action. If LGTM cannot establish the result, inspect the pending review on GitHub before taking further action.
@@ -153,11 +156,11 @@ For Save file, enter the output path and confirm an overwrite if the file alread
 
 ## After files, commits, or pull requests change
 
-Your saved comments remain available after a commit. The open review keeps its original comparison rather than silently switching to the new commit. If you reopen with different commits, choose whether to resume the saved review or complete it and start another comparison.
+Your saved comments remain available after a commit. An open local review keeps its original comparison. If you reopen a local review with different commits, choose whether to resume the saved review or complete it and start another comparison. PR reviews follow the rules below.
 
 Comments on staged or committed text follow preserved text into later commits and branch views. Comments on unstaged text can lose their location when that source changes. The discussion remains saved.
 
-A changed PR base or head blocks new draft publication and submission against the old comparison. On refresh, choose whether to keep the saved comparison or accept the current one. Recover an uncertain submission before replacing its attempt. Closed or merged PRs retain their discussions and drafts, but cannot accept a new submission. A commit or merge alone does not resolve a comment or confirm submission.
+New PR commits keep the same review and private pending comments. LGTM updates the diff when you reopen, refresh, or save a draft. Unsent comments follow a unique text match. If the selection is lost or ambiguous, LGTM saves file-level feedback with its original location and excerpt. Check the updated diff before submitting. A push that races final submission requires another refresh; an uncertain submission requires receipt recovery. Closed or merged PRs retain their discussions and drafts, but cannot accept a new submission. A commit or merge alone does not resolve a comment or confirm submission.
 
 When a preserved selection moves, its comment follows the uniquely matching text. If the selection is lost or ambiguous, its card appears above the file with the original lines and excerpt. Deleted files keep their discussions in the thread list. Matching restored content can reconnect them. A file absent from the selected diff is hidden from that view; its discussion remains in the full thread list and export.
 

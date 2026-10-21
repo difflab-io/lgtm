@@ -13,6 +13,22 @@ function M.request_key()
   return vim.fn.sha256(tostring(vim.uv.hrtime()) .. tostring(math.random()))
 end
 
+-- A native diff may be visible before its persisted review is ready.
+function M.readiness_error(state)
+  if state.load_error then
+    local cause = type(state.load_error) == "table" and state.load_error.message
+      or tostring(state.load_error)
+    return {
+      message = "PR review could not load: "
+        .. (cause or "Unknown error")
+        .. ". Use :Lgtm refresh to retry.",
+    }
+  end
+  if state.initializing then
+    return { message = "PR comments are still loading; wait for Review ready" }
+  end
+end
+
 function M.apply(state, review)
   if
     state.version
@@ -21,6 +37,15 @@ function M.apply(state, review)
     and tonumber(review.version) < tonumber(state.version)
   then
     return state
+  end
+  if
+    state.kind == "pr"
+    and state.comparison
+    and not vim.deep_equal(state.comparison, review.comparison)
+  then
+    state.views, state.reviewed, state.observe_sources = {}, {}, nil
+    state.source_generation = (state.source_generation or 0) + 1
+    state.render_ready = false
   end
   state.review = review
   state.scope = { reviewId = review.id }
@@ -109,6 +134,13 @@ function M.conversation(state, callback)
 end
 
 function M.refresh(state, callback)
+  local unavailable = M.readiness_error(state)
+  if unavailable then
+    if callback then
+      callback(unavailable)
+    end
+    return
+  end
   local function read()
     M.conversation(state, function(err)
       if state.review and M.current ~= state then
@@ -165,7 +197,7 @@ function M.start(target, comparison, root, callback, options)
       callback(nil, M.apply({ root = root }, response.review))
       return
     end
-    if not target.localGit or err.code ~= "failed_precondition" then
+    if (not target.localGit and not target.pullRequest) or err.code ~= "failed_precondition" then
       callback(err)
       return
     end
@@ -173,6 +205,20 @@ function M.start(target, comparison, root, callback, options)
       local review = saved and saved.reviews and saved.reviews[1]
       if list_error or not review then
         callback(list_error or err)
+        return
+      end
+      if target.pullRequest then
+        -- A picker comparison can age while StartReview observes a push.
+        -- Retry selection once using the server's current PR comparison.
+        local retry = vim.tbl_extend("force", input, { requestKey = M.request_key() })
+        retry.comparison = nil
+        rpc.call("StartReview", retry, function(retry_error, current)
+          if retry_error then
+            callback(retry_error)
+          else
+            callback(nil, M.apply({ root = root }, current.review))
+          end
+        end)
         return
       end
       require("lgtm.picker").select(

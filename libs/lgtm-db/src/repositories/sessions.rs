@@ -137,6 +137,62 @@ impl<C: ConnectionTrait + TransactionTrait> SessionRepository<C> {
             == 1)
     }
 
+    /// Resume only the same definitely rejected submission. Keep its body and provider review ID.
+    pub async fn reopen_rejected_submission(&self, row: &sessions::Model) -> Result<bool> {
+        Ok(sessions::Entity::update_many()
+            .set(sessions::ActiveModel {
+                state: sea_orm::Set(common::SessionState::Active),
+                completed_at: sea_orm::Set(None),
+                completed_by_id: sea_orm::Set(None),
+                outcome: sea_orm::Set(None),
+                request_key: sea_orm::Set(None),
+                request_hash: sea_orm::Set(None),
+                submission_status: sea_orm::Set("unsubmitted".into()),
+                ..Default::default()
+            })
+            .filter(sessions::Column::Id.eq(row.id))
+            .filter(sessions::Column::ContextId.eq(row.context_id))
+            .filter(sessions::Column::State.eq(common::SessionState::Completed))
+            .filter(sessions::Column::SubmissionStatus.eq("failed"))
+            .filter(sessions::Column::RequestKey.eq(row.request_key.clone()))
+            .filter(sessions::Column::RequestHash.eq(row.request_hash.clone()))
+            .exec(self.connection.as_ref())
+            .await?
+            .rows_affected
+            == 1)
+    }
+
+    /// Advance only an active, unfrozen PR review. Original comment anchors are stored separately.
+    pub async fn update_pr_comparison(
+        &self,
+        row: &sessions::Model,
+        base: &str,
+        head: &str,
+    ) -> Result<bool> {
+        Ok(sessions::Entity::update_many()
+            .set(sessions::ActiveModel {
+                base_commit: sea_orm::Set(Some(base.into())),
+                head_commit: sea_orm::Set(Some(head.into())),
+                comparison_kind: sea_orm::Set(common::ComparisonKind::PullRequest),
+                ..Default::default()
+            })
+            .filter(sessions::Column::Id.eq(row.id))
+            .filter(sessions::Column::ContextId.eq(row.context_id))
+            .filter(sessions::Column::State.eq(common::SessionState::Active))
+            .filter(sessions::Column::SubmissionStatus.eq(&row.submission_status))
+            .filter(sessions::Column::SubmissionStatus.is_in(["unsubmitted", "draft_failed"]))
+            .filter(sessions::Column::BaseCommit.eq(row.base_commit.clone()))
+            .filter(sessions::Column::HeadCommit.eq(row.head_commit.clone()))
+            .filter(sessions::Column::ComparisonKind.is_in([
+                common::ComparisonKind::Legacy,
+                common::ComparisonKind::PullRequest,
+            ]))
+            .exec(self.connection.as_ref())
+            .await?
+            .rows_affected
+            == 1)
+    }
+
     /// Complete an active session without changing its creator or reviewed commits. Return false if no active row matches.
     pub async fn complete(&self, row: &sessions::Model) -> Result<bool> {
         Ok(sessions::Entity::update_many()

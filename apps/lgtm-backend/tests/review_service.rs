@@ -449,14 +449,8 @@ mod review_service {
                     .await
                     .unwrap();
                 let live = db.get_conversation(&c.id, true).await.unwrap();
-                assert_eq!(
-                    live.comments
-                        .iter()
-                        .find(|x| x.id == local.id)
-                        .unwrap()
-                        .remote_presence,
-                    "missing"
-                );
+                assert!(!live.comments.iter().any(|x| x.id == local.id));
+                assert!(db.get_comment(&c.id, &local.id).await.is_err());
                 assert!(
                     live.comments
                         .iter()
@@ -520,7 +514,7 @@ mod review_service {
                         .unwrap()
                         .comments
                         .len(),
-                    before
+                    before - 1
                 );
                 db.database().close().await;
             }
