@@ -1,21 +1,30 @@
 [tools]
-stylua = "2.1.0"
 neovim = "0.12.5"
-
-[tasks.install]
-description = "Fetch exact dependency revisions and CodeDiff native library"
-run = "python3 {{config_root}}/common/run.py --install"
 
 [tasks.test]
 depends = ["install", "//apps/lgtm-cli:build"]
-description = "Real child Neovim against the real backend; isolated state"
-run = ["python3 {{config_root}}/common/run.py", "python3 {{config_root}}/common/run.py --kak"]
+description = "Readable TypeScript nvim E2E journeys"
+dir = "{{config_root}}/../.."
+run = "bun x vitest run --config e2e/nvim/vitest.config.ts"
 
 [tasks.lint]
-run = "nvim --headless -u NONE -l {{config_root}}/common/syntax.lua"
+dir = "{{config_root}}/../.."
+run = "bun x eslint e2e/nvim e2e/common"
 
 [tasks.format]
-run = "stylua --respect-ignores {{config_root}}"
+dir = "{{config_root}}/../.."
+run = "bun x prettier --write e2e/nvim/**/*.ts e2e/common/**/*.ts"
 
 [tasks."format:check"]
-run = "stylua --check --respect-ignores {{config_root}}"
+dir = "{{config_root}}/../.."
+run = "bun x prettier --check e2e/nvim/**/*.ts e2e/common/**/*.ts"
+
+[tasks.install]
+description = "Ensure pinned real editor dependencies, fetching only missing revisions"
+dir = "{{config_root}}/../.."
+run = "bun run e2e/nvim/install.ts"
+
+[tasks.list]
+description = "List the nvim BDD journeys without running them"
+dir = "{{config_root}}/../.."
+run = "bun x vitest list --config e2e/nvim/vitest.config.ts"

@@ -5,6 +5,8 @@ monorepo_root = true
 
 [env]
 _.path = ["{{config_root}}/bin"]
+# Keep Git diagnostics stable and Unicode fixtures usable on both CI platforms.
+LC_ALL = "{% if os() == 'macos' %}en_US.UTF-8{% else %}C.UTF-8{% endif %}"
 
 [monorepo]
 config_roots = ["apps/*", "libs/*", "e2e/backend", "e2e/cli", "e2e/nvim"]
@@ -13,6 +15,7 @@ config_roots = ["apps/*", "libs/*", "e2e/backend", "e2e/cli", "e2e/nvim"]
 buf = "1.73.0"
 rust = { version = "1.94.0", components = "rustfmt,clippy,rust-analyzer" }
 bun = "1.4.2"
+node = "26.10.0"
 goreleaser = "2.18.1"
 "cargo:cargo-zigbuild" = "0.23.4"
 zig = "0.16.0"
@@ -26,7 +29,7 @@ run = ["cargo build --workspace", "bun run --filter lgtm-web build"]
 
 [tasks.test]
 depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:test"]
-run = ["cargo test --workspace --exclude lgtm-e2e-backend --exclude lgtm-e2e-cli", "bun run --filter lgtm-web test"]
+run = ["cargo test --workspace", "bun run --filter lgtm-web test"]
 
 [tasks.lint]
 depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:lint"]
@@ -104,12 +107,27 @@ depends = ["//apps/lgtm.nvim:format:check"]
 depends = ["//apps/lgtm.nvim:test"]
 
 [tasks."e2e:format"]
-depends = ["//e2e/nvim:format"]
-run = "cargo fmt -p lgtm-e2e-backend -p lgtm-e2e-cli"
+run = "bun x prettier --write 'e2e/{common,backend,cli,nvim}/**/*.ts' e2e/tsconfig.json"
 
 [tasks."e2e:format:check"]
-depends = ["//e2e/nvim:format:check"]
-run = "cargo fmt -p lgtm-e2e-backend -p lgtm-e2e-cli --check"
+run = "bun x prettier --check 'e2e/{common,backend,cli,nvim}/**/*.ts' e2e/tsconfig.json"
 
 [tasks."e2e:github:live"]
 depends = ["//e2e/backend:test:github:live"]
+
+[tasks."e2e:typecheck"]
+run = "bun x tsc -p e2e/tsconfig.json"
+
+[tasks."e2e:lint"]
+run = "bun x eslint e2e/common e2e/backend e2e/cli e2e/nvim"
+
+[tasks."e2e:nvim:run"]
+description = "Run editor journeys against existing binaries without rebuilding"
+run = "bun x vitest run --config e2e/nvim/vitest.config.ts"
+
+[tasks."e2e:parity"]
+run = "bun run e2e/common/check-parity.ts"
+
+[tasks."e2e:list"]
+description = "List local BDD journeys without running them"
+depends = ["//e2e/backend:list", "//e2e/cli:list", "//e2e/nvim:list"]

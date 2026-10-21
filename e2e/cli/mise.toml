@@ -1,14 +1,22 @@
 [tasks.test]
-description = "Run real-process cli end-to-end workflows"
 depends = ["//apps/lgtm-cli:build"]
-run = "cargo test -p lgtm-e2e-cli"
-
-[tasks."format:check"]
-run = "cargo fmt -p lgtm-e2e-cli --check"
-
-[tasks.format]
-run = "cargo fmt -p lgtm-e2e-cli"
+description = "Readable TypeScript cli E2E journeys"
+dir = "{{config_root}}/../.."
+run = "bun x vitest run --config e2e/cli/vitest.config.ts"
 
 [tasks.lint]
-depends = ["//apps/lgtm-cli:bundle"]
-run = "cargo clippy -p lgtm-e2e-cli --all-targets -- -D warnings"
+dir = "{{config_root}}/../.."
+run = "bun x eslint e2e/cli e2e/common"
+
+[tasks.format]
+dir = "{{config_root}}/../.."
+run = "bun x prettier --write e2e/cli/**/*.ts e2e/common/**/*.ts"
+
+[tasks."format:check"]
+dir = "{{config_root}}/../.."
+run = "bun x prettier --check e2e/cli/**/*.ts e2e/common/**/*.ts"
+
+[tasks.list]
+description = "List the cli BDD journeys without running them"
+dir = "{{config_root}}/../.."
+run = "bun x vitest list --config e2e/cli/vitest.config.ts"

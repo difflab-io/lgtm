@@ -1,18 +1,27 @@
 [tasks.test]
-description = "Run real-process backend end-to-end workflows"
 depends = ["//apps/lgtm-backend:build"]
-run = "cargo test -p lgtm-e2e-backend"
-
-[tasks."format:check"]
-run = "cargo fmt -p lgtm-e2e-backend --check"
-
-[tasks.format]
-run = "cargo fmt -p lgtm-e2e-backend"
+description = "Readable TypeScript backend E2E journeys"
+dir = "{{config_root}}/../.."
+run = "bun x vitest run --config e2e/backend/vitest.config.ts"
 
 [tasks.lint]
-run = "cargo clippy -p lgtm-e2e-backend --all-targets -- -D warnings"
+dir = "{{config_root}}/../.."
+run = "bun x eslint e2e/backend e2e/common"
+
+[tasks.format]
+dir = "{{config_root}}/../.."
+run = "bun x prettier --write e2e/backend/**/*.ts e2e/common/**/*.ts"
+
+[tasks."format:check"]
+dir = "{{config_root}}/../.."
+run = "bun x prettier --check e2e/backend/**/*.ts e2e/common/**/*.ts"
 
 [tasks."test:github:live"]
-description = "Opt-in live GitHub smoke using verified private fixtures"
 depends = ["//apps/lgtm-backend:build"]
-run = "{{config_root}}/../scripts/test-github-review"
+dir = "{{config_root}}/../.."
+run = "bun x vitest run --config e2e/backend/vitest.live.config.ts"
+
+[tasks.list]
+description = "List the backend BDD journeys without running them"
+dir = "{{config_root}}/../.."
+run = "bun x vitest list --config e2e/backend/vitest.config.ts"

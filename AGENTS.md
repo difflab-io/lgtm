@@ -33,6 +33,11 @@ These rules apply to every app and library in the workspace.
 - Name tests `should_<behavior>` and keep fixture helpers separate from test cases with the standard separators.
 - Test multi-operation transactions and full review lifecycles against real SQLite and PostgreSQL. Use dummy external services.
 - Run checks through project Mise tasks invoked by Premise. Keep their source scripts tracked; generated output stays ignored.
+- Use local provider fixtures for routine E2E runs. Do not create GitHub test repositories without an explicit user request; live tests should reuse a dedicated private fixture repository.
+- Run focused checks while iterating. Repeat broad suites only when changes or failures justify them; reuse passing evidence for unchanged code.
+- Write new E2E suites in TypeScript with Vitest. Prefer a few complete BDD journeys with named Given/When/Then steps, explicit assertions and shared runtime fixtures. Keep each suite's Mise config; do not add a root `e2e/mise.toml`.
+- Use the permanent private GitHub fixture selected by `LGTM_E2E_GITHUB_REPOSITORY`. Test runners must never create, recreate, rename, archive or delete repositories. Verify private visibility before writes and clean up only run-owned PRs and refs.
+- Visually separate Arrange, Act and Assert blocks in E2E tests with section comments. Repeat the sections within long journeys when the next action needs another check.
 
 ## Backend
 
