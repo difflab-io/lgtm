@@ -45,7 +45,7 @@ flowchart TD
 
 - Axum owns the HTTP listener and request routing.
 - The generated asset table maps URLs to embedded bytes and content types.
-- `backend::router` provides the greeting and health services.
+- `backend::router_with_database` provides review, diff, identity, greeting and health services over the shared database.
 - `Store` records the listening port and protects foreground ownership.
 - Tokio receives shutdown signals and bounds connection draining.
 - `tracing` records server startup and shutdown through the log module.

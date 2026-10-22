@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { type Runtime, hash } from '../common/runtime.js'
+import { type TestHarness } from '../common/test-harness.js'
+import { hash } from '../common/test-utils.js'
 import { line } from './anchors.js'
 
-export async function prepareDirectory(runtime: Runtime) {
+export async function prepareDirectory(runtime: TestHarness) {
   await runtime.identify()
   const bytes = 'before\nselected\nafter\n'
   const plans = join(runtime.workspace, '.difflab/plan/example')
@@ -16,7 +17,7 @@ export async function prepareDirectory(runtime: Runtime) {
   return { runtime, bytes, plans, target, review, scope }
 }
 
-export async function prepareDirectoryDiscussion(runtime: Runtime) {
+export async function prepareDirectoryDiscussion(runtime: TestHarness) {
   const current = await prepareDirectory(runtime)
   const root = (
     await runtime.rpc('AddComment', {
@@ -46,7 +47,7 @@ export async function prepareDirectoryDiscussion(runtime: Runtime) {
   return { ...current, root }
 }
 
-export async function prepareStagedReview(runtime: Runtime) {
+export async function prepareStagedReview(runtime: TestHarness) {
   await runtime.identify()
   await runtime.git('init', '-q', '-b', 'main')
   const path = 'src/[x]`Ω.rs'
@@ -87,7 +88,7 @@ export async function prepareStagedReview(runtime: Runtime) {
   return { runtime, path, old, next, base, target, review, scope, root }
 }
 
-export async function prepareBranchDiscussion(runtime: Runtime) {
+export async function prepareBranchDiscussion(runtime: TestHarness) {
   const current = await prepareStagedReview(runtime)
   const snapshot = await runtime.rpc('GetConversation', { scope: current.scope })
   const head = await runtime.commit('reviewed change')

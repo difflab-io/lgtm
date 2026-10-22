@@ -4,19 +4,18 @@ use super::super::{
     error::{Error, Result, invalid},
     models::*,
 };
-mod files;
-mod forge_changes;
-mod locations;
-mod pr_updates;
 
 use super::AuthService;
 use super::actor::{get_actor, load_actors};
-use crate::utils::{ForgeSnapshot, PostReceipt, now, within};
+use crate::forge::models::{ForgeSnapshot, PostReceipt};
+use crate::models::{ForgeChange, ForgeChangeInput, ForgeChangeObject};
+use crate::utils::{now, within};
 use db::Database;
 use db::models::*;
 use sea_orm::{ConnectionTrait, TransactionTrait};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct ReviewService {
@@ -25,7 +24,28 @@ pub struct ReviewService {
     sources: super::diff::DiffService,
 }
 
+/// Remote acknowledgments contain no copy of the comment, thread, or request body.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct ChangeReceipt {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rejection: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    deleted_remote: Option<(String, String)>,
+}
+
 impl ReviewService {
+    // Public ------------------------------------------------------------------
+
+    // Construction and configuration ------------------------------------------
+
+    pub fn new(database: Database, auth: AuthService) -> Self {
+        Self {
+            database,
+            auth,
+            sources: super::diff::DiffService::default(),
+        }
+    }
+
     pub fn auth(&self) -> &AuthService {
         &self.auth
     }
@@ -38,6 +58,8 @@ impl ReviewService {
         self.sources = sources;
         self
     }
+
+    // Contexts ----------------------------------------------------------------
 
     /// Associate an optional checkout without changing PR identity or loading file content.
     pub async fn associate_checkout(&self, context_id: &uuid::Uuid, path: &str) -> Result<Context> {
@@ -64,19 +86,6 @@ impl ReviewService {
             )),
             None => Ok(None),
         }
-    }
-
-    async fn load_context<D: ConnectionTrait + TransactionTrait>(
-        &self,
-        conn: &db::Database<D>,
-        id: &uuid::Uuid,
-    ) -> Result<Context> {
-        let row = conn
-            .review_contexts
-            .get_by_id(id)
-            .await?
-            .ok_or_else(|| Error::NotFound("Context".into()))?;
-        Self::context_from_db_model(row, conn).await
     }
 
     pub async fn get_context_by_id(&self, id: &uuid::Uuid) -> Result<Context> {
@@ -123,14 +132,103 @@ impl ReviewService {
         Ok(context)
     }
 
-    pub async fn get_comment(&self, context: &uuid::Uuid, id: &uuid::Uuid) -> Result<Comment> {
-        let row = self
-            .database
-            .comments
-            .get_comment_by_id(context, id)
+    /// A notes read returns no storage when the file has no discussion.
+    pub async fn get_scope_context(&self, scope: &ReviewScope) -> Result<Option<Context>> {
+        match scope {
+            ReviewScope::Review { review_id } => Ok(Some(
+                self.get_context_by_id(&self.get_session(review_id).await?.context_id)
+                    .await?,
+            )),
+            ReviewScope::Notes { path } => {
+                let path = Self::get_notes_path(path)?;
+                match self
+                    .database
+                    .review_contexts
+                    .get_notes_for_path(&path)
+                    .await?
+                {
+                    Some(row) => Ok(Some(
+                        Self::context_from_db_model(row, &self.database).await?,
+                    )),
+                    None => Ok(None),
+                }
+            }
+        }
+    }
+
+    /// Resolve a consumer target into internal storage. The target location is always explicit.
+    pub async fn resolve_target(&self, target: &ReviewTarget) -> Result<Context> {
+        match target {
+            ReviewTarget::Directory { path } => {
+                let path = std::fs::canonicalize(path)?;
+                if !path.is_dir() {
+                    return Err(invalid("Directory review requires a directory"));
+                }
+                let path = path.to_string_lossy().into_owned();
+                if let Some(context) = self
+                    .get_scope_context(&ReviewScope::Notes { path: path.clone() })
+                    .await?
+                {
+                    return Ok(context);
+                }
+                self.ensure_context(
+                    ContextKey::Local {
+                        location: LocalLocation::Notes { path },
+                    },
+                    None,
+                )
+                .await
+            }
+            ReviewTarget::LocalGit {
+                path,
+                branch: expected_branch,
+            } => {
+                let (root, git_dir, branch) = super::workspace::get_git_location(path).await?;
+                if expected_branch
+                    .as_ref()
+                    .is_some_and(|expected| expected != &branch)
+                {
+                    return Err(Error::Conflict("The selected branch changed".into()));
+                }
+                self.ensure_context(
+                    ContextKey::Local {
+                        location: LocalLocation::Branch { git_dir, branch },
+                    },
+                    Some(&root),
+                )
+                .await
+            }
+            ReviewTarget::PullRequest {
+                repository_url,
+                number,
+            } => {
+                self.ensure_context(
+                    ContextKey::ForgeBacked {
+                        repository_url: ForgeRepositoryUrl::parse(repository_url)?,
+                        number: *number,
+                    },
+                    None,
+                )
+                .await
+            }
+        }
+    }
+
+    // Reviews and sessions ----------------------------------------------------
+
+    /// Get the immutable revision accepted for a retry key, even after later mutations.
+    pub async fn get_accepted_version(
+        &self,
+        context: &uuid::Uuid,
+        actor: &uuid::Uuid,
+        key: &str,
+    ) -> Result<i64> {
+        self.database
+            .mutations
+            .get_result(context, actor, key)
             .await?
-            .ok_or_else(|| Error::NotFound("Comment in selected context".into()))?;
-        Self::comment_from_db_model(row, &self.database).await
+            .map(|r| r.version)
+            .ok_or_else(|| Error::NotFound("Accepted mutation receipt".into()))
     }
 
     pub async fn get_session(&self, id: &uuid::Uuid) -> Result<Session> {
@@ -220,64 +318,6 @@ impl ReviewService {
             (&a.0.id, &a.1.created_at, &a.1.id).cmp(&(&b.0.id, &b.1.created_at, &b.1.id))
         });
         Ok(result)
-    }
-
-    /// Resolve a consumer target into internal storage. The target location is always explicit.
-    pub async fn resolve_target(&self, target: &ReviewTarget) -> Result<Context> {
-        match target {
-            ReviewTarget::Directory { path } => {
-                let path = std::fs::canonicalize(path)?;
-                if !path.is_dir() {
-                    return Err(invalid("Directory review requires a directory"));
-                }
-                let path = path.to_string_lossy().into_owned();
-                if let Some(context) = self
-                    .get_scope_context(&ReviewScope::Notes { path: path.clone() })
-                    .await?
-                {
-                    return Ok(context);
-                }
-                self.ensure_context(
-                    ContextKey::Local {
-                        location: LocalLocation::Notes { path },
-                    },
-                    None,
-                )
-                .await
-            }
-            ReviewTarget::LocalGit {
-                path,
-                branch: expected_branch,
-            } => {
-                let (root, git_dir, branch) = super::workspace::get_git_location(path).await?;
-                if expected_branch
-                    .as_ref()
-                    .is_some_and(|expected| expected != &branch)
-                {
-                    return Err(Error::Conflict("The selected branch changed".into()));
-                }
-                self.ensure_context(
-                    ContextKey::Local {
-                        location: LocalLocation::Branch { git_dir, branch },
-                    },
-                    Some(&root),
-                )
-                .await
-            }
-            ReviewTarget::PullRequest {
-                repository_url,
-                number,
-            } => {
-                self.ensure_context(
-                    ContextKey::ForgeBacked {
-                        repository_url: ForgeRepositoryUrl::parse(repository_url)?,
-                        number: *number,
-                    },
-                    None,
-                )
-                .await
-            }
-        }
     }
 
     /// Read a session-backed public review with a consistent conversation version.
@@ -446,1004 +486,6 @@ impl ReviewService {
             reviews.push(self.get_review(&row.id).await?);
         }
         Ok(reviews)
-    }
-
-    /// A notes read returns no storage when the file has no discussion.
-    pub async fn get_scope_context(&self, scope: &ReviewScope) -> Result<Option<Context>> {
-        match scope {
-            ReviewScope::Review { review_id } => Ok(Some(
-                self.get_context_by_id(&self.get_session(review_id).await?.context_id)
-                    .await?,
-            )),
-            ReviewScope::Notes { path } => {
-                let path = Self::get_notes_path(path)?;
-                match self
-                    .database
-                    .review_contexts
-                    .get_notes_for_path(&path)
-                    .await?
-                {
-                    Some(row) => Ok(Some(
-                        Self::context_from_db_model(row, &self.database).await?,
-                    )),
-                    None => Ok(None),
-                }
-            }
-        }
-    }
-
-    /// Resolve the internal active writer only for a mutation. Ordinary notes have no visible review.
-    pub async fn resolve_write_scope(&self, scope: &ReviewScope, actor: &Actor) -> Result<Session> {
-        if let ReviewScope::Review { review_id } = scope {
-            return self.get_session(review_id).await;
-        }
-        let ReviewScope::Notes { path } = scope else {
-            unreachable!()
-        };
-        let path = Self::get_notes_path(path)?;
-        let context = match self.get_scope_context(scope).await? {
-            Some(context) => context,
-            None => {
-                self.ensure_context(
-                    ContextKey::Local {
-                        location: LocalLocation::Notes { path },
-                    },
-                    None,
-                )
-                .await?
-            }
-        };
-        if let Some(active) = self.database.sessions.get_active(&context.id).await? {
-            return self.get_session(&active.id).await;
-        }
-        self.start_session(
-            &context,
-            actor,
-            CommitContext::default(),
-            ComparisonKind::Notes,
-            None,
-        )
-        .await
-    }
-
-    /// Apply only validated source observations. Hidden files and failed reads never imply deletion.
-    pub async fn refresh_locations(
-        &self,
-        scope: &ReviewScope,
-        actor: &Actor,
-        changes: &[SourceChange],
-        guard: &MutationGuard,
-    ) -> Result<i64> {
-        use crate::database::types::SourceKind;
-        if changes.len() > 500 {
-            return Err(invalid("Refresh exceeds 500 source observations"));
-        }
-        let actor = self.auth.validate_requester(actor).await?;
-        let Some(context) = self.get_scope_context(scope).await? else {
-            if !changes.is_empty() {
-                return Err(Error::NotFound("Notes with saved discussions".into()));
-            }
-            return Ok(0);
-        };
-        if context.key.is_forge_backed() && !changes.is_empty() {
-            return Err(invalid("Forge locations come from provider observations"));
-        }
-        let guard = guard.bind(&(scope, changes))?;
-        let tx = self.database.begin().await?;
-        if let Some(saved) = self
-            .begin_mutation::<i64>(
-                &tx,
-                &context.id,
-                &actor.id,
-                "refresh_locations",
-                Some(&guard),
-                true,
-            )
-            .await?
-        {
-            tx.commit().await?;
-            return Ok(saved);
-        }
-        if !changes.is_empty() {
-            Self::validate_local_context(&context).await?;
-        }
-        if changes
-            .iter()
-            .any(|c| matches!(c, SourceChange::LocationMoved { .. }))
-        {
-            if changes.len() != 1 {
-                return Err(invalid("A scope move must be one atomic observation"));
-            }
-            if let SourceChange::LocationMoved {
-                previous_path,
-                current_path,
-            } = &changes[0]
-            {
-                self.apply_location_move(&tx, &context, scope, previous_path, current_path)
-                    .await?;
-            }
-        }
-        let root = match &context.key {
-            ContextKey::Local {
-                location: LocalLocation::Notes { path },
-            } => {
-                let path =
-                    std::path::PathBuf::from(context.current_notes_path.as_ref().unwrap_or(path));
-                let selected_is_child = matches!(scope, ReviewScope::Notes { path: selected } if std::path::Path::new(selected).starts_with(&path) && std::path::Path::new(selected) != path);
-                if matches!(scope, ReviewScope::Notes { .. })
-                    && !path.is_dir()
-                    && !selected_is_child
-                {
-                    path.parent()
-                        .ok_or_else(|| invalid("Notes file has no parent"))?
-                        .to_path_buf()
-                } else {
-                    path
-                }
-            }
-            ContextKey::Local {
-                location: LocalLocation::Branch { .. },
-            } => context
-                .paths
-                .first()
-                .map(std::path::PathBuf::from)
-                .ok_or_else(|| invalid("Review has no working tree location"))?,
-            ContextKey::ForgeBacked { .. } => std::path::PathBuf::new(),
-        };
-        for change in changes {
-            let (id, previous, current, observed) = match change {
-                SourceChange::LocationMoved { .. } => continue,
-                SourceChange::Moved {
-                    thread_id,
-                    previous_path,
-                    current_path,
-                    source,
-                } => (
-                    thread_id,
-                    Some(previous_path.as_str()),
-                    current_path.as_str(),
-                    Some(source),
-                ),
-                SourceChange::Deleted { thread_id, path } => {
-                    (thread_id, Some(path.as_str()), path.as_str(), None)
-                }
-                SourceChange::WorkingSourceChanged {
-                    thread_id,
-                    path,
-                    source,
-                }
-                | SourceChange::Restored {
-                    thread_id,
-                    path,
-                    source,
-                } => (thread_id, None, path.as_str(), Some(source)),
-            };
-            let relative_current = context.key.is_notes()
-                && matches!(scope, ReviewScope::Review { .. })
-                && !std::path::Path::new(current).is_absolute();
-            let supplied_current = current;
-            let saved_path = |path: &str| -> Result<String> {
-                if context.key.is_notes() {
-                    let absolute = if std::path::Path::new(path).is_absolute() {
-                        std::path::PathBuf::from(path)
-                    } else {
-                        root.join(path)
-                    };
-                    Self::get_notes_path(&absolute.to_string_lossy())
-                } else {
-                    Anchor::File { path: path.into() }.validate()?;
-                    Ok(path.into())
-                }
-            };
-            let current = saved_path(current)?;
-            let previous = previous.map(saved_path).transpose()?;
-            let mut thread = self.load_thread(&tx, id, &context.id).await?;
-            let original_path = match &thread.anchor {
-                Anchor::File { path } | Anchor::Line { path, .. } => path,
-                Anchor::General => return Err(invalid("General discussions have no file source")),
-            };
-            let known_path = saved_path(
-                thread
-                    .current_path
-                    .as_deref()
-                    .or(thread.source_path.as_deref())
-                    .unwrap_or(original_path),
-            )?;
-            if previous.as_deref().is_some_and(|path| path != known_path) {
-                return Err(Error::Conflict(
-                    "Source observation does not match the current saved path".into(),
-                ));
-            }
-            if observed.is_none() {
-                let path = root.join(&current);
-                let missing = match std::fs::symlink_metadata(&path) {
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
-                    Err(e) => return Err(e.into()),
-                    Ok(_) => false,
-                };
-                if !missing {
-                    return Err(Error::Conflict("File deletion was not confirmed".into()));
-                }
-                thread.orphan_reason = Some(OrphanReason::FileDeleted);
-            } else if let Some(observed) = observed {
-                observed.validate()?;
-                let (kind, commit) = match observed {
-                    AnchorSource::Commit { sha, .. } => (SourceKind::Commit, Some(sha.clone())),
-                    AnchorSource::IndexFile { .. } => (SourceKind::IndexFile, None),
-                    AnchorSource::WorkingFile { .. } => (SourceKind::WorkingFile, None),
-                    AnchorSource::LocalFile { .. } => (SourceKind::LocalFile, None),
-                };
-                if context.key.is_notes() != (kind == SourceKind::LocalFile) {
-                    return Err(invalid("Observed source does not belong to this scope"));
-                }
-                let (source_root, path) = if context.key.is_notes() {
-                    let absolute = std::path::Path::new(&current);
-                    (
-                        absolute
-                            .parent()
-                            .ok_or_else(|| invalid("Notes file has no parent"))?
-                            .to_path_buf(),
-                        absolute
-                            .file_name()
-                            .and_then(|s| s.to_str())
-                            .ok_or_else(|| invalid("Notes file has no name"))?
-                            .to_owned(),
-                    )
-                } else {
-                    (root.clone(), current.clone())
-                };
-                let (actual, bytes) = tokio::task::spawn_blocking(move || {
-                    super::workspace::get_source(&source_root, &path, kind, commit.as_deref())
-                })
-                .await
-                .map_err(|_| invalid("Source observation failed"))??;
-                if actual != *observed {
-                    return Err(Error::Conflict(
-                        "Observed source changed before refresh".into(),
-                    ));
-                }
-                if matches!(change, SourceChange::WorkingSourceChanged { .. }) {
-                    if !matches!(
-                        thread.evidence.as_ref().map(|e| &e.source),
-                        Some(AnchorSource::WorkingFile { .. })
-                    ) {
-                        return Err(invalid(
-                            "Only unstaged working anchors use working-source orphaning",
-                        ));
-                    }
-                    if thread
-                        .evidence
-                        .as_ref()
-                        .is_some_and(|e| e.source.content_hash() == observed.content_hash())
-                    {
-                        return Err(invalid("Working source has not changed"));
-                    }
-                    thread.orphan_reason = Some(OrphanReason::WorkingSourceChanged);
-                } else {
-                    let text = std::str::from_utf8(&bytes)
-                        .map_err(|_| invalid("Source observation requires text"))?;
-                    let supported = if matches!(change, SourceChange::Moved { .. }) {
-                        // A reported move preserves file identity, even when its selected lines were lost.
-                        // The request names the known old path and actual new source; absence is checked below.
-                        true
-                    } else if let Some(evidence) = &thread.evidence {
-                        evidence.source.content_hash() == observed.content_hash()
-                            || (!matches!(evidence.source, AnchorSource::WorkingFile { .. })
-                                && evidence.get_matching_range(text).is_some())
-                    } else {
-                        false
-                    };
-                    if !supported {
-                        return Err(Error::Conflict(
-                            "Preserved evidence cannot confirm this move or restoration".into(),
-                        ));
-                    }
-                    if let SourceChange::Moved { previous_path, .. } = change {
-                        match std::fs::symlink_metadata(root.join(saved_path(previous_path)?)) {
-                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                            Err(e) => return Err(e.into()),
-                            Ok(_) => {
-                                return Err(Error::Conflict(
-                                    "Move source still exists; a copy is not a confirmed move"
-                                        .into(),
-                                ));
-                            }
-                        }
-                    }
-                    thread.current_path = Some(if relative_current {
-                        supplied_current.into()
-                    } else {
-                        current.clone()
-                    });
-                    thread.orphan_reason = None;
-                    if matches!(scope, ReviewScope::Notes { .. }) {
-                        tx.workspace
-                            .insert_path(&workspace_paths::Model {
-                                context_id: context.id,
-                                path: root.join(&current).to_string_lossy().into_owned(),
-                            })
-                            .await?;
-                    }
-                }
-            }
-            tx.comments
-                .update_thread(&threads::Model::from(&thread))
-                .await?;
-        }
-        if !changes.is_empty() {
-            Self::validate_local_context(&context).await?;
-        }
-        let version = tx
-            .review_contexts
-            .get_by_id(&context.id)
-            .await?
-            .ok_or_else(|| Error::NotFound("Context".into()))?
-            .revision;
-        Self::record_mutation(
-            &tx,
-            &context.id,
-            &actor.id,
-            "refresh_locations",
-            Some(&guard),
-            &version,
-        )
-        .await?;
-        tx.commit().await?;
-        Ok(version)
-    }
-
-    /// Page comments in stable thread/reply order. Reads never create notes or load file bodies.
-    pub async fn get_conversation_page(
-        &self,
-        scope: &ReviewScope,
-        paths: Option<&[String]>,
-        include_drafts: bool,
-        page_token: &str,
-        page_size: u32,
-    ) -> Result<(Option<Conversation>, String)> {
-        let Some(context) = self.get_scope_context(scope).await? else {
-            if !page_token.is_empty() {
-                return Err(invalid("Page token has no matching notes scope"));
-            }
-            return Ok((None, String::new()));
-        };
-        if paths.is_some_and(|p| p.len() > 500) {
-            return Err(invalid("Visible-file filter exceeds 500 paths"));
-        }
-        if let Some(paths) = paths {
-            for path in paths {
-                Anchor::File { path: path.clone() }.validate()?;
-            }
-        }
-        // File reads use the selected notes scope and confirmed path associations, never neighboring feedback.
-        let notes_paths = if let ReviewScope::Notes { path } = scope {
-            let ContextKey::Local {
-                location: LocalLocation::Notes { path: original },
-            } = &context.key
-            else {
-                return Err(invalid("Expected notes context"));
-            };
-            let selected = Self::get_notes_path(path)?;
-            let current = context.current_notes_path.as_ref().unwrap_or(original);
-            if std::path::Path::new(&selected).is_dir()
-                || (selected == *original && context.current_notes_path.is_none())
-            {
-                None
-            } else {
-                let mut aliases = vec![selected.clone()];
-                for location in [original, current] {
-                    let location = std::path::Path::new(location);
-                    let root = if location.is_dir()
-                        || std::path::Path::new(&selected).starts_with(location)
-                    {
-                        location
-                    } else {
-                        location
-                            .parent()
-                            .ok_or_else(|| invalid("Notes file has no parent"))?
-                    };
-                    if let Ok(relative) = std::path::Path::new(&selected).strip_prefix(root) {
-                        aliases.push(relative.to_string_lossy().into_owned());
-                    }
-                }
-                Some(aliases)
-            }
-        } else if context.key.is_notes() {
-            if let Some(paths) = paths {
-                let root = context
-                    .current_notes_path
-                    .as_ref()
-                    .or(match &context.key {
-                        ContextKey::Local {
-                            location: LocalLocation::Notes { path },
-                        } => Some(path),
-                        _ => None,
-                    })
-                    .ok_or_else(|| invalid("Notes have no source root"))?;
-                let mut aliases = paths.to_vec();
-                aliases.extend(paths.iter().map(|path| {
-                    std::path::Path::new(root)
-                        .join(path)
-                        .to_string_lossy()
-                        .into_owned()
-                }));
-                Some(aliases)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-        let paths = notes_paths.as_deref().or(paths);
-        let filter = format!(
-            "{:x}",
-            Sha256::digest(serde_json::to_vec(&(paths, include_drafts))?)
-        );
-        let prefix = format!("{}:{}:{filter}:", context.id, context.revision);
-        let after = if page_token.is_empty() {
-            None
-        } else {
-            let cursor = page_token.strip_prefix(&prefix).ok_or_else(|| {
-                Error::Conflict("Conversation or query changed; restart pagination".into())
-            })?;
-            let (thread, position) = cursor
-                .split_once(':')
-                .ok_or_else(|| invalid("Invalid conversation cursor"))?;
-            Some((
-                uuid::Uuid::parse_str(thread)
-                    .map_err(|_| invalid("Invalid conversation cursor"))?,
-                position
-                    .parse::<i64>()
-                    .map_err(|_| invalid("Invalid conversation cursor"))?,
-            ))
-        };
-        let size = if page_size == 0 {
-            100
-        } else {
-            page_size.min(500)
-        } as usize;
-        let mut rows = self
-            .database
-            .comments
-            .get_comment_page(&context.id, paths, include_drafts, after, size as u64 + 1)
-            .await?;
-        let more = rows.len() > size;
-        rows.truncate(size);
-        let next = if more {
-            rows.last()
-                .map(|c| format!("{prefix}{}:{}", c.thread_id, c.position))
-                .unwrap_or_default()
-        } else {
-            String::new()
-        };
-        let ids: Vec<_> = rows
-            .iter()
-            .map(|c| c.thread_id)
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect();
-        let comments = Self::comments_from_db_models(rows, &self.database).await?;
-        let threads = Self::threads_from_db_models(
-            self.database
-                .comments
-                .get_threads_by_ids(&context.id, &ids)
-                .await?,
-            &self.database,
-        )
-        .await?;
-        if self.get_context_by_id(&context.id).await?.revision != context.revision {
-            return Err(Error::Conflict(
-                "Conversation changed during the read; retry".into(),
-            ));
-        }
-        Ok((
-            Some(Conversation {
-                context,
-                sessions: vec![],
-                threads,
-                comments,
-            }),
-            next,
-        ))
-    }
-
-    /// Get the immutable revision accepted for a retry key, even after later mutations.
-    pub async fn get_accepted_version(
-        &self,
-        context: &uuid::Uuid,
-        actor: &uuid::Uuid,
-        key: &str,
-    ) -> Result<i64> {
-        self.database
-            .mutations
-            .get_result(context, actor, key)
-            .await?
-            .map(|r| r.version)
-            .ok_or_else(|| Error::NotFound("Accepted mutation receipt".into()))
-    }
-
-    /// Read all feedback for export, using stable pages and preserving immutable original anchors.
-    pub async fn get_scope_conversation(
-        &self,
-        scope: &ReviewScope,
-    ) -> Result<Option<Conversation>> {
-        let (mut combined, mut token) = self
-            .get_conversation_page(scope, None, true, "", 500)
-            .await?;
-        while !token.is_empty() {
-            let (page, next) = self
-                .get_conversation_page(scope, None, true, &token, 500)
-                .await?;
-            if let (Some(combined), Some(page)) = (&mut combined, page) {
-                for thread in page.threads {
-                    if !combined.threads.iter().any(|t| t.id == thread.id) {
-                        combined.threads.push(thread);
-                    }
-                }
-                combined.comments.extend(page.comments);
-            }
-            token = next;
-        }
-        Ok(combined)
-    }
-
-    pub async fn get_export(
-        &self,
-        scope: &ReviewScope,
-        selected_roots: &[uuid::Uuid],
-    ) -> Result<String> {
-        let Some(mut conversation) = self.get_scope_conversation(scope).await? else {
-            return Ok("# Review feedback\n\nNo comments yet.\n".into());
-        };
-        let session = match scope {
-            ReviewScope::Review { review_id } => self.get_session(review_id).await?,
-            ReviewScope::Notes { .. } => {
-                self.get_selected_session(&conversation.context.id, None, false)
-                    .await?
-            }
-        };
-        if !selected_roots.is_empty() {
-            let mut ids = HashSet::new();
-            for id in selected_roots {
-                let root = conversation
-                    .comments
-                    .iter()
-                    .find(|c| {
-                        c.id == *id
-                            && !conversation.comments.iter().any(|earlier| {
-                                earlier.thread_id == c.thread_id && earlier.position < c.position
-                            })
-                    })
-                    .ok_or_else(|| Error::NotFound("Selected root feedback in scope".into()))?;
-                ids.insert(root.thread_id);
-            }
-            conversation.threads.retain(|t| ids.contains(&t.id));
-            conversation.comments.retain(|c| ids.contains(&c.thread_id));
-        }
-        conversation.sessions = Self::sessions_from_db_models(
-            self.database
-                .sessions
-                .get_all(Some(&conversation.context.id), false)
-                .await?,
-            &self.database,
-        )
-        .await?;
-        if self
-            .get_context_by_id(&conversation.context.id)
-            .await?
-            .revision
-            != conversation.context.revision
-        {
-            return Err(Error::Conflict(
-                "Review changed during export; retry".into(),
-            ));
-        }
-        Ok(crate::utils::export_feedback(&conversation, &session))
-    }
-
-    pub async fn get_conversation(
-        &self,
-        context: &uuid::Uuid,
-        include_drafts: bool,
-    ) -> Result<Conversation> {
-        let comments: Vec<Comment> = Self::comments_from_db_models(
-            self.database.comments.get_comments(context).await?,
-            &self.database,
-        )
-        .await?
-        .into_iter()
-        .filter(|c| include_drafts || c.visibility == "published")
-        .collect();
-        let visible: std::collections::HashSet<_> = comments.iter().map(|c| c.thread_id).collect();
-        let threads: Vec<Thread> = Self::threads_from_db_models(
-            self.database.comments.get_threads(context).await?,
-            &self.database,
-        )
-        .await?
-        .into_iter()
-        .filter(|t| visible.contains(&t.id))
-        .collect();
-        let sessions = Self::sessions_from_db_models(
-            self.database.sessions.get_all(Some(context), false).await?,
-            &self.database,
-        )
-        .await?;
-        let current_context = self.get_context_by_id(context).await?;
-        Ok(Conversation {
-            context: current_context,
-            sessions,
-            threads,
-            comments,
-        })
-    }
-
-    async fn lock_context(&self, tx: &db::Transaction, id: &uuid::Uuid) -> Result<()> {
-        if !tx.review_contexts.advance_revision(id, None).await? {
-            return Err(Error::NotFound("Context".into()));
-        }
-        Ok(())
-    }
-
-    async fn validate_anchor_evidence(
-        &self,
-        context: &Context,
-        session: &Session,
-        anchor: &Anchor,
-        evidence: &AnchorEvidence,
-        scope: Option<&ReviewScope>,
-    ) -> Result<()> {
-        use crate::database::types::SourceKind;
-        evidence.validate()?;
-        let (path, range, side) = match anchor {
-            Anchor::Line {
-                path,
-                start,
-                end,
-                side,
-            } => (path, Some((*start, *end)), side.as_str()),
-            Anchor::File { path } => (path, None, "new"),
-            Anchor::General => return Err(invalid("Review-level feedback has no file source")),
-        };
-        if range.is_none()
-            && (!evidence.selected_text.is_empty()
-                || !evidence.context_before.is_empty()
-                || !evidence.context_after.is_empty())
-        {
-            return Err(invalid("File evidence has no line selection"));
-        }
-        let (kind, source_commit) = match &evidence.source {
-            AnchorSource::Commit { sha, .. } => (SourceKind::Commit, Some(sha.clone())),
-            AnchorSource::IndexFile { .. } => (SourceKind::IndexFile, None),
-            AnchorSource::WorkingFile { .. } => (SourceKind::WorkingFile, None),
-            AnchorSource::LocalFile { .. } => (SourceKind::LocalFile, None),
-        };
-        let expected_commit = if side == "old" {
-            session.commits.base.as_deref()
-        } else {
-            session.commits.head.as_deref()
-        };
-        if kind == SourceKind::Commit {
-            let matches = if range.is_some() {
-                context.key.is_forge_backed() || source_commit.as_deref() == expected_commit
-            } else {
-                context.key.is_forge_backed()
-                    || source_commit == session.commits.base
-                    || source_commit == session.commits.head
-            };
-            if !matches {
-                return Err(Error::Conflict(
-                    "Anchor commit differs from the selected comparison".into(),
-                ));
-            }
-        }
-        let allowed = if context.key.is_notes() {
-            kind == SourceKind::LocalFile && side == "new"
-        } else if context.key.is_forge_backed()
-            || side == "old"
-            || session.comparison_kind == ComparisonKind::Branch
-        {
-            kind == SourceKind::Commit
-        } else {
-            matches!(
-                (session.comparison_kind, kind),
-                (ComparisonKind::Staged, SourceKind::IndexFile)
-                    | (
-                        ComparisonKind::Working,
-                        SourceKind::WorkingFile | SourceKind::IndexFile
-                    )
-            ) || (range.is_none() && kind == SourceKind::Commit)
-        };
-        if !allowed {
-            return Err(invalid(
-                "Anchor source does not belong to the selected comparison",
-            ));
-        }
-        if context.key.is_forge_backed() {
-            return Ok(());
-        }
-        let (root, path) =
-            if let Some(absolute) = Self::get_saved_source_location(context, anchor, scope)? {
-                let root = absolute
-                    .parent()
-                    .ok_or_else(|| invalid("Notes file has no parent"))?
-                    .to_path_buf();
-                let name = absolute
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .ok_or_else(|| invalid("Notes file has no name"))?
-                    .to_owned();
-                (root, name)
-            } else {
-                (
-                    context
-                        .paths
-                        .first()
-                        .map(std::path::PathBuf::from)
-                        .ok_or_else(|| invalid("Local review has no working tree location"))?,
-                    path.clone(),
-                )
-            };
-        let check_working_index =
-            session.comparison_kind == ComparisonKind::Working && kind == SourceKind::IndexFile;
-        let (actual, bytes) = tokio::task::spawn_blocking(move || {
-            let selected =
-                super::workspace::get_source(&root, &path, kind, source_commit.as_deref())?;
-            if check_working_index {
-                let (_, working) =
-                    super::workspace::get_source(&root, &path, SourceKind::WorkingFile, None)?;
-                if working != selected.1 {
-                    return Err(Error::Conflict(
-                        "Working bytes differ from the selected staged source".into(),
-                    ));
-                }
-            }
-            Ok::<_, Error>(selected)
-        })
-        .await
-        .map_err(|_| invalid("Source validation failed"))??;
-        let captured = if let Some((start, end)) = range {
-            AnchorEvidence::capture(actual, &bytes, start, end)?
-        } else {
-            AnchorEvidence::capture_file(actual, &bytes)?
-        };
-        if captured != *evidence {
-            return Err(Error::Conflict("Saved source or selected evidence changed; keep the body and refresh before commenting".into()));
-        }
-        Ok(())
-    }
-
-    /// PR acknowledgments refer to the canonical cache. Only local retries retain historical responses.
-    async fn get_receipt_result<
-        T: serde::de::DeserializeOwned,
-        D: ConnectionTrait + TransactionTrait,
-    >(
-        database: &db::Database<D>,
-        receipt: &mutation_receipts::Model,
-    ) -> Result<T> {
-        let value: serde_json::Value = serde_json::from_str(&receipt.result_json)?;
-        let value = if let Some(id) = value
-            .get("cached_comment")
-            .and_then(serde_json::Value::as_str)
-        {
-            let id = uuid::Uuid::parse_str(id)
-                .map_err(|_| invalid("Invalid cached comment reference"))?;
-            let row = database
-                .comments
-                .get_comment_by_id(&receipt.context_id, &id)
-                .await?
-                .ok_or_else(|| Error::NotFound("Comment".into()))?;
-            serde_json::to_value(Self::comment_from_db_model(row, database).await?)?
-        } else if let Some(ids) = value
-            .get("cached_comments")
-            .and_then(serde_json::Value::as_array)
-        {
-            let mut comments = Vec::with_capacity(ids.len());
-            for id in ids {
-                let id = uuid::Uuid::parse_str(
-                    id.as_str()
-                        .ok_or_else(|| invalid("Invalid cached comment reference"))?,
-                )
-                .map_err(|_| invalid("Invalid cached comment reference"))?;
-                let row = database
-                    .comments
-                    .get_comment_by_id(&receipt.context_id, &id)
-                    .await?
-                    .ok_or_else(|| Error::NotFound("Promoted comment".into()))?;
-                comments.push(Self::comment_from_db_model(row, database).await?);
-            }
-            serde_json::to_value(comments)?
-        } else if let Some(id) = value
-            .get("cached_thread")
-            .and_then(serde_json::Value::as_str)
-        {
-            let id = uuid::Uuid::parse_str(id)
-                .map_err(|_| invalid("Invalid cached thread reference"))?;
-            let row = database
-                .comments
-                .get_thread(&receipt.context_id, &id)
-                .await?
-                .ok_or_else(|| Error::NotFound("Thread".into()))?;
-            serde_json::to_value(Self::thread_from_db_model(row, database).await?)?
-        } else if let Some(id) = value
-            .get("cached_review")
-            .and_then(serde_json::Value::as_str)
-        {
-            let id = uuid::Uuid::parse_str(id)
-                .map_err(|_| invalid("Invalid cached review reference"))?;
-            let row = database
-                .sessions
-                .get_by_id(&id)
-                .await?
-                .ok_or_else(|| Error::NotFound("Review".into()))?;
-            serde_json::to_value(Self::session_from_db_model(row, database).await?)?
-        } else {
-            value
-        };
-        Ok(serde_json::from_value(value)?)
-    }
-
-    async fn get_saved_mutation<T: serde::de::DeserializeOwned>(
-        &self,
-        context: &uuid::Uuid,
-        actor: &uuid::Uuid,
-        method: &str,
-        guard: &MutationGuard,
-    ) -> Result<Option<T>> {
-        let Some(receipt) = self
-            .database
-            .mutations
-            .get_result(context, actor, &guard.request_key)
-            .await?
-        else {
-            return Ok(None);
-        };
-        if receipt.method != method || receipt.request_hash != guard.payload_hash {
-            return Err(Error::Conflict(
-                "Retry key belongs to another action or payload".into(),
-            ));
-        }
-        Ok(Some(
-            Self::get_receipt_result(&self.database, &receipt).await?,
-        ))
-    }
-
-    async fn validate_forge_evidence(
-        &self,
-        context: &Context,
-        session: &Session,
-        anchor: &Anchor,
-        evidence: &AnchorEvidence,
-    ) -> Result<()> {
-        self.validate_anchor_evidence(context, session, anchor, evidence, None)
-            .await?;
-        let ContextKey::ForgeBacked {
-            repository_url,
-            number,
-        } = &context.key
-        else {
-            return Err(invalid("Expected a PR context"));
-        };
-        // An open composer can still refer to verified bytes from before a PR refresh.
-        // Verify that exact source; posting derives a separate current placement.
-        let mut commits = session.commits.clone();
-        if let AnchorSource::Commit { sha, .. } = &evidence.source {
-            if matches!(anchor, Anchor::Line {side, ..} if side == "old") {
-                commits.base = Some(sha.clone());
-            } else {
-                commits.head = Some(sha.clone());
-            }
-        }
-        self.sources
-            .get_anchor_evidence(
-                &context.paths,
-                ReviewTarget::PullRequest {
-                    repository_url: repository_url.as_str().into(),
-                    number: *number,
-                },
-                ReviewComparison::PullRequest {
-                    base_commit: commits
-                        .base
-                        .clone()
-                        .ok_or_else(|| invalid("PR base unavailable"))?,
-                    head_commit: commits
-                        .head
-                        .clone()
-                        .ok_or_else(|| invalid("PR head unavailable"))?,
-                },
-                anchor,
-                evidence,
-            )
-            .await?;
-        Ok(())
-    }
-
-    async fn begin_mutation<T: serde::de::DeserializeOwned>(
-        &self,
-        tx: &db::Transaction,
-        context: &uuid::Uuid,
-        actor: &uuid::Uuid,
-        method: &str,
-        guard: Option<&MutationGuard>,
-        advance: bool,
-    ) -> Result<Option<T>> {
-        if !tx.review_contexts.lock_for_write(context).await? {
-            return Err(Error::NotFound("Context".into()));
-        }
-        if let Some(guard) = guard {
-            if guard.request_key.trim().is_empty()
-                || guard.request_key.len() > 200
-                || guard.payload_hash.is_empty()
-            {
-                return Err(invalid("Mutation requires a bounded nonempty request key"));
-            }
-            if let Some(receipt) = tx
-                .mutations
-                .get_result(context, actor, &guard.request_key)
-                .await?
-            {
-                if receipt.method != method || receipt.request_hash != guard.payload_hash {
-                    return Err(Error::Conflict(
-                        "Retry key belongs to a different operation or payload".into(),
-                    ));
-                }
-                return Ok(Some(Self::get_receipt_result(tx, &receipt).await?));
-            }
-        }
-        if advance {
-            if !tx
-                .review_contexts
-                .advance_revision(context, guard.and_then(MutationGuard::write_version))
-                .await?
-            {
-                return Err(Error::Conflict(
-                    "Review data changed; read its current version before editing".into(),
-                ));
-            }
-        } else if let Some(expected) = guard.and_then(MutationGuard::write_version)
-            && tx
-                .review_contexts
-                .get_by_id(context)
-                .await?
-                .is_none_or(|row| row.revision != expected)
-        {
-            return Err(Error::Conflict(
-                "Review data changed; read its current version".into(),
-            ));
-        }
-        Ok(None)
-    }
-
-    async fn require_active_session(
-        &self,
-        tx: &db::Transaction,
-        id: &uuid::Uuid,
-    ) -> Result<Session> {
-        let row = tx
-            .sessions
-            .get_by_id(id)
-            .await?
-            .ok_or_else(|| Error::NotFound("Session".into()))?;
-        let s = Self::session_from_db_model(row, tx).await?;
-        if s.state() != "active" {
-            return Err(Error::Conflict(
-                "Completed session metadata cannot be changed; start a new session".into(),
-            ));
-        }
-        Ok(s)
-    }
-
-    async fn load_thread(
-        &self,
-        tx: &db::Transaction,
-        id: &uuid::Uuid,
-        context: &uuid::Uuid,
-    ) -> Result<Thread> {
-        let row = tx
-            .comments
-            .get_thread(context, id)
-            .await?
-            .ok_or_else(|| Error::NotFound("Thread in selected context".into()))?;
-        Self::thread_from_db_model(row, tx).await
     }
 
     /// Recover an accepted start before a PR refresh or source check can fail.
@@ -1635,6 +677,517 @@ impl ReviewService {
         Self::record_mutation(&tx, &context.id, &actor.id, "start_session", guard, &s).await?;
         tx.commit().await?;
         Ok(s)
+    }
+
+    pub async fn complete(
+        &self,
+        context_id: &uuid::Uuid,
+        actor: &Actor,
+        input: Completion,
+        request_key: &str,
+        exact_session: Option<&uuid::Uuid>,
+        guard: Option<&MutationGuard>,
+    ) -> Result<Session> {
+        let guard = guard
+            .map(|g| g.bind(&(context_id, exact_session, &input, request_key)))
+            .transpose()?;
+        let guard = guard.as_ref();
+        tracing::debug!("Review action: complete");
+        let actor = &self.auth.validate_requester(actor).await?;
+        if request_key.trim().is_empty() {
+            return Err(invalid("Completion requires a nonempty retry key"));
+        }
+        let hash = format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_string(&(input.clone(), &actor.id))?)
+        );
+        let tx = self.database.begin().await?;
+        if let Some(saved) = self
+            .begin_mutation::<Session>(&tx, context_id, &actor.id, "complete", guard, true)
+            .await?
+        {
+            tx.commit().await?;
+            return Ok(saved);
+        }
+        if input.submit
+            && tx
+                .mutations
+                .get_result(context_id, &actor.id, request_key)
+                .await?
+                .is_some_and(|receipt| receipt.method == "rejected_submission")
+        {
+            return Err(Error::Conflict(
+                "Rejected submission cannot be completed again; choose a new submission attempt"
+                    .into(),
+            ));
+        }
+        let row = tx
+            .sessions
+            .get_completion_by_key(context_id, request_key)
+            .await?;
+        if let Some(row) = row {
+            let s = Self::session_from_db_model(row, &tx).await?;
+            if s.completion().map(|c| c.request_hash.as_str()) != Some(&hash) {
+                return Err(Error::Conflict(
+                    "Retry key was already used with different content or actor".into(),
+                ));
+            }
+            if exact_session.is_some_and(|id| s.id != *id) {
+                return Err(Error::Conflict(
+                    "Retry key belongs to another review attempt".into(),
+                ));
+            }
+            Self::record_mutation(&tx, context_id, &actor.id, "complete", guard, &s).await?;
+            tx.commit().await?;
+            return Ok(s);
+        }
+        let row = tx
+            .sessions
+            .get_active(context_id)
+            .await?
+            .ok_or_else(|| Error::NotFound("Active session".into()))?;
+        if exact_session.is_some_and(|id| row.id != *id) {
+            return Err(Error::Conflict(
+                "Selected review is no longer the active attempt".into(),
+            ));
+        }
+        let mut s = Self::session_from_db_model(row, &tx).await?;
+        let context = self.load_context(&tx, context_id).await?;
+        if context.key.is_forge_backed() {
+            if !input
+                .outcome
+                .as_deref()
+                .is_some_and(|v| ["approve", "reject", "comment"].contains(&v))
+            {
+                return Err(invalid(
+                    "PR completion requires --outcome approve|reject|comment",
+                ));
+            }
+        } else if input.outcome.is_some() || input.submit {
+            return Err(invalid(
+                "PR outcomes/submission are invalid for notes and local branches",
+            ));
+        }
+        let rows = tx.comments.get_session_draft_comments(&s.id).await?;
+        for mut c in Self::comments_from_db_models(rows, &tx).await? {
+            c.visibility = "published".into();
+            c.updated_at = now();
+            tx.comments
+                .update_comment(&comments::Model::from(&c))
+                .await?;
+        }
+        let outcome = input.outcome.unwrap_or_else(|| {
+            if context.key.is_notes() {
+                "saved"
+            } else {
+                "ready-to-address"
+            }
+            .into()
+        });
+        s.complete(actor.clone(), outcome, input.body, request_key.into(), hash)?;
+        if input.submit {
+            s.submission_status = "unsubmitted".into();
+            s.submission_error = Some("Submission pending provider confirmation".into());
+        }
+        tx.sessions.complete(&sessions::Model::from(&s)).await?;
+        Self::record_mutation(&tx, context_id, &actor.id, "complete", guard, &s).await?;
+        tx.commit().await?;
+        Ok(s)
+    }
+
+    pub async fn get_file_reviews(
+        &self,
+        review_id: &uuid::Uuid,
+        actor: &Actor,
+    ) -> Result<Vec<(String, String)>> {
+        self.auth.validate_requester(actor).await?;
+        let session = self.get_session(review_id).await?;
+        let context = self.get_context_by_id(&session.context_id).await?;
+        if context.key.is_forge_backed() {
+            return Err(invalid("PR file marks belong to the forge"));
+        }
+        Ok(self
+            .database
+            .review_contexts
+            .get_file_reviews(&context.id, &actor.id)
+            .await?)
+    }
+
+    pub async fn set_file_reviewed(
+        &self,
+        review_id: &uuid::Uuid,
+        actor: &Actor,
+        path: &str,
+        content_identity: Option<&str>,
+    ) -> Result<()> {
+        self.auth.validate_requester(actor).await?;
+        Anchor::File { path: path.into() }.validate()?;
+        if content_identity.is_some_and(|value| value.is_empty() || value.len() > 4096) {
+            return Err(invalid(
+                "Reviewed content requires a bounded nonempty identity",
+            ));
+        }
+        let session = self.get_session(review_id).await?;
+        let context = self.get_context_by_id(&session.context_id).await?;
+        if context.key.is_forge_backed() || session.comparison_kind == ComparisonKind::Notes {
+            return Err(invalid("Local reviewed-file marks require a local review"));
+        }
+        self.database
+            .review_contexts
+            .set_file_reviewed(&context.id, &actor.id, path, content_identity)
+            .await?;
+        Ok(())
+    }
+
+    /// Resolve the internal active writer only for a mutation. Ordinary notes have no visible review.
+    pub async fn resolve_write_scope(&self, scope: &ReviewScope, actor: &Actor) -> Result<Session> {
+        if let ReviewScope::Review { review_id } = scope {
+            return self.get_session(review_id).await;
+        }
+        let ReviewScope::Notes { path } = scope else {
+            unreachable!()
+        };
+        let path = Self::get_notes_path(path)?;
+        let context = match self.get_scope_context(scope).await? {
+            Some(context) => context,
+            None => {
+                self.ensure_context(
+                    ContextKey::Local {
+                        location: LocalLocation::Notes { path },
+                    },
+                    None,
+                )
+                .await?
+            }
+        };
+        if let Some(active) = self.database.sessions.get_active(&context.id).await? {
+            return self.get_session(&active.id).await;
+        }
+        self.start_session(
+            &context,
+            actor,
+            CommitContext::default(),
+            ComparisonKind::Notes,
+            None,
+        )
+        .await
+    }
+
+    /// Freeze every outgoing comment and the review completion in one transaction.
+    /// A crash exposes either the original active drafts or durable sending state,
+    /// never half-staged comments without a session retry identity.
+    pub async fn prepare_submission(
+        &self,
+        session_id: &uuid::Uuid,
+        actor: &Actor,
+        input: Completion,
+        request_key: &str,
+        prepared: &[(Comment, String, String)],
+        expected_version: Option<i64>,
+    ) -> Result<Session> {
+        let actor = self.auth.validate_requester(actor).await?;
+        if request_key.trim().is_empty()
+            || !input.submit
+            || !input
+                .outcome
+                .as_deref()
+                .is_some_and(|v| ["approve", "reject", "comment"].contains(&v))
+        {
+            return Err(invalid(
+                "Submission requires an outcome and nonempty retry key",
+            ));
+        }
+        let hash = format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&(input.clone(), actor.id))?)
+        );
+        let seed = self.get_session(session_id).await?;
+        let context_id = &seed.context_id;
+        let tx = self.database.begin().await?;
+        if !tx
+            .review_contexts
+            .advance_revision(context_id, expected_version)
+            .await?
+        {
+            return Err(Error::Conflict(
+                "Review changed before submission; refresh and keep the final body".into(),
+            ));
+        }
+        if tx.mutations.get_pending(context_id, None).await? {
+            return Err(Error::Conflict(
+                "Resolve pending remote comment changes before submitting".into(),
+            ));
+        }
+        let context = self.load_context(&tx, context_id).await?;
+        if !context.key.is_forge_backed() {
+            return Err(invalid("Only forge-backed reviews can be submitted"));
+        }
+        if tx
+            .mutations
+            .get_result(context_id, &actor.id, request_key)
+            .await?
+            .is_some()
+        {
+            return Err(Error::Conflict(
+                "Submission retry key was already used; choose a new submission attempt".into(),
+            ));
+        }
+        if tx
+            .sessions
+            .get_completion_by_key(context_id, request_key)
+            .await?
+            .is_some()
+        {
+            return Err(Error::Conflict(
+                "Submission was already prepared; reconcile before retrying".into(),
+            ));
+        }
+        let mut session = self.require_active_session(&tx, session_id).await?;
+        if session.creator.id != actor.id {
+            return Err(invalid("Only the session creator can submit this review"));
+        }
+        if session.submission_status != "unsubmitted" {
+            return Err(Error::Conflict(
+                "Resolve pending draft synchronization before submitting".into(),
+            ));
+        }
+        let comments =
+            Self::comments_from_db_models(tx.comments.get_comments(context_id).await?, &tx).await?;
+        let outgoing: Vec<_> = comments
+            .iter()
+            .filter(|c| c.origin_session_id == Some(session.id) && c.forge_comment_id.is_none())
+            .collect();
+        let ids: HashSet<_> = prepared.iter().map(|(c, _, _)| c.id).collect();
+        if ids.len() != prepared.len()
+            || outgoing.len() != prepared.len()
+            || outgoing.iter().any(|c| !ids.contains(&c.id))
+        {
+            return Err(Error::Conflict(
+                "Draft set changed while preparing submission; refresh and retry".into(),
+            ));
+        }
+        for (expected, rendered, key) in prepared {
+            let current = outgoing
+                .iter()
+                .find(|c| c.id == expected.id)
+                .ok_or_else(|| Error::NotFound("Outgoing comment".into()))?;
+            if current.body != expected.body
+                || current.author != expected.author
+                || current.updated_at != expected.updated_at
+                || current.origin_session_id != Some(session.id)
+                || current.posting.state() != db::types::PostingState::Unposted
+                || key.trim().is_empty()
+            {
+                return Err(Error::Conflict(
+                    "Draft content or posting state changed while preparing submission".into(),
+                ));
+            }
+            let mut staged = (**current).clone();
+            staged.visibility = "published".into();
+            staged.posting = PostingStatus::Sending;
+            staged.posting_request_key = Some(key.clone());
+            staged.payload_hash = Some(format!("{:x}", Sha256::digest(rendered.as_bytes())));
+            staged.forge_body = Some(rendered.clone());
+            staged.updated_at = now();
+            tx.comments
+                .update_comment(&comments::Model::from(&staged))
+                .await?;
+        }
+        for mut comment in comments {
+            if comment.origin_session_id == Some(session.id)
+                && comment.visibility == "draft"
+                && !ids.contains(&comment.id)
+            {
+                comment.visibility = "published".into();
+                comment.updated_at = now();
+                tx.comments
+                    .update_comment(&comments::Model::from(&comment))
+                    .await?;
+            }
+        }
+        session.complete(
+            actor,
+            input.outcome.unwrap(),
+            input.body,
+            request_key.into(),
+            hash,
+        )?;
+        session.submission_status = "sending".into();
+        session.submission_error = None;
+        if !tx
+            .sessions
+            .complete(&sessions::Model::from(&session))
+            .await?
+        {
+            return Err(Error::Conflict(
+                "Active session changed during submission preparation".into(),
+            ));
+        }
+        tx.commit().await?;
+        Ok(session)
+    }
+
+    /// Reopen only after the forge confirms the final event was rejected and all drafts are accounted for.
+    pub(crate) async fn resume_rejected_submission(
+        &self,
+        session_id: &Uuid,
+        actor: &Actor,
+    ) -> Result<crate::models::Session> {
+        let actor = self.auth.validate_requester(actor).await?;
+        let seed = self.get_session(session_id).await?;
+        let tx = self.database.begin().await?;
+        self.lock_context(&tx, &seed.context_id).await?;
+        let row = tx
+            .sessions
+            .get_by_id(session_id)
+            .await?
+            .ok_or_else(|| Error::NotFound("Review".into()))?;
+        let mut session = Self::session_from_db_model(row.clone(), &tx).await?;
+        if session.creator.id != actor.id
+            || !self
+                .load_context(&tx, &session.context_id)
+                .await?
+                .key
+                .is_forge_backed()
+        {
+            return Err(invalid(
+                "Only the PR review owner can recover its rejected submission",
+            ));
+        }
+        if session.state() == "active" && session.submission_status == "unsubmitted" {
+            tx.commit().await?;
+            return self.get_session(session_id).await;
+        }
+        let completion = session
+            .completion()
+            .ok_or_else(|| invalid("No frozen submission to recover"))?
+            .clone();
+        if tx.sessions.get_active(&session.context_id).await?.is_some() {
+            return Err(Error::Conflict(
+                "Another review is active; the rejected review was preserved".into(),
+            ));
+        }
+        let comments = Self::comments_from_db_models(
+            tx.comments.get_comments(&session.context_id).await?,
+            &tx,
+        )
+        .await?;
+        for comment in comments
+            .iter()
+            .filter(|c| c.origin_session_id == Some(session.id))
+        {
+            if comment.forge_comment_id.is_none()
+                || ["sending", "uncertain"].contains(&comment.posting.state().as_str())
+            {
+                return Err(Error::Conflict(
+                    "Recover unconfirmed comment writes before reopening the rejected review"
+                        .into(),
+                ));
+            }
+        }
+        session.resume_rejected_submission()?;
+        tx.review_contexts
+            .advance_revision(&session.context_id, None)
+            .await?;
+        let version = tx
+            .review_contexts
+            .get_by_id(&session.context_id)
+            .await?
+            .ok_or_else(|| Error::NotFound("Context".into()))?
+            .revision;
+        // A delayed retry of the rejected key must never publish a second outcome.
+        tx.mutations
+            .insert_result(&mutation_receipts::Model {
+                context_id: session.context_id,
+                actor_id: actor.id,
+                request_key: completion.request_key,
+                method: "rejected_submission".into(),
+                request_hash: completion.request_hash,
+                result_json: "{}".into(),
+                version,
+                object_id: Some(session.id),
+                pending: false,
+            })
+            .await?;
+        if !tx.sessions.reopen_rejected_submission(&row).await? {
+            return Err(Error::Conflict(
+                "Submission state changed during recovery".into(),
+            ));
+        }
+        for mut comment in comments {
+            if comment.origin_session_id == Some(session.id)
+                && comment.forge_object_kind.as_deref() == Some("review_comment")
+            {
+                comment.visibility = "draft".into();
+                tx.comments
+                    .update_comment(&comments::Model::from(&comment))
+                    .await?;
+            }
+        }
+        tx.commit().await?;
+        self.get_session(session_id).await
+    }
+
+    // Threads -----------------------------------------------------------------
+
+    pub async fn resolve(
+        &self,
+        session_id: &uuid::Uuid,
+        thread_id: &uuid::Uuid,
+        actor: &Actor,
+        resolved: bool,
+        guard: Option<&MutationGuard>,
+    ) -> Result<Thread> {
+        let guard = guard
+            .map(|g| g.bind_attempt(session_id, &(thread_id, resolved)))
+            .transpose()?;
+        let guard = guard.as_ref();
+        tracing::debug!("Review action: resolve");
+        let actor = &self.auth.validate_requester(actor).await?;
+        let seed = self.get_session(session_id).await?;
+        let tx = self.database.begin().await?;
+        if let Some(saved) = self
+            .begin_mutation::<Thread>(&tx, &seed.context_id, &actor.id, "resolve", guard, true)
+            .await?
+        {
+            tx.commit().await?;
+            return Ok(saved);
+        }
+        if guard.is_some() {
+            let context = self.load_context(&tx, &seed.context_id).await?;
+            Self::validate_local_context(&context).await?;
+        }
+        self.require_active_session(&tx, session_id).await?;
+        let mut t = self.load_thread(&tx, thread_id, &seed.context_id).await?;
+        if let Some(guard) = guard {
+            guard.validate_object(ObjectKind::Thread, t.id, &t)?;
+        }
+        if t.forge_thread_id.is_some() {
+            return Err(invalid(
+                "Remote thread resolution is deferred; no forge action was performed",
+            ));
+        }
+        t.state = if resolved { "resolved" } else { "open" }.into();
+        t.resolved_by = resolved.then(|| actor.clone());
+        t.resolved_at = resolved.then(now);
+        t.updated_by = Some(actor.clone());
+        t.updated_at = now();
+        tx.comments.update_thread(&threads::Model::from(&t)).await?;
+        Self::record_mutation(&tx, &seed.context_id, &actor.id, "resolve", guard, &t).await?;
+        tx.commit().await?;
+        Ok(t)
+    }
+
+    // Comments and notes ------------------------------------------------------
+
+    pub async fn get_comment(&self, context: &uuid::Uuid, id: &uuid::Uuid) -> Result<Comment> {
+        let row = self
+            .database
+            .comments
+            .get_comment_by_id(context, id)
+            .await?
+            .ok_or_else(|| Error::NotFound("Comment in selected context".into()))?;
+        Self::comment_from_db_model(row, &self.database).await
     }
 
     pub async fn add_comment(
@@ -2079,323 +1632,567 @@ impl ReviewService {
         Ok(c)
     }
 
-    pub async fn resolve(
+    // Conversations and export ------------------------------------------------
+
+    /// Page comments in stable thread/reply order. Reads never create notes or load file bodies.
+    pub async fn get_conversation_page(
         &self,
-        session_id: &uuid::Uuid,
-        thread_id: &uuid::Uuid,
+        scope: &ReviewScope,
+        paths: Option<&[String]>,
+        include_drafts: bool,
+        page_token: &str,
+        page_size: u32,
+    ) -> Result<(Option<Conversation>, String)> {
+        let Some(context) = self.get_scope_context(scope).await? else {
+            if !page_token.is_empty() {
+                return Err(invalid("Page token has no matching notes scope"));
+            }
+            return Ok((None, String::new()));
+        };
+        if paths.is_some_and(|p| p.len() > 500) {
+            return Err(invalid("Visible-file filter exceeds 500 paths"));
+        }
+        if let Some(paths) = paths {
+            for path in paths {
+                Anchor::File { path: path.clone() }.validate()?;
+            }
+        }
+        // File reads use the selected notes scope and confirmed path associations, never neighboring feedback.
+        let notes_paths = if let ReviewScope::Notes { path } = scope {
+            let ContextKey::Local {
+                location: LocalLocation::Notes { path: original },
+            } = &context.key
+            else {
+                return Err(invalid("Expected notes context"));
+            };
+            let selected = Self::get_notes_path(path)?;
+            let current = context.current_notes_path.as_ref().unwrap_or(original);
+            if std::path::Path::new(&selected).is_dir()
+                || (selected == *original && context.current_notes_path.is_none())
+            {
+                None
+            } else {
+                let mut aliases = vec![selected.clone()];
+                for location in [original, current] {
+                    let location = std::path::Path::new(location);
+                    let root = if location.is_dir()
+                        || std::path::Path::new(&selected).starts_with(location)
+                    {
+                        location
+                    } else {
+                        location
+                            .parent()
+                            .ok_or_else(|| invalid("Notes file has no parent"))?
+                    };
+                    if let Ok(relative) = std::path::Path::new(&selected).strip_prefix(root) {
+                        aliases.push(relative.to_string_lossy().into_owned());
+                    }
+                }
+                Some(aliases)
+            }
+        } else if context.key.is_notes() {
+            if let Some(paths) = paths {
+                let root = context
+                    .current_notes_path
+                    .as_ref()
+                    .or(match &context.key {
+                        ContextKey::Local {
+                            location: LocalLocation::Notes { path },
+                        } => Some(path),
+                        _ => None,
+                    })
+                    .ok_or_else(|| invalid("Notes have no source root"))?;
+                let mut aliases = paths.to_vec();
+                aliases.extend(paths.iter().map(|path| {
+                    std::path::Path::new(root)
+                        .join(path)
+                        .to_string_lossy()
+                        .into_owned()
+                }));
+                Some(aliases)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let paths = notes_paths.as_deref().or(paths);
+        let filter = format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&(paths, include_drafts))?)
+        );
+        let prefix = format!("{}:{}:{filter}:", context.id, context.revision);
+        let after = if page_token.is_empty() {
+            None
+        } else {
+            let cursor = page_token.strip_prefix(&prefix).ok_or_else(|| {
+                Error::Conflict("Conversation or query changed; restart pagination".into())
+            })?;
+            let (thread, position) = cursor
+                .split_once(':')
+                .ok_or_else(|| invalid("Invalid conversation cursor"))?;
+            Some((
+                uuid::Uuid::parse_str(thread)
+                    .map_err(|_| invalid("Invalid conversation cursor"))?,
+                position
+                    .parse::<i64>()
+                    .map_err(|_| invalid("Invalid conversation cursor"))?,
+            ))
+        };
+        let size = if page_size == 0 {
+            100
+        } else {
+            page_size.min(500)
+        } as usize;
+        let mut rows = self
+            .database
+            .comments
+            .get_comment_page(&context.id, paths, include_drafts, after, size as u64 + 1)
+            .await?;
+        let more = rows.len() > size;
+        rows.truncate(size);
+        let next = if more {
+            rows.last()
+                .map(|c| format!("{prefix}{}:{}", c.thread_id, c.position))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let ids: Vec<_> = rows
+            .iter()
+            .map(|c| c.thread_id)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let comments = Self::comments_from_db_models(rows, &self.database).await?;
+        let threads = Self::threads_from_db_models(
+            self.database
+                .comments
+                .get_threads_by_ids(&context.id, &ids)
+                .await?,
+            &self.database,
+        )
+        .await?;
+        if self.get_context_by_id(&context.id).await?.revision != context.revision {
+            return Err(Error::Conflict(
+                "Conversation changed during the read; retry".into(),
+            ));
+        }
+        Ok((
+            Some(Conversation {
+                context,
+                sessions: vec![],
+                threads,
+                comments,
+            }),
+            next,
+        ))
+    }
+
+    /// Read all feedback for export, using stable pages and preserving immutable original anchors.
+    pub async fn get_scope_conversation(
+        &self,
+        scope: &ReviewScope,
+    ) -> Result<Option<Conversation>> {
+        let (mut combined, mut token) = self
+            .get_conversation_page(scope, None, true, "", 500)
+            .await?;
+        while !token.is_empty() {
+            let (page, next) = self
+                .get_conversation_page(scope, None, true, &token, 500)
+                .await?;
+            if let (Some(combined), Some(page)) = (&mut combined, page) {
+                for thread in page.threads {
+                    if !combined.threads.iter().any(|t| t.id == thread.id) {
+                        combined.threads.push(thread);
+                    }
+                }
+                combined.comments.extend(page.comments);
+            }
+            token = next;
+        }
+        Ok(combined)
+    }
+
+    pub async fn get_conversation(
+        &self,
+        context: &uuid::Uuid,
+        include_drafts: bool,
+    ) -> Result<Conversation> {
+        let comments: Vec<Comment> = Self::comments_from_db_models(
+            self.database.comments.get_comments(context).await?,
+            &self.database,
+        )
+        .await?
+        .into_iter()
+        .filter(|c| include_drafts || c.visibility == "published")
+        .collect();
+        let visible: std::collections::HashSet<_> = comments.iter().map(|c| c.thread_id).collect();
+        let threads: Vec<Thread> = Self::threads_from_db_models(
+            self.database.comments.get_threads(context).await?,
+            &self.database,
+        )
+        .await?
+        .into_iter()
+        .filter(|t| visible.contains(&t.id))
+        .collect();
+        let sessions = Self::sessions_from_db_models(
+            self.database.sessions.get_all(Some(context), false).await?,
+            &self.database,
+        )
+        .await?;
+        let current_context = self.get_context_by_id(context).await?;
+        Ok(Conversation {
+            context: current_context,
+            sessions,
+            threads,
+            comments,
+        })
+    }
+
+    pub async fn get_export(
+        &self,
+        scope: &ReviewScope,
+        selected_roots: &[uuid::Uuid],
+    ) -> Result<String> {
+        let Some(mut conversation) = self.get_scope_conversation(scope).await? else {
+            return Ok("# Review feedback\n\nNo comments yet.\n".into());
+        };
+        let session = match scope {
+            ReviewScope::Review { review_id } => self.get_session(review_id).await?,
+            ReviewScope::Notes { .. } => {
+                self.get_selected_session(&conversation.context.id, None, false)
+                    .await?
+            }
+        };
+        if !selected_roots.is_empty() {
+            let mut ids = HashSet::new();
+            for id in selected_roots {
+                let root = conversation
+                    .comments
+                    .iter()
+                    .find(|c| {
+                        c.id == *id
+                            && !conversation.comments.iter().any(|earlier| {
+                                earlier.thread_id == c.thread_id && earlier.position < c.position
+                            })
+                    })
+                    .ok_or_else(|| Error::NotFound("Selected root feedback in scope".into()))?;
+                ids.insert(root.thread_id);
+            }
+            conversation.threads.retain(|t| ids.contains(&t.id));
+            conversation.comments.retain(|c| ids.contains(&c.thread_id));
+        }
+        conversation.sessions = Self::sessions_from_db_models(
+            self.database
+                .sessions
+                .get_all(Some(&conversation.context.id), false)
+                .await?,
+            &self.database,
+        )
+        .await?;
+        if self
+            .get_context_by_id(&conversation.context.id)
+            .await?
+            .revision
+            != conversation.context.revision
+        {
+            return Err(Error::Conflict(
+                "Review changed during export; retry".into(),
+            ));
+        }
+        Ok(conversation.export_feedback(&session))
+    }
+
+    // Anchors and locations ---------------------------------------------------
+
+    /// Apply only validated source observations. Hidden files and failed reads never imply deletion.
+    pub async fn refresh_locations(
+        &self,
+        scope: &ReviewScope,
         actor: &Actor,
-        resolved: bool,
-        guard: Option<&MutationGuard>,
-    ) -> Result<Thread> {
-        let guard = guard
-            .map(|g| g.bind_attempt(session_id, &(thread_id, resolved)))
-            .transpose()?;
-        let guard = guard.as_ref();
-        tracing::debug!("Review action: resolve");
-        let actor = &self.auth.validate_requester(actor).await?;
-        let seed = self.get_session(session_id).await?;
+        changes: &[SourceChange],
+        guard: &MutationGuard,
+    ) -> Result<i64> {
+        use crate::database::types::SourceKind;
+        if changes.len() > 500 {
+            return Err(invalid("Refresh exceeds 500 source observations"));
+        }
+        let actor = self.auth.validate_requester(actor).await?;
+        let Some(context) = self.get_scope_context(scope).await? else {
+            if !changes.is_empty() {
+                return Err(Error::NotFound("Notes with saved discussions".into()));
+            }
+            return Ok(0);
+        };
+        if context.key.is_forge_backed() && !changes.is_empty() {
+            return Err(invalid("Forge locations come from provider observations"));
+        }
+        let guard = guard.bind(&(scope, changes))?;
         let tx = self.database.begin().await?;
         if let Some(saved) = self
-            .begin_mutation::<Thread>(&tx, &seed.context_id, &actor.id, "resolve", guard, true)
+            .begin_mutation::<i64>(
+                &tx,
+                &context.id,
+                &actor.id,
+                "refresh_locations",
+                Some(&guard),
+                true,
+            )
             .await?
         {
             tx.commit().await?;
             return Ok(saved);
         }
-        if guard.is_some() {
-            let context = self.load_context(&tx, &seed.context_id).await?;
+        if !changes.is_empty() {
             Self::validate_local_context(&context).await?;
         }
-        self.require_active_session(&tx, session_id).await?;
-        let mut t = self.load_thread(&tx, thread_id, &seed.context_id).await?;
-        if let Some(guard) = guard {
-            guard.validate_object(ObjectKind::Thread, t.id, &t)?;
-        }
-        if t.forge_thread_id.is_some() {
-            return Err(invalid(
-                "Remote thread resolution is deferred; no forge action was performed",
-            ));
-        }
-        t.state = if resolved { "resolved" } else { "open" }.into();
-        t.resolved_by = resolved.then(|| actor.clone());
-        t.resolved_at = resolved.then(now);
-        t.updated_by = Some(actor.clone());
-        t.updated_at = now();
-        tx.comments.update_thread(&threads::Model::from(&t)).await?;
-        Self::record_mutation(&tx, &seed.context_id, &actor.id, "resolve", guard, &t).await?;
-        tx.commit().await?;
-        Ok(t)
-    }
-
-    /// Freeze every outgoing comment and the review completion in one transaction.
-    /// A crash exposes either the original active drafts or durable sending state,
-    /// never half-staged comments without a session retry identity.
-    pub async fn prepare_submission(
-        &self,
-        session_id: &uuid::Uuid,
-        actor: &Actor,
-        input: Completion,
-        request_key: &str,
-        prepared: &[(Comment, String, String)],
-        expected_version: Option<i64>,
-    ) -> Result<Session> {
-        let actor = self.auth.validate_requester(actor).await?;
-        if request_key.trim().is_empty()
-            || !input.submit
-            || !input
-                .outcome
-                .as_deref()
-                .is_some_and(|v| ["approve", "reject", "comment"].contains(&v))
-        {
-            return Err(invalid(
-                "Submission requires an outcome and nonempty retry key",
-            ));
-        }
-        let hash = format!(
-            "{:x}",
-            Sha256::digest(serde_json::to_vec(&(input.clone(), actor.id))?)
-        );
-        let seed = self.get_session(session_id).await?;
-        let context_id = &seed.context_id;
-        let tx = self.database.begin().await?;
-        if !tx
-            .review_contexts
-            .advance_revision(context_id, expected_version)
-            .await?
-        {
-            return Err(Error::Conflict(
-                "Review changed before submission; refresh and keep the final body".into(),
-            ));
-        }
-        if tx.mutations.get_pending(context_id, None).await? {
-            return Err(Error::Conflict(
-                "Resolve pending remote comment changes before submitting".into(),
-            ));
-        }
-        let context = self.load_context(&tx, context_id).await?;
-        if !context.key.is_forge_backed() {
-            return Err(invalid("Only forge-backed reviews can be submitted"));
-        }
-        if tx
-            .mutations
-            .get_result(context_id, &actor.id, request_key)
-            .await?
-            .is_some()
-        {
-            return Err(Error::Conflict(
-                "Submission retry key was already used; choose a new submission attempt".into(),
-            ));
-        }
-        if tx
-            .sessions
-            .get_completion_by_key(context_id, request_key)
-            .await?
-            .is_some()
-        {
-            return Err(Error::Conflict(
-                "Submission was already prepared; reconcile before retrying".into(),
-            ));
-        }
-        let mut session = self.require_active_session(&tx, session_id).await?;
-        if session.creator.id != actor.id {
-            return Err(invalid("Only the session creator can submit this review"));
-        }
-        if session.submission_status != "unsubmitted" {
-            return Err(Error::Conflict(
-                "Resolve pending draft synchronization before submitting".into(),
-            ));
-        }
-        let comments =
-            Self::comments_from_db_models(tx.comments.get_comments(context_id).await?, &tx).await?;
-        let outgoing: Vec<_> = comments
+        if changes
             .iter()
-            .filter(|c| c.origin_session_id == Some(session.id) && c.forge_comment_id.is_none())
-            .collect();
-        let ids: HashSet<_> = prepared.iter().map(|(c, _, _)| c.id).collect();
-        if ids.len() != prepared.len()
-            || outgoing.len() != prepared.len()
-            || outgoing.iter().any(|c| !ids.contains(&c.id))
+            .any(|c| matches!(c, SourceChange::LocationMoved { .. }))
         {
-            return Err(Error::Conflict(
-                "Draft set changed while preparing submission; refresh and retry".into(),
-            ));
-        }
-        for (expected, rendered, key) in prepared {
-            let current = outgoing
-                .iter()
-                .find(|c| c.id == expected.id)
-                .ok_or_else(|| Error::NotFound("Outgoing comment".into()))?;
-            if current.body != expected.body
-                || current.author != expected.author
-                || current.updated_at != expected.updated_at
-                || current.origin_session_id != Some(session.id)
-                || current.posting.state() != db::types::PostingState::Unposted
-                || key.trim().is_empty()
-            {
-                return Err(Error::Conflict(
-                    "Draft content or posting state changed while preparing submission".into(),
-                ));
+            if changes.len() != 1 {
+                return Err(invalid("A scope move must be one atomic observation"));
             }
-            let mut staged = (**current).clone();
-            staged.visibility = "published".into();
-            staged.posting = PostingStatus::Sending;
-            staged.posting_request_key = Some(key.clone());
-            staged.payload_hash = Some(format!("{:x}", Sha256::digest(rendered.as_bytes())));
-            staged.forge_body = Some(rendered.clone());
-            staged.updated_at = now();
-            tx.comments
-                .update_comment(&comments::Model::from(&staged))
-                .await?;
-        }
-        for mut comment in comments {
-            if comment.origin_session_id == Some(session.id)
-                && comment.visibility == "draft"
-                && !ids.contains(&comment.id)
+            if let SourceChange::LocationMoved {
+                previous_path,
+                current_path,
+            } = &changes[0]
             {
-                comment.visibility = "published".into();
-                comment.updated_at = now();
-                tx.comments
-                    .update_comment(&comments::Model::from(&comment))
+                self.apply_location_move(&tx, &context, scope, previous_path, current_path)
                     .await?;
             }
         }
-        session.complete(
-            actor,
-            input.outcome.unwrap(),
-            input.body,
-            request_key.into(),
-            hash,
-        )?;
-        session.submission_status = "sending".into();
-        session.submission_error = None;
-        if !tx
-            .sessions
-            .complete(&sessions::Model::from(&session))
-            .await?
-        {
-            return Err(Error::Conflict(
-                "Active session changed during submission preparation".into(),
-            ));
-        }
-        tx.commit().await?;
-        Ok(session)
-    }
-
-    pub async fn complete(
-        &self,
-        context_id: &uuid::Uuid,
-        actor: &Actor,
-        input: Completion,
-        request_key: &str,
-        exact_session: Option<&uuid::Uuid>,
-        guard: Option<&MutationGuard>,
-    ) -> Result<Session> {
-        let guard = guard
-            .map(|g| g.bind(&(context_id, exact_session, &input, request_key)))
-            .transpose()?;
-        let guard = guard.as_ref();
-        tracing::debug!("Review action: complete");
-        let actor = &self.auth.validate_requester(actor).await?;
-        if request_key.trim().is_empty() {
-            return Err(invalid("Completion requires a nonempty retry key"));
-        }
-        let hash = format!(
-            "{:x}",
-            Sha256::digest(serde_json::to_string(&(input.clone(), &actor.id))?)
-        );
-        let tx = self.database.begin().await?;
-        if let Some(saved) = self
-            .begin_mutation::<Session>(&tx, context_id, &actor.id, "complete", guard, true)
-            .await?
-        {
-            tx.commit().await?;
-            return Ok(saved);
-        }
-        if input.submit
-            && tx
-                .mutations
-                .get_result(context_id, &actor.id, request_key)
-                .await?
-                .is_some_and(|receipt| receipt.method == "rejected_submission")
-        {
-            return Err(Error::Conflict(
-                "Rejected submission cannot be completed again; choose a new submission attempt"
-                    .into(),
-            ));
-        }
-        let row = tx
-            .sessions
-            .get_completion_by_key(context_id, request_key)
-            .await?;
-        if let Some(row) = row {
-            let s = Self::session_from_db_model(row, &tx).await?;
-            if s.completion().map(|c| c.request_hash.as_str()) != Some(&hash) {
+        let root = match &context.key {
+            ContextKey::Local {
+                location: LocalLocation::Notes { path },
+            } => {
+                let path =
+                    std::path::PathBuf::from(context.current_notes_path.as_ref().unwrap_or(path));
+                let selected_is_child = matches!(scope, ReviewScope::Notes { path: selected } if std::path::Path::new(selected).starts_with(&path) && std::path::Path::new(selected) != path);
+                if matches!(scope, ReviewScope::Notes { .. })
+                    && !path.is_dir()
+                    && !selected_is_child
+                {
+                    path.parent()
+                        .ok_or_else(|| invalid("Notes file has no parent"))?
+                        .to_path_buf()
+                } else {
+                    path
+                }
+            }
+            ContextKey::Local {
+                location: LocalLocation::Branch { .. },
+            } => context
+                .paths
+                .first()
+                .map(std::path::PathBuf::from)
+                .ok_or_else(|| invalid("Review has no working tree location"))?,
+            ContextKey::ForgeBacked { .. } => std::path::PathBuf::new(),
+        };
+        for change in changes {
+            let (id, previous, current, observed) = match change {
+                SourceChange::LocationMoved { .. } => continue,
+                SourceChange::Moved {
+                    thread_id,
+                    previous_path,
+                    current_path,
+                    source,
+                } => (
+                    thread_id,
+                    Some(previous_path.as_str()),
+                    current_path.as_str(),
+                    Some(source),
+                ),
+                SourceChange::Deleted { thread_id, path } => {
+                    (thread_id, Some(path.as_str()), path.as_str(), None)
+                }
+                SourceChange::WorkingSourceChanged {
+                    thread_id,
+                    path,
+                    source,
+                }
+                | SourceChange::Restored {
+                    thread_id,
+                    path,
+                    source,
+                } => (thread_id, None, path.as_str(), Some(source)),
+            };
+            let relative_current = context.key.is_notes()
+                && matches!(scope, ReviewScope::Review { .. })
+                && !std::path::Path::new(current).is_absolute();
+            let supplied_current = current;
+            let saved_path = |path: &str| -> Result<String> {
+                if context.key.is_notes() {
+                    let absolute = if std::path::Path::new(path).is_absolute() {
+                        std::path::PathBuf::from(path)
+                    } else {
+                        root.join(path)
+                    };
+                    Self::get_notes_path(&absolute.to_string_lossy())
+                } else {
+                    Anchor::File { path: path.into() }.validate()?;
+                    Ok(path.into())
+                }
+            };
+            let current = saved_path(current)?;
+            let previous = previous.map(saved_path).transpose()?;
+            let mut thread = self.load_thread(&tx, id, &context.id).await?;
+            let original_path = match &thread.anchor {
+                Anchor::File { path } | Anchor::Line { path, .. } => path,
+                Anchor::General => return Err(invalid("General discussions have no file source")),
+            };
+            let known_path = saved_path(
+                thread
+                    .current_path
+                    .as_deref()
+                    .or(thread.source_path.as_deref())
+                    .unwrap_or(original_path),
+            )?;
+            if previous.as_deref().is_some_and(|path| path != known_path) {
                 return Err(Error::Conflict(
-                    "Retry key was already used with different content or actor".into(),
+                    "Source observation does not match the current saved path".into(),
                 ));
             }
-            if exact_session.is_some_and(|id| s.id != *id) {
-                return Err(Error::Conflict(
-                    "Retry key belongs to another review attempt".into(),
-                ));
+            if observed.is_none() {
+                let path = root.join(&current);
+                let missing = match std::fs::symlink_metadata(&path) {
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+                    Err(e) => return Err(e.into()),
+                    Ok(_) => false,
+                };
+                if !missing {
+                    return Err(Error::Conflict("File deletion was not confirmed".into()));
+                }
+                thread.orphan_reason = Some(OrphanReason::FileDeleted);
+            } else if let Some(observed) = observed {
+                observed.validate()?;
+                let (kind, commit) = match observed {
+                    AnchorSource::Commit { sha, .. } => (SourceKind::Commit, Some(sha.clone())),
+                    AnchorSource::IndexFile { .. } => (SourceKind::IndexFile, None),
+                    AnchorSource::WorkingFile { .. } => (SourceKind::WorkingFile, None),
+                    AnchorSource::LocalFile { .. } => (SourceKind::LocalFile, None),
+                };
+                if context.key.is_notes() != (kind == SourceKind::LocalFile) {
+                    return Err(invalid("Observed source does not belong to this scope"));
+                }
+                let (source_root, path) = if context.key.is_notes() {
+                    let absolute = std::path::Path::new(&current);
+                    (
+                        absolute
+                            .parent()
+                            .ok_or_else(|| invalid("Notes file has no parent"))?
+                            .to_path_buf(),
+                        absolute
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .ok_or_else(|| invalid("Notes file has no name"))?
+                            .to_owned(),
+                    )
+                } else {
+                    (root.clone(), current.clone())
+                };
+                let (actual, bytes) = tokio::task::spawn_blocking(move || {
+                    super::workspace::get_source(&source_root, &path, kind, commit.as_deref())
+                })
+                .await
+                .map_err(|_| invalid("Source observation failed"))??;
+                if actual != *observed {
+                    return Err(Error::Conflict(
+                        "Observed source changed before refresh".into(),
+                    ));
+                }
+                if matches!(change, SourceChange::WorkingSourceChanged { .. }) {
+                    if !matches!(
+                        thread.evidence.as_ref().map(|e| &e.source),
+                        Some(AnchorSource::WorkingFile { .. })
+                    ) {
+                        return Err(invalid(
+                            "Only unstaged working anchors use working-source orphaning",
+                        ));
+                    }
+                    if thread
+                        .evidence
+                        .as_ref()
+                        .is_some_and(|e| e.source.content_hash() == observed.content_hash())
+                    {
+                        return Err(invalid("Working source has not changed"));
+                    }
+                    thread.orphan_reason = Some(OrphanReason::WorkingSourceChanged);
+                } else {
+                    let text = std::str::from_utf8(&bytes)
+                        .map_err(|_| invalid("Source observation requires text"))?;
+                    let supported = if matches!(change, SourceChange::Moved { .. }) {
+                        // A reported move preserves file identity, even when its selected lines were lost.
+                        // The request names the known old path and actual new source; absence is checked below.
+                        true
+                    } else if let Some(evidence) = &thread.evidence {
+                        evidence.source.content_hash() == observed.content_hash()
+                            || (!matches!(evidence.source, AnchorSource::WorkingFile { .. })
+                                && evidence.get_matching_range(text).is_some())
+                    } else {
+                        false
+                    };
+                    if !supported {
+                        return Err(Error::Conflict(
+                            "Preserved evidence cannot confirm this move or restoration".into(),
+                        ));
+                    }
+                    if let SourceChange::Moved { previous_path, .. } = change {
+                        match std::fs::symlink_metadata(root.join(saved_path(previous_path)?)) {
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                            Err(e) => return Err(e.into()),
+                            Ok(_) => {
+                                return Err(Error::Conflict(
+                                    "Move source still exists; a copy is not a confirmed move"
+                                        .into(),
+                                ));
+                            }
+                        }
+                    }
+                    thread.current_path = Some(if relative_current {
+                        supplied_current.into()
+                    } else {
+                        current.clone()
+                    });
+                    thread.orphan_reason = None;
+                    if matches!(scope, ReviewScope::Notes { .. }) {
+                        tx.workspace
+                            .insert_path(&workspace_paths::Model {
+                                context_id: context.id,
+                                path: root.join(&current).to_string_lossy().into_owned(),
+                            })
+                            .await?;
+                    }
+                }
             }
-            Self::record_mutation(&tx, context_id, &actor.id, "complete", guard, &s).await?;
-            tx.commit().await?;
-            return Ok(s);
-        }
-        let row = tx
-            .sessions
-            .get_active(context_id)
-            .await?
-            .ok_or_else(|| Error::NotFound("Active session".into()))?;
-        if exact_session.is_some_and(|id| row.id != *id) {
-            return Err(Error::Conflict(
-                "Selected review is no longer the active attempt".into(),
-            ));
-        }
-        let mut s = Self::session_from_db_model(row, &tx).await?;
-        let context = self.load_context(&tx, context_id).await?;
-        if context.key.is_forge_backed() {
-            if !input
-                .outcome
-                .as_deref()
-                .is_some_and(|v| ["approve", "reject", "comment"].contains(&v))
-            {
-                return Err(invalid(
-                    "PR completion requires --outcome approve|reject|comment",
-                ));
-            }
-        } else if input.outcome.is_some() || input.submit {
-            return Err(invalid(
-                "PR outcomes/submission are invalid for notes and local branches",
-            ));
-        }
-        let rows = tx.comments.get_session_draft_comments(&s.id).await?;
-        for mut c in Self::comments_from_db_models(rows, &tx).await? {
-            c.visibility = "published".into();
-            c.updated_at = now();
             tx.comments
-                .update_comment(&comments::Model::from(&c))
+                .update_thread(&threads::Model::from(&thread))
                 .await?;
         }
-        let outcome = input.outcome.unwrap_or_else(|| {
-            if context.key.is_notes() {
-                "saved"
-            } else {
-                "ready-to-address"
-            }
-            .into()
-        });
-        s.complete(actor.clone(), outcome, input.body, request_key.into(), hash)?;
-        if input.submit {
-            s.submission_status = "unsubmitted".into();
-            s.submission_error = Some("Submission pending provider confirmation".into());
+        if !changes.is_empty() {
+            Self::validate_local_context(&context).await?;
         }
-        tx.sessions.complete(&sessions::Model::from(&s)).await?;
-        Self::record_mutation(&tx, context_id, &actor.id, "complete", guard, &s).await?;
+        let version = tx
+            .review_contexts
+            .get_by_id(&context.id)
+            .await?
+            .ok_or_else(|| Error::NotFound("Context".into()))?
+            .revision;
+        Self::record_mutation(
+            &tx,
+            &context.id,
+            &actor.id,
+            "refresh_locations",
+            Some(&guard),
+            &version,
+        )
+        .await?;
         tx.commit().await?;
-        Ok(s)
+        Ok(version)
     }
+
+    // Forge synchronization and recovery --------------------------------------
 
     pub async fn record_refresh_failure(&self, context: &Context, message: &str) -> Result<()> {
         tracing::debug!("Review action: record_refresh_failure");
@@ -2438,7 +2235,7 @@ impl ReviewService {
         let tx = self.database.begin().await?;
         let mut deleted = HashSet::new();
         for receipt in tx.mutations.get_remote_delete_receipts(&context.id).await? {
-            let saved: forge_changes::ChangeReceipt = serde_json::from_str(&receipt.result_json)?;
+            let saved: ChangeReceipt = serde_json::from_str(&receipt.result_json)?;
             if let Some(key) = saved.deleted_remote {
                 deleted.insert(key);
             }
@@ -2860,51 +2657,350 @@ impl ReviewService {
         Ok(())
     }
 
-    async fn record_mutation<T: serde::Serialize>(
-        tx: &db::Transaction,
-        context: &uuid::Uuid,
-        actor: &uuid::Uuid,
-        method: &str,
-        guard: Option<&MutationGuard>,
-        result: &T,
-    ) -> Result<()> {
-        if let Some(guard) = guard {
-            let context_row = tx
-                .review_contexts
-                .get_by_id(context)
+    pub(crate) async fn get_forge_change(
+        &self,
+        session_id: &Uuid,
+        actor: &Actor,
+        input: &ForgeChangeInput,
+        guard: &MutationGuard,
+    ) -> Result<Option<ForgeChange>> {
+        let session = self.get_session(session_id).await?;
+        let guard = guard.bind_attempt(session_id, input)?;
+        let Some(receipt) = self
+            .database
+            .mutations
+            .get_result(&session.context_id, &actor.id, &guard.request_key)
+            .await?
+        else {
+            return Ok(None);
+        };
+        if receipt.method != input.method() || receipt.request_hash != guard.payload_hash {
+            return Err(Error::Conflict(
+                "Retry key belongs to a different remote change".into(),
+            ));
+        }
+        Ok(Some(
+            self.get_change_from_receipt(&self.database, &receipt, input)
+                .await?,
+        ))
+    }
+
+    pub(crate) async fn prepare_forge_change(
+        &self,
+        session_id: &Uuid,
+        actor: &Actor,
+        input: &ForgeChangeInput,
+        guard: &MutationGuard,
+    ) -> Result<(ForgeChange, bool)> {
+        let actor = self.auth.validate_requester(actor).await?;
+        let session = self.get_session(session_id).await?;
+        let guard = guard.bind_attempt(session_id, input)?;
+        let tx = self.database.begin().await?;
+        if self
+            .begin_mutation::<ChangeReceipt>(
+                &tx,
+                &session.context_id,
+                &actor.id,
+                input.method(),
+                Some(&guard),
+                true,
+            )
+            .await?
+            .is_some()
+        {
+            let receipt = tx
+                .mutations
+                .get_result(&session.context_id, &actor.id, &guard.request_key)
                 .await?
-                .ok_or_else(|| Error::NotFound("Context".into()))?;
-            let value = serde_json::to_value(result)?;
-            let value = if context_row.kind == ContextKind::ForgeBacked {
-                match method {
-                    "add_comment" | "reply" | "edit_comment" => {
-                        serde_json::json!({"cached_comment":value["id"]})
-                    }
-                    "resolve" => serde_json::json!({"cached_thread":value["id"]}),
-                    "start_session" | "complete" => {
-                        serde_json::json!({"cached_review":value["id"]})
-                    }
-                    "promote_notes" => {
-                        serde_json::json!({"cached_comments":value.as_array().ok_or_else(|| invalid("Invalid promotion result"))?.iter().map(|comment| comment["id"].clone()).collect::<Vec<_>>()})
-                    }
-                    _ => value,
+                .ok_or_else(|| Error::NotFound("Remote acknowledgment".into()))?;
+            let saved = self.get_change_from_receipt(&tx, &receipt, input).await?;
+            tx.commit().await?;
+            return Ok((saved, false));
+        }
+        let (_, object_id) = input.object();
+        if tx
+            .mutations
+            .get_pending(&session.context_id, Some(&object_id))
+            .await?
+        {
+            return Err(Error::Conflict(
+                "This object has an unresolved remote change; retry its saved intent first".into(),
+            ));
+        }
+        let context = self.load_context(&tx, &session.context_id).await?;
+        if !context.key.is_forge_backed() {
+            return Err(invalid("Remote changes require a PR context"));
+        }
+        let original = match input {
+            ForgeChangeInput::Edit { comment_id, .. } | ForgeChangeInput::Delete { comment_id } => {
+                if let ForgeChangeInput::Edit { body, .. } = input {
+                    crate::models::Comment::validate_body(body)?;
                 }
-            } else {
-                value
-            };
-            tx.mutations
-                .insert_result(&mutation_receipts::Model {
-                    context_id: *context,
-                    actor_id: *actor,
-                    request_key: guard.request_key.clone(),
-                    method: method.into(),
-                    request_hash: guard.payload_hash.clone(),
-                    result_json: serde_json::to_string(&value)?,
-                    object_id: None,
-                    pending: false,
-                    version: context_row.revision,
-                })
+                let row = tx
+                    .comments
+                    .get_comment_by_id(&session.context_id, comment_id)
+                    .await?
+                    .ok_or_else(|| Error::NotFound("Comment".into()))?;
+                let comment = Self::comment_from_db_model(row, &tx).await?;
+                guard.validate_object(crate::models::ObjectKind::Comment, comment.id, &comment)?;
+                if comment.origin_session_id.is_some() && comment.owner_id != Some(actor.id) {
+                    return Err(invalid("Only the draft owner may change this feedback"));
+                }
+                if comment.visibility == "draft" {
+                    self.require_active_session(&tx, session_id).await?;
+                }
+                ForgeChangeObject::Comment(Box::new(comment))
+            }
+            ForgeChangeInput::Resolve { thread_id, .. } => {
+                let thread = self
+                    .load_thread(&tx, thread_id, &session.context_id)
+                    .await?;
+                if matches!(thread.anchor, crate::models::Anchor::General) {
+                    return Err(invalid("GitHub only supports resolving review threads"));
+                }
+                guard.validate_object(crate::models::ObjectKind::Thread, thread.id, &thread)?;
+                ForgeChangeObject::Thread(Box::new(thread))
+            }
+        };
+        let saved = ForgeChange {
+            input: input.clone(),
+            original,
+            result: None,
+            rejection: None,
+            deleted_remote: None,
+        };
+        let version = tx
+            .review_contexts
+            .get_by_id(&session.context_id)
+            .await?
+            .ok_or_else(|| Error::NotFound("Context".into()))?
+            .revision;
+        tx.mutations
+            .insert_result(&mutation_receipts::Model {
+                context_id: session.context_id,
+                actor_id: actor.id,
+                request_key: guard.request_key,
+                method: input.method().into(),
+                request_hash: guard.payload_hash,
+                result_json: serde_json::to_string(&ChangeReceipt::default())?,
+                version,
+                object_id: Some(object_id),
+                pending: true,
+            })
+            .await?;
+        tx.commit().await?;
+        Ok((saved, true))
+    }
+
+    pub(crate) async fn finish_forge_change(
+        &self,
+        session_id: &Uuid,
+        actor: &Actor,
+        input: &ForgeChangeInput,
+        guard: &MutationGuard,
+        mut result: Option<ForgeChangeObject>,
+        rejection: Option<String>,
+    ) -> Result<ForgeChange> {
+        if result.is_none() && rejection.is_none() {
+            return Err(invalid(
+                "A remote change requires confirmation or definite rejection",
+            ));
+        }
+        let session = self.get_session(session_id).await?;
+        let guard = guard.bind_attempt(session_id, input)?;
+        let tx = self.database.begin().await?;
+        tx.review_contexts
+            .lock_for_write(&session.context_id)
+            .await?;
+        let receipt = tx
+            .mutations
+            .get_result(&session.context_id, &actor.id, &guard.request_key)
+            .await?
+            .ok_or_else(|| Error::NotFound("Saved remote intent".into()))?;
+        if receipt.method != input.method() || receipt.request_hash != guard.payload_hash {
+            return Err(Error::Conflict("Remote intent changed".into()));
+        }
+        let mut saved = self.get_change_from_receipt(&tx, &receipt, input).await?;
+        if saved.result.is_some() || saved.rejection.is_some() {
+            tx.commit().await?;
+            return Ok(saved);
+        }
+        if let Some(ForgeChangeObject::Thread(updated)) = &result {
+            let mut current = self
+                .load_thread(&tx, &updated.id, &session.context_id)
                 .await?;
+            current.state = updated.state.clone();
+            current.updated_at = updated.updated_at.clone();
+            current.resolved_at = updated.resolved_at.clone();
+            current.resolved_by = updated.resolved_by.clone();
+            current.updated_by = updated.updated_by.clone();
+            result = Some(ForgeChangeObject::Thread(Box::new(current)));
+        }
+        match &result {
+            Some(ForgeChangeObject::Comment(comment)) => {
+                tx.comments
+                    .update_comment(&comments::Model::from(comment.as_ref()))
+                    .await?;
+            }
+            Some(ForgeChangeObject::Thread(thread)) => {
+                tx.comments
+                    .update_thread(&threads::Model::from(thread.as_ref()))
+                    .await?;
+            }
+            Some(ForgeChangeObject::Deleted { comment_id }) => {
+                let thread_id = match &saved.original {
+                    ForgeChangeObject::Comment(comment) if comment.id == *comment_id => {
+                        comment.thread_id
+                    }
+                    _ => return Err(invalid("Deletion receipt names another comment")),
+                };
+                tx.comments
+                    .delete_remote_comment(&session.context_id, comment_id)
+                    .await?;
+                tx.comments
+                    .delete_empty_thread(&session.context_id, &thread_id)
+                    .await?;
+                if let ForgeChangeObject::Comment(comment) = &saved.original {
+                    saved.deleted_remote = comment
+                        .forge_object_kind
+                        .clone()
+                        .zip(comment.forge_comment_id.clone());
+                }
+                // Keep only the retry receipt, not a copy of the deleted text.
+                saved.original = ForgeChangeObject::Deleted {
+                    comment_id: *comment_id,
+                };
+            }
+            None => {}
+        }
+        saved.result = result;
+        saved.rejection = rejection;
+        tx.review_contexts
+            .advance_revision(&session.context_id, None)
+            .await?;
+        let version = tx
+            .review_contexts
+            .get_by_id(&session.context_id)
+            .await?
+            .ok_or_else(|| Error::NotFound("Context".into()))?
+            .revision;
+        if !tx
+            .mutations
+            .update_result(
+                &receipt,
+                &serde_json::to_string(&ChangeReceipt {
+                    rejection: saved.rejection.clone(),
+                    deleted_remote: saved.deleted_remote.clone(),
+                })?,
+                version,
+                false,
+            )
+            .await?
+        {
+            return Err(Error::Conflict("Remote receipt changed".into()));
+        }
+        tx.commit().await?;
+        Ok(saved)
+    }
+
+    pub(crate) async fn get_posting_anchor(
+        &self,
+        session: &crate::models::Session,
+        thread: &crate::models::Thread,
+    ) -> Result<crate::models::Anchor> {
+        let context = self.get_context_by_id(&session.context_id).await?;
+        let crate::models::ContextKey::ForgeBacked {
+            repository_url,
+            number,
+        } = &context.key
+        else {
+            return Err(invalid("Posting requires a PR context"));
+        };
+        self.sources
+            .get_posting_anchor(
+                &context.paths,
+                crate::models::ReviewTarget::PullRequest {
+                    repository_url: repository_url.as_str().into(),
+                    number: *number,
+                },
+                crate::models::ReviewComparison::PullRequest {
+                    base_commit: session
+                        .commits
+                        .base
+                        .clone()
+                        .ok_or_else(|| invalid("PR base unavailable"))?,
+                    head_commit: session
+                        .commits
+                        .head
+                        .clone()
+                        .ok_or_else(|| invalid("PR head unavailable"))?,
+                },
+                &thread.anchor,
+                thread.evidence.as_ref(),
+                thread.current_path.as_deref(),
+            )
+            .await
+    }
+
+    pub(crate) async fn synchronize_pr_comparison(&self, observed: &Context) -> Result<Context> {
+        if !observed.key.is_forge_backed()
+            || observed.forge_state != Some(crate::database::types::ForgeState::Open)
+        {
+            return Ok(observed.clone());
+        }
+        let (base, head) = observed
+            .refreshed_base
+            .as_deref()
+            .zip(observed.refreshed_head.as_deref())
+            .ok_or_else(|| invalid("PR observation has no complete comparison"))?;
+        let tx = self.database.begin().await?;
+        let context = self.load_context(&tx, &observed.id).await?;
+        if context.revision != observed.revision {
+            return Err(Error::Conflict(
+                "PR changed during synchronization; refresh again".into(),
+            ));
+        }
+        if let Some(active) = tx.sessions.get_active(&context.id).await?
+            && ["unsubmitted", "draft_failed"].contains(&active.submission_status.as_str())
+            && (active.base_commit.as_deref() != Some(base)
+                || active.head_commit.as_deref() != Some(head))
+            && (!tx
+                .review_contexts
+                .advance_revision(&context.id, Some(context.revision))
+                .await?
+                || !tx
+                    .sessions
+                    .update_pr_comparison(&active, base, head)
+                    .await?)
+        {
+            return Err(Error::Conflict(
+                "PR review changed during synchronization".into(),
+            ));
+        }
+        tx.commit().await?;
+        self.get_context_by_id(&observed.id).await
+    }
+
+    // Private -----------------------------------------------------------------
+
+    // Contexts ----------------------------------------------------------------
+
+    async fn load_context<D: ConnectionTrait + TransactionTrait>(
+        &self,
+        conn: &db::Database<D>,
+        id: &uuid::Uuid,
+    ) -> Result<Context> {
+        let row = conn
+            .review_contexts
+            .get_by_id(id)
+            .await?
+            .ok_or_else(|| Error::NotFound("Context".into()))?;
+        Self::context_from_db_model(row, conn).await
+    }
+
+    async fn lock_context(&self, tx: &db::Transaction, id: &uuid::Uuid) -> Result<()> {
+        if !tx.review_contexts.advance_revision(id, None).await? {
+            return Err(Error::NotFound("Context".into()));
         }
         Ok(())
     }
@@ -2927,6 +3023,422 @@ impl ReviewService {
                         .into(),
                 ));
             }
+        }
+        Ok(())
+    }
+
+    async fn context_from_db_model<D: ConnectionTrait + TransactionTrait>(
+        row: review_contexts::Model,
+        conn: &db::Database<D>,
+    ) -> Result<Context> {
+        let paths = conn
+            .workspace
+            .get_paths(&row.id)
+            .await?
+            .into_iter()
+            .map(|p| p.path)
+            .collect();
+        Context::from_db_model(row, paths)
+    }
+
+    // Reviews and sessions ----------------------------------------------------
+
+    async fn require_active_session(
+        &self,
+        tx: &db::Transaction,
+        id: &uuid::Uuid,
+    ) -> Result<Session> {
+        let row = tx
+            .sessions
+            .get_by_id(id)
+            .await?
+            .ok_or_else(|| Error::NotFound("Session".into()))?;
+        let s = Self::session_from_db_model(row, tx).await?;
+        if s.state() != "active" {
+            return Err(Error::Conflict(
+                "Completed session metadata cannot be changed; start a new session".into(),
+            ));
+        }
+        Ok(s)
+    }
+
+    async fn sessions_from_db_models<C: ConnectionTrait + TransactionTrait>(
+        rows: Vec<sessions::Model>,
+        db: &db::Database<C>,
+    ) -> Result<Vec<Session>> {
+        let mut ids = HashSet::new();
+        for r in &rows {
+            ids.insert(r.creator_id);
+            if let Some(id) = &r.completed_by_id {
+                ids.insert(*id);
+            }
+        }
+        let actors = load_actors(ids, db).await?;
+        rows.into_iter()
+            .map(|r| {
+                Session::from_db_model(
+                    r.clone(),
+                    get_actor(&actors, &r.creator_id)?,
+                    r.completed_by_id
+                        .as_ref()
+                        .map(|id| get_actor(&actors, id))
+                        .transpose()?,
+                )
+            })
+            .collect()
+    }
+
+    async fn session_from_db_model<C: ConnectionTrait + TransactionTrait>(
+        row: sessions::Model,
+        db: &db::Database<C>,
+    ) -> Result<Session> {
+        Self::sessions_from_db_models(vec![row], db)
+            .await?
+            .pop()
+            .ok_or_else(|| Error::NotFound("Session".into()))
+    }
+
+    // Threads -----------------------------------------------------------------
+
+    async fn load_thread(
+        &self,
+        tx: &db::Transaction,
+        id: &uuid::Uuid,
+        context: &uuid::Uuid,
+    ) -> Result<Thread> {
+        let row = tx
+            .comments
+            .get_thread(context, id)
+            .await?
+            .ok_or_else(|| Error::NotFound("Thread in selected context".into()))?;
+        Self::thread_from_db_model(row, tx).await
+    }
+
+    async fn threads_from_db_models<C: ConnectionTrait + TransactionTrait>(
+        rows: Vec<threads::Model>,
+        db: &db::Database<C>,
+    ) -> Result<Vec<Thread>> {
+        let mut ids = HashSet::new();
+        for r in &rows {
+            ids.insert(r.author_id);
+            if let Some(id) = &r.resolved_by_id {
+                ids.insert(*id);
+            }
+            if let Some(id) = &r.updated_by_id {
+                ids.insert(*id);
+            }
+        }
+        let actors = load_actors(ids, db).await?;
+        rows.into_iter()
+            .map(|r| {
+                Thread::from_db_model(
+                    r.clone(),
+                    get_actor(&actors, &r.author_id)?,
+                    r.resolved_by_id
+                        .as_ref()
+                        .map(|id| get_actor(&actors, id))
+                        .transpose()?,
+                    r.updated_by_id
+                        .as_ref()
+                        .map(|id| get_actor(&actors, id))
+                        .transpose()?,
+                )
+            })
+            .collect()
+    }
+
+    async fn thread_from_db_model<C: ConnectionTrait + TransactionTrait>(
+        row: threads::Model,
+        db: &db::Database<C>,
+    ) -> Result<Thread> {
+        Self::threads_from_db_models(vec![row], db)
+            .await?
+            .pop()
+            .ok_or_else(|| Error::NotFound("Thread".into()))
+    }
+
+    // Comments and notes ------------------------------------------------------
+
+    async fn comments_from_db_models<C: ConnectionTrait + TransactionTrait>(
+        rows: Vec<comments::Model>,
+        db: &db::Database<C>,
+    ) -> Result<Vec<Comment>> {
+        let mut ids = HashSet::new();
+        for r in &rows {
+            ids.insert(r.author_id);
+        }
+        let actors = load_actors(ids, db).await?;
+        rows.into_iter()
+            .map(|r| Comment::from_db_model(r.clone(), get_actor(&actors, &r.author_id)?))
+            .collect()
+    }
+
+    async fn comment_from_db_model<C: ConnectionTrait + TransactionTrait>(
+        row: comments::Model,
+        db: &db::Database<C>,
+    ) -> Result<Comment> {
+        Self::comments_from_db_models(vec![row], db)
+            .await?
+            .pop()
+            .ok_or_else(|| Error::NotFound("Comment".into()))
+    }
+
+    // Anchors and locations ---------------------------------------------------
+
+    async fn apply_location_move(
+        &self,
+        tx: &db::Transaction,
+        context: &Context,
+        scope: &ReviewScope,
+        previous: &str,
+        current: &str,
+    ) -> Result<()> {
+        use std::path::Path;
+        let ContextKey::Local {
+            location: LocalLocation::Notes { path: original },
+        } = &context.key
+        else {
+            return Err(invalid(
+                "Only saved-file scopes and directory reviews have movable locations",
+            ));
+        };
+        let previous = Self::get_notes_path(previous)?;
+        let current = Self::get_notes_path(current)?;
+        let known = context.current_notes_path.as_ref().unwrap_or(original);
+        if previous == current || matches!(scope, ReviewScope::Review { .. }) && &previous != known
+        {
+            return Err(Error::Conflict(
+                "Move does not name the current saved location".into(),
+            ));
+        }
+        match std::fs::symlink_metadata(&previous) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+            Ok(_) => {
+                return Err(Error::Conflict(
+                    "Move source still exists; a copy is not a confirmed move".into(),
+                ));
+            }
+        }
+        let directory = match scope {
+            ReviewScope::Notes { path } => {
+                if Self::get_notes_path(path)? != previous || !Path::new(&current).is_file() {
+                    return Err(invalid(
+                        "Saved-file move requires its original file scope and an existing destination file",
+                    ));
+                }
+                false
+            }
+            ReviewScope::Review { .. } => {
+                if !Path::new(&current).is_dir() {
+                    return Err(invalid(
+                        "Directory move requires an existing destination directory",
+                    ));
+                }
+                true
+            }
+        };
+        if let Some(other) = tx.review_contexts.get_notes_for_path(&current).await?
+            && other.id != context.id
+            && (other.notes_path.as_deref() == Some(&current)
+                || other.current_notes_path.as_deref() == Some(&current))
+        {
+            return Err(Error::Conflict(
+                "Destination already belongs to another saved conversation".into(),
+            ));
+        }
+        for row in tx.comments.get_threads(&context.id).await? {
+            let mut thread = Self::thread_from_db_model(row, tx).await?;
+            let path = match &thread.anchor {
+                Anchor::File { path } | Anchor::Line { path, .. } => Some(path),
+                Anchor::General => None,
+            };
+            let known_path = thread
+                .current_path
+                .as_ref()
+                .or(thread.source_path.as_ref())
+                .map(|path| {
+                    if Path::new(path).is_absolute() {
+                        std::path::PathBuf::from(path)
+                    } else {
+                        Path::new(known).join(path)
+                    }
+                })
+                .or_else(|| {
+                    path.map(|path| {
+                        if directory || &previous != known {
+                            Path::new(known).join(path)
+                        } else {
+                            previous.clone().into()
+                        }
+                    })
+                });
+            let destination = if directory {
+                known_path.and_then(|path| {
+                    path.strip_prefix(&previous)
+                        .ok()
+                        .map(|relative| Path::new(&current).join(relative))
+                })
+            } else if (known_path.is_some() || &previous == known)
+                && known_path
+                    .as_ref()
+                    .is_none_or(|path| path == Path::new(&previous))
+            {
+                Some(current.clone().into())
+            } else {
+                None
+            };
+            if let Some(destination) = destination {
+                thread.current_path = Some(destination.to_string_lossy().into_owned());
+                tx.comments
+                    .update_thread(&threads::Model::from(&thread))
+                    .await?;
+                tx.workspace
+                    .insert_path(&workspace_paths::Model {
+                        context_id: context.id,
+                        path: destination.to_string_lossy().into_owned(),
+                    })
+                    .await?;
+            }
+        }
+        if &previous == known {
+            tx.review_contexts
+                .set_notes_location(&context.id, &current)
+                .await?;
+        }
+        tx.workspace
+            .insert_path(&workspace_paths::Model {
+                context_id: context.id,
+                path: current,
+            })
+            .await?;
+        Ok(())
+    }
+
+    async fn validate_anchor_evidence(
+        &self,
+        context: &Context,
+        session: &Session,
+        anchor: &Anchor,
+        evidence: &AnchorEvidence,
+        scope: Option<&ReviewScope>,
+    ) -> Result<()> {
+        use crate::database::types::SourceKind;
+        evidence.validate()?;
+        let (path, range, side) = match anchor {
+            Anchor::Line {
+                path,
+                start,
+                end,
+                side,
+            } => (path, Some((*start, *end)), side.as_str()),
+            Anchor::File { path } => (path, None, "new"),
+            Anchor::General => return Err(invalid("Review-level feedback has no file source")),
+        };
+        if range.is_none()
+            && (!evidence.selected_text.is_empty()
+                || !evidence.context_before.is_empty()
+                || !evidence.context_after.is_empty())
+        {
+            return Err(invalid("File evidence has no line selection"));
+        }
+        let (kind, source_commit) = match &evidence.source {
+            AnchorSource::Commit { sha, .. } => (SourceKind::Commit, Some(sha.clone())),
+            AnchorSource::IndexFile { .. } => (SourceKind::IndexFile, None),
+            AnchorSource::WorkingFile { .. } => (SourceKind::WorkingFile, None),
+            AnchorSource::LocalFile { .. } => (SourceKind::LocalFile, None),
+        };
+        let expected_commit = if side == "old" {
+            session.commits.base.as_deref()
+        } else {
+            session.commits.head.as_deref()
+        };
+        if kind == SourceKind::Commit {
+            let matches = if range.is_some() {
+                context.key.is_forge_backed() || source_commit.as_deref() == expected_commit
+            } else {
+                context.key.is_forge_backed()
+                    || source_commit == session.commits.base
+                    || source_commit == session.commits.head
+            };
+            if !matches {
+                return Err(Error::Conflict(
+                    "Anchor commit differs from the selected comparison".into(),
+                ));
+            }
+        }
+        let allowed = if context.key.is_notes() {
+            kind == SourceKind::LocalFile && side == "new"
+        } else if context.key.is_forge_backed()
+            || side == "old"
+            || session.comparison_kind == ComparisonKind::Branch
+        {
+            kind == SourceKind::Commit
+        } else {
+            matches!(
+                (session.comparison_kind, kind),
+                (ComparisonKind::Staged, SourceKind::IndexFile)
+                    | (
+                        ComparisonKind::Working,
+                        SourceKind::WorkingFile | SourceKind::IndexFile
+                    )
+            ) || (range.is_none() && kind == SourceKind::Commit)
+        };
+        if !allowed {
+            return Err(invalid(
+                "Anchor source does not belong to the selected comparison",
+            ));
+        }
+        if context.key.is_forge_backed() {
+            return Ok(());
+        }
+        let (root, path) =
+            if let Some(absolute) = Self::get_saved_source_location(context, anchor, scope)? {
+                let root = absolute
+                    .parent()
+                    .ok_or_else(|| invalid("Notes file has no parent"))?
+                    .to_path_buf();
+                let name = absolute
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .ok_or_else(|| invalid("Notes file has no name"))?
+                    .to_owned();
+                (root, name)
+            } else {
+                (
+                    context
+                        .paths
+                        .first()
+                        .map(std::path::PathBuf::from)
+                        .ok_or_else(|| invalid("Local review has no working tree location"))?,
+                    path.clone(),
+                )
+            };
+        let check_working_index =
+            session.comparison_kind == ComparisonKind::Working && kind == SourceKind::IndexFile;
+        let (actual, bytes) = tokio::task::spawn_blocking(move || {
+            let selected =
+                super::workspace::get_source(&root, &path, kind, source_commit.as_deref())?;
+            if check_working_index {
+                let (_, working) =
+                    super::workspace::get_source(&root, &path, SourceKind::WorkingFile, None)?;
+                if working != selected.1 {
+                    return Err(Error::Conflict(
+                        "Working bytes differ from the selected staged source".into(),
+                    ));
+                }
+            }
+            Ok::<_, Error>(selected)
+        })
+        .await
+        .map_err(|_| invalid("Source validation failed"))??;
+        let captured = if let Some((start, end)) = range {
+            AnchorEvidence::capture(actual, &bytes, start, end)?
+        } else {
+            AnchorEvidence::capture_file(actual, &bytes)?
+        };
+        if captured != *evidence {
+            return Err(Error::Conflict("Saved source or selected evidence changed; keep the body and refresh before commenting".into()));
         }
         Ok(())
     }
@@ -2995,128 +3507,302 @@ impl ReviewService {
         Ok(path.to_string_lossy().into_owned())
     }
 
-    pub fn new(database: Database, auth: AuthService) -> Self {
-        Self {
-            database,
-            auth,
-            sources: super::diff::DiffService::default(),
-        }
-    }
+    // Forge synchronization and recovery --------------------------------------
 
-    async fn comments_from_db_models<C: ConnectionTrait + TransactionTrait>(
-        rows: Vec<comments::Model>,
-        db: &db::Database<C>,
-    ) -> Result<Vec<Comment>> {
-        let mut ids = HashSet::new();
-        for r in &rows {
-            ids.insert(r.author_id);
-        }
-        let actors = load_actors(ids, db).await?;
-        rows.into_iter()
-            .map(|r| Comment::from_db_model(r.clone(), get_actor(&actors, &r.author_id)?))
-            .collect()
-    }
-
-    async fn comment_from_db_model<C: ConnectionTrait + TransactionTrait>(
-        row: comments::Model,
-        db: &db::Database<C>,
-    ) -> Result<Comment> {
-        Self::comments_from_db_models(vec![row], db)
-            .await?
-            .pop()
-            .ok_or_else(|| Error::NotFound("Comment".into()))
-    }
-
-    async fn threads_from_db_models<C: ConnectionTrait + TransactionTrait>(
-        rows: Vec<threads::Model>,
-        db: &db::Database<C>,
-    ) -> Result<Vec<Thread>> {
-        let mut ids = HashSet::new();
-        for r in &rows {
-            ids.insert(r.author_id);
-            if let Some(id) = &r.resolved_by_id {
-                ids.insert(*id);
-            }
-            if let Some(id) = &r.updated_by_id {
-                ids.insert(*id);
+    async fn validate_forge_evidence(
+        &self,
+        context: &Context,
+        session: &Session,
+        anchor: &Anchor,
+        evidence: &AnchorEvidence,
+    ) -> Result<()> {
+        self.validate_anchor_evidence(context, session, anchor, evidence, None)
+            .await?;
+        let ContextKey::ForgeBacked {
+            repository_url,
+            number,
+        } = &context.key
+        else {
+            return Err(invalid("Expected a PR context"));
+        };
+        // An open composer can still refer to verified bytes from before a PR refresh.
+        // Verify that exact source; posting derives a separate current placement.
+        let mut commits = session.commits.clone();
+        if let AnchorSource::Commit { sha, .. } = &evidence.source {
+            if matches!(anchor, Anchor::Line {side, ..} if side == "old") {
+                commits.base = Some(sha.clone());
+            } else {
+                commits.head = Some(sha.clone());
             }
         }
-        let actors = load_actors(ids, db).await?;
-        rows.into_iter()
-            .map(|r| {
-                Thread::from_db_model(
-                    r.clone(),
-                    get_actor(&actors, &r.author_id)?,
-                    r.resolved_by_id
-                        .as_ref()
-                        .map(|id| get_actor(&actors, id))
-                        .transpose()?,
-                    r.updated_by_id
-                        .as_ref()
-                        .map(|id| get_actor(&actors, id))
-                        .transpose()?,
+        self.sources
+            .get_anchor_evidence(
+                &context.paths,
+                ReviewTarget::PullRequest {
+                    repository_url: repository_url.as_str().into(),
+                    number: *number,
+                },
+                ReviewComparison::PullRequest {
+                    base_commit: commits
+                        .base
+                        .clone()
+                        .ok_or_else(|| invalid("PR base unavailable"))?,
+                    head_commit: commits
+                        .head
+                        .clone()
+                        .ok_or_else(|| invalid("PR head unavailable"))?,
+                },
+                anchor,
+                evidence,
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// PR acknowledgments refer to the canonical cache. Only local retries retain historical responses.
+    async fn get_receipt_result<
+        T: serde::de::DeserializeOwned,
+        D: ConnectionTrait + TransactionTrait,
+    >(
+        database: &db::Database<D>,
+        receipt: &mutation_receipts::Model,
+    ) -> Result<T> {
+        let value: serde_json::Value = serde_json::from_str(&receipt.result_json)?;
+        let value = if let Some(id) = value
+            .get("cached_comment")
+            .and_then(serde_json::Value::as_str)
+        {
+            let id = uuid::Uuid::parse_str(id)
+                .map_err(|_| invalid("Invalid cached comment reference"))?;
+            let row = database
+                .comments
+                .get_comment_by_id(&receipt.context_id, &id)
+                .await?
+                .ok_or_else(|| Error::NotFound("Comment".into()))?;
+            serde_json::to_value(Self::comment_from_db_model(row, database).await?)?
+        } else if let Some(ids) = value
+            .get("cached_comments")
+            .and_then(serde_json::Value::as_array)
+        {
+            let mut comments = Vec::with_capacity(ids.len());
+            for id in ids {
+                let id = uuid::Uuid::parse_str(
+                    id.as_str()
+                        .ok_or_else(|| invalid("Invalid cached comment reference"))?,
                 )
-            })
-            .collect()
+                .map_err(|_| invalid("Invalid cached comment reference"))?;
+                let row = database
+                    .comments
+                    .get_comment_by_id(&receipt.context_id, &id)
+                    .await?
+                    .ok_or_else(|| Error::NotFound("Promoted comment".into()))?;
+                comments.push(Self::comment_from_db_model(row, database).await?);
+            }
+            serde_json::to_value(comments)?
+        } else if let Some(id) = value
+            .get("cached_thread")
+            .and_then(serde_json::Value::as_str)
+        {
+            let id = uuid::Uuid::parse_str(id)
+                .map_err(|_| invalid("Invalid cached thread reference"))?;
+            let row = database
+                .comments
+                .get_thread(&receipt.context_id, &id)
+                .await?
+                .ok_or_else(|| Error::NotFound("Thread".into()))?;
+            serde_json::to_value(Self::thread_from_db_model(row, database).await?)?
+        } else if let Some(id) = value
+            .get("cached_review")
+            .and_then(serde_json::Value::as_str)
+        {
+            let id = uuid::Uuid::parse_str(id)
+                .map_err(|_| invalid("Invalid cached review reference"))?;
+            let row = database
+                .sessions
+                .get_by_id(&id)
+                .await?
+                .ok_or_else(|| Error::NotFound("Review".into()))?;
+            serde_json::to_value(Self::session_from_db_model(row, database).await?)?
+        } else {
+            value
+        };
+        Ok(serde_json::from_value(value)?)
     }
 
-    async fn thread_from_db_model<C: ConnectionTrait + TransactionTrait>(
-        row: threads::Model,
-        db: &db::Database<C>,
-    ) -> Result<Thread> {
-        Self::threads_from_db_models(vec![row], db)
+    async fn get_saved_mutation<T: serde::de::DeserializeOwned>(
+        &self,
+        context: &uuid::Uuid,
+        actor: &uuid::Uuid,
+        method: &str,
+        guard: &MutationGuard,
+    ) -> Result<Option<T>> {
+        let Some(receipt) = self
+            .database
+            .mutations
+            .get_result(context, actor, &guard.request_key)
             .await?
-            .pop()
-            .ok_or_else(|| Error::NotFound("Thread".into()))
+        else {
+            return Ok(None);
+        };
+        if receipt.method != method || receipt.request_hash != guard.payload_hash {
+            return Err(Error::Conflict(
+                "Retry key belongs to another action or payload".into(),
+            ));
+        }
+        Ok(Some(
+            Self::get_receipt_result(&self.database, &receipt).await?,
+        ))
     }
 
-    async fn sessions_from_db_models<C: ConnectionTrait + TransactionTrait>(
-        rows: Vec<sessions::Model>,
-        db: &db::Database<C>,
-    ) -> Result<Vec<Session>> {
-        let mut ids = HashSet::new();
-        for r in &rows {
-            ids.insert(r.creator_id);
-            if let Some(id) = &r.completed_by_id {
-                ids.insert(*id);
+    async fn begin_mutation<T: serde::de::DeserializeOwned>(
+        &self,
+        tx: &db::Transaction,
+        context: &uuid::Uuid,
+        actor: &uuid::Uuid,
+        method: &str,
+        guard: Option<&MutationGuard>,
+        advance: bool,
+    ) -> Result<Option<T>> {
+        if !tx.review_contexts.lock_for_write(context).await? {
+            return Err(Error::NotFound("Context".into()));
+        }
+        if let Some(guard) = guard {
+            if guard.request_key.trim().is_empty()
+                || guard.request_key.len() > 200
+                || guard.payload_hash.is_empty()
+            {
+                return Err(invalid("Mutation requires a bounded nonempty request key"));
+            }
+            if let Some(receipt) = tx
+                .mutations
+                .get_result(context, actor, &guard.request_key)
+                .await?
+            {
+                if receipt.method != method || receipt.request_hash != guard.payload_hash {
+                    return Err(Error::Conflict(
+                        "Retry key belongs to a different operation or payload".into(),
+                    ));
+                }
+                return Ok(Some(Self::get_receipt_result(tx, &receipt).await?));
             }
         }
-        let actors = load_actors(ids, db).await?;
-        rows.into_iter()
-            .map(|r| {
-                Session::from_db_model(
-                    r.clone(),
-                    get_actor(&actors, &r.creator_id)?,
-                    r.completed_by_id
-                        .as_ref()
-                        .map(|id| get_actor(&actors, id))
-                        .transpose()?,
-                )
-            })
-            .collect()
+        if advance {
+            if !tx
+                .review_contexts
+                .advance_revision(context, guard.and_then(MutationGuard::write_version))
+                .await?
+            {
+                return Err(Error::Conflict(
+                    "Review data changed; read its current version before editing".into(),
+                ));
+            }
+        } else if let Some(expected) = guard.and_then(MutationGuard::write_version)
+            && tx
+                .review_contexts
+                .get_by_id(context)
+                .await?
+                .is_none_or(|row| row.revision != expected)
+        {
+            return Err(Error::Conflict(
+                "Review data changed; read its current version".into(),
+            ));
+        }
+        Ok(None)
     }
 
-    async fn session_from_db_model<C: ConnectionTrait + TransactionTrait>(
-        row: sessions::Model,
-        db: &db::Database<C>,
-    ) -> Result<Session> {
-        Self::sessions_from_db_models(vec![row], db)
-            .await?
-            .pop()
-            .ok_or_else(|| Error::NotFound("Session".into()))
+    async fn record_mutation<T: serde::Serialize>(
+        tx: &db::Transaction,
+        context: &uuid::Uuid,
+        actor: &uuid::Uuid,
+        method: &str,
+        guard: Option<&MutationGuard>,
+        result: &T,
+    ) -> Result<()> {
+        if let Some(guard) = guard {
+            let context_row = tx
+                .review_contexts
+                .get_by_id(context)
+                .await?
+                .ok_or_else(|| Error::NotFound("Context".into()))?;
+            let value = serde_json::to_value(result)?;
+            let value = if context_row.kind == ContextKind::ForgeBacked {
+                match method {
+                    "add_comment" | "reply" | "edit_comment" => {
+                        serde_json::json!({"cached_comment":value["id"]})
+                    }
+                    "resolve" => serde_json::json!({"cached_thread":value["id"]}),
+                    "start_session" | "complete" => {
+                        serde_json::json!({"cached_review":value["id"]})
+                    }
+                    "promote_notes" => {
+                        serde_json::json!({"cached_comments":value.as_array().ok_or_else(|| invalid("Invalid promotion result"))?.iter().map(|comment| comment["id"].clone()).collect::<Vec<_>>()})
+                    }
+                    _ => value,
+                }
+            } else {
+                value
+            };
+            tx.mutations
+                .insert_result(&mutation_receipts::Model {
+                    context_id: *context,
+                    actor_id: *actor,
+                    request_key: guard.request_key.clone(),
+                    method: method.into(),
+                    request_hash: guard.payload_hash.clone(),
+                    result_json: serde_json::to_string(&value)?,
+                    object_id: None,
+                    pending: false,
+                    version: context_row.revision,
+                })
+                .await?;
+        }
+        Ok(())
     }
 
-    async fn context_from_db_model<D: ConnectionTrait + TransactionTrait>(
-        row: review_contexts::Model,
-        conn: &db::Database<D>,
-    ) -> Result<Context> {
-        let paths = conn
-            .workspace
-            .get_paths(&row.id)
-            .await?
-            .into_iter()
-            .map(|p| p.path)
-            .collect();
-        Context::from_db_model(row, paths)
+    async fn get_change_from_receipt<D: sea_orm::ConnectionTrait + sea_orm::TransactionTrait>(
+        &self,
+        database: &crate::database::Database<D>,
+        receipt: &mutation_receipts::Model,
+        input: &ForgeChangeInput,
+    ) -> Result<ForgeChange> {
+        let saved: ChangeReceipt = serde_json::from_str(&receipt.result_json)?;
+        let (_, object_id) = input.object();
+        let original = if saved.rejection.is_some()
+            || (!receipt.pending && matches!(input, ForgeChangeInput::Delete { .. }))
+        {
+            ForgeChangeObject::Deleted {
+                comment_id: object_id,
+            }
+        } else {
+            match input {
+                ForgeChangeInput::Edit { .. } | ForgeChangeInput::Delete { .. } => {
+                    let row = database
+                        .comments
+                        .get_comment_by_id(&receipt.context_id, &object_id)
+                        .await?
+                        .ok_or_else(|| Error::NotFound("Comment".into()))?;
+                    ForgeChangeObject::Comment(Box::new(
+                        Self::comment_from_db_model(row, database).await?,
+                    ))
+                }
+                ForgeChangeInput::Resolve { .. } => {
+                    let row = database
+                        .comments
+                        .get_thread(&receipt.context_id, &object_id)
+                        .await?
+                        .ok_or_else(|| Error::NotFound("Thread".into()))?;
+                    ForgeChangeObject::Thread(Box::new(
+                        Self::thread_from_db_model(row, database).await?,
+                    ))
+                }
+            }
+        };
+        Ok(ForgeChange {
+            input: input.clone(),
+            result: (!receipt.pending && saved.rejection.is_none()).then(|| original.clone()),
+            original,
+            rejection: saved.rejection,
+            deleted_remote: saved.deleted_remote,
+        })
     }
 }

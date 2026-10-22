@@ -9,7 +9,7 @@ import { profiles } from './fixtures.js'
 import { usePrEditor, selectBranchPr } from './pr-review.fixtures.js'
 import type { GithubFixture } from '../common/github.js'
 import { githubCredentials } from '../common/github.js'
-import { waitFor } from '../common/runtime.js'
+import { waitFor, type Json } from '../common/test-utils.js'
 import { expectFileSeen } from './assertions.js'
 
 async function publishConcerns(
@@ -597,7 +597,7 @@ for (const profile of profiles) {
   describe(`When submitting a draft review [${profile}]`, { tags: [profile] }, () => {
     const fixture = usePrEditor(profile)
 
-    it('The submit shortcut uses the active PR and publishes a final message', async () => {
+    it('Publishing keeps the diff open and further comments and replies start new pending reviews', async () => {
       // Arrange
       const { editor, github } = fixture()
       const initial = await selectBranchPr(editor, github)
@@ -643,6 +643,89 @@ for (const profile of profiles) {
       expect((await editor.notices()).some((notice) => notice.message === 'Review submitted')).toBe(
         true,
       )
+
+      // Act
+      await editor.pane('new', 2)
+      await editor.keys('c')
+      await editor.compose('More feedback after submission')
+      const continued = await waitFor(
+        'a new remote draft in the same PR diff',
+        () => editor.state(),
+        (state) =>
+          state?.conversation.comments.some(
+            (comment: Json) =>
+              comment.body === 'More feedback after submission' && comment.forgeCommentId,
+          ),
+        40_000,
+      )
+      const pending = await github.api(
+        `repos/${github.repository}/pulls/${github.number}/reviews/${continued!.review.forgeReviewId}`,
+      )
+
+      // Assert
+      expect(continued!.review.id).not.toBe(submitted.review.id)
+      expect(continued!.review.state).toBe('active')
+      expect(continued!.scope.reviewId).toBe(continued!.review.id)
+      expect(continued!.review.forgeReviewId).not.toBe(submitted.review.forgeReviewId)
+      expect(continued!.panes.new.buf).toBe(initial.panes.new.buf)
+      expect(pending.state).toBe('PENDING')
+      expect(JSON.stringify(await editor.marks())).toContain('Published')
+      expect(JSON.stringify(await editor.marks())).toContain('GitHub draft')
+      expect(continued!.conversation.comments).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ body: 'Inline editor feedback', visibility: 'published' }),
+          expect.objectContaining({ body: 'More feedback after submission', visibility: 'draft' }),
+        ]),
+      )
+
+      // Act
+      await editor.choose('comment')
+      await editor.keys(' rs')
+      await editor.compose('Second published review')
+      const second = (await editor.state())!
+      await editor.pane('new', 2)
+      await editor.popup('Inline editor feedback')
+      await editor.keys('c')
+      await editor.compose('Follow-up reply after publishing')
+      const replied = await waitFor(
+        'a new pending reply after the second submission',
+        () => editor.state(),
+        (state) =>
+          state?.conversation.comments.some(
+            (comment: Json) =>
+              comment.body === 'Follow-up reply after publishing' && comment.forgeCommentId,
+          ),
+        40_000,
+      )
+      const previous = await github.api(
+        `repos/${github.repository}/pulls/${github.number}/reviews/${submitted.review.forgeReviewId}`,
+      )
+      const replyDrafts = await github.api<Array<{ body: string; in_reply_to_id?: number }>>(
+        `repos/${github.repository}/pulls/${github.number}/reviews/${replied!.review.forgeReviewId}/comments`,
+      )
+
+      // Assert
+      expect(second.review.submissionStatus).toBe('confirmed')
+      expect(replied!.review.id).not.toBe(second.review.id)
+      expect(replied!.review.state).toBe('active')
+      expect(replied!.panes.new.buf).toBe(initial.panes.new.buf)
+      expect(previous).toMatchObject({
+        state: 'COMMENTED',
+        body: expect.stringContaining('Final editor message'),
+      })
+      expect(replyDrafts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            body: expect.stringContaining('Follow-up reply after publishing'),
+            in_reply_to_id: expect.any(Number),
+          }),
+        ]),
+      )
+      expect(
+        (await editor.notices()).some((notice) =>
+          notice.message.includes('Completed session metadata'),
+        ),
+      ).toBe(false)
     })
 
     it('A rejected self-review leaves the final message editable and allows a corrected outcome', async () => {

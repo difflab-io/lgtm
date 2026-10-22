@@ -59,7 +59,7 @@ Git reviews use CodeDiff's file tree and diff panes. Directory reviews show an L
 | Toggle the current file as reviewed | `<leader>rm` |
 | Switch side-by-side and inline layouts | `:Lgtm layout` |
 
-A checkmark identifies a reviewed file. Toggle the same action to remove it. Marks apply to Working, Staged, Branch, PR, and directory reviews, not ordinary notes. They last only for the open review and do not set GitHub's Viewed state.
+A checkmark identifies a reviewed file. Toggle the same action to remove it. Marks apply to Working, Staged, Branch, PR, and directory reviews, not ordinary notes. Local marks persist across editor restarts. PR marks read and update GitHub's Viewed state.
 
 The plugin clears a mark when either compared side changes. A hidden file also loses its mark when its working or staged source changes. Use side-by-side layout when you need to select deleted lines for comments.
 
@@ -114,7 +114,7 @@ Promotion retains the original note and author. It copies the selected top-level
 
 Each successful comment change saves immediately. Run `:Lgtm save` if you want confirmation that the active review is saved. Run `:Lgtm close` or press `<leader>rq` to close the review view without completing it.
 
-To resume, run `:Lgtm sessions` or press `<leader>rS`. Filter the list, select a saved review, and press Enter. Saved reviews keep their recorded comparison. If an older review has no recorded comparison, inspect its threads or export its feedback; LGTM does not guess which files it reviewed.
+To resume, run `:Lgtm sessions` or press `<leader>rS`. Filter the list, select a saved review, and press Enter. Saved reviews keep their recorded comparison.
 
 Run `:Lgtm sessions completed` to inspect saved and completed reviews. Run `:Lgtm complete` when you want to finish a local review. Completion retains its discussion and open threads. It does not submit anything to GitHub.
 
@@ -129,7 +129,9 @@ Lowercase `<leader>rs` submits the active PR review. Uppercase `<leader>rS` open
 5. Press Ctrl-S to submit.
 6. Wait for the review-submitted notification.
 
-For your own PR, choose `comment`; GitHub rejects self-approval and self-request-changes. A rejected submission keeps your review editable and retains its pending comments and final text. Choose another outcome and submit again. For a frozen failure saved by an older backend, `:Lgtm reconcile` checks GitHub and restores editing when rejection is confirmed.
+For your own PR, choose `comment`; GitHub rejects self-approval and self-request-changes. A rejected submission keeps your review editable and retains its pending comments and final text. Choose another outcome and submit again. If the submission result is unclear, use `:Lgtm reconcile` before retrying.
+
+After a successful submission, keep reviewing in the same diff. Your next comment or reply starts a new pending review for that PR. Published comments remain visible, and the earlier review keeps its final message and outcome. Merely opening a discussion or cancelling a composer does not start another review.
 
 The pending GitHub draft becomes the submitted review. Closing the view or saving a comment alone does not submit it. If submission fails, retain the final text and follow the recovery notification before trying again.
 

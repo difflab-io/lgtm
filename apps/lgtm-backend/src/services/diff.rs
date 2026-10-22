@@ -1,13 +1,14 @@
 //! Content comparisons and selected-file reads. This service has no review database handle.
 use crate::extensions::gh;
+use crate::forge::ForgeClient;
 use crate::{
     error::{Error, Result, invalid},
-    forge::{Github, Repository},
+    forge::{GithubClient, Repository},
+    models::WorkspaceFile,
     models::{
         Anchor, AnchorSource, ContentSide, DiffComparison, DiffContent, DiffFile, ReviewComparison,
         ReviewTarget,
     },
-    utils::WorkspaceFile,
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -28,18 +29,26 @@ struct CachedSource {
 
 #[derive(Clone, Default)]
 pub struct DiffService {
-    provider: Option<Github>,
+    provider: Option<GithubClient>,
     selected_sources: Arc<Mutex<VecDeque<CachedSource>>>,
 }
 
 impl DiffService {
-    async fn get_provider(&self) -> Result<Github> {
-        match &self.provider {
-            Some(provider) => Ok(provider.clone()),
-            None => Github::from_environment().await,
+    // Public ------------------------------------------------------------------
+
+    // Construction and configuration ------------------------------------------
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_provider(provider: GithubClient) -> Self {
+        Self {
+            provider: Some(provider),
+            ..Self::default()
         }
     }
 
+    // Diffs and source placement ----------------------------------------------
     /// Verify supplied PR evidence against immutable bytes, preferring associated local Git objects.
     /// Previously served immutable bytes can be verified without another forge request.
     pub async fn get_anchor_evidence(
@@ -127,7 +136,7 @@ impl DiffService {
         if let Some(bytes) = cached {
             return verify(&bytes);
         }
-        let repo = Repository::parse(&repository_url)?;
+        let repo = Repository::from_repository_url(&repository_url)?;
         let (_, files) = self
             .get_remote_workspace(&repo, number, Some(&base_commit), &head_commit, "", true)
             .await?;
@@ -531,7 +540,7 @@ impl DiffService {
                 if number < 1 {
                     return Err(invalid("PR number must be positive"));
                 }
-                let repo = Repository::parse(&repository_url)?;
+                let repo = Repository::from_repository_url(&repository_url)?;
                 let pull = self
                     .get_provider()
                     .await?
@@ -605,7 +614,7 @@ impl DiffService {
             },
         ) = (&diff.target, &diff.comparison)
         {
-            let repo = Repository::parse(repository_url)?;
+            let repo = Repository::from_repository_url(repository_url)?;
             let (_, files) = self
                 .get_remote_workspace(&repo, *number, Some(base_commit), head_commit, path, false)
                 .await?;
@@ -699,6 +708,16 @@ impl DiffService {
         Ok(DiffContent { file, old, new })
     }
 
+    // Private -----------------------------------------------------------------
+
+    // Content loading and identity --------------------------------------------
+    async fn get_provider(&self) -> Result<GithubClient> {
+        match &self.provider {
+            Some(provider) => Ok(provider.clone()),
+            None => GithubClient::from_environment().await,
+        }
+    }
+
     async fn get_local_root(&self, diff: &DiffComparison) -> Result<PathBuf> {
         let root = match &diff.target {
             ReviewTarget::Directory { path } if diff.comparison == ReviewComparison::Directory => {
@@ -744,7 +763,7 @@ impl DiffService {
                     "Remote comparison cannot claim a local content root",
                 ));
             }
-            let repo = Repository::parse(repository_url)?;
+            let repo = Repository::from_repository_url(repository_url)?;
             let (_, files) = self
                 .get_remote_workspace(&repo, *number, Some(base_commit), head_commit, "", true)
                 .await?;
@@ -944,16 +963,5 @@ impl DiffService {
             return Err(invalid("Git metadata exceeds the bounded response limit"));
         }
         Ok(output.stdout)
-    }
-
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_provider(provider: Github) -> Self {
-        Self {
-            provider: Some(provider),
-            ..Self::default()
-        }
     }
 }

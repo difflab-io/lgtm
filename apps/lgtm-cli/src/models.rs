@@ -1,4 +1,4 @@
-//! CLI review target and attribution arguments; no persistence or forge access.
+//! Shared CLI argument models; no persistence, RPC transport or forge access.
 use clap::{Args, ValueEnum};
 use std::path::PathBuf;
 
@@ -42,4 +42,15 @@ pub struct ActorArgs {
     pub provider: Option<String>,
     #[arg(long)]
     pub identity: Option<String>,
+}
+
+/// Optional guards for replaying the same reviewed mutation from a shell.
+#[derive(Args, Default)]
+pub struct MutationArgs {
+    /// Version returned by the conversation or selected object.
+    #[arg(long)]
+    pub(crate) expected_version: Option<String>,
+    /// Reuse only with the exact original payload and expected version.
+    #[arg(long, requires = "expected_version")]
+    pub(crate) request_key: Option<String>,
 }

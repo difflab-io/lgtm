@@ -6,10 +6,11 @@
 import { describe, it, expect } from 'vitest'
 import { readFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
-import { useRuntime } from '../common/fixtures.js'
-import type { Json, Runtime } from '../common/runtime.js'
+import { useTestHarness } from '../common/fixtures.js'
+import type { TestHarness } from '../common/test-harness.js'
+import type { Json } from '../common/test-utils.js'
 
-async function prepareDirectory(r: Runtime) {
+async function prepareDirectory(r: TestHarness) {
   await r.git('init', '-q', '-b', 'main')
   const plans = join(r.workspace, '.difflab/plans/private-plan')
   await r.write('.gitignore', '.difflab/\n')
@@ -18,7 +19,7 @@ async function prepareDirectory(r: Runtime) {
   return { plans, review }
 }
 
-async function prepareDirectoryDiscussion(r: Runtime) {
+async function prepareDirectoryDiscussion(r: TestHarness) {
   const { plans, review } = await prepareDirectory(r)
   const note = (
     await r.json([
@@ -38,7 +39,7 @@ async function prepareDirectoryDiscussion(r: Runtime) {
 }
 
 describe('When starting a local directory review', () => {
-  const fixture = useRuntime('cli')
+  const fixture = useTestHarness('cli')
   it('User can review ignored content and edit its feedback', { tags: ['smoke'] }, async () => {
     // Arrange
     const { runtime: r } = fixture()
@@ -81,7 +82,7 @@ describe('When starting a local directory review', () => {
 })
 
 describe('When promoting local feedback', () => {
-  const fixture = useRuntime('cli')
+  const fixture = useTestHarness('cli')
   it('User can copy selected feedback to a review without modifying its source', async () => {
     // Arrange
     const { runtime: r } = fixture()
@@ -119,7 +120,7 @@ describe('When promoting local feedback', () => {
 })
 
 describe('When completing and resuming a local review', () => {
-  const fixture = useRuntime('cli')
+  const fixture = useTestHarness('cli')
   it('User can resume, complete and start a successor while retaining discussions', async () => {
     // Arrange
     const { runtime: r } = fixture()
@@ -149,7 +150,7 @@ describe('When completing and resuming a local review', () => {
 })
 
 describe('When a local review directory moves', () => {
-  const fixture = useRuntime('cli')
+  const fixture = useTestHarness('cli')
   it('User can resume the same review at its new location', async () => {
     // Arrange
     const { runtime: r } = fixture()
@@ -186,7 +187,7 @@ describe('When a local review directory moves', () => {
 })
 
 describe('When exporting a working-tree review', () => {
-  const fixture = useRuntime('cli')
+  const fixture = useTestHarness('cli')
   it('User gets readable old-side feedback, replies and final text without internal state', async () => {
     // Arrange
     const { runtime: r } = fixture()
@@ -257,7 +258,7 @@ describe('When exporting a working-tree review', () => {
 })
 
 describe('When staged changes become branch commits', () => {
-  const fixture = useRuntime('cli')
+  const fixture = useTestHarness('cli')
   it('User retains exact index evidence and feedback across the commit', async () => {
     // Arrange
     const { runtime: r } = fixture()

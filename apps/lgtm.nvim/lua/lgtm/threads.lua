@@ -262,6 +262,20 @@ function M.mutate(state, method, input, done)
     end
     return
   end
+  if method == "Reply" and state.kind == "pr" and state.review.state == "completed" then
+    require("lgtm.context").ensure_writable(state, function(write_error)
+      if write_error then
+        if done then
+          done(write_error)
+        else
+          require("lgtm.notifications").error(write_error)
+        end
+      else
+        M.mutate(state, method, input, done)
+      end
+    end)
+    return
+  end
   input.scope = state.scope
   local object
   for _, comment in ipairs((state.conversation or {}).comments or {}) do

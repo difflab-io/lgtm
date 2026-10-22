@@ -1,6 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises'
 import { randomUUID } from 'node:crypto'
-import { command, type Json, type Runtime } from './runtime.js'
+import { command, type TestHarness } from './test-harness.js'
+import { type Json } from './test-utils.js'
 
 const githubRepository = process.env.LGTM_E2E_GITHUB_REPOSITORY ?? 'skapoor8/lgtm-e2e'
 
@@ -131,7 +132,7 @@ export class GithubFixture {
     throw new Error(`GitHub has not indexed fixture PR ${number}`)
   }
 
-  async checkout(runtime: Runtime) {
+  async checkout(runtime: TestHarness) {
     await runtime.git('init', '-q', '-b', this.headBranch)
     await runtime.git('remote', 'add', 'origin', `${this.repositoryUrl}.git`)
     await runtime.git(

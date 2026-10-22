@@ -8,10 +8,10 @@ import { join } from 'node:path'
 import { readFile, rename, copyFile } from 'node:fs/promises'
 import { profiles, useEditor } from './fixtures.js'
 import type { Editor } from './editor.js'
-import type { Runtime } from '../common/runtime.js'
-import { waitFor, type Json } from '../common/runtime.js'
+import type { TestHarness } from '../common/test-harness.js'
+import { waitFor, type Json } from '../common/test-utils.js'
 
-async function prepareBrowsingFile(r: Runtime) {
+async function prepareBrowsingFile(r: TestHarness) {
   await r.git('init', '-q', '-b', 'main')
   const file = await r.write('notes.txt', 'one\ntwo\nthree\n')
   await r.write('.gitignore', '.difflab\n')
@@ -20,7 +20,7 @@ async function prepareBrowsingFile(r: Runtime) {
   return file
 }
 
-async function prepareNote(e: Editor, r: Runtime, body: string, reply?: string) {
+async function prepareNote(e: Editor, r: TestHarness, body: string, reply?: string) {
   const file = await prepareBrowsingFile(r)
 
   await e.edit(file)

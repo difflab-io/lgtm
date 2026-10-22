@@ -4,7 +4,8 @@ import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { decodeMultiStream, encode } from '@msgpack/msgpack'
-import { ROOT, Runtime, stop, waitFor, type Json } from '../common/runtime.js'
+import { ROOT, TestHarness, stop } from '../common/test-harness.js'
+import { waitFor, type Json } from '../common/test-utils.js'
 
 /** Operates a real editor. Helpers perform actions; specifications own assertions. */
 export class Editor {
@@ -17,7 +18,7 @@ export class Editor {
     { resolve: (value: unknown) => void; reject: (error: Error) => void }
   >()
   constructor(
-    readonly runtime: Runtime,
+    readonly runtime: TestHarness,
     readonly profile: 'required' | 'kak',
   ) {}
 

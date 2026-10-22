@@ -1,40 +1,14 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { appendFileSync } from 'node:fs'
 import { once } from 'node:events'
 import { join, resolve } from 'node:path'
-import { setTimeout as delay } from 'node:timers/promises'
 import { expect } from 'vitest'
+import { waitFor, type Json } from './test-utils.js'
 
-// Connect JSON accepts arbitrary wire fields at the process boundary.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type Json = Record<string, any>
 export const ROOT = resolve(import.meta.dirname, '../..')
 export const binary = (name: string) =>
   join(process.env.CARGO_TARGET_DIR ?? join(ROOT, 'target'), 'debug', name)
-export const hash = (bytes: string | Buffer) =>
-  `sha256:${createHash('sha256').update(bytes).digest('hex')}`
-
-export async function waitFor<T>(
-  description: string,
-  read: () => Promise<T>,
-  ready: (value: T) => boolean = Boolean,
-  timeout = 10_000,
-): Promise<T> {
-  const deadline = Date.now() + timeout
-  let last: unknown
-  while (Date.now() < deadline) {
-    try {
-      const value = await read()
-      if (ready(value)) return value
-    } catch (error) {
-      last = error
-    }
-    await delay(20)
-  }
-  throw new Error(`Timed out: ${description}`, { cause: last })
-}
 
 export function isolatedEnv(home: string): NodeJS.ProcessEnv {
   const env = {
@@ -104,8 +78,8 @@ export async function stop(child?: ChildProcess) {
   }
 }
 
-/** One real process and database per journey. Failed runs retain all evidence. */
-export class Runtime {
+/** Own a real application process, isolated database/workspace and the clients used by one test journey. Failed runs retain evidence. */
+export class TestHarness {
   endpoint = ''
   actor = ''
   rpcTimeoutMs = 40_000
@@ -250,7 +224,7 @@ export class Runtime {
       workspace = join(directory, 'workspace')
     await mkdir(home)
     await mkdir(workspace)
-    const runtime = new Runtime(directory, home, workspace, kind)
+    const runtime = new TestHarness(directory, home, workspace, kind)
     Object.assign(runtime.env, env)
     try {
       await runtime.launch()

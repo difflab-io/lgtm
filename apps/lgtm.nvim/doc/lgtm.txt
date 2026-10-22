@@ -39,8 +39,8 @@ m in tree / <leader>rm      Toggle selected/current file reviewed (✓).
 ]f/[f Tab/Shift-Tab          Next/previous file or unreviewed file.
 
 Reviewed (seen) marks apply to PR, branch, working-tree, staged and directory
-reviews, not notes. Content changes clear marks. Marks last for the open review;
-they do not survive editor restarts or sync GitHub's Viewed state.
+reviews, not notes. Content changes clear marks. Local marks survive editor
+restarts. PR marks read and update GitHub's Viewed state.
 
 Comments use full-width status/preview cards. Lost selections float above the
 file with their original range and excerpt. Deleted files retain orphaned
@@ -72,7 +72,13 @@ comments. :Lgtm refresh retries a saved move without creating another discussion
 
 Exports contain numbered Markdown feedback, old-side ~ locations, replies and
 final review text. Exporting does not change saved feedback or submit a review.
-A changed PR base/head requires an explicit comparison choice. Closed or merged
-PRs keep saved drafts and history; they cannot accept a new submission.
+PR refresh and draft saves follow new base/head commits. A push that races
+submission requires a refresh before retrying. Closed or merged PRs keep saved
+drafts and history; they cannot accept a new submission.
+
+After submitting, keep the diff open and continue commenting. Saving the next
+comment or reply starts a new pending review for the same PR. Published comments
+and final text stay published. Reconcile an uncertain submission before starting
+another draft.
 
  vim:tw=78:ts=8:noet:ft=help:norl:

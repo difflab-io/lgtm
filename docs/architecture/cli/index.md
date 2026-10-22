@@ -40,8 +40,11 @@ Neovim connects to the running backend. Review and comment commands use the same
 - [Daemon](daemon.md): Start, discover, and stop the server
 - [Server](server.md): Serve web assets and API requests
 - [Store](store.md): Own runtime paths and PID/port files
+- `commands/`: Own one command group per file; share target, identity and output helpers in its module
+- `models.rs`: Shared command arguments; no RPC transport or persistence
+- `rpc_client.rs`: Generated Rust gRPC clients and connection discovery
 - `ui`: Build review URLs and open the browser
-- Bundled backend: Serve review, identity, greeting and health services
+- Bundled backend: Serve review, diff, identity, greeting and health services
 
 
 ```mermaid
@@ -49,7 +52,11 @@ flowchart TD
     MAIN["main: parse CLI command"] --> STORE["Store: select runtime directory"]
     MAIN --> DAEMON["daemon: up / down / status"]
     MAIN --> SERVER["server: serve"]
-    MAIN --> UI["ui: review path"]
+    MAIN --> COMMANDS["commands: review / session / sessions / comments"]
+    COMMANDS --> MODELS["models: shared CLI arguments"]
+    COMMANDS --> CLIENT["rpc_client: generated gRPC clients"]
+    COMMANDS --> UI["ui: browser review path"]
+    CLIENT --> BACKEND["Shared backend API"]
     MAIN --> LOG["log: initialize server logging"]
 ```
 
@@ -70,7 +77,7 @@ ReviewService and database access stay in the backend. Session/comment commands 
 
 #### Review flows
 
-Session and comment commands use generated backend clients. The browser `review` entry point opens the demonstration UI; `review --json` starts a review through RPC. Only the server opens review storage or calls the forge.
+Session and comment commands use generated backend clients. The browser `review` entry point opens the demonstration UI; `review --json` starts a review through RPC. Only the server opens review storage or calls the forge. Adding or replying after a confirmed PR submission selects a new active attempt for the same PR; the submitted attempt remains immutable.
 
 ```mermaid
 flowchart TD
@@ -119,7 +126,11 @@ Uncertain remote writes use saved receipts and explicit reconciliation. They are
 | `status`            | Print server URLs                         |
 | `status --json`     | Print discovery data                      |
 | `review`            | Open the current directory in the UI      |
-| `serve --daemonize` | Internal background startup               |
+| `review --json` | Start or resume a review through the backend |
+| `session` | Start, show, refresh, export, complete or submit a review |
+| `sessions` | List saved review attempts |
+| `comments` | Add, reply, edit, delete, resolve, reopen or promote feedback |
+| `serve --daemonize` | Internal background startup |
 
 The default port is `8080`. Port `0` asks the operating system for an available port. `--no-open` suppresses browser launch for `up` and `review`.
 
@@ -127,9 +138,26 @@ The default port is `8080`. Port `0` asks the operating system for an available 
 
 ## Implementation
 
+### File organization
+
+```text
+apps/lgtm-cli/src/
+├── main.rs                   Root parsing and dispatch
+├── models.rs                 Shared command arguments
+├── rpc_client.rs             RPC transport and discovery
+└── commands/
+    ├── mod.rs                Shared selection, identity and output helpers
+    ├── review.rs             Browser and machine review entry points
+    ├── session.rs            Start, show, refresh, export, complete and submit
+    ├── sessions.rs           Saved-review listing
+    └── comments.rs           Comments, replies, resolution and promotion
+```
+
+Each command file puts local types first, then its command argument struct, callbacks and private helpers. Backend services retain persistence and forge behavior.
+
 ### Command definitions
 
-Clap derives argument parsing from Rust types. The internal `serve` command is hidden from normal help. `main()` returns `anyhow::Result<()>`, so parsing and runtime errors do not report command success.
+Clap derives argument parsing from Rust types. The internal `serve` command is hidden from normal help. `run()` returns `anyhow::Result<()>`. `main()` prints errors to stderr or as JSON and exits with a nonzero status.
 
 ### Runtime boundary
 
@@ -137,7 +165,7 @@ Background startup uses a fresh copy of the executable. That copy calls `daemon:
 
 ### Backend inclusion
 
-The `backend` module comes from `bundle/backend.rs`. The tracked bundle task includes the backend router, generated review/diff protocol types, and database sources before compilation. Review commands never embed a second persistence workflow.
+The `backend` module comes from `bundle/backend/mod.rs`. The tracked bundle task includes the backend router, generated review/diff protocol types, and database sources before compilation. Review commands never embed a second persistence workflow.
 
 ## References
 

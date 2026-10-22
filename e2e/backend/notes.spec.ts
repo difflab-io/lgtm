@@ -7,11 +7,12 @@ import { describe, it, expect } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { copyFile, mkdir, readFile, rename, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { useRuntime } from '../common/fixtures.js'
-import { hash, type Runtime, type Json } from '../common/runtime.js'
+import { useTestHarness } from '../common/fixtures.js'
+import { type TestHarness } from '../common/test-harness.js'
+import { hash, type Json } from '../common/test-utils.js'
 import { line } from './anchors.js'
 
-async function prepareNote(runtime: Runtime) {
+async function prepareNote(runtime: TestHarness) {
   await runtime.identify()
   const bytes = 'before\r\nselected\r\nafter'
   const file = await runtime.write('notes/one.md', bytes)
@@ -28,7 +29,7 @@ async function prepareNote(runtime: Runtime) {
 }
 
 describe('When taking notes while browsing files', () => {
-  const fixture = useRuntime('backend')
+  const fixture = useTestHarness('backend')
 
   it(
     'User can persist an exact line selection without creating a review',
@@ -123,7 +124,7 @@ describe('When taking notes while browsing files', () => {
 })
 
 describe('When discussing and exporting notes', () => {
-  const fixture = useRuntime('backend')
+  const fixture = useTestHarness('backend')
 
   it('User can reply, resolve and export a note without changing its stored discussion', async () => {
     // Arrange
@@ -205,7 +206,7 @@ describe('When discussing and exporting notes', () => {
 })
 
 describe('When a note file moves', () => {
-  const fixture = useRuntime('backend')
+  const fixture = useTestHarness('backend')
 
   it('A copied file cannot claim the original notes location', async () => {
     // Arrange
@@ -271,7 +272,7 @@ describe('When a note file moves', () => {
 })
 
 describe('When a note file is deleted and restored', () => {
-  const fixture = useRuntime('backend')
+  const fixture = useTestHarness('backend')
 
   it('User keeps file-level feedback orphaned until the original bytes return', async () => {
     // Arrange

@@ -5,13 +5,13 @@
  * @module-tag pr-review
  */
 import { describe, it, expect } from 'vitest'
-import { usePrRuntime } from '../common/pr-runtime.js'
+import { usePrFixture } from '../common/pr.fixtures.js'
 import { githubCredentials } from '../common/github.js'
 
 const secondaryUser = process.env.LGTM_E2E_GITHUB_SECONDARY_USER ?? 'skapoor81'
 
 describe('When starting a fresh draft review', () => {
-  const fixture = usePrRuntime('cli')
+  const fixture = usePrFixture('cli')
 
   it(
     'User can select a PR and immediately persist an inline draft',
@@ -160,7 +160,7 @@ describe('When starting a fresh draft review', () => {
 })
 
 describe('When resuming an existing draft review', () => {
-  const fixture = usePrRuntime('cli')
+  const fixture = usePrFixture('cli')
 
   it('User sees existing drafts and can continue the same pending review after restart', async () => {
     // Arrange
@@ -210,7 +210,7 @@ describe('When resuming an existing draft review', () => {
 })
 
 describe('When there are changes during a PR review', () => {
-  const fixture = usePrRuntime('cli')
+  const fixture = usePrFixture('cli')
 
   it('User can refresh and continue commenting after new commits without replacing the review', async () => {
     // Arrange
@@ -268,7 +268,7 @@ describe('When there are changes during a PR review', () => {
 })
 
 describe('When submitting a draft review', () => {
-  const fixture = usePrRuntime('cli')
+  const fixture = usePrFixture('cli')
 
   it('Authentication failure returns a JSON error, retains drafts and allows recovery', async () => {
     // Arrange
@@ -326,7 +326,7 @@ describe('When submitting a draft review', () => {
     expect(corrected.review.submissionStatus).toBe('confirmed')
   })
 
-  it('User can submit comments and export the final review message', async () => {
+  it('User can submit comments, export final feedback and continue with a new draft', async () => {
     // Arrange
     const { runtime, github } = fixture()
     const pr = `${github.repositoryUrl}/pull/${github.number}`
@@ -357,6 +357,48 @@ describe('When submitting a draft review', () => {
     })
     for (const text of ['General CLI feedback', 'Final CLI message'])
       expect(exported.markdown).toContain(text)
+
+    // Act
+    const saved = await runtime.json([
+      'comments',
+      'add',
+      '--pr',
+      pr,
+      '--file',
+      github.path,
+      '--line',
+      '2',
+      '--body',
+      'CLI feedback after publishing',
+    ])
+    const continued = await runtime.json(['session', 'show', '--pr', pr])
+    const previous = await runtime.json([
+      'session',
+      'show',
+      '--pr',
+      pr,
+      '--session',
+      submitted.review.id,
+    ])
+    const pending = await github.api(
+      `repos/${github.repository}/pulls/${github.number}/reviews/${continued.review.forgeReviewId}`,
+    )
+
+    // Assert
+    expect(continued.review.id).not.toBe(submitted.review.id)
+    expect(continued.review.state).toBe('active')
+    expect(saved.comment).toMatchObject({
+      body: 'CLI feedback after publishing',
+      visibility: 'draft',
+      originSessionId: continued.review.id,
+    })
+    expect(saved.comment.forgeCommentId).toBeTruthy()
+    expect(pending.state).toBe('PENDING')
+    expect(previous.review).toMatchObject({
+      state: 'completed',
+      submissionStatus: 'confirmed',
+      body: 'Final CLI message',
+    })
   })
 
   it.each(['approve', 'request_changes'])(
@@ -453,7 +495,7 @@ describe('When submitting a draft review', () => {
 })
 
 describe('When addressing published comments or change requests', () => {
-  const fixture = usePrRuntime('cli')
+  const fixture = usePrFixture('cli')
 
   it('User can reply to another reviewer with a draft and submit a comment response', async () => {
     // Arrange

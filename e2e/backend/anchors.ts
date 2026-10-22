@@ -1,4 +1,4 @@
-import { hash } from '../common/runtime.js'
+import { hash } from '../common/test-utils.js'
 
 /** A line selection from exact local bytes, including its surrounding evidence. */
 export const line = (bytes: string, path = '') => ({

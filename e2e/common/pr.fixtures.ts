@@ -1,9 +1,9 @@
 import { beforeAll, beforeEach, afterEach, afterAll } from 'vitest'
 import { GithubFixture } from './github.js'
-import { useRuntime } from './fixtures.js'
+import { useTestHarness } from './fixtures.js'
 
 /** Share one owned PR per state group, with a fresh process and database for each case. */
-export function usePrRuntime(kind: 'backend' | 'cli') {
+export function usePrFixture(kind: 'backend' | 'cli') {
   let github: GithubFixture
   const fixtures: GithubFixture[] = []
 
@@ -31,6 +31,6 @@ export function usePrRuntime(kind: 'backend' | 'cli') {
       .map((result) => result.reason)
     if (errors.length) throw new AggregateError(errors, 'GitHub fixture cleanup failed')
   })
-  const runtime = useRuntime(kind, () => github.env)
+  const runtime = useTestHarness(kind, () => github.env)
   return () => ({ ...runtime(), github })
 }

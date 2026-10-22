@@ -4,8 +4,8 @@ mod common;
 mod review_service {
     //! Review service persistence, lifecycle and external failure contracts.
     mod concurrency {
+        use lgtm_backend::forge::models::*;
         use lgtm_backend::models::*;
-        use lgtm_backend::utils::*;
 
         use crate::common;
 
@@ -209,7 +209,7 @@ mod review_service {
         }
     }
     mod forge {
-        use lgtm_backend::utils::*;
+        use lgtm_backend::{forge::models::*, utils::*};
         use lgtm_backend::{models::*, services::*};
         use lgtm_db::types as lgtm_db_types;
 
@@ -839,7 +839,7 @@ mod review_service {
                 assert_eq!(live.comments.len(), 3);
                 assert_eq!(live.sessions.len(), 2);
                 assert!(
-                    lgtm_backend::utils::export_feedback(&live, &closed)
+                    live.export_feedback(&closed)
                         .contains("New review, same thread")
                 );
                 assert_eq!(
@@ -1313,7 +1313,7 @@ mod review_service {
                     .unwrap();
                 assert_eq!(replay.id, completed.id);
                 assert_eq!(replay.creator.name, "Renamed profile");
-                let exported = lgtm_backend::utils::export_feedback(&conversation, &replay);
+                let exported = conversation.export_feedback(&replay);
                 assert!(exported.contains("Renamed profile"));
                 assert!(!exported.contains("Alice <alice@example.com>"));
                 let mut changed_model = current.clone();
@@ -1559,8 +1559,8 @@ mod review_service {
     mod context_boundaries {
         use crate::common;
         use lgtm_backend::{
+            forge::models::{ForgeSnapshot, PostReceipt},
             models::*,
-            utils::{ForgeSnapshot, PostReceipt},
         };
 
         // tests ---------------------------------------------------------------

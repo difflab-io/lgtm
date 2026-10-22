@@ -3,7 +3,7 @@ use lgtm_backend::models::ComparisonKind;
 mod common;
 use common::github_http::{Fixture, Request};
 use lgtm_backend::{
-    forge::Github,
+    forge::GithubClient,
     models::{Anchor, CommitContext, ContextKey, ForgeRepositoryUrl},
     services::forge::ForgeService,
 };
@@ -254,7 +254,7 @@ async fn should_submit_final_body_and_comments_once_and_reconcile_lost_response(
             let fixture = fixture(state.clone());
             let forge = ForgeService::with_provider(
                 reviews.clone(),
-                Github::for_test(&fixture.endpoint).unwrap(),
+                GithubClient::for_test(&fixture.endpoint).unwrap(),
             );
             let actor = reviews
                 .auth()
@@ -392,7 +392,7 @@ async fn should_reject_stale_head_before_freezing_or_writing() {
         let fixture = fixture(state.clone());
         let forge = ForgeService::with_provider(
             reviews.clone(),
-            Github::for_test(&fixture.endpoint).unwrap(),
+            GithubClient::for_test(&fixture.endpoint).unwrap(),
         );
         let actor = reviews
             .auth()
@@ -446,7 +446,7 @@ async fn should_roll_back_every_staged_comment_when_a_later_payload_changed() {
         let fixture = fixture(Arc::new(Mutex::new(Remote::default())));
         let forge = ForgeService::with_provider(
             reviews.clone(),
-            Github::for_test(&fixture.endpoint).unwrap(),
+            GithubClient::for_test(&fixture.endpoint).unwrap(),
         );
         let actor = reviews
             .auth()
@@ -551,7 +551,7 @@ async fn should_finalize_only_verified_pending_review_and_never_replay_missing_c
             let fixture = fixture(state.clone());
             let forge = ForgeService::with_provider(
                 reviews.clone(),
-                Github::for_test(&fixture.endpoint).unwrap(),
+                GithubClient::for_test(&fixture.endpoint).unwrap(),
             );
             let actor = reviews
                 .auth()
@@ -679,7 +679,7 @@ mod pending_drafts {
                 let fixture = fixture(state.clone());
                 let forge = ForgeService::with_provider(
                     reviews.clone(),
-                    Github::for_test(&fixture.endpoint).unwrap(),
+                    GithubClient::for_test(&fixture.endpoint).unwrap(),
                 );
                 let actor = reviews
                     .auth()
@@ -736,7 +736,7 @@ mod pending_drafts {
                 // A fresh service has no in-memory receipt or lock; recover only from durable/provider evidence.
                 let forge = ForgeService::with_provider(
                     reviews.clone(),
-                    Github::for_test(&fixture.endpoint).unwrap(),
+                    GithubClient::for_test(&fixture.endpoint).unwrap(),
                 );
                 let draft = forge
                     .sync_draft(&session.id, &comment.id, &actor)
@@ -815,7 +815,7 @@ async fn should_keep_original_anchors_and_refresh_current_provider_locations_ind
         let server = fixture(state.clone());
         let forge = ForgeService::with_provider(
             reviews.clone(),
-            Github::for_test(&server.endpoint).unwrap(),
+            GithubClient::for_test(&server.endpoint).unwrap(),
         );
         let context = reviews
             .ensure_context(
@@ -883,7 +883,7 @@ async fn should_follow_a_changed_base_but_reject_closed_or_merged_publication_wi
         let server = fixture(state.clone());
         let forge = ForgeService::with_provider(
             reviews.clone(),
-            Github::for_test(&server.endpoint).unwrap(),
+            GithubClient::for_test(&server.endpoint).unwrap(),
         );
         let actor = reviews
             .auth()
@@ -1006,7 +1006,7 @@ async fn should_recover_remote_edits_resolution_and_deletion_after_response_loss
         let server = fixture(state.clone());
         let forge = ForgeService::with_provider(
             reviews.clone(),
-            Github::for_test(&server.endpoint).unwrap(),
+            GithubClient::for_test(&server.endpoint).unwrap(),
         );
         let actor = reviews
             .auth()
@@ -1093,7 +1093,7 @@ async fn should_recover_remote_edits_resolution_and_deletion_after_response_loss
             state.lock().unwrap().lose_mutation_response = true;
             assert!(
                 forge
-                    .change(&session.id, &actor, input.clone(), Some(&guard))
+                    .apply_change(&session.id, &actor, input.clone(), Some(&guard))
                     .await
                     .is_err()
             );
@@ -1141,10 +1141,10 @@ async fn should_recover_remote_edits_resolution_and_deletion_after_response_loss
             let reopened = common::service(&url).await.unwrap();
             let restarted = ForgeService::with_provider(
                 reopened.clone(),
-                Github::for_test(&server.endpoint).unwrap(),
+                GithubClient::for_test(&server.endpoint).unwrap(),
             );
             let result = restarted
-                .change(&session.id, &actor, input.clone(), Some(&guard))
+                .apply_change(&session.id, &actor, input.clone(), Some(&guard))
                 .await
                 .unwrap();
             match (key, result) {
@@ -1182,7 +1182,7 @@ async fn should_recover_remote_edits_resolution_and_deletion_after_response_loss
                     .unwrap()
             );
             restarted
-                .change(&session.id, &actor, input, Some(&guard))
+                .apply_change(&session.id, &actor, input, Some(&guard))
                 .await
                 .unwrap();
             assert_eq!(
@@ -1203,7 +1203,7 @@ async fn should_keep_pr_identity_and_pending_review_across_pushes_but_freeze_com
         let server = fixture(remote.clone());
         let forge = ForgeService::with_provider(
             reviews.clone(),
-            Github::for_test(&server.endpoint).unwrap(),
+            GithubClient::for_test(&server.endpoint).unwrap(),
         );
         let actor = reviews
             .auth()
@@ -1309,7 +1309,7 @@ async fn should_use_targeted_actions_and_never_restore_confirmed_remote_deletion
         let server = fixture(remote.clone());
         let forge = ForgeService::with_provider(
             reviews.clone(),
-            Github::for_test(&server.endpoint).unwrap(),
+            GithubClient::for_test(&server.endpoint).unwrap(),
         );
         let actor = reviews
             .auth()
@@ -1389,7 +1389,7 @@ async fn should_use_targeted_actions_and_never_restore_confirmed_remote_deletion
         remote.lock().unwrap().other_viewer = true;
         assert!(
             forge
-                .change(
+                .apply_change(
                     &session.id,
                     &actor,
                     delete.clone(),
@@ -1414,7 +1414,7 @@ async fn should_use_targeted_actions_and_never_restore_confirmed_remote_deletion
         }
         assert!(
             forge
-                .change(
+                .apply_change(
                     &session.id,
                     &actor,
                     delete.clone(),
@@ -1453,7 +1453,7 @@ async fn should_use_targeted_actions_and_never_restore_confirmed_remote_deletion
         remote.lock().unwrap().requests.clear();
         // Resolution is acknowledged by the mutation itself: no /user or whole-PR scans.
         forge
-            .change(
+            .apply_change(
                 &session.id,
                 &actor,
                 ForgeChangeInput::Resolve {
@@ -1476,7 +1476,7 @@ async fn should_use_targeted_actions_and_never_restore_confirmed_remote_deletion
         };
         let guard = MutationGuard::new(None, "delete-fast".into());
         assert!(
-            matches!(forge.change(&session.id, &actor, delete.clone(), Some(&guard)).await.unwrap(), ForgeChangeObject::Deleted {comment_id} if comment_id == draft.id)
+            matches!(forge.apply_change(&session.id, &actor, delete.clone(), Some(&guard)).await.unwrap(), ForgeChangeObject::Deleted {comment_id} if comment_id == draft.id)
         );
         {
             let state = remote.lock().unwrap();
@@ -1504,10 +1504,10 @@ async fn should_use_targeted_actions_and_never_restore_confirmed_remote_deletion
         let reopened = common::service(&url).await.unwrap();
         let restarted = ForgeService::with_provider(
             reopened.clone(),
-            Github::for_test(&server.endpoint).unwrap(),
+            GithubClient::for_test(&server.endpoint).unwrap(),
         );
         restarted
-            .change(&session.id, &actor, delete, Some(&guard))
+            .apply_change(&session.id, &actor, delete, Some(&guard))
             .await
             .unwrap();
         assert_eq!(
@@ -1541,7 +1541,7 @@ async fn should_keep_self_review_validation_and_rejected_submissions_editable_wi
             let server = fixture(remote.clone());
             let forge = ForgeService::with_provider(
                 reviews.clone(),
-                Github::for_test(&server.endpoint).unwrap(),
+                GithubClient::for_test(&server.endpoint).unwrap(),
             );
             let actor = reviews
                 .auth()
@@ -1673,7 +1673,7 @@ async fn should_keep_self_review_validation_and_rejected_submissions_editable_wi
             let reopened = common::service(&url).await.unwrap();
             let forge = ForgeService::with_provider(
                 reopened.clone(),
-                Github::for_test(&server.endpoint).unwrap(),
+                GithubClient::for_test(&server.endpoint).unwrap(),
             );
             let current = reopened.get_session(&session.id).await.unwrap();
             assert_eq!(current.forge_review_id.as_deref(), Some("5"));

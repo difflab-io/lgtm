@@ -1,6 +1,8 @@
 use super::super::database::models::threads;
 use super::super::error::Result;
 use super::{Actor, Anchor, AnchorEvidence, ForgeObservation, OrphanReason};
+use crate::{models as m, proto::lgtm::v1 as p};
+use connectrpc::ConnectError;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -28,6 +30,8 @@ pub struct Thread {
 }
 
 impl Thread {
+    // Public ------------------------------------------------------------------
+
     pub fn from_db_model(
         v: threads::Model,
         author: Actor,
@@ -77,6 +81,72 @@ impl Thread {
                 _ => Anchor::General,
             },
         })
+    }
+
+    // RPC conversion ----------------------------------------------------------
+
+    /// Convert the domain value and include its concurrency token.
+    pub(crate) fn into_versioned_proto(
+        self,
+        version: i64,
+    ) -> std::result::Result<p::Thread, ConnectError> {
+        let value = self;
+        let token = crate::models::ExpectedObject::get_version(
+            m::ObjectKind::Thread,
+            version,
+            value.id,
+            &value,
+        )
+        .map_err(ConnectError::from)?;
+        let mut value = m::Thread::into_proto(value);
+        value.version = token;
+        Ok(value)
+    }
+
+    /// Convert the domain value to its RPC representation.
+    pub(crate) fn into_proto(self) -> p::Thread {
+        let v = self;
+        let mut original = m::Anchor::into_proto(v.anchor);
+        if let Some(evidence) = v.evidence {
+            original.source = Some(m::AnchorSource::into_proto(evidence.source)).into();
+            original.evidence = Some(p::AnchorEvidence {
+                selected_text: evidence.selected_text,
+                context_before: evidence.context_before,
+                context_after: evidence.context_after,
+                ..Default::default()
+            })
+            .into();
+        }
+        p::Thread {
+            id: v.id.to_string(),
+            anchor: Some(original).into(),
+            current_path: v.current_path.unwrap_or_default(),
+            source_path: v.source_path.unwrap_or_default(),
+            orphan_reason: v
+                .orphan_reason
+                .map(|r| {
+                    match r {
+                        m::OrphanReason::FileDeleted => "file_deleted",
+                        m::OrphanReason::WorkingSourceChanged => "working_source_changed",
+                    }
+                    .to_owned()
+                })
+                .unwrap_or_default(),
+            forge_observation: v
+                .forge_observation
+                .map(|o| p::ForgeObservation {
+                    base: o.base,
+                    head: o.head,
+                    outdated: o.outdated,
+                    current: o.current.map(m::Anchor::into_proto).into(),
+                    ..Default::default()
+                })
+                .into(),
+            state: v.state,
+            author: Some(m::Actor::into_proto(v.author)).into(),
+            forge_thread_id: v.forge_thread_id.unwrap_or_default(),
+            ..Default::default()
+        }
     }
 }
 

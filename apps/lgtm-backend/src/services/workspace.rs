@@ -1,7 +1,7 @@
 //! Explicit local content selection. Ignored files are included for notes roots.
 use crate::error::{Result, invalid};
+use crate::models::WorkspaceFile;
 use crate::models::{Context, ContextKey, LocalLocation};
-use crate::utils::WorkspaceFile;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 

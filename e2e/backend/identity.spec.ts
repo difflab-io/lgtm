@@ -3,10 +3,10 @@
  * @module-tag backend
  */
 import { describe, it, expect } from 'vitest'
-import { useRuntime } from '../common/fixtures.js'
+import { useTestHarness } from '../common/fixtures.js'
 
 describe('When discovering the review API', () => {
-  const fixture = useRuntime('backend')
+  const fixture = useTestHarness('backend')
 
   it('Consumers can discover the supported review contracts without creating reviews', async () => {
     // Arrange

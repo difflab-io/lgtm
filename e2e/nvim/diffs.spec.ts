@@ -6,10 +6,11 @@
 import { join } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { profiles, useEditor } from './fixtures.js'
-import { waitFor, type Runtime } from '../common/runtime.js'
+import { type TestHarness } from '../common/test-harness.js'
+import { waitFor } from '../common/test-utils.js'
 import { expectFileSeen } from './assertions.js'
 
-async function prepareNativeCheckout(runtime: Runtime) {
+async function prepareNativeCheckout(runtime: TestHarness) {
   await runtime.git('init', '-q', '-b', 'main')
   await runtime.write('review.txt', 'old\n')
   await runtime.write('src/lib.rs', 'pub fn old() {}\n// second line\n// third line\n')

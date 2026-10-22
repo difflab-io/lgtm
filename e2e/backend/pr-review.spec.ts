@@ -6,9 +6,9 @@
  */
 import { describe, it, expect } from 'vitest'
 import { randomUUID } from 'node:crypto'
-import { usePrRuntime } from '../common/pr-runtime.js'
+import { usePrFixture } from '../common/pr.fixtures.js'
 import { githubCredentials } from '../common/github.js'
-import type { Json } from '../common/runtime.js'
+import type { Json } from '../common/test-utils.js'
 import {
   prepareReview,
   saveDraft,
@@ -20,7 +20,7 @@ import {
 const secondaryUser = process.env.LGTM_E2E_GITHUB_SECONDARY_USER ?? 'skapoor81'
 
 describe('When starting a fresh draft review', () => {
-  const fixture = usePrRuntime('backend')
+  const fixture = usePrFixture('backend')
 
   it('User can start a review for the selected PR', async () => {
     // Arrange
@@ -357,7 +357,7 @@ describe('When starting a fresh draft review', () => {
 })
 
 describe('When resuming an existing draft review', () => {
-  const fixture = usePrRuntime('backend')
+  const fixture = usePrFixture('backend')
 
   it('User continues to see existing GitHub drafts after a backend restart', async () => {
     // Arrange
@@ -425,7 +425,7 @@ describe('When resuming an existing draft review', () => {
 })
 
 describe('When there are changes during a PR review', () => {
-  const fixture = usePrRuntime('backend')
+  const fixture = usePrFixture('backend')
 
   it.each([
     ['an unrelated file changes', 'unrelated'],
@@ -565,7 +565,7 @@ describe('When there are changes during a PR review', () => {
 })
 
 describe('When submitting a draft review', () => {
-  const fixture = usePrRuntime('backend')
+  const fixture = usePrFixture('backend')
 
   it('User can submit comments with a final message', async () => {
     // Arrange
@@ -697,7 +697,7 @@ describe('When submitting a draft review', () => {
 })
 
 describe('When addressing published comments or change requests', () => {
-  const fixture = usePrRuntime('backend')
+  const fixture = usePrFixture('backend')
 
   async function publishedConcern() {
     const { runtime, github } = fixture()
@@ -901,7 +901,7 @@ describe('When addressing published comments or change requests', () => {
 })
 
 describe('When a PR is closed or merged', () => {
-  const fixture = usePrRuntime('backend')
+  const fixture = usePrFixture('backend')
 
   it('Closing and reopening a PR preserves its pending feedback and review identity', async () => {
     // Arrange
@@ -953,7 +953,7 @@ describe('When a PR is closed or merged', () => {
 })
 
 describe('When exporting PR feedback', () => {
-  const fixture = usePrRuntime('backend')
+  const fixture = usePrFixture('backend')
 
   it('Export identifies file, author, thread state and selected feedback without database state', async () => {
     // Arrange

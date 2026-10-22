@@ -3,7 +3,7 @@
 ## Repo Structure
 
 - Keep backend domain models in `apps/lgtm-backend/src/models/`, services in `src/services/`, and application errors in `src/error.rs`.
-- Put general helpers and external import/export contracts in `src/utils.rs`. Domain models represent application entities.
+- Put general helpers in `src/utils.rs`. Keep forge import contracts in `src/forge/models.rs` and review export behavior with its domain model. Domain models represent application entities.
 - Keep database entities private; expose actual SeaORM models and the repositories required by backend workflows. Shared SeaORM entity types belong in `libs/lgtm-db/src/entities/common.rs`.
 
 ## Docs
@@ -19,7 +19,8 @@
 - Name mutating operations and factories with imperative verbs (for example, `promote`, not `promoted`).
 
 - Name public repository and service reads `get_*`.
-- Use one inherent `impl` block per type per file. Put instance methods first, associated functions after them, and required trait implementations after the inherent block.
+- Use one inherent `impl` block per type per file. Put constructors and configuration methods first, then public operations, then private helpers. Put required trait implementations after the inherent block. Add `// Public` and `// Private` section headers, padded with hyphens to column 80, and use logical subsection headers such as `// Sessions`, `// Threads` and `// Comments` to group related methods.
+- Keep one main model type per file where practical. Keep validators and `from_*` / `to_*` / `into_*` conversions beside that type; RPC modules contain transport handlers, not model conversion functions.
 - Separate functions with a blank line. Keep unit tests last, after a `// tests ---` separator padded to column 80.
 - Use `// fixtures ---` and `// tests ---` separators padded to column 80 in test files.
 - Call standard/library functions directly. Do not add aliases that only forward one method call.
@@ -46,6 +47,10 @@ These rules apply to every app and library in the workspace.
 - Organize E2E specs by top-level `When ...` states and native `it` cases for individual observable behaviors. Put suite and feature labels in Vitest tags. A state group may share run-owned PRs through `beforeAll`/`afterAll`; reset relevant remote feedback between independent cases. Keep credentials scoped to test processes and never switch the user’s active GitHub account during tests.
 - Keep shared process and GitHub lifecycle fixtures in `e2e/common/`. Compose editor lifecycle hooks once under `e2e/nvim/`. Keep feature setup in adjacent `*.fixtures.ts` files, and keep small single-file helpers private in their spec. Export only helpers that another module uses.
 
+## CLI
+
+- Keep each command group in its own file under `apps/lgtm-cli/src/commands/`. Order each file as local types, command argument struct, command callbacks, then private helpers. Keep shared command argument types in `src/models.rs` and transport in `src/rpc_client.rs`.
+
 ## Backend
 
 - Models validate, map data and implement domain behavior. They must not query or mutate the database; services own persistence orchestration and relationship loading.
@@ -54,4 +59,4 @@ These rules apply to every app and library in the workspace.
 - Expose database queries and mutations only through named repository methods. The DB client is the single source of truth for the persistence rules encapsulated by those operations. Do not expose raw connections, generic query builders or raw SQL escape hatches to callers.
 - Expose only operations needed by agreed backend workflows. Update explicit mutable columns.
 - Establish tracing spans at CLI/RPC boundaries. Services use tracing macros and do not store request spans.
-- Keep CLI review/session/comment commands scaffold-only until backend review RPCs exist. Preserve daemon, greeting/health RPC and dummy UI behavior; do not embed review persistence in the CLI.
+- Keep CLI review/session/comment commands as backend RPC clients. Preserve daemon and greeting/health behavior; do not embed review persistence in the CLI.

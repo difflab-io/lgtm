@@ -1,10 +1,11 @@
 import type { Editor } from './editor.js'
-import { type Runtime, waitFor, type Json } from '../common/runtime.js'
+import { type TestHarness } from '../common/test-harness.js'
+import { waitFor, type Json } from '../common/test-utils.js'
 import { join } from 'node:path'
 import { mkdir, symlink } from 'node:fs/promises'
 
 /** Establish real index-backed feedback, while the working file already has a different line layout. */
-export async function prepareStagedFeedback(editor: Editor, runtime: Runtime) {
+export async function prepareStagedFeedback(editor: Editor, runtime: TestHarness) {
   await runtime.git('init', '-q', '-b', 'main')
   const path = 'src/source [literal] ü.txt'
   const moved = 'moved/source [literal] ü.txt'
@@ -39,7 +40,7 @@ export async function prepareStagedFeedback(editor: Editor, runtime: Runtime) {
   return { path, moved, stagedBytes, shifted, oid, rootId, original, replyId }
 }
 
-export async function prepareCommittedFeedback(editor: Editor, runtime: Runtime) {
+export async function prepareCommittedFeedback(editor: Editor, runtime: TestHarness) {
   const feedback = await prepareStagedFeedback(editor, runtime)
   await editor.command('Lgtm complete')
   await editor.wait(
@@ -60,7 +61,7 @@ export async function prepareCommittedFeedback(editor: Editor, runtime: Runtime)
   return feedback
 }
 
-export async function prepareShiftedFeedback(editor: Editor, runtime: Runtime) {
+export async function prepareShiftedFeedback(editor: Editor, runtime: TestHarness) {
   const feedback = await prepareCommittedFeedback(editor, runtime)
   await runtime.commit('insert leading line')
   await editor.openLocal('branch', true)
@@ -68,7 +69,7 @@ export async function prepareShiftedFeedback(editor: Editor, runtime: Runtime) {
   return feedback
 }
 
-export async function prepareRenamedFeedback(editor: Editor, runtime: Runtime) {
+export async function prepareRenamedFeedback(editor: Editor, runtime: TestHarness) {
   const feedback = await prepareShiftedFeedback(editor, runtime)
   await runtime.git('mv', 'src', 'moved')
   await runtime.commit('move reviewed directory')
@@ -84,7 +85,7 @@ export async function prepareRenamedFeedback(editor: Editor, runtime: Runtime) {
   return feedback
 }
 
-export async function prepareLostSelection(editor: Editor, runtime: Runtime) {
+export async function prepareLostSelection(editor: Editor, runtime: TestHarness) {
   const feedback = await prepareRenamedFeedback(editor, runtime)
   await runtime.write(feedback.moved, feedback.shifted.replace('selected', 'replacement'))
   await runtime.commit('replace reviewed selection')
@@ -93,7 +94,7 @@ export async function prepareLostSelection(editor: Editor, runtime: Runtime) {
   return feedback
 }
 
-export async function prepareDeletedFile(editor: Editor, runtime: Runtime) {
+export async function prepareDeletedFile(editor: Editor, runtime: TestHarness) {
   const feedback = await prepareRenamedFeedback(editor, runtime)
   await runtime.git('rm', '--', feedback.moved)
   await runtime.commit('delete reviewed file')
@@ -108,7 +109,7 @@ export async function prepareDeletedFile(editor: Editor, runtime: Runtime) {
   return feedback
 }
 
-export async function prepareRestoredFile(editor: Editor, runtime: Runtime) {
+export async function prepareRestoredFile(editor: Editor, runtime: TestHarness) {
   const feedback = await prepareDeletedFile(editor, runtime)
   await runtime.write(feedback.moved, feedback.shifted)
   await runtime.commit('restore matching source')
@@ -117,7 +118,7 @@ export async function prepareRestoredFile(editor: Editor, runtime: Runtime) {
   return feedback
 }
 
-export async function prepareWorkingFeedback(editor: Editor, runtime: Runtime) {
+export async function prepareWorkingFeedback(editor: Editor, runtime: TestHarness) {
   const feedback = await prepareRenamedFeedback(editor, runtime)
   await editor.command('Lgtm complete')
   await editor.wait(
@@ -146,7 +147,7 @@ export async function prepareWorkingFeedback(editor: Editor, runtime: Runtime) {
   }
 }
 
-export async function prepareOrphanedWorkingFeedback(editor: Editor, runtime: Runtime) {
+export async function prepareOrphanedWorkingFeedback(editor: Editor, runtime: TestHarness) {
   const feedback = await prepareWorkingFeedback(editor, runtime)
   await runtime.write('other.txt', 'changed working selection\n')
   await editor.command('Lgtm refresh')
@@ -163,7 +164,7 @@ export async function prepareOrphanedWorkingFeedback(editor: Editor, runtime: Ru
   return feedback
 }
 
-export async function prepareIgnoredWorkspace(runtime: Runtime) {
+export async function prepareIgnoredWorkspace(runtime: TestHarness) {
   await runtime.git('init', '-q', '-b', 'main')
   await runtime.write('.gitignore', '.difflab\n')
   await runtime.commit('base')
@@ -175,14 +176,14 @@ export async function prepareIgnoredWorkspace(runtime: Runtime) {
   return plans
 }
 
-export async function prepareIgnoredDirectory(editor: Editor, runtime: Runtime) {
+export async function prepareIgnoredDirectory(editor: Editor, runtime: TestHarness) {
   const plans = await prepareIgnoredWorkspace(runtime)
   await editor.command(`Lgtm directory ${plans}`)
   await editor.loaded()
   return plans
 }
 
-export async function prepareIgnoredDiscussion(editor: Editor, runtime: Runtime) {
+export async function prepareIgnoredDiscussion(editor: Editor, runtime: TestHarness) {
   const plans = await prepareIgnoredDirectory(editor, runtime)
   await editor.pane('new', 2)
   await editor.keys(' rc')

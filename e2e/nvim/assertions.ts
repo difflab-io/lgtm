@@ -1,6 +1,6 @@
 import { expect } from 'vitest'
 import type { Editor } from './editor.js'
-import { waitFor } from '../common/runtime.js'
+import { waitFor } from '../common/test-utils.js'
 
 export async function expectFileSeen(e: Editor, path: string, expected: boolean) {
   // Assert

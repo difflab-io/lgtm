@@ -1,6 +1,6 @@
 # LGTM
 
-LGTM is a local code and document review tool for people and agents. The planned browser and Neovim interfaces support local reviews, GitHub pull request reviews, and annotations on arbitrary files, including ignored plans.
+LGTM is a local code and document review tool for people and agents. The CLI and Neovim plugin support local reviews, GitHub pull request reviews, and annotations on arbitrary files, including ignored plans. The browser review interface is planned.
 
 ## Features
 

@@ -1,136 +1,94 @@
 //! Octocrab-backed GitHub REST/GraphQL API with complete paginated snapshots.
+use super::{ForgeClient, models::Repository};
 use crate::extensions::gh::{self, COMMENTS_QUERY, number, opaque, request, text};
 use crate::{
     error::{Error, Result, invalid},
-    models::{Anchor, ContextKey, ForgeRepositoryUrl},
-    utils::{ForgeSnapshot, PullRequest, RemoteAuthor, RemoteComment, RemoteThread},
+    forge::models::{ForgeSnapshot, PullRequest, RemoteAuthor, RemoteComment, RemoteThread},
+    models::Anchor,
 };
 use octocrab::Octocrab;
 use serde_json::{Value, json};
 
-/// Validated github.com repository scope. IDs remain scoped opaque strings.
-#[derive(Clone, Debug)]
-pub struct Repository {
-    pub owner: String,
-    pub name: String,
-    pub repository_url: String,
-}
-
-impl Repository {
-    pub fn route(&self) -> String {
-        format!("/repos/{}/{}", self.owner, self.name)
-    }
-
-    pub fn parse(repository_url: &str) -> Result<Self> {
-        let repository_url = ForgeRepositoryUrl::parse(repository_url)?;
-        let url = url::Url::parse(repository_url.as_str())
-            .map_err(|_| invalid("Invalid repository URL"))?;
-        if url.scheme() != "https" || url.host_str() != Some("github.com") || url.port().is_some() {
-            return Err(invalid(
-                "Only https://github.com repositories are supported",
-            ));
-        }
-        let parts: Vec<_> = url.path().trim_matches('/').split('/').collect();
-        if parts.len() != 2
-            || parts.iter().any(|v| {
-                v.is_empty()
-                    || !v
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
-            })
-        {
-            return Err(invalid("GitHub repository URL requires owner/repository"));
-        }
-        let name = parts[1].trim_end_matches(".git");
-        if name.is_empty() {
-            return Err(invalid("GitHub repository name is empty"));
-        }
-        Ok(Self {
-            owner: parts[0].into(),
-            name: name.into(),
-            repository_url: format!("https://github.com/{}/{}", parts[0], name),
-        })
-    }
-
-    pub fn from_context(key: &ContextKey) -> Result<(Self, i64)> {
-        match key {
-            ContextKey::ForgeBacked {
-                repository_url,
-                number,
-            } => Ok((Self::parse(repository_url.as_str())?, *number)),
-            _ => Err(invalid("Remote operations require a forge-backed context")),
-        }
-    }
-}
-
 /// Cloneable provider. Test construction always uses an inert fixture token.
 #[derive(Clone)]
-pub struct Github {
+pub struct GithubClient {
     pub(crate) client: Octocrab,
 }
 
-impl Github {
-    pub async fn get_pull_requests(
-        &self,
-        repo: &Repository,
-        query: &str,
-        page: u32,
-    ) -> Result<(Vec<PullRequest>, u32)> {
-        let page = page.max(1);
-        // Search is server-side, not a misleading filter of one REST page.
-        if !query.trim().is_empty() {
-            let result = self.get("/search/issues", Some(&json!({"q":format!("repo:{}/{} is:pr is:open {}", repo.owner, repo.name, query),"per_page":30,"page":page}))).await?;
-            let mut entries = vec![];
-            let items = result["items"]
-                .as_array()
-                .ok_or_else(|| invalid("Malformed GitHub search response"))?;
-            for item in items {
-                entries.push(self.get_pull_request(repo, number(item, "number")?).await?);
+impl GithubClient {
+    // Public ------------------------------------------------------------------
+
+    // Construction and configuration ------------------------------------------
+
+    pub async fn from_environment() -> Result<Self> {
+        if let Ok(endpoint) = std::env::var("LGTM_GITHUB_TEST_API_URL") {
+            if std::env::var("LGTM_GITHUB_TEST_MODE").as_deref() != Ok("1") {
+                return Err(invalid("Test GitHub endpoint requires explicit test mode"));
             }
-            let next = if u64::from(page) * 30 < result["total_count"].as_u64().unwrap_or(0) {
-                page + 1
-            } else {
-                0
-            };
-            return Ok((entries, next));
+            return Self::for_test(&endpoint);
         }
-        let response = self
-            .get(
-                &format!("{}/pulls", repo.route()),
-                Some(&json!({"state":"open","per_page":30,"page":page})),
-            )
-            .await?;
-        let items = response
-            .as_array()
-            .ok_or_else(|| invalid("Malformed GitHub PR list"))?;
-        let entries = items
-            .iter()
-            .map(|v| pull_request(repo, v))
-            .collect::<Result<Vec<_>>>()?;
-        Ok((entries, if items.len() == 30 { page + 1 } else { 0 }))
+        let account = std::env::var("LGTM_GITHUB_ACCOUNT").ok();
+        let token = gh::get_token(account.as_deref()).await?;
+        let client = Octocrab::builder()
+            .personal_token(token)
+            .build()
+            .map_err(|_| invalid("Could not initialize GitHub client"))?;
+        Ok(Self { client })
     }
 
-    pub async fn get_pull_request(&self, repo: &Repository, pr: i64) -> Result<PullRequest> {
-        pull_request(
-            repo,
-            &self
-                .get(&format!("{}/pulls/{pr}", repo.route()), None)
-                .await?,
-        )
-    }
-
-    pub async fn get_account_id(&self) -> Result<String> {
-        opaque(&self.get("/user", None).await?, "id")
-    }
-
-    /// Retry one complete observation if commits move while its pages are loading.
-    /// Provider writes are never retried by this read path.
-    pub async fn get_snapshot(&self, repo: &Repository, pr: i64) -> Result<ForgeSnapshot> {
-        match self.get_snapshot_once(repo, pr).await {
-            Err(Error::Conflict(_)) => self.get_snapshot_once(repo, pr).await,
-            result => result,
+    /// Explicit HTTP fixture boundary; refuses remote hosts and never reads real credentials.
+    pub fn for_test(endpoint: &str) -> Result<Self> {
+        let url = url::Url::parse(endpoint).map_err(|_| invalid("Invalid GitHub test endpoint"))?;
+        if url.scheme() != "http"
+            || !matches!(url.host_str(), Some("127.0.0.1" | "[::1]" | "localhost"))
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+        {
+            return Err(invalid(
+                "GitHub test endpoint must be credential-free loopback HTTP",
+            ));
         }
+        let client = Octocrab::builder()
+            .base_uri(endpoint)
+            .map_err(|_| invalid("Invalid test endpoint"))?
+            .personal_token("lgtm-test-fixture-only".to_owned())
+            .build()
+            .map_err(|_| invalid("Could not initialize test GitHub client"))?;
+        Ok(Self { client })
     }
+
+    // Transport ---------------------------------------------------------------
+
+    pub async fn get(&self, route: &str, params: Option<&Value>) -> Result<Value> {
+        request(self.client.get(route, params)).await
+    }
+
+    pub async fn post(&self, route: &str, body: &Value) -> Result<Value> {
+        request(self.client.post(route, Some(body))).await
+    }
+
+    pub async fn patch(&self, route: &str, body: &Value) -> Result<Value> {
+        request(self.client.patch(route, Some(body))).await
+    }
+
+    pub async fn delete(&self, route: &str) -> Result<()> {
+        request(async {
+            let response = self.client._delete(route, None::<&()>).await?;
+            octocrab::map_github_error(response).await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn graphql(&self, body: Value) -> Result<Value> {
+        request(self.client.graphql(&body)).await
+    }
+
+    // Private -----------------------------------------------------------------
+
+    // Snapshots and response mapping ------------------------------------------
 
     async fn get_snapshot_once(&self, repo: &Repository, pr: i64) -> Result<ForgeSnapshot> {
         let initial = self.get_pull_request(repo, pr).await?;
@@ -173,7 +131,7 @@ impl Github {
                     .iter()
                     .enumerate()
                     .map(|(i, c)| {
-                        remote_comment(
+                        Self::remote_comment(
                             c,
                             "review_comment",
                             if i > 0 { Some(root_id.clone()) } else { None },
@@ -253,7 +211,7 @@ impl Github {
                 if item["body"].as_str().is_none_or(|v| v.trim().is_empty()) {
                     continue;
                 }
-                let mut c = remote_rest_comment(&item, kind)?;
+                let mut c = Self::remote_rest_comment(&item, kind)?;
                 if kind == "review" {
                     c.review_id = Some(c.id.clone());
                 }
@@ -326,132 +284,136 @@ impl Github {
         })
     }
 
-    pub async fn get(&self, route: &str, params: Option<&Value>) -> Result<Value> {
-        request(self.client.get(route, params)).await
-    }
-
-    pub async fn post(&self, route: &str, body: &Value) -> Result<Value> {
-        request(self.client.post(route, Some(body))).await
-    }
-
-    pub async fn patch(&self, route: &str, body: &Value) -> Result<Value> {
-        request(self.client.patch(route, Some(body))).await
-    }
-
-    pub async fn delete(&self, route: &str) -> Result<()> {
-        request(async {
-            let response = self.client._delete(route, None::<&()>).await?;
-            octocrab::map_github_error(response).await?;
-            Ok(())
+    fn pull_request(repo: &Repository, v: &Value) -> Result<PullRequest> {
+        Ok(PullRequest {
+            number: number(v, "number")?,
+            state: if v["merged"] == true || v["merged_at"].is_string() {
+                crate::database::types::ForgeState::Merged
+            } else if v["state"] == "closed" {
+                crate::database::types::ForgeState::Closed
+            } else {
+                crate::database::types::ForgeState::Open
+            },
+            title: text(v, "title")?,
+            head: text(&v["head"], "sha")?,
+            base: text(&v["base"], "sha")?,
+            repository_url: repo.repository_url.clone(),
+            author_account_id: v.get("user").map(|user| opaque(user, "id")).transpose()?,
         })
-        .await
     }
 
-    pub async fn graphql(&self, body: Value) -> Result<Value> {
-        request(self.client.graphql(&body)).await
+    fn remote_author(user: &Value) -> Result<RemoteAuthor> {
+        let name = text(user, "login")?;
+        let account_id = opaque(
+            user,
+            if user.get("databaseId").is_some() {
+                "databaseId"
+            } else {
+                "id"
+            },
+        )?;
+        Ok(RemoteAuthor {
+            name: name.clone(),
+            email: format!("{account_id}+{name}@users.noreply.github.com"),
+            account_id,
+        })
     }
 
-    pub async fn from_environment() -> Result<Self> {
-        if let Ok(endpoint) = std::env::var("LGTM_GITHUB_TEST_API_URL") {
-            if std::env::var("LGTM_GITHUB_TEST_MODE").as_deref() != Ok("1") {
-                return Err(invalid("Test GitHub endpoint requires explicit test mode"));
+    fn remote_comment(v: &Value, kind: &str, reply_to: Option<String>) -> Result<RemoteComment> {
+        Ok(RemoteComment {
+            pending: v["pullRequestReview"]["state"] == "PENDING",
+            id: opaque(v, "databaseId")?,
+            kind: kind.into(),
+            review_id: v["pullRequestReview"]["databaseId"]
+                .as_u64()
+                .map(|i| i.to_string()),
+            body: text(v, "body")?,
+            updated_at: text(v, "updatedAt")?,
+            author: Self::remote_author(&v["author"])?,
+            reply_to,
+        })
+    }
+
+    fn remote_rest_comment(v: &Value, kind: &str) -> Result<RemoteComment> {
+        Ok(RemoteComment {
+            pending: v["state"] == "PENDING",
+            id: opaque(v, "id")?,
+            kind: kind.into(),
+            review_id: None,
+            body: text(v, "body")?,
+            updated_at: v["updated_at"]
+                .as_str()
+                .or(v["submitted_at"].as_str())
+                .unwrap_or("")
+                .into(),
+            author: Self::remote_author(&v["user"])?,
+            reply_to: None,
+        })
+    }
+}
+
+impl ForgeClient for GithubClient {
+    async fn get_pull_requests(
+        &self,
+        repo: &Repository,
+        query: &str,
+        page: u32,
+    ) -> Result<(Vec<PullRequest>, u32)> {
+        let page = page.max(1);
+        // Search is server-side, not a misleading filter of one REST page.
+        if !query.trim().is_empty() {
+            let result = self.get("/search/issues", Some(&json!({"q":format!("repo:{}/{} is:pr is:open {}", repo.owner, repo.name, query),"per_page":30,"page":page}))).await?;
+            let mut entries = vec![];
+            let items = result["items"]
+                .as_array()
+                .ok_or_else(|| invalid("Malformed GitHub search response"))?;
+            for item in items {
+                entries.push(self.get_pull_request(repo, number(item, "number")?).await?);
             }
-            return Self::for_test(&endpoint);
+            let next = if u64::from(page) * 30 < result["total_count"].as_u64().unwrap_or(0) {
+                page + 1
+            } else {
+                0
+            };
+            return Ok((entries, next));
         }
-        let account = std::env::var("LGTM_GITHUB_ACCOUNT").ok();
-        let token = gh::get_token(account.as_deref()).await?;
-        let client = Octocrab::builder()
-            .personal_token(token)
-            .build()
-            .map_err(|_| invalid("Could not initialize GitHub client"))?;
-        Ok(Self { client })
+        let response = self
+            .get(
+                &format!("{}/pulls", repo.route()),
+                Some(&json!({"state":"open","per_page":30,"page":page})),
+            )
+            .await?;
+        let items = response
+            .as_array()
+            .ok_or_else(|| invalid("Malformed GitHub PR list"))?;
+        let entries = items
+            .iter()
+            .map(|v| Self::pull_request(repo, v))
+            .collect::<Result<Vec<_>>>()?;
+        Ok((entries, if items.len() == 30 { page + 1 } else { 0 }))
     }
 
-    /// Explicit HTTP fixture boundary; refuses remote hosts and never reads real credentials.
-    pub fn for_test(endpoint: &str) -> Result<Self> {
-        let url = url::Url::parse(endpoint).map_err(|_| invalid("Invalid GitHub test endpoint"))?;
-        if url.scheme() != "http"
-            || !matches!(url.host_str(), Some("127.0.0.1" | "[::1]" | "localhost"))
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.query().is_some()
-            || url.fragment().is_some()
-        {
-            return Err(invalid(
-                "GitHub test endpoint must be credential-free loopback HTTP",
-            ));
+    async fn get_pull_request(&self, repo: &Repository, pr: i64) -> Result<PullRequest> {
+        Self::pull_request(
+            repo,
+            &self
+                .get(&format!("{}/pulls/{pr}", repo.route()), None)
+                .await?,
+        )
+    }
+
+    async fn get_account_id(&self) -> Result<String> {
+        opaque(&self.get("/user", None).await?, "id")
+    }
+
+    /// Retry one complete observation if commits move while its pages are loading.
+    /// Provider writes are never retried by this read path.
+    async fn get_snapshot(&self, repo: &Repository, pr: i64) -> Result<ForgeSnapshot> {
+        match self.get_snapshot_once(repo, pr).await {
+            Err(Error::Conflict(_)) => self.get_snapshot_once(repo, pr).await,
+            result => result,
         }
-        let client = Octocrab::builder()
-            .base_uri(endpoint)
-            .map_err(|_| invalid("Invalid test endpoint"))?
-            .personal_token("lgtm-test-fixture-only".to_owned())
-            .build()
-            .map_err(|_| invalid("Could not initialize test GitHub client"))?;
-        Ok(Self { client })
     }
 }
 
-fn pull_request(repo: &Repository, v: &Value) -> Result<PullRequest> {
-    Ok(PullRequest {
-        number: number(v, "number")?,
-        state: if v["merged"] == true || v["merged_at"].is_string() {
-            crate::database::types::ForgeState::Merged
-        } else if v["state"] == "closed" {
-            crate::database::types::ForgeState::Closed
-        } else {
-            crate::database::types::ForgeState::Open
-        },
-        title: text(v, "title")?,
-        head: text(&v["head"], "sha")?,
-        base: text(&v["base"], "sha")?,
-        repository_url: repo.repository_url.clone(),
-        author_account_id: v.get("user").map(|user| opaque(user, "id")).transpose()?,
-    })
-}
-fn remote_author(user: &Value) -> Result<RemoteAuthor> {
-    let name = text(user, "login")?;
-    let account_id = opaque(
-        user,
-        if user.get("databaseId").is_some() {
-            "databaseId"
-        } else {
-            "id"
-        },
-    )?;
-    Ok(RemoteAuthor {
-        name: name.clone(),
-        email: format!("{account_id}+{name}@users.noreply.github.com"),
-        account_id,
-    })
-}
-fn remote_comment(v: &Value, kind: &str, reply_to: Option<String>) -> Result<RemoteComment> {
-    Ok(RemoteComment {
-        pending: v["pullRequestReview"]["state"] == "PENDING",
-        id: opaque(v, "databaseId")?,
-        kind: kind.into(),
-        review_id: v["pullRequestReview"]["databaseId"]
-            .as_u64()
-            .map(|i| i.to_string()),
-        body: text(v, "body")?,
-        updated_at: text(v, "updatedAt")?,
-        author: remote_author(&v["author"])?,
-        reply_to,
-    })
-}
-fn remote_rest_comment(v: &Value, kind: &str) -> Result<RemoteComment> {
-    Ok(RemoteComment {
-        pending: v["state"] == "PENDING",
-        id: opaque(v, "id")?,
-        kind: kind.into(),
-        review_id: None,
-        body: text(v, "body")?,
-        updated_at: v["updated_at"]
-            .as_str()
-            .or(v["submitted_at"].as_str())
-            .unwrap_or("")
-            .into(),
-        author: remote_author(&v["user"])?,
-        reply_to: None,
-    })
-}
 const THREADS_QUERY: &str = r#"query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$cursor){nodes{id path line startLine originalLine originalStartLine diffSide startDiffSide subjectType isResolved isOutdated comments(first:100){nodes{id databaseId path body updatedAt author{login ... on User{databaseId} ... on Bot{databaseId}} pullRequestReview{databaseId state}} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}}}}}"#;

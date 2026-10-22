@@ -6,7 +6,7 @@ Backend, CLI and Neovim journeys use TypeScript and Vitest. Each suite has its o
 | --- | --- | --- | --- |
 | Backend | [Notes](backend/notes.spec.ts), [local reviews](backend/local-review.spec.ts), [PR reviews](backend/pr-review.spec.ts), [diff data](backend/diffs.spec.ts) | Standalone backend and Connect JSON | `premise run e2e:backend` |
 | CLI | [Notes](cli/notes.spec.ts), [local reviews](cli/local-review.spec.ts), [PR reviews](cli/pr-review.spec.ts) | CLI commands and bundled backend | `premise run e2e:cli` |
-| Neovim | [Notes](nvim/notes.spec.ts), [local reviews](nvim/local-review.spec.ts), [PR reviews](nvim/pr-review.spec.ts), [CodeDiff](nvim/diffs.spec.ts), [editor services](nvim/editor-services.spec.ts) | Editor, keys, modals, CodeDiff and backend | `premise run e2e:nvim` |
+| Neovim | [Notes](nvim/notes.spec.ts), [local reviews](nvim/local-review.spec.ts), [PR reviews](nvim/pr-review.spec.ts), [CodeDiff](nvim/diffs.spec.ts), [editor services](nvim/editor.spec.ts) | Editor, keys, modals, CodeDiff and backend | `premise run e2e:nvim` |
 
 Native Vitest `describe` groups name states, such as `When resuming an existing draft review`. Each `it` names one visible behavior. Suite and feature names come from Vitest tags. Plain `// Arrange`, `// Act` and `// Assert` comments separate setup, actions and assertions. Tests use Vitest directly, without custom test aliases or step runners.
 
@@ -19,12 +19,12 @@ PR E2E uses real GitHub. There is no simulated provider option, opt-in live mode
 ```text
 e2e/
 ├── common/
-│   ├── runtime.ts                 # Processes, isolated environments, Git, CLI and RPC
+│   ├── test-harness.ts            # Processes, isolated environments, Git, CLI and RPC
 │   ├── github.ts                  # Existing private repository; run-owned PRs and refs
 │   ├── fixtures.ts                # Local process lifecycle
-│   ├── pr-runtime.ts              # PR group lifecycle, composed with the runtime fixture
+│   ├── pr.fixtures.ts             # PR group lifecycle, composed with the test harness fixture
+│   ├── test-utils.ts              # Polling, content hashes and wire-value types
 │   ├── config.ts
-│   ├── check-parity.ts
 │   └── anchor_cases.json
 ├── backend/
 │   ├── notes.spec.ts
@@ -48,7 +48,7 @@ e2e/
 │   ├── local-review.spec.ts
 │   ├── pr-review.spec.ts
 │   ├── diffs.spec.ts
-│   ├── editor-services.spec.ts
+│   ├── editor.spec.ts
 │   ├── assertions.ts
 │   ├── editor.ts
 │   ├── fixtures.ts
@@ -59,8 +59,6 @@ e2e/
 │   ├── dependencies.lock.json
 │   ├── vitest.config.ts
 │   └── mise.toml
-├── PARITY.md
-├── parity.json
 └── tsconfig.json
 ```
 
@@ -81,7 +79,6 @@ premise run e2e
 premise run e2e:typecheck
 premise run e2e:lint
 premise run e2e:format:check
-premise run e2e:parity
 ```
 
 The `e2e` task builds the binaries before it runs the suites. After a build, use the `:run` tasks for focused tests. Select a feature file and profile with native Vitest arguments:
@@ -125,8 +122,5 @@ Each PR state group creates unique base/head branches and one PR in that same re
 
 CI reads the repository secrets `LGTM_E2E_GITHUB_TOKEN` and `LGTM_E2E_GITHUB_SECONDARY_TOKEN`. Both are required for cross-account review cases. The optional Actions variable `LGTM_E2E_GITHUB_REPOSITORY` selects a different permanent private fixture. The ordinary workflow `GITHUB_TOKEN` cannot write to another private repository. Real PR E2E runs on trusted branches; fork PRs do not receive the fixture credential. Keep the secret renewed before its expiry.
 
-## Coverage history
-
-The legacy Rust, Lua and Python E2E suites were removed after review. [PARITY.md](PARITY.md) maps 76 historical behaviors to current E2E scenarios and Rust integration tests. Retired source files remain archived outside the checkout. Provider fault injection belongs in Rust integration tests. Real GitHub E2E tests cover accepted-request retries, authentication failures, commits and restarts. The map records these boundary changes explicitly. `premise run e2e:parity` checks that referenced scenarios exist; it does not prove assertion equivalence or replace running the suites.
 
 Private Rust unit tests, database integration tests and the plugin's Lua unit contracts remain in their existing app and library locations.

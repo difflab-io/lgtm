@@ -227,6 +227,8 @@ Use explicit refresh when needed. Clients do not need a continuous refresh loop 
 
 PR outcomes are `approve`, `comment`, and `request_changes`. GitHub self-reviews support `comment`. Reject self-approval and self-request-changes before freezing any intent. The final body can be empty. Closing the editor view does not complete or submit a review. Reconciliation is an explicit recovery action. It can finish a previously staged remote submission.
 
+After a confirmed PR submission, clients call `StartReview` with the same PR target before creating the next draft comment or reply. Use the returned review ID and version for writes. This creates or resumes the next active attempt; it does not change the submitted attempt, its final body or its outcome. Reading the completed attempt does not create a successor.
+
 #### Promote notes or export
 
 ```text
@@ -727,8 +729,11 @@ Threads belong to a context and can outlive the attempt that created them. Comme
 apps/lgtm-backend/
 ├── proto/lgtm/v1/review.proto       Wire methods and messages
 ├── src/
-│   ├── rpc/mod.rs                   Request mapping, identity, and error boundary
-│   ├── models/                      Contexts, sessions, comments, and anchors
+│   ├── rpc/
+│   │   ├── mod.rs                   Identity and shared transport errors
+│   │   ├── review.rs                Review RPC handlers
+│   │   └── diff.rs                  Diff RPC handlers
+│   ├── models/                      One domain type per file, validation and RPC conversion
 │   ├── services/
 │   │   ├── auth.rs                  Logical actor selection
 │   │   ├── review.rs                Persistence and conversation workflows
@@ -737,7 +742,9 @@ apps/lgtm-backend/
 │   ├── extensions/
 │   │   └── gh.rs                    Stateless Octocrab and gh CLI helpers
 │   └── forge/
-│       └── github.rs                GitHub review mapping and complete snapshots
+│       ├── client.rs                Typed forge discovery and snapshot contract
+│       ├── models.rs                Repository and forge response models
+│       └── github.rs                GithubClient and complete GitHub snapshots
 └── tests/                          Service, RPC, and adapter contracts
 
 libs/lgtm-db/src/repositories/       Named persistence operations
@@ -790,7 +797,7 @@ Test complete workflows through the public boundary against real SQLite and Post
 - [Atlas anchor handling at the inspected revision](https://github.com/emrearmagan/atlas.nvim/blob/7e8bb268f0c670fc725319f90c5b72583c1befac/lua/atlas/pulls/diff/position.lua).
 - [Review.nvim extmark tracking at the inspected revision](https://github.com/georgeguimaraes/review.nvim/blob/d0b2c3821f6beed0b32608b425364296f4008524/lua/review/marks.lua).
 - [Protobuf schema](../../../apps/lgtm-backend/proto/lgtm/v1/review.proto).
-- [RPC boundary](../../../apps/lgtm-backend/src/rpc/mod.rs).
+- [Review RPC handlers](../../../apps/lgtm-backend/src/rpc/review.rs).
 - [Review workflows](../../../apps/lgtm-backend/src/services/review.rs).
 - [Forge orchestration](../../../apps/lgtm-backend/src/services/forge.rs).
 - [Product requirements](../../../prd/0001-core-concepts/README.md).

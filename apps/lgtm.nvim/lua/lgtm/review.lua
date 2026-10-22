@@ -554,43 +554,51 @@ function M.comment(kind, range)
       anchor = anchor,
     }
     require("lgtm.composer").open("Review comment", "", function(body, done)
-      -- Capture the latest review version on first save; an open PR composer can
-      -- retain verified source bytes across an explicit comparison refresh.
-      if not input.body then
-        input.expectedVersion = state.version
-      end
-      -- Keep the exact source, version, and operation key when an uncertain save is retried.
-      if input.body and input.body ~= body then
-        input.requestKey = contexts.request_key()
-      end
-      input.body = body
-      local saving = notice.show("Saving draft…")
-      rpc.call("AddComment", input, function(error, result)
-        if error then
-          notice.error(error, saving)
-          done(error)
+      contexts.ensure_writable(state, function(write_error)
+        if write_error then
+          notice.error(write_error)
+          done(write_error)
           return
         end
-        state.refresh(function(refresh_error)
-          if result.syncError and result.syncError ~= "" then
-            notice.error(
-              "Draft saved locally; GitHub sync failed: "
-                .. result.syncError
-                .. ". Use :Lgtm sync to recover.",
-              saving
-            )
-          else
-            notice.show(
-              result.comment
-                  and result.comment.forgeCommentId
-                  and result.comment.forgeCommentId ~= ""
-                  and "Draft saved on GitHub"
-                or "Draft saved locally",
-              nil,
-              saving
-            )
+        -- Capture the latest review version on first save; an open PR composer can
+        -- retain verified source bytes across an explicit comparison refresh.
+        if not input.body then
+          input.scope = vim.deepcopy(state.scope)
+          input.expectedVersion = state.version
+        end
+        -- Keep the exact source, version, and operation key when an uncertain save is retried.
+        if input.body and input.body ~= body then
+          input.requestKey = contexts.request_key()
+        end
+        input.body = body
+        local saving = notice.show("Saving draft…")
+        rpc.call("AddComment", input, function(error, result)
+          if error then
+            notice.error(error, saving)
+            done(error)
+            return
           end
-          done(refresh_error)
+          state.refresh(function(refresh_error)
+            if result.syncError and result.syncError ~= "" then
+              notice.error(
+                "Draft saved locally; GitHub sync failed: "
+                  .. result.syncError
+                  .. ". Use :Lgtm sync to recover.",
+                saving
+              )
+            else
+              notice.show(
+                result.comment
+                    and result.comment.forgeCommentId
+                    and result.comment.forgeCommentId ~= ""
+                    and "Draft saved on GitHub"
+                  or "Draft saved locally",
+                nil,
+                saving
+              )
+            end
+            done(refresh_error)
+          end)
         end)
       end)
     end)

@@ -40,6 +40,8 @@ Exports use numbered Markdown feedback, compact file/range locations, `~` for ol
 
 `--mode working|staged|branch --path CHECKOUT` selects a local comparison. `--mode branch --base BASE` compares the merge base with HEAD; `--base` requires branch mode. `--branch NAME` selects the checked-out local branch context; `--pr NUMBER --repo https://github.com/OWNER/REPO --path CHECKOUT` selects GitHub. A full GitHub PR URL also works. Start/select a session, then use the same comment commands. `session refresh` imports GitHub state; `session submit --outcome approve|reject|comment --body TEXT --request-key KEY` submits the review and optional final comment. GitHub permission and self-review restrictions still apply. Retain a request key when retrying a known request; uncertain writes require `session reconcile --session UUID` (or the same context flags) rather than blind resubmission.
 
+After a confirmed PR submission, the next `comments add` or `comments reply` starts a new review attempt for the same PR. The submitted review keeps its final message and outcome. Reads and exports do not create another attempt.
+
 The backend obtains credentials from the local `gh` account; run `gh auth login` as the same OS user as the backend. Tokens are not sent to the editor or stored in review exports.
 
 ## Machine output and browser compatibility
@@ -52,9 +54,4 @@ See [lgtm.nvim setup and usage](../lgtm.nvim/README.md). The plugin calls Connec
 
 Run checks through Premise, for example `premise run lgtm-cli:test`. The bundle task embeds backend/database sources and generated protobuf code so the published CLI does not depend on unpublished workspace crates. App tests cover component/argument contracts; real-process workflows live in [e2e/cli](../../e2e/cli/), with their own Mise config, and run with `premise run e2e:cli`.
 
-PR line/file comments and replies sync to a private pending GitHub review after
-the backend saves them locally. Adding a comment never submits the review. JSON
-results include `syncError` when local persistence succeeded but GitHub sync did
-not. Use `lgtm comments sync COMMENT_ID --pr PR_URL --json` to sync an existing
-local draft or recover an accepted draft after a lost response. General PR
-comments stay local until explicit review submission.
+PR line/file comments and replies sync to a private pending GitHub review after the backend saves them locally. Adding a comment never submits the review. JSON results include `syncError` when local persistence succeeded but GitHub sync did not. Use `lgtm comments sync COMMENT_ID --pr PR_URL --json` to sync an existing local draft or recover an accepted draft after a lost response. General PR comments stay local until explicit review submission.

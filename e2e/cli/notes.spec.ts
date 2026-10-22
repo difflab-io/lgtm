@@ -6,11 +6,11 @@
 import { describe, it, expect } from 'vitest'
 import { mkdir, rename, rm, access } from 'node:fs/promises'
 import { join } from 'node:path'
-import { useRuntime } from '../common/fixtures.js'
-import { binary, command, isolatedEnv } from '../common/runtime.js'
+import { useTestHarness } from '../common/fixtures.js'
+import { binary, command, isolatedEnv } from '../common/test-harness.js'
 
 describe('When the backend is unavailable', () => {
-  const fixture = useRuntime('cli')
+  const fixture = useTestHarness('cli')
   it('User gets a JSON error without starting a backend', async () => {
     // Arrange
     const { runtime: r } = fixture()
@@ -32,7 +32,7 @@ describe('When the backend is unavailable', () => {
 })
 
 describe('When taking notes while browsing files', () => {
-  const fixture = useRuntime('cli')
+  const fixture = useTestHarness('cli')
   it(
     'User can persist exact selections, retry writes and delete a note after its file disappears',
     { tags: ['smoke'] },
@@ -105,7 +105,7 @@ describe('When taking notes while browsing files', () => {
 })
 
 describe('When a note file moves', () => {
-  const fixture = useRuntime('cli')
+  const fixture = useTestHarness('cli')
   it('User keeps the note identity at its new location and can retry the move', async () => {
     // Arrange
     const { runtime: r } = fixture()

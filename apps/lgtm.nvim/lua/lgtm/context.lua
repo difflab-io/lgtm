@@ -186,6 +186,55 @@ function M.refresh(state, callback)
   end
 end
 
+-- Published attempts stay immutable; the next PR draft lazily resumes or starts its successor.
+function M.ensure_writable(state, callback)
+  if state.kind ~= "pr" or not state.review or state.review.state ~= "completed" then
+    callback()
+    return
+  end
+  if state.review.submissionStatus ~= "confirmed" then
+    callback({ message = "Reconcile the previous submission before adding another draft" })
+    return
+  end
+  if state.continuing_review then
+    state.continuing_review[#state.continuing_review + 1] = callback
+    return
+  end
+  state.continuing_review = { callback }
+  state.continuation_key = state.continuation_key or M.request_key()
+  rpc.call("StartReview", {
+    target = state.target,
+    requestKey = state.continuation_key,
+    resumePolicy = "RESUME_POLICY_MATCHING_ONLY",
+  }, function(err, response)
+    if not err and M.current ~= state then
+      err = { message = "Review changed while preparing the next draft" }
+    end
+    if not err and response.review.state ~= "active" then
+      err = { message = "The next PR review is not writable" }
+    end
+    local function finish(failure)
+      local waiting = state.continuing_review
+      state.continuing_review = nil
+      for _, done in ipairs(waiting) do
+        done(failure)
+      end
+    end
+    if err then
+      finish(err)
+      return
+    end
+    M.apply(state, response.review)
+    if state.review.id ~= response.review.id or state.review.state ~= "active" then
+      finish({ message = "Review changed while preparing the next draft" })
+      return
+    end
+    state.continuation_key = nil
+    -- Starting an attempt can update thread versions while importing the PR discussion.
+    M.conversation(state, finish)
+  end)
+end
+
 function M.start(target, comparison, root, callback, options)
   local input = vim.tbl_extend("force", {
     target = target,

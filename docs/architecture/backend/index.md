@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Rust backend owns domain validation, requester identity and review workflows over lgtm-db. The stateful RPC router exposes IdentityService and ReviewService alongside greeting and health. Both native gRPC clients and direct Connect JSON clients call the same services. The CLI and Neovim plugin use these RPCs; neither owns persistence or depends on the web UI.
+The Rust backend owns domain validation, requester identity and review workflows over lgtm-db. The stateful RPC router exposes IdentityService, ReviewService and DiffService alongside greeting and health. Both native gRPC clients and direct Connect JSON clients call the same services. The CLI and Neovim plugin use these RPCs; neither owns persistence or depends on the web UI.
 
 See [review architecture](reviews.md) for context requirements, backend data flows, and the intended review contracts. The [system architecture](../index.md) defines shared concepts and comment lifecycle behavior. The [DiffService](diffs.md) owns backend file listing and content access for the web UI. Neovim uses CodeDiff for analogous content access. The review service owns review data and state transitions. The review document's [Usage](reviews.md#usage) covers API consumer request sequences and recovery. The [LGTM user guide](../../user-guide.md) covers Neovim review workflows and the web interface's availability.
 
@@ -20,7 +20,7 @@ See [review architecture](reviews.md) for context requirements, backend data flo
 
 - NFR1: Keep all database interaction in services; models only validate, map supplied values and implement domain behavior.
 - NFR2: Share transaction semantics across SQLite and PostgreSQL.
-- NFR3: Keep review persistence out of the CLI until backend RPCs exist.
+- NFR3: Keep review persistence in the backend; CLI commands call its RPCs.
 - NFR4: Inherit caller tracing context without retaining request spans.
 
 ## Design
@@ -78,16 +78,18 @@ flowchart TB
     Schema --> Storage
 ```
 
-- lib.rs: greeting/health router and router_with_database for stateful identity/review APIs.
-- rpc/: typed protobuf mappings, per-request tracing, requester metadata and application error mapping.
+- lib.rs: greeting/health router and router_with_database for stateful identity/review/diff APIs.
+- rpc/: review and diff handlers, per-request tracing and requester metadata.
 - services/workspace.rs: ignored-inclusive notes content and Git working/index/revision reads.
 - services/forge.rs and forge/: GitHub review orchestration, Octocrab HTTP calls and local credential lookup.
-- models/: Actor/ActorKind, Context/ContextKey, Session/SessionStatus, Comment/PostingStatus, Thread/Anchor and domain inputs.
+- models/: domain types, validators and `from_proto` / `into_proto` conversions. Each main type has its own file.
 - services/auth.rs: requester metadata resolution, explicit human/agent lookup/create and requester validation. Authentication and authorization remain future work.
 - services/review.rs: contexts, session lifecycle, comments, resolution, exports and forge reconciliation.
 - services/actor.rs: batch actor loading into a plain UUID-to-Actor lookup for service mappings.
-- utils.rs: shared formatting/path helpers and forge import/export contracts.
-- error.rs: application-defined validation, conflict and not-found errors.
+- forge/client.rs: typed forge discovery and snapshot contract, implemented by GithubClient.
+- forge/models.rs: repository addresses and normalized forge response models.
+- utils.rs: general time, path and serialization helpers.
+- error.rs: application-defined errors and their Connect error conversion.
 - lgtm-db: repositories, typed SeaORM models, transactions and private migrations.
 
 ### Data and Control Flow
@@ -133,6 +135,7 @@ erDiagram
         uuid id PK
         ContextKind kind
         text notes_path "nullable"
+        text current_notes_path "nullable"
         text git_dir "nullable"
         text branch "nullable"
         text repository_url "nullable"
@@ -143,6 +146,7 @@ erDiagram
         text refreshed_base "nullable"
         text refresh_error "nullable"
         text refresh_status
+        ForgeState forge_state "nullable"
     }
     WORKSPACE_PATHS {
         uuid context_id PK,FK
@@ -164,6 +168,7 @@ erDiagram
         SessionState state
         text base_commit "nullable"
         text head_commit "nullable"
+        ComparisonKind comparison_kind
         text created_at
         text completed_at "nullable"
         uuid completed_by_id FK "nullable"
@@ -221,6 +226,27 @@ erDiagram
         text posting_request_key "nullable"
         text payload_hash "nullable"
     }
+    MUTATION_RECEIPTS {
+        uuid context_id PK,FK
+        uuid actor_id PK,FK
+        text request_key PK
+        text method
+        text request_hash
+        text result_json
+        bigint version
+        uuid object_id "nullable"
+        boolean pending
+    }
+    FILE_REVIEWS {
+        uuid context_id PK,FK
+        uuid actor_id PK,FK
+        text path PK
+        text content_identity
+    }
+    REVIEW_CONTEXTS ||--o{ MUTATION_RECEIPTS : context_id
+    IDENTITIES ||--o{ MUTATION_RECEIPTS : actor_id
+    REVIEW_CONTEXTS ||--o{ FILE_REVIEWS : context_id
+    IDENTITIES ||--o{ FILE_REVIEWS : actor_id
     REVIEW_CONTEXTS ||--o{ WORKSPACE_PATHS : context_id
     REVIEW_CONTEXTS ||--o{ SESSIONS : context_id
     REVIEW_CONTEXTS ||--o{ THREADS : context_id

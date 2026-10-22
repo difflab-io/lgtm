@@ -7,8 +7,8 @@ import { describe, it, expect } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { mkdir, rename, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { useRuntime } from '../common/fixtures.js'
-import { hash, type Json } from '../common/runtime.js'
+import { useTestHarness } from '../common/fixtures.js'
+import { hash, type Json } from '../common/test-utils.js'
 import { line } from './anchors.js'
 import {
   prepareDirectory,
@@ -18,7 +18,7 @@ import {
 } from './local-review.fixtures.js'
 
 describe('When starting a local directory review', () => {
-  const fixture = useRuntime('backend')
+  const fixture = useTestHarness('backend')
 
   it(
     'User can review ignored files and immediately persist local draft comments',
@@ -75,7 +75,7 @@ describe('When starting a local directory review', () => {
 })
 
 describe('When files change during a local review', () => {
-  const fixture = useRuntime('backend')
+  const fixture = useTestHarness('backend')
 
   it('User feedback follows a confirmed file move while preserving its original anchor', async () => {
     // Arrange
@@ -165,7 +165,7 @@ describe('When files change during a local review', () => {
 })
 
 describe('When promoting notes into a local review', () => {
-  const fixture = useRuntime('backend')
+  const fixture = useTestHarness('backend')
 
   it('User can copy selected notes into a review without losing their author or modifying the source', async () => {
     // Arrange
@@ -214,7 +214,7 @@ describe('When promoting notes into a local review', () => {
 })
 
 describe('When completing and resuming local reviews', () => {
-  const fixture = useRuntime('backend')
+  const fixture = useTestHarness('backend')
 
   it('User can complete once, retain the final message and read the completed review after restart', async () => {
     // Arrange
@@ -245,7 +245,7 @@ describe('When completing and resuming local reviews', () => {
 })
 
 describe('When staged changes become branch commits', () => {
-  const fixture = useRuntime('backend')
+  const fixture = useTestHarness('backend')
 
   it('User explicitly replaces the comparison while retaining feedback in the shared local context', async () => {
     // Arrange
@@ -314,7 +314,7 @@ describe('When staged changes become branch commits', () => {
 })
 
 describe('When exporting local review feedback', () => {
-  const fixture = useRuntime('backend')
+  const fixture = useTestHarness('backend')
 
   it('Export describes moved and deleted files, replies and final feedback without internal state', async () => {
     // Arrange

@@ -3,28 +3,17 @@ use tracing::Instrument;
 
 #[path = "../bundle/backend/mod.rs"]
 pub mod backend;
-mod context;
 mod daemon;
 mod log;
+mod models;
 
-mod reviews;
-mod rpc;
+mod commands;
+mod rpc_client;
 mod server;
 mod store;
 mod ui;
 
 // types -----------------------------------------------------------------------
-
-/// Run LGTM with a bundled web UI and gRPC server.
-#[derive(Parser)]
-#[command(name = "lgtm", version, about)]
-struct Cli {
-    /// Return machine-readable JSON, with diagnostics on stderr.
-    #[arg(long, global = true)]
-    json: bool,
-    #[command(subcommand)]
-    command: Command,
-}
 
 #[derive(Subcommand)]
 enum Command {
@@ -35,13 +24,13 @@ enum Command {
     /// Show whether the server is running.
     Status,
     /// Open the current directory in the web interface.
-    Review(reviews::ReviewArgs),
+    Review(commands::review::ReviewArgs),
     /// Scaffold for future backend session RPC commands.
-    Session(reviews::SessionArgs),
+    Session(commands::session::SessionArgs),
     /// Scaffold for future backend session listing.
-    Sessions(reviews::SessionsArgs),
+    Sessions(commands::sessions::SessionsArgs),
     /// Scaffold for future backend comment RPC commands.
-    Comments(reviews::CommentsArgs),
+    Comments(commands::comments::CommentsArgs),
     #[command(hide = true)]
     Serve {
         #[arg(long, default_value_t = 8080)]
@@ -64,7 +53,20 @@ struct Up {
     no_open: bool,
 }
 
-// api -------------------------------------------------------------------------
+// Command ---------------------------------------------------------------------
+
+/// Run LGTM with a bundled web UI and gRPC server.
+#[derive(Parser)]
+#[command(name = "lgtm", version, about)]
+struct Cli {
+    /// Return machine-readable JSON, with diagnostics on stderr.
+    #[arg(long, global = true)]
+    json: bool,
+    #[command(subcommand)]
+    command: Command,
+}
+
+// Callbacks -------------------------------------------------------------------
 
 fn main() {
     let json_output = std::env::args().any(|arg| arg == "--json");
@@ -115,10 +117,10 @@ fn run() -> anyhow::Result<()> {
                 Command::Up(options) => daemon::up(options.port, !options.no_open, &store).await,
                 Command::Down => daemon::down(&store).await,
                 Command::Status => daemon::status(&store, cli.json).await,
-                Command::Review(args) => reviews::review(args, &store, cli.json).await,
-                Command::Session(args) => reviews::session(args, &store, cli.json).await,
-                Command::Sessions(args) => reviews::sessions(args, &store, cli.json).await,
-                Command::Comments(args) => reviews::comments(args, &store, cli.json).await,
+                Command::Review(args) => commands::review::run(args, &store, cli.json).await,
+                Command::Session(args) => commands::session::run(args, &store, cli.json).await,
+                Command::Sessions(args) => commands::sessions::run(args, &store, cli.json).await,
+                Command::Comments(args) => commands::comments::run(args, &store, cli.json).await,
                 Command::Serve { port, daemonize } => server::serve(port, &store, daemonize).await,
             }
         }

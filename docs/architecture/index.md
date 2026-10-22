@@ -253,7 +253,7 @@ A merged PR is not an LGTM review outcome. It must not become an invented approv
 | Export | Read notes or a review without changing any lifecycle state. |
 | Mark a file reviewed or seen | Persist local comparison progress; use GitHub Viewed state for PR files. Do not resolve comments. |
 
-Reviewed-file marks apply to working, staged, branch, PR, and explicit directory reviews, not ordinary notes. They do not persist across editor restarts and have no backend RPC. Marks bind to both compared source identities. A change to either side clears the mark, including a hidden working or index file change.
+Reviewed-file marks apply to working, staged, branch, PR, and explicit directory reviews, not ordinary notes. Local marks persist across editor restarts through `GetFileReviews` and `SetFileReviewed`; PR marks use GitHub Viewed state through those methods. Local marks bind to both compared source identities. A change to either side clears the mark, including a hidden working or index file change.
 
 ### Local comment lifecycle
 
@@ -297,6 +297,16 @@ flowchart TD
 Saving an eligible anchored comment synchronizes it to a private pending review rather than publishing the review. General PR comments stay local until the explicit submission path sends them. Final submission uses the same pending review, selected outcome, and optional final comment.
 
 A failed remote save retains the local comment. Uncertain results retain operation identity and require evidence before recovery. The diagram shows confirmed recovery paths, not a guarantee that every uncertain operation can be completed automatically. Refresh must not upload unrelated old local drafts.
+
+```mermaid
+flowchart LR
+    Active["Active PR attempt"] -->|Submit| Published["Published attempt: immutable outcome"]
+    Published -->|Read discussion| Published
+    Published -->|Next comment or reply| Next["New active attempt in the same PR"]
+    Next -->|Save| Draft["New private GitHub draft"]
+```
+
+The editor keeps its current diff and published discussion. A new draft uses the next attempt’s ID; a completed attempt’s metadata never changes.
 
 ### Thread resolution
 

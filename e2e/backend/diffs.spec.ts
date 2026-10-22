@@ -6,11 +6,11 @@
 import { describe, it, expect } from 'vitest'
 import { copyFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { useRuntime } from '../common/fixtures.js'
-import type { Runtime } from '../common/runtime.js'
+import { useTestHarness } from '../common/fixtures.js'
+import type { TestHarness } from '../common/test-harness.js'
 import { line } from './anchors.js'
 
-async function prepareSource(runtime: Runtime) {
+async function prepareSource(runtime: TestHarness) {
   await runtime.identify()
   const bytes = 'before\nselected\nafter\n'
   const plans = join(runtime.workspace, '.difflab/plan/example')
@@ -22,7 +22,7 @@ async function prepareSource(runtime: Runtime) {
 }
 
 describe('When reading diff metadata and source bytes', () => {
-  const fixture = useRuntime('backend')
+  const fixture = useTestHarness('backend')
 
   it(
     'Consumers can read ignored content without creating a review',
@@ -65,7 +65,7 @@ describe('When reading diff metadata and source bytes', () => {
 })
 
 describe('When locating original selections in current sources', () => {
-  const fixture = useRuntime('backend')
+  const fixture = useTestHarness('backend')
 
   it('Confirmed current paths relocate selections without changing original evidence', async () => {
     // Arrange

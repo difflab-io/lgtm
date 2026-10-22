@@ -2,6 +2,8 @@ use super::super::database::models::comments;
 use super::super::error::{Result, invalid};
 use super::{Actor, PostingStatus, Session, Thread};
 use crate::utils::now;
+use crate::{models as m, proto::lgtm::v1 as p};
+use connectrpc::ConnectError;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -33,6 +35,8 @@ pub struct Comment {
 }
 
 impl Comment {
+    // Public ------------------------------------------------------------------
+
     pub fn from_db_model(v: comments::Model, author: Actor) -> Result<Self> {
         Ok(Comment {
             id: v.id,
@@ -99,6 +103,55 @@ impl Comment {
             posting: PostingStatus::Unposted,
             posting_request_key: None,
             payload_hash: None,
+        }
+    }
+
+    // RPC conversion ----------------------------------------------------------
+
+    /// Convert the domain value and include its concurrency token.
+    pub(crate) fn into_versioned_proto(
+        self,
+        version: i64,
+    ) -> std::result::Result<p::Comment, ConnectError> {
+        let value = self;
+        let token = crate::models::ExpectedObject::get_version(
+            m::ObjectKind::Comment,
+            version,
+            value.id,
+            &value,
+        )
+        .map_err(ConnectError::from)?;
+        let mut value = m::Comment::into_proto(value);
+        value.version = token;
+        Ok(value)
+    }
+
+    /// Convert the domain value to its RPC representation.
+    pub(crate) fn into_proto(self) -> p::Comment {
+        let v = self;
+        p::Comment {
+            id: v.id.to_string(),
+            context_id: v.context_id.to_string(),
+            thread_id: v.thread_id.to_string(),
+            origin_session_id: v
+                .origin_session_id
+                .map(|x| x.to_string())
+                .unwrap_or_default(),
+            posting_status: v.posting.state().as_str().into(),
+            owner_id: v.owner_id.map(|id| id.to_string()).unwrap_or_default(),
+            source_note_id: v
+                .source_note_id
+                .map(|id| id.to_string())
+                .unwrap_or_default(),
+            author: Some(m::Actor::into_proto(v.author)).into(),
+            body: v.body,
+            position: v.position,
+            visibility: v.visibility,
+            created_at: v.created_at,
+            updated_at: v.updated_at,
+            forge_comment_id: v.forge_comment_id.unwrap_or_default(),
+
+            ..Default::default()
         }
     }
 }

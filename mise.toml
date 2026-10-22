@@ -28,7 +28,7 @@ depends = ["//apps/lgtm-cli:bundle"]
 run = ["cargo build --workspace", "bun run --filter lgtm-web build"]
 
 [tasks.test]
-depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:test", "e2e:typecheck", "e2e:parity"]
+depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:test", "e2e:typecheck"]
 run = ["cargo test --workspace", "bun run --filter lgtm-web test"]
 
 [tasks.lint]
@@ -121,9 +121,6 @@ run = "bun x eslint e2e/common e2e/backend e2e/cli e2e/nvim"
 [tasks."e2e:nvim:run"]
 description = "Run editor journeys against existing binaries without rebuilding"
 run = "bun x vitest run --config e2e/nvim/vitest.config.ts"
-
-[tasks."e2e:parity"]
-run = "bun run e2e/common/check-parity.ts"
 
 [tasks."e2e:list"]
 description = "List local BDD journeys without running them"

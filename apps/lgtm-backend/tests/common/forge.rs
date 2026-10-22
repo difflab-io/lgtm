@@ -5,7 +5,7 @@ use db::{
     services::ReviewService,
 };
 use lgtm_backend as db;
-use lgtm_backend::utils::*;
+use lgtm_backend::forge::models::*;
 
 // fixtures --------------------------------------------------------------------
 fn invalid(message: impl Into<String>) -> Error {

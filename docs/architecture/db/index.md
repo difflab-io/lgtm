@@ -216,6 +216,7 @@ erDiagram
         uuid id PK
         ContextKind kind
         text notes_path "nullable"
+        text current_notes_path "nullable"
         text git_dir "nullable"
         text branch "nullable"
         text repository_url "nullable"
@@ -226,6 +227,7 @@ erDiagram
         text refreshed_base "nullable"
         text refresh_error "nullable"
         text refresh_status
+        ForgeState forge_state "nullable"
     }
     WORKSPACE_PATHS {
         uuid context_id PK,FK
@@ -247,6 +249,7 @@ erDiagram
         SessionState state
         text base_commit "nullable"
         text head_commit "nullable"
+        ComparisonKind comparison_kind
         text created_at
         text completed_at "nullable"
         uuid completed_by_id FK "nullable"
@@ -304,6 +307,27 @@ erDiagram
         text posting_request_key "nullable"
         text payload_hash "nullable"
     }
+    MUTATION_RECEIPTS {
+        uuid context_id PK,FK
+        uuid actor_id PK,FK
+        text request_key PK
+        text method
+        text request_hash
+        text result_json
+        bigint version
+        uuid object_id "nullable"
+        boolean pending
+    }
+    FILE_REVIEWS {
+        uuid context_id PK,FK
+        uuid actor_id PK,FK
+        text path PK
+        text content_identity
+    }
+    REVIEW_CONTEXTS ||--o{ MUTATION_RECEIPTS : context_id
+    IDENTITIES ||--o{ MUTATION_RECEIPTS : actor_id
+    REVIEW_CONTEXTS ||--o{ FILE_REVIEWS : context_id
+    IDENTITIES ||--o{ FILE_REVIEWS : actor_id
     REVIEW_CONTEXTS ||--o{ WORKSPACE_PATHS : context_id
     REVIEW_CONTEXTS ||--o{ SESSIONS : context_id
     REVIEW_CONTEXTS ||--o{ THREADS : context_id
@@ -373,6 +397,8 @@ Every query below is asynchronous and returns `lgtm_db::error::Result<T>`. UUID 
 
 A single-record query returns `Ok(None)` when no record matches. Context-scoped comment/thread queries also return `None` when the UUID belongs to another context. Query ordering exists only where the table specifies it.
 
+The query table lists core entity reads. Paging uses `sessions.get_review_page` and `comments.get_comment_page`; selected-path reads use `comments.get_threads_for_paths` and `get_threads_by_ids`. `review_contexts.get_notes_for_path` finds a saved-file context after confirmed moves. `get_file_reviews` reads local progress. The `mutations` repository reads accepted retry results, unresolved intents and verified remote deletion receipts.
+
 #### Repository mutations
 
 All record arguments below are borrowed SeaORM models. Mutations return `Result<()>` unless the table specifies `Result<bool>`.
@@ -391,13 +417,15 @@ All record arguments below are borrowed SeaORM models. Mutations return `Result<
 | `comments` | `update_thread(row)` | Return `bool`. Update resolution, latest editor, remote linkage and applicability. Preserve author, ownership and original anchor. |
 | `comments` | `update_comment(row)` | Return `bool`. Update content, publication and posting fields. Preserve author, ownership, origin session, position and creation time. |
 
+Additional workflow operations update submission receipts, reopen definitely rejected submissions, advance PR comparisons, delete comments and empty threads, move notes, and store file progress. These are named repository methods; callers cannot issue raw queries. The `mutations` repository inserts and updates request receipts in the same transaction as the accepted change.
+
 A boolean mutation returns `false` when no eligible row matches. A unit-returning mutation does not report whether it inserted or updated a row. Insert-if-absent methods ignore conflicts and do not merge supplied values into existing records.
 
 These methods enforce persistence contracts, not complete backend workflows. The backend validates domain input, authorizes actions and applies lifecycle rules. For concurrent context mutations, it advances the context revision before dependent reads and writes in the same transaction.
 
 #### Public values and errors
 
-The public model namespaces are `identities`, `workspace_paths`, `review_contexts`, `sessions`, `threads`, `comments` and `mutation_receipts`. The `types` module exports `IdentityKind`, `ContextKind`, `SessionState` and `PostingState`.
+The public model namespaces are `identities`, `workspace_paths`, `review_contexts`, `sessions`, `threads`, `comments`, `mutation_receipts` and `file_reviews`. The `types` module exports shared enums, including `IdentityKind`, `ContextKind`, `SessionState`, `PostingState`, `ComparisonKind`, `ForgeState` and `OrphanReason`.
 
 Model fields are mutable in memory. Repository methods persist only their explicit writable columns. Entity and ActiveModel module paths remain private, as do connection access and migration entry points.
 

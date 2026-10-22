@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest'
 import { join } from 'node:path'
 import { rename, mkdir, symlink } from 'node:fs/promises'
 import { profiles, useEditor } from './fixtures.js'
-import { hash, waitFor, type Json } from '../common/runtime.js'
+import { hash, waitFor, type Json } from '../common/test-utils.js'
 import type { Editor } from './editor.js'
 
 import {

@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import { type Runtime, type Json } from '../common/runtime.js'
+import { type TestHarness } from '../common/test-harness.js'
+import { type Json } from '../common/test-utils.js'
 import type { GithubFixture } from '../common/github.js'
 
 /** Establish a consumer-visible review and exact sources through public RPCs. */
 export async function prepareReview(
-  runtime: Runtime,
+  runtime: TestHarness,
   github: GithubFixture,
   identity: Json = { name: 'E2E user', email: 'e2e@example.test' },
 ) {
@@ -33,7 +34,7 @@ export async function prepareReview(
 }
 
 /** Capture the current guard while preserving the caller's explicit comment content and anchor. */
-export async function saveDraft(runtime: Runtime, scope: Json, body: string, anchor: Json) {
+export async function saveDraft(runtime: TestHarness, scope: Json, body: string, anchor: Json) {
   const current = await runtime.rpc('GetConversation', { scope })
   return runtime.rpc('AddComment', {
     scope,
@@ -44,7 +45,7 @@ export async function saveDraft(runtime: Runtime, scope: Json, body: string, anc
   })
 }
 
-export async function refreshReview(runtime: Runtime, scope: Json) {
+export async function refreshReview(runtime: TestHarness, scope: Json) {
   const current = await runtime.rpc('GetConversation', { scope })
   return runtime.rpc('RefreshReview', {
     scope,
@@ -54,7 +55,7 @@ export async function refreshReview(runtime: Runtime, scope: Json) {
 }
 
 export async function submitReview(
-  runtime: Runtime,
+  runtime: TestHarness,
   reviewId: string,
   outcome = 'comment',
   body = 'Final feedback',
@@ -74,7 +75,7 @@ export async function submitReview(
 
 /** Pending comments are exposed through their pending review, not the published-comment endpoint. */
 export async function readPendingComment(
-  runtime: Runtime,
+  runtime: TestHarness,
   github: GithubFixture,
   reviewId: string,
   commentId: string,

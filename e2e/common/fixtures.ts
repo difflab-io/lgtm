@@ -1,11 +1,11 @@
 import { beforeEach, afterEach } from 'vitest'
-import { Runtime } from './runtime.js'
+import { TestHarness } from './test-harness.js'
 
 /** Own the backend process and database for one case. Consumers can add narrower fixtures. */
-export function useRuntime(kind: 'backend' | 'cli', environment?: () => NodeJS.ProcessEnv) {
-  let runtime: Runtime | undefined
+export function useTestHarness(kind: 'backend' | 'cli', environment?: () => NodeJS.ProcessEnv) {
+  let runtime: TestHarness | undefined
   beforeEach(async () => {
-    runtime = await Runtime.create(kind, environment?.())
+    runtime = await TestHarness.create(kind, environment?.())
   })
   afterEach(async ({ task }) => {
     try {
@@ -15,7 +15,7 @@ export function useRuntime(kind: 'backend' | 'cli', environment?: () => NodeJS.P
     }
   })
   return () => {
-    if (!runtime) throw new Error('Runtime fixture requested outside a test')
+    if (!runtime) throw new Error('TestHarness fixture requested outside a test')
     return { runtime }
   }
 }

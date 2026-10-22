@@ -1,6 +1,7 @@
 //! Logical human or agent attribution, independent of forge posting accounts.
 use super::super::{database::models::identities, database::types::IdentityKind};
 use crate::error::{Result, invalid};
+use crate::{models as m, proto::lgtm::v1 as p};
 use serde::{Deserialize, Serialize};
 
 /// An identity referenced by review records.
@@ -21,6 +22,8 @@ pub enum ActorKind {
 }
 
 impl Actor {
+    // Public ------------------------------------------------------------------
+
     /// Validate the fields required by the selected identity kind.
     pub fn validate(&self) -> Result<()> {
         fn single(value: &str) -> bool {
@@ -62,6 +65,30 @@ impl Actor {
             ActorKind::Human { email } => format!("{} <{}>", self.name, email),
             ActorKind::Agent { model, provider } => format!("{} ({provider}/{model})", self.name),
         }
+    }
+
+    // RPC conversion ----------------------------------------------------------
+
+    /// Convert the domain value to its RPC representation.
+    pub(crate) fn into_proto(self) -> p::Actor {
+        let v = self;
+        let mut out = p::Actor {
+            id: v.id.to_string(),
+            name: v.name,
+            ..Default::default()
+        };
+        match v.kind {
+            m::ActorKind::Human { email } => {
+                out.kind = "human".into();
+                out.email = email;
+            }
+            m::ActorKind::Agent { model, provider } => {
+                out.kind = "agent".into();
+                out.model = model;
+                out.provider = provider;
+            }
+        }
+        out
     }
 }
 

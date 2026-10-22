@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { profiles, useEditor } from './fixtures.js'
-import { waitFor } from '../common/runtime.js'
+import { waitFor } from '../common/test-utils.js'
 
 for (const profile of profiles) {
   describe(`When checking editor dependencies [${profile}]`, { tags: [profile] }, () => {
