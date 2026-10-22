@@ -47,7 +47,7 @@ for (const profile of profiles) {
       await editor.choose('PR')
       await editor.command('Lgtm review')
       await editor.wait(
-        'require("lgtm.picker").last and not require("lgtm.picker").last.closed',
+        'require("lgtm.picker").last and not require("lgtm.picker").last.closed and vim.api.nvim_get_current_buf() == require("lgtm.picker").last.buf and vim.fn.mode():sub(1,1) == "i"',
         'PR picker displayed',
       )
       const options = await editor.value('_G.e2e.last_select.items')
@@ -87,12 +87,11 @@ for (const profile of profiles) {
       // Arrange
       const { editor, github } = fixture()
       const alternate = await github.createBranchComparison()
-      await github.waitForSearch(alternate.number)
 
       // Act
       await editor.command('Lgtm prs')
       await editor.wait(
-        'require("lgtm.picker").last and #require("lgtm.picker").last.filtered >= 2',
+        'require("lgtm.picker").last and #require("lgtm.picker").last.filtered >= 2 and vim.fn.mode():sub(1,1) == "i"',
         'both branch PRs listed',
       )
       const first = await editor.value('require("lgtm.picker").last.index')
@@ -521,7 +520,7 @@ for (const profile of profiles) {
       const { editor, runtime, github } = fixture()
       await editor.command('Lgtm prs')
       await editor.wait(
-        'require("lgtm.picker").last and not require("lgtm.picker").last.closed',
+        'require("lgtm.picker").last and not require("lgtm.picker").last.closed and vim.api.nvim_get_current_buf() == require("lgtm.picker").last.buf and vim.fn.mode():sub(1,1) == "i"',
         'PR picker loaded',
       )
       await editor.keys(`#${github.number} `)

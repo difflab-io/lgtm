@@ -118,20 +118,6 @@ export class GithubFixture {
     throw new Error(`GitHub has not updated the head of fixture PR ${this.number}`)
   }
 
-  /** GitHub search is indexed asynchronously after creating a PR. */
-  async waitForSearch(number = this.number) {
-    const query = encodeURIComponent(
-      `repo:${this.repository} is:pr is:open head:${this.headBranch}`,
-    )
-    const deadline = Date.now() + 40_000
-    while (Date.now() < deadline) {
-      const result = await this.api(`search/issues?q=${query}`)
-      if (result.items?.some((item: Json) => item.number === number)) return
-      await delay(1000)
-    }
-    throw new Error(`GitHub has not indexed fixture PR ${number}`)
-  }
-
   async checkout(runtime: TestHarness) {
     await runtime.git('init', '-q', '-b', this.headBranch)
     await runtime.git('remote', 'add', 'origin', `${this.repositoryUrl}.git`)

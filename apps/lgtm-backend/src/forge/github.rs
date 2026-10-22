@@ -360,8 +360,12 @@ impl ForgeClient for GithubClient {
         page: u32,
     ) -> Result<(Vec<PullRequest>, u32)> {
         let page = page.max(1);
-        // Search is server-side, not a misleading filter of one REST page.
-        if !query.trim().is_empty() {
+        let query = query.trim();
+        // Branch selection must not depend on GitHub's asynchronously indexed search.
+        let branch = query
+            .strip_prefix("head:")
+            .filter(|branch| !branch.is_empty() && !branch.chars().any(char::is_whitespace));
+        if !query.is_empty() && branch.is_none() {
             let result = self.get("/search/issues", Some(&json!({"q":format!("repo:{}/{} is:pr is:open {}", repo.owner, repo.name, query),"per_page":30,"page":page}))).await?;
             let mut entries = vec![];
             let items = result["items"]
@@ -377,11 +381,16 @@ impl ForgeClient for GithubClient {
             };
             return Ok((entries, next));
         }
+        let mut params = json!({"state":"open","per_page":30,"page":page});
+        if let Some(branch) = branch {
+            params["head"] = json!(if branch.contains(':') {
+                branch.to_owned()
+            } else {
+                format!("{}:{branch}", repo.owner)
+            });
+        }
         let response = self
-            .get(
-                &format!("{}/pulls", repo.route()),
-                Some(&json!({"state":"open","per_page":30,"page":page})),
-            )
+            .get(&format!("{}/pulls", repo.route()), Some(&params))
             .await?;
         let items = response
             .as_array()

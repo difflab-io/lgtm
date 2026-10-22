@@ -9,6 +9,38 @@ use std::sync::{Arc, Mutex};
 
 // tests -----------------------------------------------------------------------
 #[tokio::test]
+async fn should_list_branch_prs_without_search_indexing_or_per_pr_requests() {
+    let heads = Arc::new(Mutex::new(vec![]));
+    let captured = heads.clone();
+    let fixture = Fixture::new(move |r| {
+        let url = url::Url::parse(&format!("http://localhost{}", r.path)).unwrap();
+        assert_eq!(url.path(), "/repos/acme/repo/pulls");
+        let params = url
+            .query_pairs()
+            .collect::<std::collections::HashMap<_, _>>();
+        captured.lock().unwrap().push(params["head"].to_string());
+        assert_eq!(params["page"], "2");
+        assert_eq!(params["state"], "open");
+        (
+            200,
+            json!([{"number":7,"title":"Review","head":{"sha":"head"},"base":{"sha":"base"}}]),
+        )
+    });
+    let github = GithubClient::for_test(&fixture.endpoint).unwrap();
+    let repo = Repository::from_repository_url("https://github.com/acme/repo").unwrap();
+    for query in ["head:feature/review", "head:contributor:feature/review"] {
+        let (entries, next) = github.get_pull_requests(&repo, query, 2).await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].number, 7);
+        assert_eq!(next, 0);
+    }
+    assert_eq!(
+        *heads.lock().unwrap(),
+        ["acme:feature/review", "contributor:feature/review"]
+    );
+}
+
+#[tokio::test]
 async fn should_use_only_fixture_credentials_and_preserve_server_paging() {
     let requests = Arc::new(Mutex::new(vec![]));
     let captured = requests.clone();
