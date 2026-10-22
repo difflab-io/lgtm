@@ -16,8 +16,8 @@ description = "Remove build artifacts"
 run = "bun run clean"
 
 [tasks.test]
-description = "Run the Bun test suite"
-depends = ["install"]
+description = "Run the Bun test suite against the built backend"
+depends = ["install", "//apps/lgtm-backend:build"]
 run = "bun run test"
 
 [tasks.lint]
@@ -89,11 +89,6 @@ fi
 [tasks.deploy]
 description = "Report deferred deployment"
 run = 'echo "deploy: no deployment target configured"'
-
-[tasks.e2e]
-description = "Run the finite application smoke test"
-depends = ["install"]
-run = "sh -c 'bun run test'"
 
 [tasks.typecheck]
 description = "Run project-specific type checks"

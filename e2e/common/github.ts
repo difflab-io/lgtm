@@ -279,8 +279,9 @@ export class GithubFixture {
 export async function githubCredentials(account?: string) {
   if (account && process.env.LGTM_E2E_GITHUB_SECONDARY_TOKEN)
     return { GH_TOKEN: process.env.LGTM_E2E_GITHUB_SECONDARY_TOKEN }
-  if (!account && (process.env.GH_TOKEN || process.env.GITHUB_TOKEN))
-    return { GH_TOKEN: process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN! }
+  const primary =
+    process.env.LGTM_E2E_GITHUB_TOKEN ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN
+  if (!account && primary) return { GH_TOKEN: primary }
   const selected = account ?? process.env.LGTM_E2E_GITHUB_PRIMARY_USER ?? 'skapoor8'
   const env = { ...process.env }
   delete env.GH_TOKEN

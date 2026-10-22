@@ -129,7 +129,7 @@ jobs:
           install-premise: build
       - name: Run real E2E suite
         env:
-          GH_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_TOKEN }}
+          LGTM_E2E_GITHUB_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_TOKEN }}
           LGTM_E2E_GITHUB_SECONDARY_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
           LGTM_E2E_GITHUB_REPOSITORY: ${{ vars.LGTM_E2E_GITHUB_REPOSITORY || 'skapoor8/lgtm-e2e' }}
         run: premise run e2e:${{ matrix.suite }}

@@ -99,7 +99,7 @@ premise run e2e:nvim:run -- --tags-filter=smoke
 
 The smoke selection has 11 cases: four backend, three CLI and four Neovim cases. It covers notes, local reviews, diff data and native CodeDiff, plus remote draft creation through each public boundary. The editor smoke cases use the required dependency profile; the full suite also covers Kak. These are the same tests used by the full suite. PR cases use real GitHub and clean up their run-owned PRs and refs. The smoke tasks build changed binaries and install missing editor dependencies; the `:run` example uses existing binaries.
 
-During development, run only the tests relevant to the changed behavior. Use a spec path, test name or tag for focused checks. Use smoke when a quick check across features is useful. Reserve the full suite for final validation or changes to shared fixtures or behavior that require all suites. Do not repeat passing suites whose inputs have not changed. CI continues to run the full suites.
+During development, run only the tests relevant to the changed behavior. Use a spec path, test name or tag for focused checks. Use smoke when a quick check across features is useful. Reserve the full suite for final validation or changes to shared fixtures or behavior that require all suites. Do not repeat passing suites whose inputs have not changed. CI continues to run the full suites in dedicated E2E jobs. App-level Mise configs do not expose duplicate `e2e` hooks: Premise’s optional deployment-oriented hook passes a target such as `preview`, which is not a Vitest file filter.
 
 ## Permanent private GitHub fixture
 
@@ -107,7 +107,7 @@ The default is [skapoor8/lgtm-e2e](https://github.com/skapoor8/lgtm-e2e). Tests 
 
 Locally, log in to both GitHub accounts with `gh auth login`. The fixture reads each stored token by account name. It never switches your active account. The primary account creates the PR. The second account acts as another reviewer and needs write access to the same private repository.
 
-The primary account defaults to `skapoor8`. Override it with `LGTM_E2E_GITHUB_PRIMARY_USER`. The second account defaults to `skapoor81`. Override it with `LGTM_E2E_GITHUB_SECONDARY_USER`. For CI, supply the primary token through `GH_TOKEN` and the second token through `LGTM_E2E_GITHUB_SECONDARY_TOKEN`.
+The primary account defaults to `skapoor8`. Override it with `LGTM_E2E_GITHUB_PRIMARY_USER`. The second account defaults to `skapoor81`. Override it with `LGTM_E2E_GITHUB_SECONDARY_USER`. For CI, supply the primary token through `LGTM_E2E_GITHUB_TOKEN` and the second token through `LGTM_E2E_GITHUB_SECONDARY_TOKEN`.
 
 A repository-scoped primary token needs Contents, Issues and Pull requests read/write, plus Metadata read access. Tests need no repository administration permission. Keep tokens in local credential storage or CI secrets.
 
@@ -120,7 +120,7 @@ LGTM_E2E_GITHUB_REPOSITORY=owner/private-fixture premise run e2e
 
 Each PR state group creates unique base/head branches and one PR in that same repository. Cleanup closes its PR and removes only its own branches. Parallel runs use separate refs; no global lock branch is needed. The default branch remains unchanged. If a process is killed, use its logged PR and run identifier to inspect and clean up that run's refs.
 
-CI reads the repository secrets `LGTM_E2E_GITHUB_TOKEN` and `LGTM_E2E_GITHUB_SECONDARY_TOKEN`. Both are required for cross-account review cases. The optional Actions variable `LGTM_E2E_GITHUB_REPOSITORY` selects a different permanent private fixture. The ordinary workflow `GITHUB_TOKEN` cannot write to another private repository. Real PR E2E runs on trusted branches; fork PRs do not receive the fixture credential. Keep the secret renewed before its expiry.
+CI reads the repository secrets `LGTM_E2E_GITHUB_TOKEN` and `LGTM_E2E_GITHUB_SECONDARY_TOKEN`. Both are required for cross-account review cases. The optional Actions variable `LGTM_E2E_GITHUB_REPOSITORY` selects a different permanent private fixture. Premise removes generic publication credentials such as `GH_TOKEN` from task environments. Dedicated LGTM token variables reach only the PR fixtures, which pass the selected token to their own GitHub subprocesses. The ordinary workflow `GITHUB_TOKEN` cannot write to another private repository. Real PR E2E runs on trusted branches; fork PRs do not receive the fixture credential. Keep the secret renewed before its expiry.
 
 
 Private Rust unit tests, database integration tests and the plugin's Lua unit contracts remain in their existing app and library locations.

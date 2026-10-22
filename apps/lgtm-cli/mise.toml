@@ -103,6 +103,3 @@ fi
 description = "Validate the deploy contract (no deployable surface)"
 run = 'echo "deploy: no deployable surface"'
 
-[tasks.e2e]
-description = "Run the independent cli E2E suite"
-run = "mise run //e2e/cli:test"

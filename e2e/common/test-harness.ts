@@ -26,6 +26,7 @@ export function isolatedEnv(home: string): NodeJS.ProcessEnv {
   for (const key of [
     'GH_TOKEN',
     'GITHUB_TOKEN',
+    'LGTM_E2E_GITHUB_TOKEN',
     'LGTM_E2E_GITHUB_SECONDARY_TOKEN',
     'LGTM_RPC_URL',
     'LGTM_DATABASE_URL',
