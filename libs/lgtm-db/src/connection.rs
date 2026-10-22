@@ -23,8 +23,6 @@ pub struct Database<C = DatabaseConnection> {
     pub workspace: WorkspaceRepository<C>,
     /// Thread, root comment and reply operations.
     pub comments: CommentRepository<C>,
-    /// Source note provenance and idempotent promotion receipts.
-    pub promotions: PromotionRepository<C>,
     /// Atomically saved results for local mutation retries.
     pub mutations: MutationRepository<C>,
 }
@@ -41,7 +39,6 @@ impl<C: ConnectionTrait + TransactionTrait> Database<C> {
             review_contexts: ReviewContextRepository::new(Arc::clone(&pool)),
             workspace: WorkspaceRepository::new(Arc::clone(&pool)),
             comments: CommentRepository::new(Arc::clone(&pool)),
-            promotions: PromotionRepository::new(Arc::clone(&pool)),
             mutations: MutationRepository::new(Arc::clone(&pool)),
             pool,
         }
@@ -127,7 +124,6 @@ impl Database<DatabaseTransaction> {
             review_contexts,
             workspace,
             comments,
-            promotions,
             mutations,
         } = self;
         drop((
@@ -136,7 +132,6 @@ impl Database<DatabaseTransaction> {
             review_contexts,
             workspace,
             comments,
-            promotions,
             mutations,
         ));
         Arc::try_unwrap(pool)

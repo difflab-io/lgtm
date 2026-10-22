@@ -82,6 +82,7 @@ impl<C: ConnectionTrait + TransactionTrait> ReviewContextRepository<C> {
         }
         Ok(matches.pop())
     }
+
     /// Get a record by its internal UUID; return None when absent or outside the selected context.
     pub async fn get_by_id(&self, id: &uuid::Uuid) -> Result<Option<review_contexts::Model>> {
         Ok(review_contexts::Entity::find_by_id(*id)
@@ -188,6 +189,63 @@ impl<C: ConnectionTrait + TransactionTrait> ReviewContextRepository<C> {
             .await?;
         Ok(())
     }
+
+    /// Local marks are per reviewer and survive review attempts; callers compare source identities.
+    pub async fn get_file_reviews(
+        &self,
+        context: &uuid::Uuid,
+        actor: &uuid::Uuid,
+    ) -> Result<Vec<(String, String)>> {
+        use crate::entities::file_reviews;
+        Ok(file_reviews::Entity::find()
+            .filter(file_reviews::Column::ContextId.eq(*context))
+            .filter(file_reviews::Column::ActorId.eq(*actor))
+            .all(self.connection.as_ref())
+            .await?
+            .into_iter()
+            .map(|row| (row.path, row.content_identity))
+            .collect())
+    }
+
+    /// Set an idempotent local file mark without changing the conversation revision.
+    pub async fn set_file_reviewed(
+        &self,
+        context: &uuid::Uuid,
+        actor: &uuid::Uuid,
+        path: &str,
+        content_identity: Option<&str>,
+    ) -> Result<()> {
+        use crate::entities::file_reviews;
+        use sea_orm::{Set, sea_query::OnConflict};
+        if let Some(identity) = content_identity {
+            file_reviews::Entity::insert(file_reviews::ActiveModel {
+                context_id: Set(*context),
+                actor_id: Set(*actor),
+                path: Set(path.into()),
+                content_identity: Set(identity.into()),
+            })
+            .on_conflict(
+                OnConflict::columns([
+                    file_reviews::Column::ContextId,
+                    file_reviews::Column::ActorId,
+                    file_reviews::Column::Path,
+                ])
+                .update_column(file_reviews::Column::ContentIdentity)
+                .to_owned(),
+            )
+            .exec(self.connection.as_ref())
+            .await?;
+        } else {
+            file_reviews::Entity::delete_many()
+                .filter(file_reviews::Column::ContextId.eq(*context))
+                .filter(file_reviews::Column::ActorId.eq(*actor))
+                .filter(file_reviews::Column::Path.eq(path))
+                .exec(self.connection.as_ref())
+                .await?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn new(connection: Arc<C>) -> Self {
         Self { connection }
     }

@@ -12,7 +12,7 @@ pub struct Session {
     pub context_id: uuid::Uuid,
     pub creator: Actor,
     pub commits: CommitContext,
-    /// Recorded selection mode. Legacy attempts do not imply a working or staged source.
+    /// Recorded selection mode, independent of the conversation identity.
     pub comparison_kind: ComparisonKind,
     pub created_at: String,
     #[serde(flatten)]

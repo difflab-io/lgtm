@@ -8,7 +8,7 @@ local api = vim.api
 local function comments(state, thread)
   local result = {}
   for _, c in ipairs(state.conversation.comments or {}) do
-    if c.threadId == thread.id and not c.deleted and c.remotePresence ~= "missing" then
+    if c.threadId == thread.id then
       result[#result + 1] = c
     end
   end
@@ -39,7 +39,7 @@ function M.placement(state, thread, path, side)
     return nil
   end
   if state.note then
-    -- The backend restricts a saved-file scope to that file, including legacy directory storage.
+    -- The backend restricts a saved-file scope to that file, including moved-file associations.
     view = vim.tbl_extend(
       "force",
       view,

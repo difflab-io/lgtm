@@ -126,8 +126,6 @@ pub enum ComparisonKind {
     /// Internal notes writes have no visible review attempt.
     #[sea_orm(string_value = "notes")]
     Notes,
-    #[sea_orm(string_value = "legacy")]
-    Legacy,
     #[sea_orm(string_value = "working")]
     Working,
     #[sea_orm(string_value = "staged")]
@@ -140,13 +138,11 @@ pub enum ComparisonKind {
     PullRequest,
 }
 
-/// The immutable source of annotated bytes. Unavailable means no saved-byte evidence was supplied.
+/// The selected source of annotated bytes. Absence of evidence is represented by None.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::None)")]
 #[serde(rename_all = "snake_case")]
 pub enum SourceKind {
-    #[sea_orm(string_value = "unavailable")]
-    Unavailable,
     #[sea_orm(string_value = "commit")]
     Commit,
     #[sea_orm(string_value = "index_file")]

@@ -1,4 +1,4 @@
-//! Committed results of local review mutations, scoped by actor, context, and retry key.
+//! Request acknowledgments and unresolved writes, scoped by actor, context, and retry key.
 use sea_orm::entity::prelude::*;
 
 #[sea_orm::model]
@@ -14,7 +14,7 @@ pub struct Model {
     /// Method and normalized payload bind the key to one intended action.
     pub method: String,
     pub request_hash: String,
-    /// Serialized domain response saved in the same transaction as the mutation.
+    /// Local accepted response, PR cache reference, or compact remote acknowledgment. No PR body history.
     pub result_json: String,
     /// Scope revision committed with the accepted result. Retries retain it.
     pub version: i64,

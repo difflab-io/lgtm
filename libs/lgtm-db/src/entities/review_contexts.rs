@@ -19,7 +19,7 @@ pub struct Model {
     pub git_dir: Option<String>,
     /// Full refs/heads/ branch name; set only for local branch reviews.
     pub branch: Option<String>,
-    /// Complete forge repository URL referencing repositories.repository_url; set only for forge-backed contexts.
+    /// Complete validated forge repository URL; set only for forge-backed contexts.
     pub repository_url: Option<String>,
     /// Repository/project-scoped PR or MR number, not a global forge object ID.
     pub number: Option<i64>,

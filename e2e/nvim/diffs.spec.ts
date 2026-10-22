@@ -131,12 +131,12 @@ for (const profile of profiles) {
       expect(state.native_explorer).toBe(true)
     })
 
-    it('Working-file changes invalidate its checkmark', async () => {
+    it('Working-file marks survive restart and changes invalidate the checkmark', async () => {
       // Arrange
       const { editor, runtime } = fixture()
       await prepareNativeCheckout(runtime)
       await runtime.write('review.txt', 'unstaged\n')
-      const state = await editor.openLocal('working')
+      await editor.openLocal('working')
       await editor.show('review.txt')
       await editor.pane()
       await editor.keys(' rm')
@@ -144,6 +144,28 @@ for (const profile of profiles) {
       await editor.keys(' rm')
       await expectFileSeen(editor, 'review.txt', false)
       await editor.keys(' rm')
+
+      await editor.wait(
+        'next(require("lgtm.context").current.reviewed_pending or {}) == nil',
+        'file mark saved by backend',
+      )
+
+      // Act
+      await editor.close()
+      await runtime.restart()
+      await editor.start()
+      const state = await editor.openLocal('working')
+      await editor.show('review.txt')
+      await editor.wait(
+        'require("lgtm.context").current.reviewed["review.txt"] ~= nil',
+        'persisted local file mark',
+      )
+
+      // Assert
+      await expectFileSeen(editor, 'review.txt', true)
+      expect((await editor.notices()).some((notice) => /File marked/.test(notice.message))).toBe(
+        false,
+      )
 
       // Act
       await runtime.write('review.txt', 'working content changed after marking seen\n')

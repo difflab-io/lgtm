@@ -1,7 +1,13 @@
 local M = {
   identity = nil,
   capabilities = nil,
-  required_capabilities = { "review_targets", "feedback_scopes", "anchor_evidence", "diff_service" },
+  required_capabilities = {
+    "review_targets",
+    "feedback_scopes",
+    "anchor_evidence",
+    "diff_service",
+    "file_reviews",
+  },
 }
 local initializing, waiting = false, {}
 function M.bootstrap(callback)

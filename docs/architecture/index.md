@@ -93,7 +93,7 @@ The installed application serves web assets and backend methods in the same proc
 | Placement | A derived location for one displayed comparison, with a confirmed, outdated, orphaned, or unverified status. |
 | Actor | A human or agent author. The GitHub posting account is a separate identity. |
 | Receipt | Evidence that an external write was accepted, used to recover without duplicates. |
-| Reviewed-file mark | Consumer-local progress for a reviewed comparison, independent of discussion resolution. |
+| Reviewed-file mark | Per-reviewer progress for a reviewed comparison, independent of discussion resolution. |
 
 #### Review data and diff data
 
@@ -251,7 +251,7 @@ A merged PR is not an LGTM review outcome. It must not become an invented approv
 | Complete a local session | Freeze completion metadata and retain the context conversation. Open threads remain open. |
 | Submit a PR review | Submit the same pending review with the selected outcome and optional final body. |
 | Export | Read notes or a review without changing any lifecycle state. |
-| Mark a file reviewed or seen | Track the reviewed comparison locally in the open consumer. Do not resolve comments or set GitHub Viewed state. |
+| Mark a file reviewed or seen | Persist local comparison progress; use GitHub Viewed state for PR files. Do not resolve comments. |
 
 Reviewed-file marks apply to working, staged, branch, PR, and explicit directory reviews, not ordinary notes. They do not persist across editor restarts and have no backend RPC. Marks bind to both compared source identities. A change to either side clears the mark, including a hidden working or index file change.
 
@@ -340,7 +340,7 @@ GitHub current locations and outdated state remain separate from historical coor
 
 ### Reviewed-file marks
 
-Marking a file reviewed or seen is separate from commenting, resolution, and submission. The editor shows a checkmark for PR, branch, working, staged, and explicit directory reviews, but not ordinary notes. These marks last only for the open review and do not synchronize GitHub's Viewed state.
+Marking a file reviewed or seen is separate from commenting, resolution, and submission. The editor shows a checkmark for PR, branch, working, staged, and explicit directory reviews, but not ordinary notes. Local marks persist across editor restarts and invalidate when compared content changes. PR marks use GitHub's Viewed state and its invalidation rules. Marking a file is silent.
 
 The editor invalidates a mark when either compared source changes. Hidden working and index files use metadata checks rather than body downloads. Use the [editor guide](../../apps/lgtm.nvim/README.md) for the mark and navigation keys.
 

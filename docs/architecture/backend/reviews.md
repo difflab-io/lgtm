@@ -247,7 +247,7 @@ markdown = Export({ scope: { reviewId: review.id } }).markdown
 notes = Export({ scope: source }).markdown
 ```
 
-Promotion retains source notes and original authorship. Each target anchor includes its source identity and evidence. The client confirms target locations before promotion. A PR target follows the remote draft rules. Export changes no review state and performs no GitHub write.
+Promotion retains source notes and original authorship. The copied comment records its source note ID. The same request key cannot duplicate a copy; a fresh request can promote again after deletion. No separate promotion history is stored. Each target anchor includes its source identity and evidence. The client confirms target locations before promotion. A PR target follows the remote draft rules. Export changes no review state and performs no GitHub write.
 
 #### Retry after a failure
 
@@ -408,7 +408,22 @@ Anchor       = General
 
 Each union becomes a typed discriminator, such as a Protobuf `oneof`. Local comparison fields describe what the client selected. The service resolves storage from the target. For PRs, the service obtains authoritative base, head, and lifecycle metadata from the forge. A review line anchor requires a relative path. A notes line anchor uses its scope's file path. Directory reviews use the notes context model internally.
 
-#### Anchor ownership
+#### Storage ownership
+
+```mermaid
+flowchart LR
+    Client["API consumer"] --> Review["Review service"]
+    Review --> Local["Local: durable conversation and anchors"]
+    Review --> Forge["PR: GitHub-owned discussion"]
+    Forge --> Cache["Disposable conversation cache"]
+    Review --> Retry["Local results or PR cache IDs and write acknowledgments"]
+```
+
+Local reviews own their discussion, source evidence and resolution state. GitHub owns PR drafts, comments, replies, resolution, submission and Viewed state. PR rows support fast reads and retain unsent input while a write fails; a complete provider observation replaces confirmed remote state. Failed or partial reads never infer deletion.
+
+A retry record is not a second PR history. Local requests may need their committed result after later edits or deletion. PR creation requests keep cache IDs; remote mutations keep identity, a payload hash and an acknowledgment. Uncertain writes recover against GitHub before replay. Promotion uses this shared retry contract and a nullable source-note ID on the copied comment.
+
+### Anchor ownership
 
 An anchor records what a comment discussed. A placement records where that anchor belongs in one displayed comparison. They have separate lifetimes.
 
@@ -586,6 +601,8 @@ The request shapes define client responsibilities. Final message fields follow t
 | `EditComment` | Scope, comment ID, body, version, request key → comment | Enforce ownership and remote permissions. Preserve authorship and anchor. |
 | `DeleteComment` | Scope, comment ID, version, request key → receipt | Enforce ownership and provider permissions. Confirmed remote deletion removes the cached comment; surviving replies keep their thread. Local roots require deleting replies first. |
 | `ResolveThread` | Scope, thread ID, resolved, version, request key → thread | Resolve or reopen according to thread origin. Confirm remote resolution from the targeted mutation response. |
+| `GetFileReviews` | Review ID → paths and content identities | Read local per-reviewer marks or GitHub Viewed state. |
+| `SetFileReviewed` | Review ID, path, reviewed, content identity → acknowledgment | Upsert/delete local progress or update GitHub Viewed state. No comment or resolution changes. |
 | `SyncDraftComment` | Review ID, comment ID → save state | Recover a known draft using receipts. Detect changed PR commits, update the active comparison, and derive safe placement before a new private write. Reuse its pending review. Keep saved drafts on failure. |
 | `CompleteReview` | Review ID, final body, version, request key → review | Complete a local review. Reject PR targets. Keep discussion and resolution. |
 | `Export` | Scope, optional selected roots → Markdown | Export notes or reviews without changing state. Selected roots include their threads. |
@@ -613,7 +630,7 @@ Mutations use `x-lgtm-identity` for local attribution. This header is not networ
 | PR reopens | Observe current lifecycle and comparison before enabling new actions. |
 | Another client submits or discards a pending review | Reconcile remote evidence. Do not silently recreate the pending review. |
 
-Clients clear reviewed-file marks when either compared side changes. These marks are UI progress and are outside the review service. Notes have no reviewed-file mark. Completed attempts retain their metadata. Later discussion changes do not turn exports into historical snapshots.
+Clients invalidate local reviewed-file marks when their compared content changes. The review service stores local marks per context, actor and path; PR marks use GitHub Viewed state directly. Notes have no reviewed-file mark. Completed attempts retain their metadata. Later discussion changes do not turn exports into historical snapshots.
 
 #### PR continuity across commits
 
@@ -682,7 +699,7 @@ The session's existing body column retains final text while the review is active
 
 `GetCapabilities` advertises `rejected_submission_recovery` for this contract. Clients require that capability before recovering a failed submission: an older backend may retry its final event. This check does not change recovery of an uncertain submission.
 
-For an older frozen `failed` attempt, `ReconcileSubmission` first verifies the owning account, unique pending review, and all staged comment receipts. A known rejection then resumes editing without retrying its final event. Missing receipts preserve the frozen intent. Recovery of an uncertain write still follows the existing receipt rules; it must not guess rejection or change an outcome that may already have been published.
+For a frozen `failed` attempt, `ReconcileSubmission` first verifies the owning account, unique pending review, and all staged comment receipts. A known rejection then resumes editing without retrying its final event. Missing receipts preserve the frozen intent. Recovery of an uncertain write still follows the existing receipt rules; it must not guess rejection or change an outcome that may already have been published.
 
 
 ## Implementation
@@ -760,7 +777,7 @@ Keep transport changes in the RPC boundary and domain changes in their existing 
 | External pending-review changes | Detect external submit or discard without creating replacement drafts silently. |
 | Remote write recovery | Survive lost responses for draft save, edit, delete, resolution, and submission without false success. |
 | Note promotion | Retain source attribution and provenance. Save eligible promoted PR drafts remotely. Reply transfer requires an explicit policy. |
-| UI progress | Client tests clear reviewed marks when either side changes. Backend tests require no viewed-file state. |
+| UI progress | Marks persist across restart. Changed files lose their marks while unchanged files keep them. PR marks agree with GitHub Viewed state. Marking is silent. |
 
 Test complete workflows through the public boundary against real SQLite and PostgreSQL. Keep dummy forge behavior at the HTTP boundary. Use separate backend, CLI, and Neovim E2E suites. The editor suite uses real Neovim, CodeDiff, WhichKey, notifications, and backend processes, plus an optional Kak profile. Any live fixture repository must be private. Confirm visibility before uploading content.
 

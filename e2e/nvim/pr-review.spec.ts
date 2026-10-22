@@ -4,7 +4,7 @@
  * @module-tag github
  * @module-tag pr-review
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { profiles } from './fixtures.js'
 import { usePrEditor, selectBranchPr } from './pr-review.fixtures.js'
 import type { GithubFixture } from '../common/github.js'
@@ -473,13 +473,10 @@ for (const profile of profiles) {
           expect.objectContaining({ state: 'open' }),
         ]),
       )
-      for (const text of [
-        'Earlier resolved concern',
-        'Earlier open concern',
-        'Published',
-        'Resolved',
-      ])
+      for (const text of ['Earlier open concern', 'Published', 'Resolved'])
         expect(cards).toContain(text)
+      expect(cards).not.toContain('Earlier resolved concern')
+      expect(cards).toContain('✓')
       expect(modal.toUpperCase()).toContain('RESOLVED')
       expect(modal).toContain('Earlier resolved concern')
     })
@@ -688,7 +685,29 @@ for (const profile of profiles) {
   describe(`When marking PR files as reviewed [${profile}]`, { tags: [profile] }, () => {
     const fixture = usePrEditor(profile)
 
-    it('The mark shortcut toggles the checkmark in the native CodeDiff tree', async () => {
+    afterEach(async () => {
+      const { github } = fixture()
+      const response = await github.api('graphql', 'POST', {
+        query:
+          'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id files(first:100){nodes{path viewerViewedState}}}}}',
+        variables: {
+          owner: github.repository.split('/')[0],
+          name: github.repository.split('/')[1],
+          number: github.number,
+        },
+      })
+      const pr = response.data.repository.pullRequest
+      for (const file of pr.files.nodes)
+        if (file.viewerViewedState === 'VIEWED') {
+          await github.api('graphql', 'POST', {
+            query:
+              'mutation($input:UnmarkFileAsViewedInput!){unmarkFileAsViewed(input:$input){clientMutationId}}',
+            variables: { input: { pullRequestId: pr.id, path: file.path } },
+          })
+        }
+    })
+
+    it('The mark shortcut silently toggles the checkmark in the native CodeDiff tree', async () => {
       // Arrange
       const { editor, github } = fixture()
       await selectBranchPr(editor, github)
@@ -701,8 +720,98 @@ for (const profile of profiles) {
 
       // Assert
       await expectFileSeen(editor, github.path, false)
+      expect((await editor.notices()).some((notice) => /File marked/.test(notice.message))).toBe(
+        false,
+      )
+    })
+    it('Viewed files survive editor and backend restarts and only changed files lose their marks', async () => {
+      // Arrange
+      const { editor, github, runtime } = fixture()
+      const unchanged = `${github.run}-unchanged.txt`
+      await github.changeFiles({ [unchanged]: 'unchanged reviewed file\n' })
+      await runtime.git(
+        '-c',
+        'credential.helper=!gh auth git-credential',
+        'fetch',
+        '--quiet',
+        'origin',
+        github.head,
+      )
+      const initial = await selectBranchPr(editor, github)
+      for (const path of [github.path, unchanged]) {
+        await editor.show(path)
+        await editor.pane('new')
+        await editor.keys(' rm')
+        await expectFileSeen(editor, path, true)
+      }
+      await waitFor(
+        'GitHub viewed-file state',
+        () =>
+          github.api('graphql', 'POST', {
+            query:
+              'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){files(first:100){nodes{path viewerViewedState}}}}}',
+            variables: {
+              owner: github.repository.split('/')[0],
+              name: github.repository.split('/')[1],
+              number: github.number,
+            },
+          }),
+        (response) =>
+          [github.path, unchanged].every((path) =>
+            response.data.repository.pullRequest.files.nodes.some(
+              (file: { path: string; viewerViewedState: string }) =>
+                file.path === path && file.viewerViewedState === 'VIEWED',
+            ),
+          ),
+      )
+      await editor.close()
+      await runtime.restart()
+      await editor.start()
+
+      // Act
+      const resumed = await selectBranchPr(editor, github)
+      await waitFor(
+        'resumed file checkmark',
+        () => editor.state(),
+        (state) => Boolean(state?.reviewed?.[github.path]),
+      )
+
+      // Assert
+      expect(resumed.review.id).toBe(initial.review.id)
+      await expectFileSeen(editor, github.path, true)
+
+      // Act
+      await github.changeFiles({
+        [github.path]: github.headContent + 'changed after marking viewed\n',
+      })
+      await runtime.git(
+        '-c',
+        'credential.helper=!gh auth git-credential',
+        'fetch',
+        '--quiet',
+        'origin',
+        github.head,
+      )
+      await editor.command('Lgtm refresh')
+      await editor.wait(
+        `require("lgtm.context").current.head == "${github.head}" and require("lgtm.context").current.render_ready`,
+        'updated review comparison',
+      )
+      await waitFor(
+        'changed file checkmark cleared',
+        () => editor.state(),
+        (state) => !state?.reviewed?.[github.path],
+      )
+
+      // Assert
+      await expectFileSeen(editor, github.path, false)
+      await expectFileSeen(editor, unchanged, true)
+      expect((await editor.notices()).some((notice) => /File marked/.test(notice.message))).toBe(
+        false,
+      )
     })
   })
+
   describe(`When addressing published comments [${profile}]`, { tags: [profile] }, () => {
     const fixture = usePrEditor(profile)
 
@@ -784,7 +893,8 @@ for (const profile of profiles) {
       expect(notices.some((notice) => notice.message.includes('Only your own comments'))).toBe(true)
       expect(remote.data.node.isResolved).toBe(true)
       const cards = JSON.stringify(await editor.marks())
-      expect(cards).toContain('Published concern')
+      expect(cards).not.toContain('Published concern')
+      expect(cards).toContain('✓')
       expect(cards).toContain('Resolved')
       expect(cards).toContain('LgtmCommentResolved')
       await editor.pane('new', 2)

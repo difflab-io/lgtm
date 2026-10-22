@@ -2,7 +2,7 @@
 mod common;
 use lgtm_db::{
     models::{identities, review_contexts, threads},
-    types::{ContextKind, IdentityKind, SourceKind},
+    types::{ContextKind, IdentityKind},
 };
 use uuid::Uuid;
 
@@ -54,7 +54,7 @@ fn thread(context_id: Uuid, author_id: Uuid) -> threads::Model {
         anchor_kind: "line".into(),
         file_path: Some("original.rs".into()),
         side: Some("new".into()),
-        selected_text: Some("selected".into()),
+
         start_line: Some(3),
         end_line: Some(3),
         state: "open".into(),
@@ -63,23 +63,14 @@ fn thread(context_id: Uuid, author_id: Uuid) -> threads::Model {
         updated_by_id: None,
         updated_at: "now".into(),
         forge_thread_id: None,
-        outdated: false,
-        source_kind: SourceKind::IndexFile,
-        source_blob_oid: Some("b".repeat(40)),
-        source_commit: None,
-        source_content_hash: Some(format!("sha256:{}", "a".repeat(64))),
-        context_before: Some("before".into()),
-        context_after: Some("after".into()),
+
+        source_evidence: Some(
+            serde_json::json!({"source":{"kind":"index_file","blob_oid":"b".repeat(40),"content_hash":format!("sha256:{}","a".repeat(64))},"selected_text":"selected","context_before":"before","context_after":"after"}),
+        ),
+        forge_observation: None,
         current_path: None,
         source_path: None,
         orphan_reason: None,
-        observed_base: None,
-        observed_head: None,
-        observed_outdated: None,
-        observed_path: None,
-        observed_side: None,
-        observed_start: None,
-        observed_end: None,
     }
 }
 
@@ -89,19 +80,32 @@ async fn should_reject_incomplete_source_and_provider_shapes() {
     for db in common::databases().await {
         let (context, author) = context(&db).await;
         let mut missing_blob = thread(context, author);
-        missing_blob.source_blob_oid = None;
+        missing_blob.source_evidence.as_mut().unwrap()["source"]
+            .as_object_mut()
+            .unwrap()
+            .remove("blob_oid");
         assert!(db.comments.insert_thread(&missing_blob).await.is_err());
         let mut wrong_origin = thread(context, author);
         wrong_origin.source_path = Some("/notes/not-a-git-origin".into());
         assert!(db.comments.insert_thread(&wrong_origin).await.is_err());
         let mut missing_hash = thread(context, author);
-        missing_hash.source_content_hash = None;
+        missing_hash.source_evidence.as_mut().unwrap()["source"]
+            .as_object_mut()
+            .unwrap()
+            .remove("content_hash");
         assert!(db.comments.insert_thread(&missing_hash).await.is_err());
         let mut missing_text = thread(context, author);
-        missing_text.selected_text = None;
+        missing_text
+            .source_evidence
+            .as_mut()
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .remove("selected_text");
         assert!(db.comments.insert_thread(&missing_text).await.is_err());
         let mut partial_observation = thread(context, author);
-        partial_observation.observed_start = Some(3);
+        partial_observation.forge_observation =
+            Some(serde_json::json!({"current":{"kind":"line","start":3}}));
         assert!(
             db.comments
                 .insert_thread(&partial_observation)
@@ -109,9 +113,8 @@ async fn should_reject_incomplete_source_and_provider_shapes() {
                 .is_err()
         );
         let mut complete = thread(context, author);
-        complete.observed_outdated = Some(true);
-        complete.observed_base = Some("base".into());
-        complete.observed_head = Some("head".into());
+        complete.forge_observation =
+            Some(serde_json::json!({"base":"base","head":"head","outdated":true,"current":null}));
         // Historical-only provider threads have no current coordinates.
         db.comments.insert_thread(&complete).await.unwrap();
         assert_eq!(
@@ -131,7 +134,8 @@ async fn should_preserve_original_evidence_when_updating_paths_and_filtering_vie
         let mut moved = original.clone();
         moved.current_path = Some("moved/file.rs".into());
         moved.file_path = Some("must-not-replace-origin.rs".into());
-        moved.source_blob_oid = Some("c".repeat(40));
+        moved.source_evidence.as_mut().unwrap()["source"]["blob_oid"] =
+            serde_json::json!("c".repeat(40));
         moved.source_path = Some("/must-not-replace-an-origin".into());
         db.comments.update_thread(&moved).await.unwrap();
         let saved = db
@@ -141,9 +145,8 @@ async fn should_preserve_original_evidence_when_updating_paths_and_filtering_vie
             .unwrap()
             .unwrap();
         assert_eq!(saved.file_path, original.file_path);
-        assert_eq!(saved.source_blob_oid, original.source_blob_oid);
+        assert_eq!(saved.source_evidence, original.source_evidence);
         assert_eq!(saved.source_path, original.source_path);
-        assert_eq!(saved.selected_text, original.selected_text);
         assert_eq!(saved.current_path.as_deref(), Some("moved/file.rs"));
         assert_eq!(
             db.comments
@@ -194,7 +197,7 @@ async fn should_roll_back_path_changes_and_context_revision_on_failed_transactio
         moved.current_path = Some("moved.rs".into());
         tx.comments.update_thread(&moved).await.unwrap();
         let mut invalid = thread(context, author);
-        invalid.source_blob_oid = None;
+        invalid.source_evidence = Some(serde_json::json!("invalid evidence"));
         assert!(tx.comments.insert_thread(&invalid).await.is_err());
         drop(tx);
         assert_eq!(

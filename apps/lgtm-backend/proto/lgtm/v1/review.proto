@@ -47,10 +47,13 @@ message Comment {
   string created_at = 10;
   string updated_at = 11;
   string forge_comment_id = 12;
-  string remote_presence = 13;
+  reserved 13;
+  reserved "remote_presence";
   string version = 14;
   string owner_id = 15;
-  bool deleted = 16;
+  reserved 16;
+  reserved "deleted";
+  string source_note_id = 17;
 }
 
 message Thread {
@@ -186,6 +189,8 @@ service ReviewService {
   rpc StartReview(StartReviewRequest) returns (StartReviewResponse);
   rpc ListReviews(ListReviewsRequest) returns (ListReviewsResponse);
   rpc GetReview(GetReviewRequest) returns (GetReviewResponse);
+  rpc GetFileReviews(GetFileReviewsRequest) returns (GetFileReviewsResponse);
+  rpc SetFileReviewed(SetFileReviewedRequest) returns (SetFileReviewedResponse);
   rpc RefreshReview(RefreshReviewRequest) returns (RefreshReviewResponse);
   rpc CompleteReview(CompleteReviewRequest) returns (CompleteReviewResponse);
   rpc GetConversation(GetConversationRequest) returns (GetConversationResponse);
@@ -448,3 +453,14 @@ message CompleteReviewRequest {
 }
 
 message CompleteReviewResponse { Review review = 1; }
+
+// Local marks include the exact comparison content; PR marks are authoritative GitHub viewer state.
+message FileReview { string path = 1; string content_identity = 2; }
+
+message GetFileReviewsRequest { string review_id = 1; }
+
+message GetFileReviewsResponse { repeated FileReview files = 1; }
+
+message SetFileReviewedRequest { string review_id = 1; string path = 2; bool reviewed = 3; string content_identity = 4; }
+
+message SetFileReviewedResponse {}

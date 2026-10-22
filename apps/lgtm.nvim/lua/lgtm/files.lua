@@ -2,6 +2,101 @@
 local M = {}
 local api = vim.api
 
+-- JSON object key order can differ across editor processes; compare the source values.
+local function same_content(first, second)
+  if first == second then
+    return true
+  end
+  local first_ok, first_value = pcall(vim.json.decode, first)
+  local second_ok, second_value = pcall(vim.json.decode, second)
+  return first_ok
+    and second_ok
+    and type(first_value) == "table"
+    and vim.deep_equal(first_value, second_value)
+end
+
+-- Local marks survive editor restarts; GitHub owns PR viewer state.
+function M.load_reviewed(state)
+  if not state.review or not state.comparison then
+    return
+  end
+  state.reviewed_read = (state.reviewed_read or 0) + 1
+  local generation = state.reviewed_read
+  state.reviewed_loading = true
+  state.reviewed_review = state.review.id
+  require("lgtm.rpc").call("GetFileReviews", { reviewId = state.review.id }, function(err, response)
+    if state.closed or generation ~= state.reviewed_read then
+      return
+    end
+    state.reviewed_loading = false
+    if err then
+      state.reviewed_review = nil
+      require("lgtm.notifications").error(err)
+      return
+    end
+    state.reviewed = {}
+    for _, file in ipairs(response.files or {}) do
+      state.reviewed[file.path] = file.contentIdentity
+    end
+    for path, queue in pairs(state.reviewed_pending or {}) do
+      state.reviewed[path] = queue[#queue].identity
+    end
+    M.render(state)
+  end)
+end
+
+function M.save_reviewed(state, path, identity, done)
+  local reload_progress = state.reviewed_loading
+  state.reviewed_loading = false
+  state.reviewed_read = (state.reviewed_read or 0) + 1
+  if not state.review then
+    return
+  end
+  state.reviewed_pending = state.reviewed_pending or {}
+  local queue = state.reviewed_pending[path]
+  local request = { identity = identity, done = done }
+  if queue then
+    queue[#queue + 1] = request
+    return
+  end
+  queue = { request }
+  state.reviewed_pending[path] = queue
+  local function send()
+    local current = queue[1]
+    require("lgtm.rpc").call("SetFileReviewed", {
+      reviewId = state.review.id,
+      path = path,
+      reviewed = current.identity ~= nil,
+      contentIdentity = current.identity,
+    }, function(err)
+      table.remove(queue, 1)
+      if #queue == 0 then
+        state.reviewed_pending[path] = nil
+        if reload_progress and not state.closed then
+          M.load_reviewed(state)
+        end
+      else
+        send()
+      end
+      if current.done then
+        current.done(err)
+      end
+      if err then
+        require("lgtm.notifications").error(err)
+      end
+    end)
+  end
+  send()
+end
+
+function M.invalidate_reviewed(state, path)
+  if not state.reviewed or not state.reviewed[path] then
+    return
+  end
+  state.reviewed[path] = nil
+  M.save_reviewed(state, path, nil)
+end
+
 -- Selected bodies supply the original identity. Hidden files need only bounded metadata checks.
 function M.validate_reviewed(state)
   if not state.git_root or not state.reviewed then
@@ -23,26 +118,49 @@ function M.validate_reviewed(state)
       return
     end
     if changed then
-      state.reviewed[file.path] = nil
+      M.invalidate_reviewed(state, file.path)
       M.render(state)
     end
   end
   if state.mode == "working" then
     for _, file in ipairs(selected) do
       local expected = file.saved_stamp
-      vim.uv.fs_stat(vim.fs.joinpath(state.git_root, file.path), function(err, stat)
-        vim.schedule(function()
-          local absent = expected == false and err and err:match("ENOENT")
-          invalidate(
-            file,
-            not absent
-              and (
-                err ~= nil
-                or not vim.deep_equal(expected, require("lgtm.sources").saved_stamp(stat))
-              )
-          )
+      if expected == nil then
+        local valid, identity = pcall(vim.json.decode, state.reviewed[file.path])
+        require("lgtm.sources").file(
+          state.git_root,
+          file.path,
+          "working_file",
+          function(err, selected)
+            invalidate(
+              file,
+              err ~= nil
+                or not valid
+                or type(identity) ~= "table"
+                or not selected.source
+                or not identity.new
+                or selected.source.content_hash ~= identity.new.content_hash
+            )
+            if not err and selected then
+              file.saved_stamp = selected.saved_stamp
+            end
+          end
+        )
+      else
+        vim.uv.fs_stat(vim.fs.joinpath(state.git_root, file.path), function(err, stat)
+          vim.schedule(function()
+            local absent = expected == false and err and err:match("ENOENT")
+            invalidate(
+              file,
+              not absent
+                and (
+                  err ~= nil
+                  or not vim.deep_equal(expected, require("lgtm.sources").saved_stamp(stat))
+                )
+            )
+          end)
         end)
-      end)
+      end
     end
   elseif state.mode == "staged" then
     -- Bound each command even when a large review has many viewed files.
@@ -75,7 +193,12 @@ function M.validate_reviewed(state)
             end
           end
           for _, file in ipairs(batch) do
-            invalidate(file, result.code ~= 0 or (entries[file.path] or false) ~= file.index_oid)
+            local valid, identity = pcall(vim.json.decode, state.reviewed[file.path] or "")
+            local expected = file.index_oid
+            if expected == nil and valid then
+              expected = identity.new and identity.new.blob_oid or false
+            end
+            invalidate(file, result.code ~= 0 or (entries[file.path] or false) ~= expected)
           end
         end)
       end)
@@ -113,9 +236,11 @@ function M.render(state)
       if
         state.reviewed
         and state.reviewed[file.path]
-        and state.reviewed[file.path] ~= file.contentHash
+        and state.reviewed[file.path] ~= "github"
+        and file.contentHash
+        and not same_content(state.reviewed[file.path], file.contentHash)
       then
-        state.reviewed[file.path] = nil
+        M.invalidate_reviewed(state, file.path)
       end
     end
     for row = 1, api.nvim_buf_line_count(panel.bufnr) do
@@ -136,8 +261,13 @@ function M.render(state)
   local lines = {}
   state.reviewed = state.reviewed or {}
   for _, file in ipairs(state.files or {}) do
-    if state.reviewed[file.path] and state.reviewed[file.path] ~= file.contentHash then
-      state.reviewed[file.path] = nil
+    if
+      state.reviewed[file.path]
+      and state.reviewed[file.path] ~= "github"
+      and file.contentHash
+      and not same_content(state.reviewed[file.path], file.contentHash)
+    then
+      M.invalidate_reviewed(state, file.path)
     end
     local changed = state.kind == "pr" or (file.baseContent or "") ~= (file.content or "")
     lines[#lines + 1] = string.format(
@@ -167,19 +297,23 @@ function M.toggle_reviewed(state, file)
     and pane.win == api.nvim_get_current_win()
     and api.nvim_win_get_cursor(pane.win)
   state.reviewed = state.reviewed or {}
-  if state.reviewed[file.path] then
+  local previous = state.reviewed[file.path]
+  if previous then
     state.reviewed[file.path] = nil
   else
     state.reviewed[file.path] = file.contentHash
   end
+  local selected = state.reviewed[file.path]
+  M.save_reviewed(state, file.path, selected, function(err)
+    if err and state.reviewed[file.path] == selected then
+      state.reviewed[file.path] = previous
+      M.render(state)
+    end
+  end)
   M.render(state)
   if cursor then
     api.nvim_win_set_cursor(pane.win, cursor)
   end
-  require("lgtm.notifications").show(
-    (state.reviewed[file.path] and "File marked reviewed: " or "File marked unreviewed: ")
-      .. file.path
-  )
 end
 
 -- CodeDiff updates working/index buffers independently of file selection.
@@ -203,7 +337,7 @@ function M.observe(state, buf)
         end
         -- Invalidate immediately. A bounded selected-source read runs after CodeDiff settles.
         state.reviewed = state.reviewed or {}
-        state.reviewed[state.file.path] = nil
+        M.invalidate_reviewed(state, state.file.path)
         state.views = {}
         state.source_generation = (state.source_generation or 0) + 1
         if state.render then

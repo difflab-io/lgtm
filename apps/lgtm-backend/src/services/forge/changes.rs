@@ -113,9 +113,7 @@ impl ForgeService {
                         .find(|t| t.id == *thread_id)
                         .ok_or_else(|| Error::NotFound("Thread".into()))?;
                     if !conversation.comments.iter().any(|comment| {
-                        comment.thread_id == *thread_id
-                            && !comment.deleted
-                            && comment.visibility != "draft"
+                        comment.thread_id == *thread_id && comment.visibility != "draft"
                     }) {
                         return Err(invalid(
                             "Publish draft comments before resolving their thread",
@@ -472,7 +470,7 @@ impl ForgeService {
                 updated.forge_body = Some(rendered);
                 updated.forge_updated_at = Some(remote.updated_at.clone());
                 updated.updated_at = now();
-                updated.remote_presence = "present".into();
+
                 updated.visibility = if remote.pending { "draft" } else { "published" }.into();
                 Ok(Some(ForgeChangeObject::Comment(Box::new(updated))))
             }
@@ -500,9 +498,6 @@ impl ForgeService {
                 updated.resolved_by = None;
                 updated.updated_by = None;
                 updated.forge_observation = remote.observation.clone();
-                if let Some(observation) = &updated.forge_observation {
-                    updated.outdated = observation.outdated;
-                }
                 Ok(Some(ForgeChangeObject::Thread(updated)))
             }
             _ => Err(invalid("Saved remote intent has an incompatible object")),

@@ -34,6 +34,43 @@ struct Submission<'a> {
 }
 
 impl ForgeService {
+    /// Read the authenticated viewer's marks directly from GitHub; never mirror them into local review tables.
+    pub async fn get_file_reviews(&self, review_id: &Uuid) -> Result<Vec<(String, String)>> {
+        let session = self.reviews.get_session(review_id).await?;
+        let context = self.reviews.get_context_by_id(&session.context_id).await?;
+        let (repo, number) = Repository::from_context(&context.key)?;
+        let github = self.get_provider().await?;
+        Ok(
+            gh::get_viewed_files(&github.client, &repo.owner, &repo.name, number)
+                .await?
+                .into_iter()
+                .map(|path| (path, "github".into()))
+                .collect(),
+        )
+    }
+
+    pub async fn set_file_reviewed(
+        &self,
+        review_id: &Uuid,
+        path: &str,
+        reviewed: bool,
+    ) -> Result<()> {
+        Anchor::File { path: path.into() }.validate()?;
+        let session = self.reviews.get_session(review_id).await?;
+        let context = self.reviews.get_context_by_id(&session.context_id).await?;
+        let (repo, number) = Repository::from_context(&context.key)?;
+        let github = self.get_provider().await?;
+        gh::set_file_viewed(
+            &github.client,
+            &repo.owner,
+            &repo.name,
+            number,
+            path,
+            reviewed,
+        )
+        .await
+    }
+
     async fn get_provider(&self) -> Result<Github> {
         match &self.provider {
             Some(p) => Ok(p.clone()),
@@ -645,7 +682,7 @@ impl ForgeService {
         let mut comments: Vec<_> = conversation
             .comments
             .into_iter()
-            .filter(|c| c.origin_session_id == Some(*session_id) && c.remote_presence != "missing")
+            .filter(|c| c.origin_session_id == Some(*session_id))
             .collect();
         comments.sort_by_key(|c| (c.position, c.created_at.clone(), c.id));
         let mut prepared = Vec::new();

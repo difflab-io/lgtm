@@ -357,7 +357,6 @@ function M.sync()
       and c.author
       and (c.ownerId ~= "" and c.ownerId or c.author.id) == rpc.identity
       and c.visibility == "draft"
-      and c.remotePresence ~= "missing"
     then
       drafts[#drafts + 1] = c
     end
@@ -675,6 +674,9 @@ function M.refresh()
       end
       if result.review then
         contexts.apply(state, result.review)
+        if vim.deep_equal(comparison, state.comparison) then
+          require("lgtm.files").load_reviewed(state)
+        end
       end
       local function content()
         state.refresh(function(error)

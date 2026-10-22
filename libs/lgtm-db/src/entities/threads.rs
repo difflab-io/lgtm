@@ -21,8 +21,6 @@ pub struct Model {
     pub file_path: Option<String>,
     /// Original diff side, old or new, for a line anchor.
     pub side: Option<String>,
-    /// Selected non-Git lines only, used for unique relocation after content changes.
-    pub selected_text: Option<String>,
     /// Original inclusive starting line, using one-based indexing.
     pub start_line: Option<i64>,
     /// Original inclusive ending line, using one-based indexing.
@@ -39,42 +37,16 @@ pub struct Model {
     pub updated_at: String,
     /// Opaque remote discussion/thread ID, scoped by context; NULL until linked.
     pub forge_thread_id: Option<String>,
-    /// Whether the original line anchor refers to a commit different from the current reviewed commit.
-    pub outdated: bool,
-
-    /// Immutable source discriminator. Unavailable means no saved-byte evidence was supplied.
-    pub source_kind: crate::entities::common::SourceKind,
-    /// Original stage-zero index blob ID, required only for index evidence.
-    pub source_blob_oid: Option<String>,
-    /// Immutable content commit, including file-level anchors with no line coordinates.
-    pub source_commit: Option<String>,
-    /// SHA-256 identity of the exact annotated bytes, including line endings.
-    pub source_content_hash: Option<String>,
-    /// Bounded original text immediately before the selected range.
-    pub context_before: Option<String>,
-    /// Bounded original text immediately after the selected range.
-    pub context_after: Option<String>,
+    /// Immutable typed source identity and bounded relocation evidence; absent for provider-only coordinates.
+    pub source_evidence: Option<Json>,
+    /// Disposable provider location observation; rebuilt from GitHub during refresh.
+    pub forge_observation: Option<Json>,
     /// Confirmed repository-relative path or absolute saved-file association. The original file_path never changes.
     pub current_path: Option<String>,
     /// Immutable absolute saved-file location for local notes. Git and forge anchors remain repository-relative.
     pub source_path: Option<String>,
     /// Confirmed file deletion or changed ephemeral working source. Absence is not proof of a valid line.
     pub orphan_reason: Option<crate::entities::common::OrphanReason>,
-    /// Base identity of the last complete forge location observation.
-    pub observed_base: Option<String>,
-    /// Head identity of the last complete forge location observation.
-    pub observed_head: Option<String>,
-    /// Provider outdated flag, independent of resolution and local mapping.
-    pub observed_outdated: Option<bool>,
-    /// Provider current path, separate from the immutable original path.
-    pub observed_path: Option<String>,
-    /// Provider current diff side for a line observation.
-    pub observed_side: Option<String>,
-    /// Provider current inclusive first line. Never filled from historical lines.
-    pub observed_start: Option<i64>,
-    /// Provider current inclusive last line. Absent when no current line exists.
-    pub observed_end: Option<i64>,
-
     #[sea_orm(belongs_to, relation_enum = "Author", from = "author_id", to = "id")]
     /// Loaded relationship; not an additional stored column.
     pub author: BelongsTo<super::identities::Entity>,
@@ -109,6 +81,82 @@ pub struct Model {
     )]
     /// Loaded relationship; not an additional stored column.
     pub origin_session: BelongsTo<Option<super::sessions::Entity>>,
+}
+
+impl Model {
+    /// Validate immutable evidence at insertion. Its fields are stored and replaced as one value.
+    pub(crate) fn validate_source(&self) -> crate::error::Result<()> {
+        use crate::error::invalid;
+        let Some(evidence) = &self.source_evidence else {
+            return Ok(());
+        };
+        let source = &evidence["source"];
+        let hash = source["content_hash"].as_str().unwrap_or_default();
+        let kind = source["kind"].as_str().unwrap_or_default();
+        let object = |field: &str| {
+            source[field].as_str().is_some_and(|value| {
+                [40, 64].contains(&value.len())
+                    && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+        };
+        let valid_source = match kind {
+            "commit" => object("sha"),
+            "index_file" => object("blob_oid"),
+            "working_file" | "local_file" => true,
+            _ => false,
+        };
+        if !["file", "line"].contains(&self.anchor_kind.as_str())
+            || !valid_source
+            || !hash.strip_prefix("sha256:").is_some_and(|value| {
+                value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+            || ["selected_text", "context_before", "context_after"]
+                .iter()
+                .any(|field| !evidence[field].is_string())
+            || self.source_path.is_some() && kind != "local_file"
+            || self.anchor_kind == "file"
+                && ["selected_text", "context_before", "context_after"]
+                    .iter()
+                    .any(|field| evidence[field] != "")
+        {
+            return Err(invalid("Incomplete or incompatible anchor evidence"));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_observation(&self) -> crate::error::Result<()> {
+        use crate::error::invalid;
+        let Some(observation) = &self.forge_observation else {
+            return Ok(());
+        };
+        if ["base", "head"]
+            .iter()
+            .any(|field| observation[field].as_str().is_none_or(str::is_empty))
+            || !observation["outdated"].is_boolean()
+        {
+            return Err(invalid("Incomplete forge observation"));
+        }
+        let current = &observation["current"];
+        if current.is_null() {
+            return Ok(());
+        }
+        if current["path"].as_str().is_none_or(str::is_empty)
+            || match current["kind"].as_str() {
+                Some("file") => false,
+                Some("line") => {
+                    current["start"].as_i64().is_none_or(|start| start < 1)
+                        || current["end"]
+                            .as_i64()
+                            .is_none_or(|end| end < current["start"].as_i64().unwrap_or(1))
+                        || ![Some("old"), Some("new")].contains(&current["side"].as_str())
+                }
+                _ => true,
+            }
+        {
+            return Err(invalid("Incomplete forge location"));
+        }
+        Ok(())
+    }
 }
 
 impl ActiveModelBehavior for ActiveModel {}

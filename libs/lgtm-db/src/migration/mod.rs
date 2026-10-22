@@ -1,25 +1,11 @@
 use sea_orm_migration::prelude::*;
 mod m20261015_220400_review;
-mod m20261018_200000_note_promotions;
-mod m20261018_210000_selected_text;
-mod m20261019_090000_anchor_evidence;
-mod m20261019_091000_mutation_receipts;
-mod m20261019_092000_forge_lifecycle;
-mod m20261019_093000_notes_locations;
 
 pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![
-            Box::new(m20261015_220400_review::Migration),
-            Box::new(m20261018_200000_note_promotions::Migration),
-            Box::new(m20261018_210000_selected_text::Migration),
-            Box::new(m20261019_090000_anchor_evidence::Migration),
-            Box::new(m20261019_091000_mutation_receipts::Migration),
-            Box::new(m20261019_092000_forge_lifecycle::Migration),
-            Box::new(m20261019_093000_notes_locations::Migration),
-        ]
+        vec![Box::new(m20261015_220400_review::Migration)]
     }
 }
 
@@ -161,25 +147,25 @@ mod tests {
                 anchor_kind: Set("general".into()),
                 state: Set("open".into()),
                 updated_at: Set("now".into()),
-                outdated: Set(false),
                 ..Default::default()
             }
             .insert(db.connection())
             .await
             .unwrap();
-            let mut comment = comments::ActiveModel {
+            let comment = comments::ActiveModel {
                 id: Set(fixture_id("comment")),
                 context_id: Set(fixture_id("context")),
                 thread_id: Set(fixture_id("thread")),
                 origin_session_id: Set(Some(session.id)),
                 author_id: Set(identity.id),
+                owner_id: Set(Some(identity.id)),
                 body: Set("Survives migrations".into()),
                 position: Set(0),
                 visibility: Set("published".into()),
                 created_at: Set("now".into()),
                 updated_at: Set("now".into()),
                 posting_state: Set(crate::entities::common::PostingState::Unposted),
-                remote_presence: Set("local".into()),
+
                 ..Default::default()
             }
             .insert(db.connection())
@@ -187,36 +173,21 @@ mod tests {
             .unwrap();
 
             let raw = sea_orm::Database::connect(&url).await.unwrap();
-            // Upgrade a populated pre-evidence database, preserving legacy data without inventing a source.
-            Migrator::down(&raw, Some(Migrator::migrations().len() as u32 - 3))
-                .await
-                .unwrap();
-            assert!(
-                !SchemaManager::new(&raw)
-                    .has_column("threads", "source_kind")
-                    .await
-                    .unwrap()
-            );
+            // Reopening the current fresh schema preserves records without extra migrations.
             apply::<Migrator>(&raw).await.unwrap();
-            comment.owner_id = Some(comment.author_id);
             let preserved = db
                 .comments
                 .get_thread(&fixture_id("context"), &fixture_id("thread"))
                 .await
                 .unwrap()
                 .unwrap();
-            assert_eq!(preserved.source_kind, crate::types::SourceKind::Unavailable);
-            assert!(preserved.source_content_hash.is_none());
+            assert!(preserved.source_evidence.is_none());
             assert_eq!(
                 db.comments
-                    .get_by_id(&fixture_id("context"), &comment.id)
+                    .get_comment_by_id(&fixture_id("context"), &comment.id)
                     .await
                     .unwrap(),
-                Some({
-                    let mut expected = comment.clone();
-                    expected.owner_id = Some(expected.author_id);
-                    expected
-                })
+                Some(comment.clone())
             );
             assert!(apply::<Failing>(&raw).await.is_err());
             assert!(
@@ -294,14 +265,10 @@ mod tests {
             );
             assert_eq!(
                 db.comments
-                    .get_by_id(&fixture_id("context"), &comment.id)
+                    .get_comment_by_id(&fixture_id("context"), &comment.id)
                     .await
                     .unwrap(),
-                Some({
-                    let mut expected = comment.clone();
-                    expected.owner_id = Some(expected.author_id);
-                    expected
-                })
+                Some(comment.clone())
             );
             raw.close().await.unwrap();
             db.close().await;
@@ -313,7 +280,7 @@ mod tests {
             assert_eq!(
                 reopened
                     .comments
-                    .get_by_id(&fixture_id("context"), &comment.id)
+                    .get_comment_by_id(&fixture_id("context"), &comment.id)
                     .await
                     .unwrap(),
                 Some(comment)

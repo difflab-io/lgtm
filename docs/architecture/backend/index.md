@@ -129,16 +129,13 @@ SessionStatus separates Active from Completed metadata. PostingStatus only carri
 ```mermaid
 erDiagram
     direction LR
-    REPOSITORIES {
-        text repository_url PK
-    }
     REVIEW_CONTEXTS {
         uuid id PK
         ContextKind kind
         text notes_path "nullable"
         text git_dir "nullable"
         text branch "nullable"
-        text repository_url FK "nullable"
+        text repository_url "nullable"
         bigint number "nullable"
         bigint revision
         text last_refreshed_at "nullable"
@@ -186,8 +183,11 @@ erDiagram
         text anchor_kind
         text file_path "nullable"
         text side "nullable"
-        text source_commit "nullable"
-        text source_content_hash "nullable"
+        json source_evidence "nullable"
+        json forge_observation "nullable"
+        text source_path "nullable"
+        text current_path "nullable"
+        OrphanReason orphan_reason "nullable"
         bigint start_line "nullable"
         bigint end_line "nullable"
         text state
@@ -196,7 +196,6 @@ erDiagram
         uuid updated_by_id FK "nullable"
         text updated_at
         text forge_thread_id "nullable"
-        boolean outdated
     }
     COMMENTS {
         uuid id PK
@@ -204,6 +203,8 @@ erDiagram
         uuid thread_id FK
         uuid origin_session_id FK "nullable"
         uuid author_id FK
+        uuid owner_id FK "nullable"
+        uuid source_note_id "nullable"
         text body
         bigint position
         text visibility
@@ -219,9 +220,7 @@ erDiagram
         text posting_error "nullable"
         text posting_request_key "nullable"
         text payload_hash "nullable"
-        text remote_presence
     }
-    REPOSITORIES |o--o{ REVIEW_CONTEXTS : repository_url
     REVIEW_CONTEXTS ||--o{ WORKSPACE_PATHS : context_id
     REVIEW_CONTEXTS ||--o{ SESSIONS : context_id
     REVIEW_CONTEXTS ||--o{ THREADS : context_id

@@ -15,6 +15,7 @@ export class GithubFixture {
   private readonly baseContent = 'first\nsecond\n' + this.sourceTail
   readonly headContent = 'first\nchanged\n' + this.sourceTail
   repositoryUrl = ''
+  private nodeId = ''
   private base = ''
   head = ''
   number?: number
@@ -158,7 +159,13 @@ export class GithubFixture {
         ['git/', 'contents/', 'pulls', 'issues/'].some((resource) =>
           route.startsWith(`repos/${this.repository}/${resource}`),
         )
-      if (!readQuery && !fixtureResource)
+      const unmarkOwnedFile =
+        route === 'graphql' &&
+        this.nodeId !== '' &&
+        body?.query ===
+          'mutation($input:UnmarkFileAsViewedInput!){unmarkFileAsViewed(input:$input){clientMutationId}}' &&
+        body?.variables?.input?.pullRequestId === this.nodeId
+      if (!readQuery && !fixtureResource && !unmarkOwnedFile)
         throw new Error(
           'Tests can mutate fixture resources only; repository provisioning or changes are forbidden',
         )
@@ -251,6 +258,7 @@ export class GithubFixture {
         body: 'Isolated review lifecycle test in the permanent private fixture repository. Closed after this run.',
       })
       fixture.number = pr.number
+      fixture.nodeId = pr.node_id
       console.info(`Persistent private fixture: ${pr.html_url}`)
       return fixture
     } catch (error) {

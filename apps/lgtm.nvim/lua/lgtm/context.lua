@@ -38,11 +38,9 @@ function M.apply(state, review)
   then
     return state
   end
-  if
-    state.kind == "pr"
-    and state.comparison
-    and not vim.deep_equal(state.comparison, review.comparison)
-  then
+  local comparison_changed = not vim.deep_equal(state.comparison, review.comparison)
+  local load_progress = state.reviewed_review ~= review.id or comparison_changed
+  if state.kind == "pr" and state.comparison and comparison_changed then
     state.views, state.reviewed, state.observe_sources = {}, {}, nil
     state.source_generation = (state.source_generation or 0) + 1
     state.render_ready = false
@@ -63,6 +61,9 @@ function M.apply(state, review)
     or state.root
     or (review.target.localGit or {}).path
   state.scope_key = review.id
+  if load_progress then
+    require("lgtm.files").load_reviewed(state)
+  end
   return state
 end
 

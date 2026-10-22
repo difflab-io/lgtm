@@ -6,6 +6,12 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        let json_type =
+            if manager.get_connection().get_database_backend() == sea_orm::DbBackend::Postgres {
+                "jsonb_typeof"
+            } else {
+                "json_type"
+            };
         manager
             .create_table(
                 Table::create()
@@ -79,31 +85,16 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table("repositories")
-                    .col(
-                        ColumnDef::new("repository_url")
-                            .text()
-                            .not_null()
-                            .primary_key(),
-                    )
-                    .check(
-                        Condition::any()
-                            .add(Expr::col("repository_url").like("https://%/%/%"))
-                            .add(Expr::col("repository_url").like("http://%/%/%")),
-                    )
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_table(
-                Table::create()
                     .table("review_contexts")
+                    .col(ColumnDef::new("current_notes_path").text()
+                .extra("CHECK (current_notes_path IS NULL OR (notes_path IS NOT NULL AND current_notes_path LIKE '/%'))"))
+                    .col(ColumnDef::new("forge_state").text().extra("CHECK (forge_state IS NULL OR (kind = 'forge_backed' AND forge_state IN ('open','closed','merged')))"))
                     .col(ColumnDef::new("id").uuid().not_null().primary_key())
                     .col(ColumnDef::new("kind").text().not_null())
                     .col(ColumnDef::new("notes_path").text())
                     .col(ColumnDef::new("git_dir").text())
                     .col(ColumnDef::new("branch").text())
-                    .col(ColumnDef::new("repository_url").text())
+                    .col(ColumnDef::new("repository_url").text().extra("CHECK (repository_url IS NULL OR repository_url LIKE 'https://%' OR repository_url LIKE 'http://%')"))
                     .col(ColumnDef::new("number").big_integer())
                     .col(ColumnDef::new("revision").big_integer().not_null())
                     .col(ColumnDef::new("last_refreshed_at").text())
@@ -114,13 +105,7 @@ impl MigrationTrait for Migration {
                     .index(Index::create().unique().col("notes_path"))
                     .index(Index::create().unique().col("git_dir").col("branch"))
                     .index(Index::create().unique().col("repository_url").col("number"))
-                    .foreign_key(
-                        ForeignKey::create()
-                            .from_tbl("review_contexts")
-                            .from_col("repository_url")
-                            .to_tbl("repositories")
-                            .to_col("repository_url"),
-                    )
+
                     .check(
                         Condition::any()
                             .add(
@@ -186,6 +171,7 @@ impl MigrationTrait for Migration {
             .create_table(
                 Table::create()
                     .table("sessions")
+                    .col(ColumnDef::new("comparison_kind").text().not_null().default("directory").extra("CHECK (comparison_kind IN ('notes','working','staged','branch','directory','pull_request'))"))
                     .col(ColumnDef::new("id").uuid().not_null().primary_key())
                     .col(ColumnDef::new("context_id").uuid().not_null())
                     .col(ColumnDef::new("creator_id").uuid().not_null())
@@ -276,6 +262,13 @@ impl MigrationTrait for Migration {
             .create_table(
                 Table::create()
                     .table("threads")
+                    .col(ColumnDef::new("source_evidence").json_binary().extra(format!("CHECK (source_evidence IS NULL OR (anchor_kind IN ('file','line') AND {json_type}(source_evidence) = 'object'))")))
+                    .col(ColumnDef::new("forge_observation").json_binary().extra(format!("CHECK (forge_observation IS NULL OR {json_type}(forge_observation) = 'object')")))
+                    .col(ColumnDef::new("source_path")
+                        .text()
+                        .extra("CHECK (source_path IS NULL OR source_path LIKE '/%')"))
+                    .col(ColumnDef::new("current_path").text())
+                    .col(ColumnDef::new("orphan_reason").text().extra("CHECK (orphan_reason IS NULL OR orphan_reason IN ('file_deleted','working_source_changed'))"))
                     .col(ColumnDef::new("id").uuid().not_null().primary_key())
                     .col(ColumnDef::new("context_id").uuid().not_null())
                     .col(ColumnDef::new("origin_session_id").uuid())
@@ -291,7 +284,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new("updated_by_id").uuid())
                     .col(ColumnDef::new("updated_at").text().not_null())
                     .col(ColumnDef::new("forge_thread_id").text())
-                    .col(ColumnDef::new("outdated").boolean().not_null())
+
                     .index(Index::create().unique().col("id").col("context_id"))
                     .index(
                         Index::create()
@@ -376,6 +369,12 @@ impl MigrationTrait for Migration {
             .create_table(
                 Table::create()
                     .table("comments")
+                    .col(ColumnDef::new("source_note_id").uuid())
+                    .col(
+                        ColumnDef::new("owner_id")
+                            .uuid()
+                            .extra("REFERENCES identities(id)"),
+                    )
                     .col(ColumnDef::new("id").uuid().not_null().primary_key())
                     .col(ColumnDef::new("context_id").uuid().not_null())
                     .col(ColumnDef::new("thread_id").uuid().not_null())
@@ -396,7 +395,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new("posting_error").text())
                     .col(ColumnDef::new("posting_request_key").text())
                     .col(ColumnDef::new("payload_hash").text())
-                    .col(ColumnDef::new("remote_presence").text().not_null())
                     .index(Index::create().unique().col("thread_id").col("position"))
                     .index(
                         Index::create()
@@ -478,10 +476,117 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
+        manager
+            .create_table(
+                Table::create()
+                    .table("mutation_receipts")
+                    .col(ColumnDef::new("context_id").uuid().not_null())
+                    .col(ColumnDef::new("actor_id").uuid().not_null())
+                    .col(ColumnDef::new("request_key").text().not_null())
+                    .col(ColumnDef::new("method").text().not_null())
+                    .col(ColumnDef::new("request_hash").text().not_null())
+                    .col(ColumnDef::new("result_json").text().not_null())
+                    .col(ColumnDef::new("version").big_integer().not_null())
+                    .col(ColumnDef::new("object_id").uuid())
+                    .col(
+                        ColumnDef::new("pending")
+                            .boolean()
+                            .not_null()
+                            .default(false),
+                    )
+                    .primary_key(
+                        Index::create()
+                            .col("context_id")
+                            .col("actor_id")
+                            .col("request_key"),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .from_tbl("mutation_receipts")
+                            .from_col("context_id")
+                            .to_tbl("review_contexts")
+                            .to_col("id"),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .from_tbl("mutation_receipts")
+                            .from_col("actor_id")
+                            .to_tbl("identities")
+                            .to_col("id"),
+                    )
+                    .check(Expr::col("request_key").ne(""))
+                    .check(Expr::col("method").ne(""))
+                    .check(Expr::col("request_hash").ne(""))
+                    .check(Expr::col("version").gt(0))
+                    .check(
+                        Expr::col("pending")
+                            .eq(false)
+                            .or(Expr::col("object_id").is_not_null()),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_index(
+                Index::create()
+                    .name("one_pending_object_mutation")
+                    .table("mutation_receipts")
+                    .col("context_id")
+                    .col("object_id")
+                    .unique()
+                    .and_where(Expr::col("pending").eq(true))
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_review_contexts_current_notes_path")
+                    .table("review_contexts")
+                    .col("current_notes_path")
+                    .unique()
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                Table::create()
+                    .table("file_reviews")
+                    .col(ColumnDef::new("context_id").uuid().not_null())
+                    .col(ColumnDef::new("actor_id").uuid().not_null())
+                    .col(ColumnDef::new("path").text().not_null())
+                    .col(ColumnDef::new("content_identity").text().not_null())
+                    .primary_key(
+                        Index::create()
+                            .col("context_id")
+                            .col("actor_id")
+                            .col("path"),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .from("file_reviews", "context_id")
+                            .to("review_contexts", "id"),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .from("file_reviews", "actor_id")
+                            .to("identities", "id"),
+                    )
+                    .check(Expr::col("path").ne(""))
+                    .check(Expr::col("content_identity").ne(""))
+                    .to_owned(),
+            )
+            .await?;
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(Table::drop().table("file_reviews").to_owned())
+            .await?;
+        manager
+            .drop_table(Table::drop().table("mutation_receipts").to_owned())
+            .await?;
         manager
             .drop_table(Table::drop().table("comments").to_owned())
             .await?;
@@ -496,9 +601,6 @@ impl MigrationTrait for Migration {
             .await?;
         manager
             .drop_table(Table::drop().table("review_contexts").to_owned())
-            .await?;
-        manager
-            .drop_table(Table::drop().table("repositories").to_owned())
             .await?;
         manager
             .drop_table(Table::drop().table("identities").to_owned())

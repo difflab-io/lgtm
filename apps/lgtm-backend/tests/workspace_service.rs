@@ -50,7 +50,7 @@ async fn should_anchor_ignored_non_git_files_and_guard_owned_draft_mutations() {
                 &context,
                 &alice,
                 CommitContext::default(),
-                ComparisonKind::Legacy,
+                crate::common::comparison(&context),
                 None,
             )
             .await
@@ -158,7 +158,7 @@ async fn should_follow_an_explicit_symlink_root_but_reject_nested_escape() {
 }
 
 #[tokio::test]
-async fn should_promote_notes_atomically_with_attribution_and_deleted_target_receipts() {
+async fn should_promote_notes_atomically_with_attribution_and_safe_retries_after_deletion() {
     for (service, _, temp) in common::databases().await {
         let alice = service
             .auth()
@@ -181,15 +181,28 @@ async fn should_promote_notes_atomically_with_attribution_and_deleted_target_rec
             )
             .await
             .unwrap();
+        let output = std::process::Command::new("git")
+            .args(["init", "-q", "-b", "main"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
         let target = service
             .ensure_context(
                 ContextKey::Local {
                     location: LocalLocation::Branch {
-                        git_dir: temp.path().join(".git").to_str().unwrap().into(),
+                        git_dir: temp
+                            .path()
+                            .join(".git")
+                            .canonicalize()
+                            .unwrap()
+                            .to_str()
+                            .unwrap()
+                            .into(),
                         branch: "refs/heads/main".into(),
                     },
                 },
-                None,
+                Some(temp.path().to_str().unwrap()),
             )
             .await
             .unwrap();
@@ -198,7 +211,7 @@ async fn should_promote_notes_atomically_with_attribution_and_deleted_target_rec
                 &source,
                 &alice,
                 CommitContext::default(),
-                ComparisonKind::Legacy,
+                crate::common::comparison(&source),
                 None,
             )
             .await
@@ -208,7 +221,7 @@ async fn should_promote_notes_atomically_with_attribution_and_deleted_target_rec
                 &target,
                 &bob,
                 CommitContext::default(),
-                ComparisonKind::Legacy,
+                crate::common::comparison(&target),
                 None,
             )
             .await
@@ -235,9 +248,8 @@ async fn should_promote_notes_atomically_with_attribution_and_deleted_target_rec
                     comment_ids: selected.to_vec(),
                     anchors: anchors.to_vec(),
                     evidence: vec![],
-                    request_key: ("promote-1").to_string(),
                     expected_source_version: None,
-                    guard: None,
+                    guard: MutationGuard::new(None, "promote-1".into()),
                 },
             )
         };
@@ -252,9 +264,8 @@ async fn should_promote_notes_atomically_with_attribution_and_deleted_target_rec
                         comment_ids: [note.id, uuid::Uuid::new_v4()].to_vec(),
                         anchors: [Anchor::General, Anchor::General].to_vec(),
                         evidence: vec![],
-                        request_key: ("bad").to_string(),
                         expected_source_version: None,
-                        guard: None
+                        guard: MutationGuard::new(None, "bad".into())
                     }
                 )
                 .await
@@ -302,15 +313,37 @@ async fn should_promote_notes_atomically_with_attribution_and_deleted_target_rec
             .delete_comment(&review.id, &first[0].id, &bob, None)
             .await
             .unwrap();
-        assert!(promote().await.is_err());
-        let receipt = service
-            .database()
-            .promotions
-            .get_source_target(&note.id, &review.id)
+        assert_eq!(
+            promote().await.unwrap()[0].id,
+            first[0].id,
+            "retry returns the accepted result without resurrecting a deleted comment"
+        );
+        assert!(
+            service
+                .get_conversation(&target.id, true)
+                .await
+                .unwrap()
+                .comments
+                .is_empty()
+        );
+        let second = service
+            .promote_notes(
+                &source.id,
+                &review.id,
+                &bob,
+                NotePromotion {
+                    comment_ids: selected.to_vec(),
+                    anchors: anchors.to_vec(),
+                    evidence: vec![],
+                    expected_source_version: None,
+                    guard: MutationGuard::new(None, "promote-again".into()),
+                },
+            )
             .await
-            .unwrap()
             .unwrap();
-        assert!(receipt.target_comment_id.is_none());
+        assert_ne!(second[0].id, first[0].id);
+        assert_eq!(second[0].source_note_id, Some(note.id));
+        assert_eq!(second[0].author.id, alice.id);
     }
 }
 
@@ -404,7 +437,7 @@ async fn should_relocate_unique_text_and_fall_back_for_ambiguous_or_deleted_text
                 &context,
                 &actor,
                 CommitContext::default(),
-                ComparisonKind::Legacy,
+                crate::common::comparison(&context),
                 None,
             )
             .await
@@ -550,10 +583,13 @@ async fn should_relocate_unique_text_and_fall_back_for_ambiguous_or_deleted_text
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(stored.selected_text.as_deref(), Some("second"));
+        assert_eq!(
+            stored.source_evidence.as_ref().unwrap()["selected_text"].as_str(),
+            Some("second")
+        );
         assert_eq!(stored.start_line, Some(2));
         assert_eq!(
-            stored.source_content_hash.as_deref(),
+            stored.source_evidence.as_ref().unwrap()["source"]["content_hash"].as_str(),
             Some(file.content_hash.as_str())
         );
     }
@@ -643,7 +679,6 @@ fn should_capture_index_bytes_separately_from_working_and_committed_content() {
         "source reads must not change the checkout or index"
     );
     assert!(get_source(root, "../outside", SourceKind::WorkingFile, None).is_err());
-    assert!(get_source(root, "file[1].txt", SourceKind::Unavailable, None).is_err());
 }
 
 #[test]

@@ -89,7 +89,7 @@ pub struct PullRequest {
     pub head: String,
     pub base: String,
     pub repository_url: String,
-    /// Provider account that opened this PR; absent in legacy import contracts.
+    /// Provider account that opened this PR; absent when the provider does not supply it.
     #[serde(default)]
     pub author_account_id: Option<String>,
 }
@@ -197,16 +197,13 @@ pub fn export_feedback(
         }
         value
     }
-    fn visible(comment: &crate::models::Comment) -> bool {
-        !comment.deleted && comment.remote_presence != "missing"
-    }
     let observed_overall = conversation.comments.iter().find(|comment| {
         comment.forge_object_kind.as_deref() == Some("review")
             && comment.forge_review_id == session.forge_review_id
             && session.forge_review_id.is_some()
     });
     let overall = if let Some(comment) = observed_overall {
-        visible(comment).then(|| without_receipt(comment, &conversation.sessions))
+        Some(without_receipt(comment, &conversation.sessions))
     } else {
         session
             .completion()
@@ -218,12 +215,9 @@ pub fn export_feedback(
         .comments
         .iter()
         .filter(|comment| {
-            visible(comment)
-                && !conversation.comments.iter().any(|other| {
-                    other.thread_id == comment.thread_id
-                        && visible(other)
-                        && other.position < comment.position
-                })
+            !conversation.comments.iter().any(|other| {
+                other.thread_id == comment.thread_id && other.position < comment.position
+            })
         })
         .collect();
     roots.retain(|comment| {
@@ -359,7 +353,6 @@ pub fn export_feedback(
                 .evidence
                 .as_ref()
                 .map(|evidence| evidence.selected_text.as_str())
-                .or(thread.selected_text.as_deref())
                 .filter(|excerpt| !excerpt.is_empty())
             {
                 out.push('\n');
@@ -374,9 +367,7 @@ pub fn export_feedback(
         let mut replies: Vec<_> = conversation
             .comments
             .iter()
-            .filter(|reply| {
-                reply.thread_id == thread.id && reply.position > comment.position && visible(reply)
-            })
+            .filter(|reply| reply.thread_id == thread.id && reply.position > comment.position)
             .collect();
         replies.sort_by_key(|reply| (reply.position, reply.id));
         for reply in replies {

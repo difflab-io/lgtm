@@ -152,7 +152,7 @@ function M.add(range)
       notice.error(capture_error)
       return
     end
-    -- The backend supplies the relative path, including legacy and moved-file associations.
+    -- The backend supplies the relative path, including moved-file associations.
     anchor.path = nil
     local input = {
       scope = state.scope,
@@ -211,7 +211,7 @@ function M.promote()
       return
     end
     local roots = vim.tbl_filter(function(comment)
-      return not comment.deleted and tonumber(comment.position or 0) == 0
+      return tonumber(comment.position or 0) == 0
     end, source.conversation.comments or {})
     require("lgtm.picker").select("Promote note (original retained)", roots, function(comment)
       return comment.body:gsub("\n", " ")

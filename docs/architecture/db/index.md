@@ -212,16 +212,13 @@ The caller chooses the transaction boundary. All operations on its transaction u
 ```mermaid
 erDiagram
     direction LR
-    REPOSITORIES {
-        text repository_url PK
-    }
     REVIEW_CONTEXTS {
         uuid id PK
         ContextKind kind
         text notes_path "nullable"
         text git_dir "nullable"
         text branch "nullable"
-        text repository_url FK "nullable"
+        text repository_url "nullable"
         bigint number "nullable"
         bigint revision
         text last_refreshed_at "nullable"
@@ -269,8 +266,11 @@ erDiagram
         text anchor_kind
         text file_path "nullable"
         text side "nullable"
-        text source_commit "nullable"
-        text source_content_hash "nullable"
+        json source_evidence "nullable"
+        json forge_observation "nullable"
+        text source_path "nullable"
+        text current_path "nullable"
+        OrphanReason orphan_reason "nullable"
         bigint start_line "nullable"
         bigint end_line "nullable"
         text state
@@ -279,7 +279,6 @@ erDiagram
         uuid updated_by_id FK "nullable"
         text updated_at
         text forge_thread_id "nullable"
-        boolean outdated
     }
     COMMENTS {
         uuid id PK
@@ -287,6 +286,8 @@ erDiagram
         uuid thread_id FK
         uuid origin_session_id FK "nullable"
         uuid author_id FK
+        uuid owner_id FK "nullable"
+        uuid source_note_id "nullable"
         text body
         bigint position
         text visibility
@@ -302,9 +303,7 @@ erDiagram
         text posting_error "nullable"
         text posting_request_key "nullable"
         text payload_hash "nullable"
-        text remote_presence
     }
-    REPOSITORIES |o--o{ REVIEW_CONTEXTS : repository_url
     REVIEW_CONTEXTS ||--o{ WORKSPACE_PATHS : context_id
     REVIEW_CONTEXTS ||--o{ SESSIONS : context_id
     REVIEW_CONTEXTS ||--o{ THREADS : context_id
@@ -320,7 +319,7 @@ erDiagram
     IDENTITIES ||--o{ COMMENTS : author_id
 ```
 
-The ERD above includes every stored field. `PK` marks a primary key and `FK` marks a foreign key. A `nullable` field can contain SQL `NULL`.
+The ERD shows the main review records. Retry metadata and reviewed-file marks are described below. `PK` marks a primary key and `FK` marks a foreign key. A `nullable` field can contain SQL `NULL`.
 
 The diagram describes the current schema. UUID fields use native PostgreSQL UUID storage and SQLite UUID text storage. Timestamp fields currently use text in both the models and migration. The diagram does not imply a timestamp-type conversion.
 
@@ -336,7 +335,7 @@ The shared migration also enforces constraints that relationship lines cannot ex
 - Human identities require email and exclude model/provider. Agent identities require model/provider and exclude email.
 - Active/completed sessions and posting states have constraints for their associated metadata and errors.
 
-Fields that contain complete URLs use a `_url` suffix. `repositories.repository_url` identifies a forge repository, and `review_contexts.repository_url` references it. Local branch contexts use `git_dir` instead. The backend derives the forge origin from the URL, including its scheme and port.
+Fields that contain complete URLs use a `_url` suffix. `review_contexts.repository_url` identifies the forge repository directly; there is no separate repository registry. Local branch contexts use `git_dir` instead. The backend derives the forge origin from the URL, including its scheme and port.
 
 The backend represents local locations as `LocalLocation::Notes` or `LocalLocation::Branch`. Forge-backed contexts require a parsed `ForgeRepositoryUrl`. Refresh, posting and remote receipt operations reject persisted local contexts before mutating records.
 
@@ -365,12 +364,12 @@ Every query below is asynchronous and returns `lgtm_db::error::Result<T>`. UUID 
 | `comments` | `get_thread(context_id, id)` | Optional thread within the selected context. |
 | `comments` | `get_thread_by_remote_id(context_id, remote)` | Optional thread matching a context-scoped forge ID. |
 | `comments` | `get_threads(context_id)` | Context threads ordered by UUID. |
-| `comments` | `get_by_id(context_id, id)` | Optional comment within the selected context. |
-| `comments` | `get_by_remote_id(context_id, kind, remote)` | Optional comment matching a scoped forge object. |
-| `comments` | `get_all(context_id)` | Comments ordered by thread UUID and reply position. Includes drafts. |
-| `comments` | `get_remote(context_id)` | Comments with a forge comment ID. |
-| `comments` | `get_session_drafts(session_id)` | Draft comments originating in the selected session. |
-| `comments` | `get_next_position(thread_id)` | Next reply position, or zero for an empty thread. Hold the context write lock before using it. |
+| `comments` | `get_comment_by_id(context_id, id)` | Optional comment within the selected context. |
+| `comments` | `get_comment_by_remote_id(context_id, kind, remote)` | Optional comment matching a scoped forge object. |
+| `comments` | `get_comments(context_id)` | Comments ordered by thread UUID and reply position. Includes drafts. |
+| `comments` | `get_remote_comments(context_id)` | Comments with a forge comment ID. |
+| `comments` | `get_session_draft_comments(session_id)` | Draft comments originating in the selected session. |
+| `comments` | `get_next_reply_position(thread_id)` | Next reply position, or zero for an empty thread. Hold the context write lock before using it. |
 
 A single-record query returns `Ok(None)` when no record matches. Context-scoped comment/thread queries also return `None` when the UUID belongs to another context. Query ordering exists only where the table specifies it.
 
@@ -381,7 +380,6 @@ All record arguments below are borrowed SeaORM models. Mutations return `Result<
 | Repository field | Mutation | Contract |
 | --- | --- | --- |
 | `identities` | `insert(row)` | Insert without replacing conflicting records. Re-read the natural key to obtain an existing identity. |
-| `workspace` | `insert_repository(row)` | Insert a forge repository URL if absent. |
 | `workspace` | `insert_path(row)` | Associate a path with a context if absent. |
 | `review_contexts` | `insert(row)` | Insert without replacing a conflicting context. Re-read its key after insertion. |
 | `review_contexts` | `advance_revision(id, expected)` | Return `bool`. Increment the revision and acquire the context write lock. If `expected` is supplied, require that revision. |
@@ -389,9 +387,9 @@ All record arguments below are borrowed SeaORM models. Mutations return `Result<
 | `sessions` | `insert(row)` | Insert a session. Conflicting keys or invalid field combinations return errors. |
 | `sessions` | `complete(row)` | Return `bool`. Complete only a matching active session, without changing its creator, creation time or reviewed commits. |
 | `comments` | `insert_thread(row)` | Insert a thread with its author, ownership and original anchor. |
-| `comments` | `insert(row)` | Insert a root comment or reply. Constraint violations return errors. |
+| `comments` | `insert_comment(row)` | Insert a root comment or reply. Constraint violations return errors. |
 | `comments` | `update_thread(row)` | Return `bool`. Update resolution, latest editor, remote linkage and applicability. Preserve author, ownership and original anchor. |
-| `comments` | `update(row)` | Return `bool`. Update content, publication and posting fields. Preserve author, ownership, origin session, position and creation time. |
+| `comments` | `update_comment(row)` | Return `bool`. Update content, publication and posting fields. Preserve author, ownership, origin session, position and creation time. |
 
 A boolean mutation returns `false` when no eligible row matches. A unit-returning mutation does not report whether it inserted or updated a row. Insert-if-absent methods ignore conflicts and do not merge supplied values into existing records.
 
@@ -399,7 +397,7 @@ These methods enforce persistence contracts, not complete backend workflows. The
 
 #### Public values and errors
 
-The public model namespaces are `identities`, `repositories`, `workspace_paths`, `review_contexts`, `sessions`, `threads` and `comments`. The `types` module exports `IdentityKind`, `ContextKind`, `SessionState` and `PostingState`.
+The public model namespaces are `identities`, `workspace_paths`, `review_contexts`, `sessions`, `threads`, `comments` and `mutation_receipts`. The `types` module exports `IdentityKind`, `ContextKind`, `SessionState` and `PostingState`.
 
 Model fields are mutable in memory. Repository methods persist only their explicit writable columns. Entity and ActiveModel module paths remain private, as do connection access and migration entry points.
 
@@ -481,32 +479,27 @@ SQLite enables foreign keys and uses the driver's five-second busy timeout with 
 
 Private tests cover entity relationships and migration history. Public integration tests compose repository queries and mutations, transactions, rollback and savepoints. The contracts run on real SQLite and PostgreSQL databases.
 
-### Review workflow additions
-
-The additive `m20261018_200000_note_promotions` migration creates `note_promotions`. Its composite key is `(source_comment_id, target_session_id)`, so each note is promoted once per target review. The row stores the target draft UUID, request key and hash of the source body, author and chosen target anchor. The service inserts the receipt and draft in one transaction.
-
-The source UUID remains after source-note deletion. Target deletion sets `target_comment_id` to NULL and retains a retry tombstone. A target-session foreign key preserves review ownership. `PromotionRepository` exposes named reads/insertion rather than raw database access.
-
-`Anchor` stores location only. `AnchorSource` stores the immutable source identity: a commit SHA and content hash, an index blob ID and content hash, or a saved-file content hash. The database stores these in `source_commit`, `source_blob_oid`, and `source_content_hash`. Forge observations use their base/head revisions and diff side; they do not store a second per-line commit.
-
-`CommentRepository::delete_draft` and `delete_empty_thread` support owned unposted draft deletion under the service's context transaction. A root with replies must have its replies removed first. Submission receipt/state updates use the existing session columns and named repository methods; no second submission store exists.
-
-The additive `m20261018_210000_selected_text` migration adds nullable `threads.selected_text`. It contains only the original selected lines for new non-Git line notes. Domain relocation accepts one exact match in current content and otherwise leaves an outdated file-level fallback. The original line/commit columns and excerpt are immutable after insertion; this is not full-file snapshot history. Existing rows with no excerpt retain hash-only fallback behavior.
-
-### Source evidence and mutation receipts
-
-Additive migrations 090–093 extend existing review records. They do not replace contexts, sessions, or submission ownership.
+### Review ownership and recovery
 
 ```mermaid
 flowchart LR
-    Origin["Immutable original anchor, source identity, and excerpt"] --> Thread["Existing thread"]
-    Thread --> Current["Mutable current path and orphan reason"]
-    Thread --> Forge["Separate provider comparison and coordinates"]
-    Context["Immutable notes lookup key"] --> Root["Unique current notes root"]
-    Context --> Receipt["Actor, operation, payload, and saved result"]
+    Local["Local notes and reviews"] --> Threads["Durable threads and comments"]
+    GitHub["GitHub owns PR discussions and Viewed state"] --> Cache["Cached PR threads and comments"]
+    Evidence["Immutable source identity and bounded excerpt"] --> Threads
+    Observation["Current provider coordinates"] --> Cache
+    Retry["Actor and request key"] --> LocalResult["Local result for safe retries"]
+    Retry --> PRResult["PR cache IDs or remote acknowledgment"]
 ```
 
-The database constrains source shapes, forge-state shapes, unique current notes locations, and unresolved mutation ownership. Named repository updates preserve original evidence and saved-file source paths. A confirmed move changes current associations, not the original anchor or thread ID. A later comment records its own actual source location. Legacy unknown evidence stays unknown. Real SQLite and PostgreSQL contracts cover populated upgrades, immutable origins, unique locations, transaction rollback, and durable retry receipts.
+One initial migration creates the alpha schema. There is no upgrade path for earlier versions of this branch and no separate repository registry or promotion history.
+
+`threads.source_evidence` stores one immutable source identity with its bounded excerpt. `threads.forge_observation` stores the provider's base, head, current location and outdated status as one replaceable value. Original coordinates remain separate from confirmed current paths and orphan reasons. There is no duplicate selected-text or derived outdated column. Confirmed deletions remove comment rows; there is no soft-delete or duplicate remote-presence flag. Repository methods validate evidence and observation shapes; SQL constrains anchor shapes, relationships, unique locations and unresolved mutation ownership.
+
+Promotion copies a note into the target review in the same transaction as its retry result. `comments.source_note_id` preserves source attribution without requiring the source note to survive. The copy keeps the original author; its owner controls edits. Repeating the same request cannot recreate a deleted copy. A new request may deliberately promote it again. There is no promotion table, per-target deduplication rule or deleted-target tombstone.
+
+Local mutation receipts retain the committed result because a retry must return the same result even after the source file changes, disappears or the returned draft is deleted. PR creation receipts retain only cache IDs. Remote edit, delete and resolution receipts retain operation identity, a payload hash and pending/terminal acknowledgment; they never retain another comment or thread body. Pending writes remain recoverable after restart without blindly replaying a write that GitHub may have accepted. Confirmed deletions retain only scoped remote identity to reject stale provider pages.
+
+`file_reviews` stores local progress by `(context_id, actor_id, path)` and the exact compared-content identity. Marks survive editor restarts and disappear when that identity changes. GitHub owns PR Viewed state; it is read and updated directly without a local mirror. Notes have no reviewed-file marks.
 
 ## References
 

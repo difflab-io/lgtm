@@ -340,7 +340,7 @@
       {
         "file": "nvim/pr-review.spec.ts",
         "scenarios": [
-          "The mark shortcut toggles the checkmark in the native CodeDiff tree"
+          "The mark shortcut silently toggles the checkmark in the native CodeDiff tree"
         ]
       }
     ]
@@ -415,7 +415,7 @@
       {
         "file": "nvim/diffs.spec.ts",
         "scenarios": [
-          "Working-file changes invalidate its checkmark"
+          "Working-file marks survive restart and changes invalidate the checkmark"
         ]
       }
     ]

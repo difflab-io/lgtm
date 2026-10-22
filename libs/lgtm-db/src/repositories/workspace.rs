@@ -12,12 +12,6 @@ pub struct WorkspaceRepository<C = sea_orm::DatabaseConnection> {
     connection: Arc<C>,
 }
 
-impl<C> WorkspaceRepository<C> {
-    pub(crate) fn new(connection: Arc<C>) -> Self {
-        Self { connection }
-    }
-}
-
 impl<C: ConnectionTrait + TransactionTrait> WorkspaceRepository<C> {
     /// Get the canonical workspace paths associated with a context.
     pub async fn get_paths(&self, context_id: &uuid::Uuid) -> Result<Vec<workspace_paths::Model>> {
@@ -28,16 +22,6 @@ impl<C: ConnectionTrait + TransactionTrait> WorkspaceRepository<C> {
             .await?)
     }
 
-    /// Insert a canonical forge repository URL if it does not already exist.
-    pub async fn insert_repository(&self, row: &repositories::Model) -> Result<()> {
-        repositories::Entity::insert(row.clone().into_active_model().reset_all())
-            .on_conflict(OnConflict::new().do_nothing().to_owned())
-            .try_insert()
-            .exec(self.connection.as_ref())
-            .await?;
-        Ok(())
-    }
-
     /// Associate a canonical workspace path with its context if absent.
     pub async fn insert_path(&self, row: &workspace_paths::Model) -> Result<()> {
         workspace_paths::Entity::insert(row.clone().into_active_model().reset_all())
@@ -46,5 +30,8 @@ impl<C: ConnectionTrait + TransactionTrait> WorkspaceRepository<C> {
             .exec(self.connection.as_ref())
             .await?;
         Ok(())
+    }
+    pub(crate) fn new(connection: Arc<C>) -> Self {
+        Self { connection }
     }
 }

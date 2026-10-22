@@ -154,7 +154,15 @@ for (const profile of profiles) {
         'vim.api.nvim_buf_get_extmarks(0,require("lgtm.threads").namespace,0,-1,{details=true})',
       )
       expect(JSON.stringify(cards)).toContain('Resolved')
-      expect(JSON.stringify(cards)).toContain('Edited standalone note')
+      expect(JSON.stringify(cards)).not.toContain('Edited standalone note')
+      expect(JSON.stringify(cards)).toContain('✓')
+      const rows = cards.flatMap((mark: Json) => mark[3].virt_lines ?? [])
+      expect(rows).toHaveLength(1)
+      const statusRow = rows[0].map((chunk: [string, unknown]) => chunk[0]).join('')
+      expect(statusRow).toMatch(/✓ $/)
+      expect(await e.lua('return vim.fn.strdisplaywidth(...)', statusRow)).toBe(
+        await e.value('vim.api.nvim_win_get_width(0)'),
+      )
 
       // Act
       await e.popup()

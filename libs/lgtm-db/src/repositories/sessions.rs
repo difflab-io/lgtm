@@ -183,10 +183,7 @@ impl<C: ConnectionTrait + TransactionTrait> SessionRepository<C> {
             .filter(sessions::Column::SubmissionStatus.is_in(["unsubmitted", "draft_failed"]))
             .filter(sessions::Column::BaseCommit.eq(row.base_commit.clone()))
             .filter(sessions::Column::HeadCommit.eq(row.head_commit.clone()))
-            .filter(sessions::Column::ComparisonKind.is_in([
-                common::ComparisonKind::Legacy,
-                common::ComparisonKind::PullRequest,
-            ]))
+            .filter(sessions::Column::ComparisonKind.is_in([common::ComparisonKind::PullRequest]))
             .exec(self.connection.as_ref())
             .await?
             .rows_affected

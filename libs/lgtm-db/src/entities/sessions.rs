@@ -19,7 +19,7 @@ pub struct Model {
     pub base_commit: Option<String>,
     /// Head comparison identity; active PR reviews follow updates, and completed reviews retain their final identity.
     pub head_commit: Option<String>,
-    /// Selected comparison kind; legacy attempts have no recorded mode.
+    /// Selected comparison kind.
     pub comparison_kind: crate::entities::common::ComparisonKind,
     /// UTC creation timestamp; immutable after insertion.
     pub created_at: String,

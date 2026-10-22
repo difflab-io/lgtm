@@ -482,15 +482,18 @@ fn comment(v: m::Comment) -> Comment {
             .unwrap_or_default(),
         posting_status: v.posting.state().as_str().into(),
         owner_id: v.owner_id.map(|id| id.to_string()).unwrap_or_default(),
+        source_note_id: v
+            .source_note_id
+            .map(|id| id.to_string())
+            .unwrap_or_default(),
         author: Some(actor(v.author)).into(),
         body: v.body,
-        deleted: v.deleted,
         position: v.position,
         visibility: v.visibility,
         created_at: v.created_at,
         updated_at: v.updated_at,
         forge_comment_id: v.forge_comment_id.unwrap_or_default(),
-        remote_presence: v.remote_presence,
+
         ..Default::default()
     }
 }
@@ -590,6 +593,7 @@ impl IdentityService for Api {
                 "feedback_scopes".into(),
                 "anchor_evidence".into(),
                 "diff_service".into(),
+                "file_reviews".into(),
                 "rejected_submission_recovery".into(),
             ],
             ..Default::default()
@@ -597,6 +601,61 @@ impl IdentityService for Api {
     }
 }
 impl ReviewService for Api {
+    #[tracing::instrument(name = "rpc_request", skip_all, fields(rpc.method = "lgtm.v1/get_file_reviews"))]
+    async fn get_file_reviews<'a>(
+        &'a self,
+        ctx: RequestContext,
+        request: ServiceRequest<'_, GetFileReviewsRequest>,
+    ) -> ServiceResult<impl Encodable<GetFileReviewsResponse> + Send + use<'a>> {
+        let who = self.reviews.auth().requester(&ctx).await.map_err(error)?;
+        let review_id = id(request.review_id)?;
+        let selected = self.reviews.get_review(&review_id).await.map_err(error)?;
+        let marks = if matches!(selected.target, m::ReviewTarget::PullRequest { .. }) {
+            self.forge.get_file_reviews(&review_id).await
+        } else {
+            self.reviews.get_file_reviews(&review_id, &who).await
+        }
+        .map_err(error)?;
+        Response::ok(GetFileReviewsResponse {
+            files: marks
+                .into_iter()
+                .map(|(path, content_identity)| FileReview {
+                    path,
+                    content_identity,
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        })
+    }
+
+    #[tracing::instrument(name = "rpc_request", skip_all, fields(rpc.method = "lgtm.v1/set_file_reviewed"))]
+    async fn set_file_reviewed<'a>(
+        &'a self,
+        ctx: RequestContext,
+        request: ServiceRequest<'_, SetFileReviewedRequest>,
+    ) -> ServiceResult<impl Encodable<SetFileReviewedResponse> + Send + use<'a>> {
+        let who = self.reviews.auth().requester(&ctx).await.map_err(error)?;
+        let review_id = id(request.review_id)?;
+        let selected = self.reviews.get_review(&review_id).await.map_err(error)?;
+        if matches!(selected.target, m::ReviewTarget::PullRequest { .. }) {
+            self.forge
+                .set_file_reviewed(&review_id, request.path, request.reviewed)
+                .await
+        } else {
+            self.reviews
+                .set_file_reviewed(
+                    &review_id,
+                    &who,
+                    request.path,
+                    request.reviewed.then_some(request.content_identity),
+                )
+                .await
+        }
+        .map_err(error)?;
+        Response::ok(SetFileReviewedResponse::default())
+    }
+
     #[tracing::instrument(name = "rpc_request", skip_all, fields(rpc.method = "lgtm.v1/start_review"))]
     async fn start_review<'a>(
         &'a self,
@@ -1437,9 +1496,8 @@ impl ReviewService for Api {
                     comment_ids: ids,
                     anchors,
                     evidence,
-                    request_key: request.request_key.clone(),
                     expected_source_version: source_version,
-                    guard: Some(guard),
+                    guard,
                 },
             )
             .await

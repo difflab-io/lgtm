@@ -1,4 +1,4 @@
-//! Saved edit/delete/resolve intent. Submission receipts remain on the existing review attempt.
+//! In-flight edit/delete/resolve data. Comment and thread bodies are never serialized into remote retry records.
 use super::{Comment, ObjectKind, Thread};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -38,7 +38,7 @@ pub enum ForgeChangeObject {
     Thread(Box<Thread>),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct ForgeChange {
     pub input: ForgeChangeInput,
     pub original: ForgeChangeObject,
@@ -47,6 +47,5 @@ pub struct ForgeChange {
     /// A definite provider rejection can release the object without replaying this intent.
     pub rejection: Option<String>,
     /// Identity-only deletion receipt prevents stale provider pages from restoring deleted feedback.
-    #[serde(default)]
     pub deleted_remote: Option<(String, String)>,
 }

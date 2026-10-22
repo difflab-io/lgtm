@@ -228,9 +228,8 @@ pub struct NotePromotion {
     pub comment_ids: Vec<uuid::Uuid>,
     pub anchors: Vec<super::Anchor>,
     pub evidence: Vec<Option<super::AnchorEvidence>>,
-    pub request_key: String,
     pub expected_source_version: Option<i64>,
-    pub guard: Option<MutationGuard>,
+    pub guard: MutationGuard,
 }
 
 /// Changing comparisons requires explicit acceptance of the selected prior attempt.

@@ -83,11 +83,6 @@ pub fn get_source(
             (Some(parts[2].to_owned()), Some(sha.to_owned()))
         }
         SourceKind::WorkingFile | SourceKind::LocalFile => (None, None),
-        SourceKind::Unavailable => {
-            return Err(invalid(
-                "Unavailable source cannot establish new anchor evidence",
-            ));
-        }
     };
     let bytes = if let Some(oid) = &oid {
         let size = git(&["cat-file", "-s", oid])?;
@@ -134,7 +129,6 @@ pub fn get_source(
         },
         SourceKind::WorkingFile => AnchorSource::WorkingFile { content_hash },
         SourceKind::LocalFile => AnchorSource::LocalFile { content_hash },
-        SourceKind::Unavailable => unreachable!(),
     };
     Ok((source, bytes))
 }

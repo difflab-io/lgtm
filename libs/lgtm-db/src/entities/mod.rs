@@ -1,9 +1,8 @@
 pub mod comments;
 pub mod common;
+pub mod file_reviews;
 pub mod identities;
 pub mod mutation_receipts;
-pub mod note_promotions;
-pub mod repositories;
 pub mod review_contexts;
 pub mod sessions;
 pub mod threads;
@@ -68,23 +67,12 @@ mod tests {
                 anchor_kind: "general".into(),
                 file_path: None,
                 side: None,
-                selected_text: None,
-                source_kind: crate::types::SourceKind::Unavailable,
-                source_blob_oid: None,
-                source_commit: None,
-                source_content_hash: None,
-                context_before: None,
-                context_after: None,
+
+                source_evidence: None,
+                forge_observation: None,
                 current_path: None,
                 source_path: None,
                 orphan_reason: None,
-                observed_base: None,
-                observed_head: None,
-                observed_outdated: None,
-                observed_path: None,
-                observed_side: None,
-                observed_start: None,
-                observed_end: None,
 
                 start_line: None,
                 end_line: None,
@@ -94,7 +82,6 @@ mod tests {
                 updated_by_id: Some(fixture_id("updater")),
                 updated_at: "now".into(),
                 forge_thread_id: None,
-                outdated: false,
             };
             db.comments.insert_thread(&thread).await.unwrap();
             let loaded = threads::Entity::load()

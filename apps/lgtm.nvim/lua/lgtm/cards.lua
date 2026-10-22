@@ -34,6 +34,14 @@ function M.render(thread, comments, status, width, expanded, placement)
   width = math.max(8, width)
   local border = require("lgtm.ui").border()
   local resolved = thread.state == "resolved"
+  if resolved and not expanded then
+    return {
+      {
+        { fit(" Resolved · Enter open · za expand", width - 2), "LgtmCommentResolved" },
+        { "✓ ", "LgtmCommentResolved" },
+      },
+    }
+  end
   local heading = (thread.anchor.kind == "file" and "File · " or "")
     .. (status or (resolved and "Resolved" or "Open"))
   if status then

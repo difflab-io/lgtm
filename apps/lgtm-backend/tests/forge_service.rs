@@ -281,7 +281,7 @@ async fn should_submit_final_body_and_comments_once_and_reconcile_lost_response(
                         base: Some("base".into()),
                         head: Some("head".into()),
                     },
-                    ComparisonKind::Legacy,
+                    crate::common::comparison(&context),
                     None,
                 )
                 .await
@@ -419,7 +419,7 @@ async fn should_reject_stale_head_before_freezing_or_writing() {
                     base: Some("base".into()),
                     head: Some("head".into()),
                 },
-                ComparisonKind::Legacy,
+                crate::common::comparison(&context),
                 None,
             )
             .await
@@ -473,7 +473,7 @@ async fn should_roll_back_every_staged_comment_when_a_later_payload_changed() {
                     base: Some("base".into()),
                     head: Some("head".into()),
                 },
-                ComparisonKind::Legacy,
+                crate::common::comparison(&context),
                 None,
             )
             .await
@@ -578,7 +578,7 @@ async fn should_finalize_only_verified_pending_review_and_never_replay_missing_c
                         base: Some("base".into()),
                         head: Some("head".into()),
                     },
-                    ComparisonKind::Legacy,
+                    crate::common::comparison(&context),
                     None,
                 )
                 .await
@@ -708,7 +708,7 @@ mod pending_drafts {
                             base: Some("base".into()),
                             head: Some("head".into()),
                         },
-                        ComparisonKind::Legacy,
+                        crate::common::comparison(&context),
                         None,
                     )
                     .await
@@ -849,7 +849,7 @@ async fn should_keep_original_anchors_and_refresh_current_provider_locations_ind
                 side: "new".into(),
             })
         );
-        assert!(!thread.outdated);
+        assert!(!thread.forge_observation.as_ref().unwrap().outdated);
         {
             let mut remote = state.lock().unwrap();
             remote.threads[0]["isOutdated"] = json!(true);
@@ -863,7 +863,7 @@ async fn should_keep_original_anchors_and_refresh_current_provider_locations_ind
         assert_eq!(current.id, thread.id);
         assert_eq!(current.anchor, thread.anchor);
         assert_eq!(current.state, "resolved");
-        assert!(current.outdated);
+        assert!(current.forge_observation.as_ref().unwrap().outdated);
         assert_eq!(
             current.forge_observation.as_ref().unwrap().current,
             Some(Anchor::File {
@@ -1098,6 +1098,18 @@ async fn should_recover_remote_edits_resolution_and_deletion_after_response_loss
                     .is_err()
             );
             let writes = state.lock().unwrap().writes;
+            let receipt = reviews
+                .database()
+                .mutations
+                .get_result(&context.id, &actor.id, key)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                serde_json::from_str::<Value>(&receipt.result_json).unwrap(),
+                json!({}),
+                "uncertain PR writes retain identity and a payload hash, never a second comment body"
+            );
             assert!(
                 reviews
                     .database()
@@ -1520,7 +1532,7 @@ async fn should_use_targeted_actions_and_never_restore_confirmed_remote_deletion
 async fn should_keep_self_review_validation_and_rejected_submissions_editable_without_duplicate_publication()
  {
     use lgtm_backend::models::Completion;
-    for legacy in [false, true] {
+    for interrupted in [false, true] {
         for (reviews, url, _temp) in common::databases().await {
             let remote = Arc::new(Mutex::new(Remote {
                 author_is_viewer: true,
@@ -1602,8 +1614,8 @@ async fn should_keep_self_review_validation_and_rejected_submissions_editable_wi
                     "self-review validation precedes freezing and all provider writes"
                 );
             }
-            if legacy {
-                // Reproduce an installed older backend's frozen, definitely rejected attempt.
+            if interrupted {
+                // Recover a frozen attempt after restart, with a definite provider rejection.
                 reviews
                     .prepare_submission(
                         &session.id,

@@ -55,6 +55,59 @@ pub async fn get_all(client: &Octocrab, route: &str) -> Result<Vec<Value>> {
     }
 }
 
+/// Read all files marked Viewed by the authenticated GitHub viewer.
+pub async fn get_viewed_files(
+    client: &Octocrab,
+    owner: &str,
+    name: &str,
+    number: i64,
+) -> Result<Vec<String>> {
+    let mut cursor = Value::Null;
+    let mut marks = Vec::new();
+    for _ in 0..1000 {
+        let response: Value = request(client.graphql(&json!({"query": "query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){files(first:100,after:$cursor){nodes{path viewerViewedState}pageInfo{hasNextPage endCursor}}}}}", "variables":{"owner":owner,"name":name,"number":number,"cursor":cursor}}))).await?;
+        let files = &response["repository"]["pullRequest"]["files"];
+        for file in files["nodes"]
+            .as_array()
+            .ok_or_else(|| invalid("Incomplete GitHub viewed-file response"))?
+        {
+            if file["viewerViewedState"] == "VIEWED" {
+                marks.push(text(file, "path")?);
+            }
+        }
+        if !files["pageInfo"]["hasNextPage"]
+            .as_bool()
+            .ok_or_else(|| invalid("Incomplete GitHub viewed-file page"))?
+        {
+            return Ok(marks);
+        }
+        cursor = Value::String(text(&files["pageInfo"], "endCursor")?);
+    }
+    Err(invalid(
+        "GitHub viewed-file pagination exceeded its safety bound",
+    ))
+}
+
+/// Set GitHub's per-viewer file progress. The provider enforces permissions.
+pub async fn set_file_viewed(
+    client: &Octocrab,
+    owner: &str,
+    name: &str,
+    number: i64,
+    path: &str,
+    viewed: bool,
+) -> Result<()> {
+    let response: Value = request(client.graphql(&json!({"query":"query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id}}}","variables":{"owner":owner,"name":name,"number":number}}))).await?;
+    let pr = text(&response["repository"]["pullRequest"], "id")?;
+    let (mutation, input) = if viewed {
+        ("markFileAsViewed", "MarkFileAsViewedInput")
+    } else {
+        ("unmarkFileAsViewed", "UnmarkFileAsViewedInput")
+    };
+    let _: Value = request(client.graphql(&json!({"query":format!("mutation($input:{input}!){{{mutation}(input:$input){{clientMutationId}}}}"),"variables":{"input":{"pullRequestId":pr,"path":path}}}))).await?;
+    Ok(())
+}
+
 /// Read one comment within its previously verified thread, including private drafts.
 /// A missing node is not an authorization receipt; callers verify scope before deletion recovery.
 pub async fn get_review_comment(

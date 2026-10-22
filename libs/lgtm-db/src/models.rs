@@ -6,11 +6,6 @@ pub mod identities {
     pub use super::super::entities::identities::Model;
 }
 
-/// SeaORM persisted model for repositories.
-pub mod repositories {
-    pub use super::super::entities::repositories::Model;
-}
-
 /// SeaORM persisted model for workspace paths.
 pub mod workspace_paths {
     pub use super::super::entities::workspace_paths::Model;
@@ -34,11 +29,6 @@ pub mod threads {
 /// SeaORM persisted model for comments.
 pub mod comments {
     pub use super::super::entities::comments::Model;
-}
-
-/// Source-to-review provenance for notes.
-pub mod note_promotions {
-    pub use super::super::entities::note_promotions::Model;
 }
 
 /// Committed local mutation retry results.

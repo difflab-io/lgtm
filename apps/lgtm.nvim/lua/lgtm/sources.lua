@@ -347,11 +347,7 @@ function M.observe(state, file, views, callback)
   end
   local has_comments, renames = {}, {}
   for _, comment in ipairs(state.conversation.comments or {}) do
-    if
-      not comment.deleted and (comment.remotePresence ~= "missing" or comment.visibility == "draft")
-    then
-      has_comments[comment.threadId] = true
-    end
+    has_comments[comment.threadId] = true
   end
   for _, candidate in ipairs(state.files or {}) do
     if candidate.confirmedRename then

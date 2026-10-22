@@ -52,7 +52,7 @@ mod review_service {
                         &c,
                         &actor,
                         CommitContext::default(),
-                        ComparisonKind::Legacy,
+                        crate::common::comparison(&c),
                         None,
                     )
                     .await
@@ -139,7 +139,7 @@ mod review_service {
                                     &context,
                                     &actor,
                                     CommitContext::default(),
-                                    ComparisonKind::Legacy,
+                                    crate::common::comparison(&context),
                                     None,
                                 )
                                 .await
@@ -182,7 +182,7 @@ mod review_service {
                                     &c,
                                     &a,
                                     CommitContext::default(),
-                                    ComparisonKind::Legacy,
+                                    crate::common::comparison(&c),
                                     None,
                                 )
                                 .await
@@ -195,7 +195,7 @@ mod review_service {
                                 &context,
                                 &actor,
                                 CommitContext::default(),
-                                ComparisonKind::Legacy,
+                                crate::common::comparison(&context),
                                 None,
                             )
                             .await
@@ -355,7 +355,7 @@ mod review_service {
                         &c,
                         &alice,
                         CommitContext::default(),
-                        ComparisonKind::Legacy,
+                        crate::common::comparison(&c),
                         None
                     )
                     .await
@@ -375,7 +375,7 @@ mod review_service {
                             base: Some("base".into()),
                             head: Some("head".into()),
                         },
-                        ComparisonKind::Legacy,
+                        crate::common::comparison(&c),
                         None,
                     )
                     .await
@@ -527,7 +527,7 @@ mod review_service {
                         &c,
                         &alice,
                         CommitContext::default(),
-                        ComparisonKind::Legacy,
+                        crate::common::comparison(&c),
                         None
                     )
                     .await
@@ -545,7 +545,7 @@ mod review_service {
                         &c,
                         &alice,
                         CommitContext::default(),
-                        ComparisonKind::Legacy,
+                        crate::common::comparison(&c),
                         None,
                     )
                     .await
@@ -595,7 +595,7 @@ mod review_service {
                         &current,
                         &actor,
                         CommitContext::default(),
-                        ComparisonKind::Legacy,
+                        crate::common::comparison(&current),
                         None,
                     )
                     .await
@@ -634,7 +634,7 @@ mod review_service {
                 draft.author_id = identity.id;
                 draft.position = 1;
                 draft.body = "Discard on failure".into();
-                tx.comments.insert(&draft).await.unwrap();
+                tx.comments.insert_comment(&draft).await.unwrap();
 
                 let provider = FailingProvider(std::sync::atomic::AtomicUsize::new(0));
                 assert!(provider.fetch(&context.key).await.is_err());
@@ -652,7 +652,7 @@ mod review_service {
                     review
                         .database()
                         .comments
-                        .get_by_id(&context.id, &draft.id)
+                        .get_comment_by_id(&context.id, &draft.id)
                         .await
                         .unwrap()
                         .is_none()
@@ -727,7 +727,7 @@ mod review_service {
                             &c,
                             &a,
                             CommitContext::default(),
-                            ComparisonKind::Legacy,
+                            crate::common::comparison(&c),
                             None,
                         )
                         .await
@@ -788,7 +788,7 @@ mod review_service {
                         &context,
                         &bot,
                         CommitContext::default(),
-                        ComparisonKind::Legacy,
+                        crate::common::comparison(&context),
                         None,
                     )
                     .await
@@ -861,7 +861,7 @@ mod review_service {
                         &other,
                         &alice,
                         CommitContext::default(),
-                        ComparisonKind::Legacy,
+                        crate::common::comparison(&other),
                         None,
                     )
                     .await
@@ -967,13 +967,13 @@ mod review_service {
                     let mut row = db
                         .database()
                         .comments
-                        .get_by_id(&context.id, &c.id)
+                        .get_comment_by_id(&context.id, &c.id)
                         .await
                         .unwrap()
                         .unwrap();
                     row.context_id = other.id;
                     matches!(
-                        db.database().comments.update(&row).await,
+                        db.database().comments.update_comment(&row).await,
                         Ok(false) | Err(_)
                     )
                 });
@@ -1111,20 +1111,21 @@ mod review_service {
                     .await
                     .unwrap();
                 let live = db.get_conversation(&c.id, true).await.unwrap();
+                let anchored = live
+                    .threads
+                    .iter()
+                    .find(|t| t.id == line.thread_id)
+                    .unwrap();
+                assert!(
+                    matches!(&anchored.evidence.as_ref().unwrap().source, AnchorSource::Commit { sha, .. } if sha == &first)
+                );
                 assert!(
                     live.threads
                         .iter()
-                        .find(|t| t.id == line.thread_id)
-                        .unwrap()
-                        .outdated
-                );
-                assert!(
-                    !live
-                        .threads
-                        .iter()
                         .find(|t| t.id == general.thread_id)
                         .unwrap()
-                        .outdated
+                        .evidence
+                        .is_none()
                 );
                 for filter in [
                     SessionFilter {
@@ -1220,7 +1221,7 @@ mod review_service {
                         &c,
                         &a,
                         CommitContext::default(),
-                        ComparisonKind::Legacy,
+                        crate::common::comparison(&c),
                         None,
                     )
                     .await
@@ -1325,7 +1326,7 @@ mod review_service {
                         &c,
                         &changed_model,
                         CommitContext::default(),
-                        ComparisonKind::Legacy,
+                        crate::common::comparison(&c),
                         None
                     )
                     .await
@@ -1337,12 +1338,12 @@ mod review_service {
                     let mut row = db
                         .database()
                         .comments
-                        .get_by_id(&c.id, &root.id)
+                        .get_comment_by_id(&c.id, &root.id)
                         .await
                         .unwrap()
                         .unwrap();
                     row.forge_comment_id = Some("unscoped".into());
-                    db.database().comments.update(&row).await.is_err()
+                    db.database().comments.update_comment(&row).await.is_err()
                 });
                 raw.close().await.unwrap();
                 db.database().close().await;
@@ -1418,7 +1419,7 @@ mod review_service {
                         &context,
                         &actor,
                         CommitContext::default(),
-                        ComparisonKind::Legacy,
+                        crate::common::comparison(&context),
                         None,
                     )
                     .await
@@ -1438,14 +1439,14 @@ mod review_service {
                 row.thread_id = uuid::Uuid::new_v4();
                 row.position = 999;
                 row.created_at = "cannot-rewrite-created-at".into();
-                assert!(tx.comments.update(&row).await.unwrap());
+                assert!(tx.comments.update_comment(&row).await.unwrap());
                 tx.commit().await.unwrap();
                 let saved = review.get_comment(&context.id, &comment.id).await.unwrap();
                 assert_eq!(saved.body, row.body);
                 assert_eq!(saved.author.name, "Alice");
                 let stored = db
                     .comments
-                    .get_by_id(&context.id, &comment.id)
+                    .get_comment_by_id(&context.id, &comment.id)
                     .await
                     .unwrap()
                     .unwrap();
@@ -1458,11 +1459,11 @@ mod review_service {
                 let tx = db.begin().await.unwrap();
                 let nested = tx.begin().await.unwrap();
                 row.body = "Nested savepoint".into();
-                nested.comments.update(&row).await.unwrap();
+                nested.comments.update_comment(&row).await.unwrap();
                 nested.commit().await.unwrap();
                 assert_eq!(
                     tx.comments
-                        .get_by_id(&context.id, &comment.id)
+                        .get_comment_by_id(&context.id, &comment.id)
                         .await
                         .unwrap()
                         .unwrap()
@@ -1481,7 +1482,7 @@ mod review_service {
 
                 let tx = db.begin().await.unwrap();
                 row.body = "Dropped".into();
-                tx.comments.update(&row).await.unwrap();
+                tx.comments.update_comment(&row).await.unwrap();
                 drop(tx);
                 assert_eq!(
                     review
@@ -1495,9 +1496,9 @@ mod review_service {
                 // A constraint error lets the caller discard earlier work as well.
                 let tx = db.begin().await.unwrap();
                 row.body = "Discarded".into();
-                tx.comments.update(&row).await.unwrap();
+                tx.comments.update_comment(&row).await.unwrap();
                 row.visibility = "invalid".into();
-                assert!(tx.comments.update(&row).await.is_err());
+                assert!(tx.comments.update_comment(&row).await.is_err());
                 tx.rollback().await.unwrap();
                 assert_eq!(
                     review
@@ -1538,7 +1539,7 @@ mod review_service {
                 thread.origin_session_id = None;
                 thread.anchor_kind = "file".into();
                 thread.file_path = Some("cannot-change-anchor.rs".into());
-                thread.outdated = true;
+                thread.state = "resolved".into();
                 assert!(db.comments.update_thread(&thread).await.unwrap());
                 let stored = db
                     .comments
@@ -1550,7 +1551,7 @@ mod review_service {
                 assert_eq!(stored.origin_session_id, original_thread.origin_session_id);
                 assert_eq!(stored.anchor_kind, original_thread.anchor_kind);
                 assert_eq!(stored.file_path, original_thread.file_path);
-                assert!(stored.outdated);
+                assert_eq!(stored.state, "resolved");
                 db.close().await;
             }
         }
@@ -1589,7 +1590,7 @@ mod review_service {
                             &context,
                             &actor,
                             CommitContext::default(),
-                            ComparisonKind::Legacy,
+                            crate::common::comparison(&context),
                             None,
                         )
                         .await
@@ -1929,9 +1930,12 @@ mod mutation_guards {
                 .await
                 .unwrap()
                 .unwrap();
-            assert_eq!(stored.selected_text.as_deref(), Some("selected"));
             assert_eq!(
-                stored.source_content_hash.as_deref(),
+                stored.source_evidence.as_ref().unwrap()["selected_text"].as_str(),
+                Some("selected")
+            );
+            assert_eq!(
+                stored.source_evidence.as_ref().unwrap()["source"]["content_hash"].as_str(),
                 Some(evidence.source.content_hash())
             );
             assert_eq!(stored.start_line, Some(2));
@@ -2017,6 +2021,109 @@ mod mutation_guards {
                 service.get_session(&next.id).await.unwrap().state(),
                 "active"
             );
+        }
+    }
+}
+
+mod file_reviews {
+    use lgtm_backend::models::*;
+
+    // tests ------------------------------------------------------------------
+    #[tokio::test]
+    async fn should_persist_local_marks_per_reviewer_without_changing_the_conversation() {
+        for (reviews, url, _) in crate::common::databases().await {
+            let alice = reviews
+                .auth()
+                .ensure_human("Alice", "marks-alice@example.com")
+                .await
+                .unwrap();
+            let bob = reviews
+                .auth()
+                .ensure_human("Bob", "marks-bob@example.com")
+                .await
+                .unwrap();
+            let context = reviews
+                .ensure_context(
+                    ContextKey::Local {
+                        location: LocalLocation::Notes {
+                            path: "/reviewed-directory".into(),
+                        },
+                    },
+                    None,
+                )
+                .await
+                .unwrap();
+            let session = reviews
+                .start_session(
+                    &context,
+                    &alice,
+                    CommitContext::default(),
+                    ComparisonKind::Directory,
+                    None,
+                )
+                .await
+                .unwrap();
+            let revision = reviews
+                .get_context_by_id(&context.id)
+                .await
+                .unwrap()
+                .revision;
+            for identity in ["first-comparison", "changed-comparison"] {
+                reviews
+                    .set_file_reviewed(&session.id, &alice, "file.txt", Some(identity))
+                    .await
+                    .unwrap();
+            }
+            let reopened = crate::common::service(&url).await.unwrap();
+            assert_eq!(
+                reopened
+                    .get_file_reviews(&session.id, &alice)
+                    .await
+                    .unwrap(),
+                vec![("file.txt".into(), "changed-comparison".into())]
+            );
+            assert!(
+                reopened
+                    .get_file_reviews(&session.id, &bob)
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+            assert_eq!(
+                reopened
+                    .get_context_by_id(&context.id)
+                    .await
+                    .unwrap()
+                    .revision,
+                revision
+            );
+            assert!(
+                reopened
+                    .get_conversation(&context.id, true)
+                    .await
+                    .unwrap()
+                    .comments
+                    .is_empty()
+            );
+            assert!(
+                reopened
+                    .set_file_reviewed(&session.id, &alice, "../escape", Some("content"))
+                    .await
+                    .is_err()
+            );
+            reopened
+                .set_file_reviewed(&session.id, &alice, "file.txt", None)
+                .await
+                .unwrap();
+            assert!(
+                reopened
+                    .get_file_reviews(&session.id, &alice)
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+            reopened.database().close().await;
+            reviews.database().close().await;
         }
     }
 }

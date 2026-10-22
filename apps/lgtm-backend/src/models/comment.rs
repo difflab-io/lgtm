@@ -14,9 +14,9 @@ pub struct Comment {
     /// Draft ownership is distinct from preserved source attribution.
     #[serde(default)]
     pub owner_id: Option<uuid::Uuid>,
+    /// Original note identity for copied feedback; no ownership or deletion restriction.
+    pub source_note_id: Option<uuid::Uuid>,
     pub body: String,
-    #[serde(default)]
-    pub deleted: bool,
     pub position: i64,
     pub visibility: String,
     pub created_at: String,
@@ -30,7 +30,6 @@ pub struct Comment {
     pub posting: PostingStatus,
     pub posting_request_key: Option<String>,
     pub payload_hash: Option<String>,
-    pub remote_presence: String,
 }
 
 impl Comment {
@@ -41,7 +40,6 @@ impl Comment {
             thread_id: v.thread_id,
             origin_session_id: v.origin_session_id,
             body: v.body,
-            deleted: v.deleted,
             position: v.position,
             visibility: v.visibility,
             created_at: v.created_at,
@@ -55,8 +53,8 @@ impl Comment {
             posting: PostingStatus::from_db(v.posting_state, v.posting_error)?,
             posting_request_key: v.posting_request_key,
             payload_hash: v.payload_hash,
-            remote_presence: v.remote_presence,
             owner_id: v.owner_id,
+            source_note_id: v.source_note_id,
             author,
         })
     }
@@ -65,6 +63,7 @@ impl Comment {
     pub fn promote(source: &Self, target: &Session, thread: &Thread, owner: &Actor) -> Self {
         let mut comment = Self::local(target, thread, &source.author, &source.body, 0);
         comment.owner_id = Some(owner.id);
+        comment.source_note_id = Some(source.id);
         comment
     }
 
@@ -85,8 +84,8 @@ impl Comment {
             origin_session_id: Some(s.id),
             author: actor.clone(),
             owner_id: Some(actor.id),
+            source_note_id: None,
             body: body.into(),
-            deleted: false,
             position,
             visibility: "draft".into(),
             created_at: now(),
@@ -100,7 +99,6 @@ impl Comment {
             posting: PostingStatus::Unposted,
             posting_request_key: None,
             payload_hash: None,
-            remote_presence: "local".into(),
         }
     }
 }
@@ -114,8 +112,8 @@ impl From<&Comment> for comments::Model {
             origin_session_id: v.origin_session_id,
             author_id: v.author.id,
             owner_id: v.owner_id,
+            source_note_id: v.source_note_id,
             body: v.body.clone(),
-            deleted: v.deleted,
             position: v.position,
             visibility: v.visibility.clone(),
             created_at: v.created_at.clone(),
@@ -130,7 +128,6 @@ impl From<&Comment> for comments::Model {
             posting_error: v.posting.error().map(str::to_owned),
             posting_request_key: v.posting_request_key.clone(),
             payload_hash: v.payload_hash.clone(),
-            remote_presence: v.remote_presence.clone(),
         }
     }
 }

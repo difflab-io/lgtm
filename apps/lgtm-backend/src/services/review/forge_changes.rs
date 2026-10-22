@@ -7,6 +7,15 @@ use crate::{
 };
 use uuid::Uuid;
 
+/// Remote acknowledgments contain no copy of the comment, thread, or request body.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+pub(super) struct ChangeReceipt {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) rejection: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) deleted_remote: Option<(String, String)>,
+}
+
 impl ReviewService {
     /// Reopen only after the forge confirms the final event was rejected and all drafts are accounted for.
     pub(crate) async fn resume_rejected_submission(
@@ -48,9 +57,11 @@ impl ReviewService {
                 "Another review is active; the rejected review was preserved".into(),
             ));
         }
-        let comments =
-            Self::comments_from_db_models(tx.comments.get_all(&session.context_id).await?, &tx)
-                .await?;
+        let comments = Self::comments_from_db_models(
+            tx.comments.get_comments(&session.context_id).await?,
+            &tx,
+        )
+        .await?;
         for comment in comments
             .iter()
             .filter(|c| c.origin_session_id == Some(session.id))
@@ -82,7 +93,7 @@ impl ReviewService {
                 request_key: completion.request_key,
                 method: "rejected_submission".into(),
                 request_hash: completion.request_hash,
-                result_json: serde_json::to_string(&seed)?,
+                result_json: "{}".into(),
                 version,
                 object_id: Some(session.id),
                 pending: false,
@@ -98,11 +109,60 @@ impl ReviewService {
                 && comment.forge_object_kind.as_deref() == Some("review_comment")
             {
                 comment.visibility = "draft".into();
-                tx.comments.update(&comments::Model::from(&comment)).await?;
+                tx.comments
+                    .update_comment(&comments::Model::from(&comment))
+                    .await?;
             }
         }
         tx.commit().await?;
         self.get_session(session_id).await
+    }
+
+    async fn get_change_from_receipt<D: sea_orm::ConnectionTrait + sea_orm::TransactionTrait>(
+        &self,
+        database: &crate::database::Database<D>,
+        receipt: &mutation_receipts::Model,
+        input: &ForgeChangeInput,
+    ) -> Result<ForgeChange> {
+        let saved: ChangeReceipt = serde_json::from_str(&receipt.result_json)?;
+        let (_, object_id) = input.object();
+        let original = if saved.rejection.is_some()
+            || (!receipt.pending && matches!(input, ForgeChangeInput::Delete { .. }))
+        {
+            ForgeChangeObject::Deleted {
+                comment_id: object_id,
+            }
+        } else {
+            match input {
+                ForgeChangeInput::Edit { .. } | ForgeChangeInput::Delete { .. } => {
+                    let row = database
+                        .comments
+                        .get_comment_by_id(&receipt.context_id, &object_id)
+                        .await?
+                        .ok_or_else(|| Error::NotFound("Comment".into()))?;
+                    ForgeChangeObject::Comment(Box::new(
+                        Self::comment_from_db_model(row, database).await?,
+                    ))
+                }
+                ForgeChangeInput::Resolve { .. } => {
+                    let row = database
+                        .comments
+                        .get_thread(&receipt.context_id, &object_id)
+                        .await?
+                        .ok_or_else(|| Error::NotFound("Thread".into()))?;
+                    ForgeChangeObject::Thread(Box::new(
+                        Self::thread_from_db_model(row, database).await?,
+                    ))
+                }
+            }
+        };
+        Ok(ForgeChange {
+            input: input.clone(),
+            result: (!receipt.pending && saved.rejection.is_none()).then(|| original.clone()),
+            original,
+            rejection: saved.rejection,
+            deleted_remote: saved.deleted_remote,
+        })
     }
 
     pub(crate) async fn get_forge_change(
@@ -127,7 +187,10 @@ impl ReviewService {
                 "Retry key belongs to a different remote change".into(),
             ));
         }
-        Ok(Some(serde_json::from_str(&receipt.result_json)?))
+        Ok(Some(
+            self.get_change_from_receipt(&self.database, &receipt, input)
+                .await?,
+        ))
     }
 
     pub(crate) async fn prepare_forge_change(
@@ -141,8 +204,8 @@ impl ReviewService {
         let session = self.get_session(session_id).await?;
         let guard = guard.bind_attempt(session_id, input)?;
         let tx = self.database.begin().await?;
-        if let Some(saved) = self
-            .begin_mutation::<ForgeChange>(
+        if self
+            .begin_mutation::<ChangeReceipt>(
                 &tx,
                 &session.context_id,
                 &actor.id,
@@ -151,7 +214,14 @@ impl ReviewService {
                 true,
             )
             .await?
+            .is_some()
         {
+            let receipt = tx
+                .mutations
+                .get_result(&session.context_id, &actor.id, &guard.request_key)
+                .await?
+                .ok_or_else(|| Error::NotFound("Remote acknowledgment".into()))?;
+            let saved = self.get_change_from_receipt(&tx, &receipt, input).await?;
             tx.commit().await?;
             return Ok((saved, false));
         }
@@ -176,7 +246,7 @@ impl ReviewService {
                 }
                 let row = tx
                     .comments
-                    .get_by_id(&session.context_id, comment_id)
+                    .get_comment_by_id(&session.context_id, comment_id)
                     .await?
                     .ok_or_else(|| Error::NotFound("Comment".into()))?;
                 let comment = Self::comment_from_db_model(row, &tx).await?;
@@ -220,7 +290,7 @@ impl ReviewService {
                 request_key: guard.request_key,
                 method: input.method().into(),
                 request_hash: guard.payload_hash,
-                result_json: serde_json::to_string(&saved)?,
+                result_json: serde_json::to_string(&ChangeReceipt::default())?,
                 version,
                 object_id: Some(object_id),
                 pending: true,
@@ -258,7 +328,7 @@ impl ReviewService {
         if receipt.method != input.method() || receipt.request_hash != guard.payload_hash {
             return Err(Error::Conflict("Remote intent changed".into()));
         }
-        let mut saved: ForgeChange = serde_json::from_str(&receipt.result_json)?;
+        let mut saved = self.get_change_from_receipt(&tx, &receipt, input).await?;
         if saved.result.is_some() || saved.rejection.is_some() {
             tx.commit().await?;
             return Ok(saved);
@@ -277,7 +347,7 @@ impl ReviewService {
         match &result {
             Some(ForgeChangeObject::Comment(comment)) => {
                 tx.comments
-                    .update(&comments::Model::from(comment.as_ref()))
+                    .update_comment(&comments::Model::from(comment.as_ref()))
                     .await?;
             }
             Some(ForgeChangeObject::Thread(thread)) => {
@@ -293,7 +363,7 @@ impl ReviewService {
                     _ => return Err(invalid("Deletion receipt names another comment")),
                 };
                 tx.comments
-                    .delete_remote(&session.context_id, comment_id)
+                    .delete_remote_comment(&session.context_id, comment_id)
                     .await?;
                 tx.comments
                     .delete_empty_thread(&session.context_id, &thread_id)
@@ -324,7 +394,15 @@ impl ReviewService {
             .revision;
         if !tx
             .mutations
-            .update_result(&receipt, &serde_json::to_string(&saved)?, version, false)
+            .update_result(
+                &receipt,
+                &serde_json::to_string(&ChangeReceipt {
+                    rejection: saved.rejection.clone(),
+                    deleted_remote: saved.deleted_remote.clone(),
+                })?,
+                version,
+                false,
+            )
             .await?
         {
             return Err(Error::Conflict("Remote receipt changed".into()));

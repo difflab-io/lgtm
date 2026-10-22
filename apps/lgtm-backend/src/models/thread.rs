@@ -1,8 +1,6 @@
 use super::super::database::models::threads;
-use super::super::database::types::SourceKind;
 use super::super::error::Result;
-use super::super::error::invalid;
-use super::{Actor, Anchor, AnchorEvidence, AnchorSource, ForgeObservation, OrphanReason};
+use super::{Actor, Anchor, AnchorEvidence, ForgeObservation, OrphanReason};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -12,8 +10,6 @@ pub struct Thread {
     pub origin_session_id: Option<uuid::Uuid>,
     pub author: Actor,
     pub anchor: Anchor,
-    /// Original selected text for local content anchors; no full-file snapshot is stored.
-    pub selected_text: Option<String>,
     /// Immutable source evidence. None means the provider supplied no saved-byte evidence.
     pub evidence: Option<AnchorEvidence>,
     /// Confirmed current path; absent when no move has been observed.
@@ -29,7 +25,6 @@ pub struct Thread {
     pub updated_by: Option<Actor>,
     pub updated_at: String,
     pub forge_thread_id: Option<String>,
-    pub outdated: bool,
 }
 
 impl Thread {
@@ -39,61 +34,20 @@ impl Thread {
         resolved_by: Option<Actor>,
         updated_by: Option<Actor>,
     ) -> Result<Self> {
-        let required = |v: &Option<String>| {
-            v.clone()
-                .ok_or_else(|| invalid("Persisted anchor evidence is incomplete"))
-        };
-        let evidence = if v.source_kind == SourceKind::Unavailable {
-            None
-        } else {
-            let content_hash = required(&v.source_content_hash)?;
-            let source = match v.source_kind {
-                SourceKind::Commit => AnchorSource::Commit {
-                    sha: required(&v.source_commit)?,
-                    content_hash,
-                },
-                SourceKind::IndexFile => AnchorSource::IndexFile {
-                    blob_oid: required(&v.source_blob_oid)?,
-                    content_hash,
-                },
-                SourceKind::WorkingFile => AnchorSource::WorkingFile { content_hash },
-                SourceKind::LocalFile => AnchorSource::LocalFile { content_hash },
-                SourceKind::Unavailable => unreachable!(),
-            };
-            let evidence = AnchorEvidence {
-                source,
-                selected_text: required(&v.selected_text)?,
-                context_before: v.context_before.clone().unwrap_or_default(),
-                context_after: v.context_after.clone().unwrap_or_default(),
-            };
+        let evidence: Option<AnchorEvidence> =
+            v.source_evidence.map(serde_json::from_value).transpose()?;
+        if let Some(evidence) = &evidence {
             evidence.validate()?;
-            Some(evidence)
-        };
-        let forge_observation = v
-            .observed_outdated
-            .map(|outdated| -> Result<ForgeObservation> {
-                let current = match (&v.observed_path, v.observed_start, v.observed_end) {
-                    (Some(path), Some(start), Some(end)) => Some(Anchor::Line {
-                        path: path.clone(),
-                        start,
-                        end,
-                        side: required(&v.observed_side)?,
-                    }),
-                    (Some(path), None, None) => Some(Anchor::File { path: path.clone() }),
-                    (None, None, None) => None,
-                    _ => return Err(invalid("Persisted forge location is incomplete")),
-                };
-                if let Some(anchor) = &current {
-                    anchor.validate()?;
-                }
-                Ok(ForgeObservation {
-                    base: required(&v.observed_base)?,
-                    head: required(&v.observed_head)?,
-                    outdated,
-                    current,
-                })
-            })
+        }
+        let forge_observation: Option<ForgeObservation> = v
+            .forge_observation
+            .map(serde_json::from_value)
             .transpose()?;
+        if let Some(observation) = &forge_observation
+            && let Some(anchor) = &observation.current
+        {
+            anchor.validate()?;
+        }
         Ok(Thread {
             evidence,
             current_path: v.current_path,
@@ -107,8 +61,6 @@ impl Thread {
             resolved_at: v.resolved_at,
             updated_at: v.updated_at,
             forge_thread_id: v.forge_thread_id,
-            outdated: v.outdated,
-            selected_text: v.selected_text,
             author,
             resolved_by,
             updated_by,
@@ -130,7 +82,7 @@ impl Thread {
 
 impl From<&Thread> for threads::Model {
     fn from(v: &Thread) -> Self {
-        let mut row = Self {
+        Self {
             id: v.id,
             context_id: v.context_id,
             origin_session_id: v.origin_session_id,
@@ -149,23 +101,17 @@ impl From<&Thread> for threads::Model {
                 Anchor::Line { side, .. } => Some(side.clone()),
                 _ => None,
             },
-            source_kind: SourceKind::Unavailable,
-            source_blob_oid: None,
-            source_commit: None,
-            source_content_hash: None,
-            context_before: None,
-            context_after: None,
+            source_evidence: v
+                .evidence
+                .as_ref()
+                .map(|value| serde_json::to_value(value).expect("anchor evidence serializes")),
+            forge_observation: v
+                .forge_observation
+                .as_ref()
+                .map(|value| serde_json::to_value(value).expect("forge observation serializes")),
             current_path: v.current_path.clone(),
             source_path: v.source_path.clone(),
             orphan_reason: v.orphan_reason,
-            observed_base: None,
-            observed_head: None,
-            observed_outdated: None,
-            observed_path: None,
-            observed_side: None,
-            observed_start: None,
-            observed_end: None,
-            selected_text: v.selected_text.clone(),
             start_line: match &v.anchor {
                 Anchor::Line { start, .. } => Some(*start),
                 _ => None,
@@ -180,46 +126,6 @@ impl From<&Thread> for threads::Model {
             updated_by_id: v.updated_by.as_ref().map(|a| a.id),
             updated_at: v.updated_at.clone(),
             forge_thread_id: v.forge_thread_id.clone(),
-            outdated: v.outdated,
-        };
-        if let Some(evidence) = &v.evidence {
-            row.source_kind = match &evidence.source {
-                AnchorSource::Commit { sha, .. } => {
-                    row.source_commit = Some(sha.clone());
-                    SourceKind::Commit
-                }
-                AnchorSource::IndexFile { blob_oid, .. } => {
-                    row.source_blob_oid = Some(blob_oid.clone());
-                    SourceKind::IndexFile
-                }
-                AnchorSource::WorkingFile { .. } => SourceKind::WorkingFile,
-                AnchorSource::LocalFile { .. } => SourceKind::LocalFile,
-            };
-            row.source_content_hash = Some(evidence.source.content_hash().into());
-            row.selected_text = Some(evidence.selected_text.clone());
-            row.context_before = Some(evidence.context_before.clone());
-            row.context_after = Some(evidence.context_after.clone());
         }
-        if let Some(observation) = &v.forge_observation {
-            row.observed_base = Some(observation.base.clone());
-            row.observed_head = Some(observation.head.clone());
-            row.observed_outdated = Some(observation.outdated);
-            match &observation.current {
-                Some(Anchor::Line {
-                    path,
-                    start,
-                    end,
-                    side,
-                }) => {
-                    row.observed_path = Some(path.clone());
-                    row.observed_start = Some(*start);
-                    row.observed_end = Some(*end);
-                    row.observed_side = Some(side.clone());
-                }
-                Some(Anchor::File { path }) => row.observed_path = Some(path.clone()),
-                _ => {}
-            }
-        }
-        row
     }
 }
