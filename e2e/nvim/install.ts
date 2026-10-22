@@ -20,7 +20,7 @@ for (const [name, pin] of Object.entries(pins)) {
     .catch(() => '')
   if (actual !== pin.commit) {
     await exec('git', ['-C', directory, 'fetch', 'origin', pin.commit])
-    await exec('git', ['-C', directory, 'checkout', '--detach', pin.commit])
   }
+  await exec('git', ['-C', directory, 'checkout', '--detach', pin.commit])
   console.info(`${name}: ${pin.commit}`)
 }

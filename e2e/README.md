@@ -48,6 +48,7 @@ e2e/
 │   ├── local-review.spec.ts
 │   ├── pr-review.spec.ts
 │   ├── diffs.spec.ts
+│   ├── dependencies.ts
 │   ├── editor.spec.ts
 │   ├── assertions.ts
 │   ├── editor.ts
@@ -124,3 +125,5 @@ CI reads the repository secrets `LGTM_E2E_GITHUB_TOKEN` and `LGTM_E2E_GITHUB_SEC
 
 
 Private Rust unit tests, database integration tests and the plugin's Lua unit contracts remain in their existing app and library locations.
+
+Neovim runs a global preflight before test hooks create any PRs. It starts both editor profiles and computes a native CodeDiff diff. Missing modules or native binaries fail the suite once, with the startup error. The installer always checks out each pinned revision, including on a fresh clone whose default HEAD already matches the pin.

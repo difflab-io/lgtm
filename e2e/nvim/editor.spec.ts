@@ -1,3 +1,4 @@
+import { isolatedEnv } from '../common/test-utils.js'
 /**
  * @module-tag e2e
  * @module-tag nvim
@@ -6,7 +7,7 @@ import { describe, it, expect } from 'vitest'
 import { cp, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { command, isolatedEnv, ROOT } from '../common/test-harness.js'
+import { command, ROOT } from '../common/test-harness.js'
 import { profiles, useEditor } from './fixtures.js'
 import { waitFor } from '../common/test-utils.js'
 

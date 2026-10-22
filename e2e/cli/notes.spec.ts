@@ -1,3 +1,4 @@
+import { isolatedEnv } from '../common/test-utils.js'
 /**
  * @module-tag e2e
  * @module-tag cli
@@ -7,7 +8,7 @@ import { describe, it, expect } from 'vitest'
 import { mkdir, rename, rm, access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { useTestHarness } from '../common/fixtures.js'
-import { binary, command, isolatedEnv } from '../common/test-harness.js'
+import { binary, command } from '../common/test-harness.js'
 
 describe('When the backend is unavailable', () => {
   const fixture = useTestHarness('cli')
