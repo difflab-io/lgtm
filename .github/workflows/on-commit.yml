@@ -6,6 +6,10 @@ name: On Commit
   push:
     branches-ignore: [main]
 
+concurrency:
+  group: on-commit-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   id-token: write
@@ -108,11 +112,33 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  e2e-budget:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-22.04
+    timeout-minutes: 65
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: cloudvoyant/premise@v0
+        with:
+          setup-only: true
+          install-premise: build
+      - name: Wait for GitHub fixture API budget
+        env:
+          LGTM_E2E_GITHUB_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_TOKEN }}
+          LGTM_E2E_GITHUB_REPOSITORY: ${{ vars.LGTM_E2E_GITHUB_REPOSITORY || 'skapoor8/lgtm-e2e' }}
+        run: premise run e2e-budget
+
   # TODO: Remove this standalone job once Premise supports E2E suites.
   e2e:
+    needs: e2e-budget
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
         suite: [backend, cli, nvim]
         runner: [ubuntu-22.04, macos-latest]

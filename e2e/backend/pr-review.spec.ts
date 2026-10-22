@@ -139,7 +139,8 @@ describe('When starting a fresh draft review', () => {
         }),
       ]),
     )
-    expect(conversation.threads[0].anchor.kind).toBe('general')
+    const thread = conversation.threads.find((thread: Json) => thread.id === saved.comment.threadId)
+    expect(thread).toMatchObject({ id: saved.comment.threadId, anchor: { kind: 'general' } })
   })
 
   it('Agent can immediately persist draft comments with an identity notice', async () => {
