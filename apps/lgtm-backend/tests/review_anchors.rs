@@ -65,7 +65,6 @@ async fn should_resume_legacy_directory_notes_by_file_without_exposing_neighbori
                             start: 2,
                             end: 2,
                             side: "new".into(),
-                            commit: AnchorSource::hash(bytes),
                         },
                         Some(evidence(bytes)),
                         None,
@@ -109,7 +108,6 @@ async fn should_resume_legacy_directory_notes_by_file_without_exposing_neighbori
                     start: 2,
                     end: 2,
                     side: "new".into(),
-                    commit: AnchorSource::hash(bytes),
                 },
                 Some(evidence(bytes)),
                 None,
@@ -179,7 +177,6 @@ async fn should_keep_file_notes_and_new_origins_across_repeated_moves_between_pa
             start: 2,
             end: 2,
             side: "new".into(),
-            commit: AnchorSource::hash(bytes),
         };
         let first_scope = scope(&first);
         let writer = service
@@ -347,7 +344,6 @@ async fn should_resume_directory_reviews_after_repeated_root_moves_without_rewri
             start: 2,
             end: 2,
             side: "new".into(),
-            commit: AnchorSource::hash(bytes),
         };
         let comment = service
             .add_comment(

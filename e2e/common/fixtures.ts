@@ -2,14 +2,10 @@ import { beforeEach, afterEach } from 'vitest'
 import { Runtime } from './runtime.js'
 
 /** Own the backend process and database for one case. Consumers can add narrower fixtures. */
-export function useRuntime(
-  kind: 'backend' | 'cli',
-  seed?: (home: string) => Promise<void>,
-  environment?: () => NodeJS.ProcessEnv,
-) {
+export function useRuntime(kind: 'backend' | 'cli', environment?: () => NodeJS.ProcessEnv) {
   let runtime: Runtime | undefined
   beforeEach(async () => {
-    runtime = await Runtime.create(kind, seed, environment?.())
+    runtime = await Runtime.create(kind, environment?.())
   })
   afterEach(async ({ task }) => {
     try {

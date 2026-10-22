@@ -890,14 +890,12 @@ mod review_service {
                         start: 0,
                         end: 2,
                         side: "new".into(),
-                        commit: "abc".into(),
                     },
                     Anchor::Line {
                         path: "a".into(),
                         start: 3,
                         end: 2,
                         side: "new".into(),
-                        commit: "abc".into(),
                     },
                 ] {
                     assert!(
@@ -1000,6 +998,34 @@ mod review_service {
             for (db, url, temp) in databases().await {
                 let a = actor(&db, "Reviewer", None).await;
                 let root = temp.path().to_str().unwrap();
+                let git = |args: &[&str]| {
+                    let output = std::process::Command::new("git")
+                        .current_dir(root)
+                        .args(args)
+                        .output()
+                        .unwrap();
+                    assert!(
+                        output.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+                };
+                git(&["init", "-q"]);
+                git(&["config", "user.name", "Reviewer"]);
+                git(&["config", "user.email", "reviewer@example.test"]);
+                std::fs::write(temp.path().join("file.rs"), "first\nsecond\nthird\n").unwrap();
+                git(&["add", "file.rs"]);
+                git(&["commit", "-qm", "initial source"]);
+                let first = git(&["rev-parse", "HEAD"]);
+                let (source, bytes) = lgtm_backend::services::workspace::get_source(
+                    temp.path(),
+                    "file.rs",
+                    lgtm_backend::database::types::SourceKind::Commit,
+                    Some(&first),
+                )
+                .unwrap();
+                let evidence = AnchorEvidence::capture(source, &bytes, 1, 3).unwrap();
                 let c = db
                     .ensure_context(
                         ContextKey::Local {
@@ -1017,29 +1043,27 @@ mod review_service {
                         &c,
                         &a,
                         CommitContext {
-                            base: Some("old".into()),
-                            head: Some("head-1".into()),
+                            base: Some(first.clone()),
+                            head: Some(first.clone()),
                         },
-                        ComparisonKind::Legacy,
+                        ComparisonKind::Branch,
                         None,
                     )
                     .await
                     .unwrap();
+                let anchor = Anchor::Line {
+                    path: "file.rs".into(),
+                    start: 1,
+                    end: 3,
+                    side: "new".into(),
+                };
+                assert!(
+                    db.add_comment(&s.id, &a, "Missing evidence", anchor.clone(), None, None)
+                        .await
+                        .is_err()
+                );
                 let line = db
-                    .add_comment(
-                        &s.id,
-                        &a,
-                        "Line range",
-                        Anchor::Line {
-                            path: "file.rs".into(),
-                            start: 1,
-                            end: 3,
-                            side: "new".into(),
-                            commit: "head-1".into(),
-                        },
-                        None,
-                        None,
-                    )
+                    .add_comment(&s.id, &a, "Line range", anchor, Some(evidence), None)
                     .await
                     .unwrap();
                 let general = db
@@ -1069,15 +1093,19 @@ mod review_service {
                 db.complete(&c.id, &a, completion(), "first", None, None)
                     .await
                     .unwrap();
+                std::fs::write(temp.path().join("other.txt"), "next\n").unwrap();
+                git(&["add", "other.txt"]);
+                git(&["commit", "-qm", "next source"]);
+                let second = git(&["rev-parse", "HEAD"]);
                 let next = db
                     .start_session(
                         &c,
                         &a,
                         CommitContext {
-                            base: Some("head-1".into()),
-                            head: Some("head-2".into()),
+                            base: Some(first.clone()),
+                            head: Some(second),
                         },
-                        ComparisonKind::Legacy,
+                        ComparisonKind::Branch,
                         None,
                     )
                     .await
@@ -1218,7 +1246,6 @@ mod review_service {
                             start: 1,
                             end: 1,
                             side: "new".into(),
-                            commit: "invented".into()
                         },
                         None,
                         None
@@ -1864,7 +1891,6 @@ mod mutation_guards {
                 side: "new".into(),
                 start: 2,
                 end: 2,
-                commit: evidence.source.content_hash().into(),
             };
             let guard = MutationGuard::new(
                 Some(version(&service, &context).await),

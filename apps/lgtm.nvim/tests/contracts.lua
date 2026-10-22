@@ -143,7 +143,7 @@ local function should_validate_plugin_contracts()
     elseif method == "GetConversation" then
       done(nil, { version = "0", comments = {}, threads = {} })
     else
-      error("Unknown legacy evidence must not invoke content operations: " .. method)
+      error("Unavailable source evidence must not invoke content operations: " .. method)
     end
   end
   local state = contexts.apply({}, legacy)

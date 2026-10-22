@@ -1,10 +1,10 @@
 import { usePrRuntime } from '../common/pr-runtime.js'
 import type { GithubFixture } from '../common/github.js'
 import type { Editor } from './editor.js'
-import { seedEditorDatabase, useEditorProcess, type profiles } from './fixtures.js'
+import { useEditorProcess, type profiles } from './fixtures.js'
 
 export function usePrEditor(profile: (typeof profiles)[number]) {
-  return useEditorProcess(usePrRuntime('cli', seedEditorDatabase), profile, {
+  return useEditorProcess(usePrRuntime('cli'), profile, {
     timeoutMs: 40_000,
     prepare: async ({ runtime, github }) => {
       await github.checkout(runtime)

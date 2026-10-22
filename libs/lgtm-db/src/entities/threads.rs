@@ -21,8 +21,6 @@ pub struct Model {
     pub file_path: Option<String>,
     /// Original diff side, old or new, for a line anchor.
     pub side: Option<String>,
-    /// Original Git commit or sha256:-prefixed non-Git content identity.
-    pub reviewed_commit: Option<String>,
     /// Selected non-Git lines only, used for unique relocation after content changes.
     pub selected_text: Option<String>,
     /// Original inclusive starting line, using one-based indexing.
@@ -44,7 +42,7 @@ pub struct Model {
     /// Whether the original line anchor refers to a commit different from the current reviewed commit.
     pub outdated: bool,
 
-    /// Immutable source discriminator. Legacy records have no proven source evidence.
+    /// Immutable source discriminator. Unavailable means no saved-byte evidence was supplied.
     pub source_kind: crate::entities::common::SourceKind,
     /// Original stage-zero index blob ID, required only for index evidence.
     pub source_blob_oid: Option<String>,
@@ -76,8 +74,6 @@ pub struct Model {
     pub observed_start: Option<i64>,
     /// Provider current inclusive last line. Absent when no current line exists.
     pub observed_end: Option<i64>,
-    /// Actual source commit for the provider current line.
-    pub observed_commit: Option<String>,
 
     #[sea_orm(belongs_to, relation_enum = "Author", from = "author_id", to = "id")]
     /// Loaded relationship; not an additional stored column.

@@ -283,7 +283,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new("anchor_kind").text().not_null())
                     .col(ColumnDef::new("file_path").text())
                     .col(ColumnDef::new("side").text())
-                    .col(ColumnDef::new("reviewed_commit").text())
                     .col(ColumnDef::new("start_line").big_integer())
                     .col(ColumnDef::new("end_line").big_integer())
                     .col(ColumnDef::new("state").text().not_null())
@@ -346,8 +345,7 @@ impl MigrationTrait for Migration {
                                     .add(Expr::col("file_path").is_null())
                                     .add(Expr::col("start_line").is_null())
                                     .add(Expr::col("end_line").is_null())
-                                    .add(Expr::col("side").is_null())
-                                    .add(Expr::col("reviewed_commit").is_null()),
+                                    .add(Expr::col("side").is_null()),
                             )
                             .add(
                                 Condition::all()
@@ -356,8 +354,7 @@ impl MigrationTrait for Migration {
                                     .add(Expr::col("file_path").ne(""))
                                     .add(Expr::col("start_line").is_null())
                                     .add(Expr::col("end_line").is_null())
-                                    .add(Expr::col("side").is_null())
-                                    .add(Expr::col("reviewed_commit").is_null()),
+                                    .add(Expr::col("side").is_null()),
                             )
                             .add(
                                 Condition::all()
@@ -369,9 +366,7 @@ impl MigrationTrait for Migration {
                                     .add(Expr::col("start_line").gte(1))
                                     .add(Expr::col("end_line").gte(Expr::col("start_line")))
                                     .add(Expr::col("side").is_not_null())
-                                    .add(Expr::col("side").is_in(["old", "new"]))
-                                    .add(Expr::col("reviewed_commit").is_not_null())
-                                    .add(Expr::col("reviewed_commit").ne("")),
+                                    .add(Expr::col("side").is_in(["old", "new"])),
                             ),
                     )
                     .to_owned(),

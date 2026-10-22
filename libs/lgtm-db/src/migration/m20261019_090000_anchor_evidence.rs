@@ -99,14 +99,7 @@ impl MigrationTrait for Migration {
                 .to_owned(),
         )
         .await?;
-        m.alter_table(
-            Table::alter()
-                .table("threads")
-                .add_column(ColumnDef::new("observed_commit").text())
-                .to_owned(),
-        )
-        .await?;
-        m.alter_table(Table::alter().table("threads").add_column(ColumnDef::new("source_kind").text().not_null().default("legacy").extra("CHECK ((source_kind = 'legacy' AND source_commit IS NULL AND source_blob_oid IS NULL AND source_content_hash IS NULL AND context_before IS NULL AND context_after IS NULL)  OR (anchor_kind IN ('line','file') AND selected_text IS NOT NULL AND source_content_hash IS NOT NULL AND source_content_hash LIKE 'sha256:%' AND length(source_content_hash) = 71  AND ((source_kind = 'commit' AND source_blob_oid IS NULL AND source_commit IS NOT NULL AND length(source_commit) IN (40,64) AND (anchor_kind = 'file' OR reviewed_commit = source_commit))  OR (source_kind = 'index_file' AND source_commit IS NULL AND source_blob_oid IS NOT NULL AND length(source_blob_oid) IN (40,64))  OR (source_kind IN ('working_file','local_file') AND source_commit IS NULL AND source_blob_oid IS NULL)))) CHECK (anchor_kind <> 'file' OR source_kind = 'legacy' OR (selected_text = '' AND context_before = '' AND context_after = '')) CHECK ((observed_outdated IS NULL AND observed_base IS NULL AND observed_head IS NULL AND observed_path IS NULL AND observed_side IS NULL AND observed_start IS NULL AND observed_end IS NULL AND observed_commit IS NULL) OR (observed_outdated IS NOT NULL AND observed_base IS NOT NULL AND observed_head IS NOT NULL AND ((observed_start IS NULL AND observed_end IS NULL AND observed_side IS NULL AND observed_commit IS NULL) OR (observed_path IS NOT NULL AND observed_start IS NOT NULL AND observed_end IS NOT NULL AND observed_start > 0 AND observed_end >= observed_start AND observed_side IS NOT NULL AND observed_side IN ('old','new') AND observed_commit IS NOT NULL AND length(observed_commit) > 0))))")).to_owned()).await?;
+        m.alter_table(Table::alter().table("threads").add_column(ColumnDef::new("source_kind").text().not_null().default("unavailable").extra("CHECK ((source_kind = 'unavailable' AND source_commit IS NULL AND source_blob_oid IS NULL AND source_content_hash IS NULL AND context_before IS NULL AND context_after IS NULL)  OR (anchor_kind IN ('line','file') AND selected_text IS NOT NULL AND source_content_hash IS NOT NULL AND source_content_hash LIKE 'sha256:%' AND length(source_content_hash) = 71  AND ((source_kind = 'commit' AND source_blob_oid IS NULL AND source_commit IS NOT NULL AND length(source_commit) IN (40,64))  OR (source_kind = 'index_file' AND source_commit IS NULL AND source_blob_oid IS NOT NULL AND length(source_blob_oid) IN (40,64))  OR (source_kind IN ('working_file','local_file') AND source_commit IS NULL AND source_blob_oid IS NULL)))) CHECK (anchor_kind <> 'file' OR source_kind = 'unavailable' OR (selected_text = '' AND context_before = '' AND context_after = '')) CHECK ((observed_outdated IS NULL AND observed_base IS NULL AND observed_head IS NULL AND observed_path IS NULL AND observed_side IS NULL AND observed_start IS NULL AND observed_end IS NULL) OR (observed_outdated IS NOT NULL AND observed_base IS NOT NULL AND observed_head IS NOT NULL AND ((observed_start IS NULL AND observed_end IS NULL AND observed_side IS NULL) OR (observed_path IS NOT NULL AND observed_start IS NOT NULL AND observed_end IS NOT NULL AND observed_start > 0 AND observed_end >= observed_start AND observed_side IS NOT NULL AND observed_side IN ('old','new')))))")).to_owned()).await?;
         m.alter_table(Table::alter().table("sessions").add_column(ColumnDef::new("comparison_kind").text().not_null().default("legacy").extra("CHECK (comparison_kind IN ('legacy','notes','working','staged','branch','directory','pull_request'))")).to_owned()).await?;
         Ok(())
     }
@@ -130,13 +123,6 @@ impl MigrationTrait for Migration {
             Table::alter()
                 .table("threads")
                 .drop_column("source_commit")
-                .to_owned(),
-        )
-        .await?;
-        m.alter_table(
-            Table::alter()
-                .table("threads")
-                .drop_column("observed_commit")
                 .to_owned(),
         )
         .await?;

@@ -718,12 +718,8 @@ mod pending_drafts {
                         &session.id,
                         &actor,
                         "Draft feedback",
-                        Anchor::Line {
+                        Anchor::File {
                             path: "file.txt".into(),
-                            start: 2,
-                            end: 2,
-                            side: "new".into(),
-                            commit: "head".into(),
                         },
                         None,
                         None,
@@ -842,7 +838,6 @@ async fn should_keep_original_anchors_and_refresh_current_provider_locations_ind
                 start: 2,
                 end: 3,
                 side: "new".into(),
-                commit: original.clone()
             }
         );
         assert_eq!(
@@ -852,7 +847,6 @@ async fn should_keep_original_anchors_and_refresh_current_provider_locations_ind
                 start: 7,
                 end: 8,
                 side: "new".into(),
-                commit: "head".into()
             })
         );
         assert!(!thread.outdated);

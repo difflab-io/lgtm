@@ -62,12 +62,11 @@ return function(root)
     anchors.resolve(thread, view).status == "exact",
     "the typed original commit independently confirms historical placement after a move"
   )
-  local legacy = vim.deepcopy(thread)
-  legacy.anchor.source, legacy.anchor.evidence = nil, nil
-  legacy.anchor.commit = sha
+  local unproven = vim.deepcopy(thread)
+  unproven.anchor.source, unproven.anchor.evidence = nil, nil
   assert(
-    anchors.resolve(legacy, view).status == "unverified",
-    "a legacy hash or commit field is not historical proof"
+    anchors.resolve(unproven, view).status == "unverified",
+    "missing saved-byte evidence is not historical proof"
   )
   view.unavailable = "Source could not be read"
   assert(

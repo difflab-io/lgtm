@@ -83,9 +83,9 @@ pub fn get_source(
             (Some(parts[2].to_owned()), Some(sha.to_owned()))
         }
         SourceKind::WorkingFile | SourceKind::LocalFile => (None, None),
-        SourceKind::Legacy => {
+        SourceKind::Unavailable => {
             return Err(invalid(
-                "Unknown legacy source cannot establish new anchor evidence",
+                "Unavailable source cannot establish new anchor evidence",
             ));
         }
     };
@@ -134,7 +134,7 @@ pub fn get_source(
         },
         SourceKind::WorkingFile => AnchorSource::WorkingFile { content_hash },
         SourceKind::LocalFile => AnchorSource::LocalFile { content_hash },
-        SourceKind::Legacy => unreachable!(),
+        SourceKind::Unavailable => unreachable!(),
     };
     Ok((source, bytes))
 }

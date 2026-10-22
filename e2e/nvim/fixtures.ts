@@ -1,24 +1,9 @@
-import { DatabaseSync } from 'node:sqlite'
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { beforeEach, afterEach } from 'vitest'
 import { Editor } from './editor.js'
-import { ROOT, type Runtime } from '../common/runtime.js'
+import type { Runtime } from '../common/runtime.js'
 import { useRuntime } from '../common/fixtures.js'
 
 export const profiles = ['required', 'kak'] as const
-
-/** Exercise an upgrade from the installed schema in every editor case. */
-export async function seedEditorDatabase(home: string) {
-  const database = new DatabaseSync(join(home, 'reviews.sqlite'))
-  try {
-    database.exec(
-      await readFile(join(ROOT, 'libs/lgtm-db/src/tests/fixtures/installed_20261019.sql'), 'utf8'),
-    )
-  } finally {
-    database.close()
-  }
-}
 
 /** Add an editor to an existing runtime fixture, preserving its context and cleanup order. */
 export function useEditorProcess<T extends { runtime: Runtime }>(
@@ -50,5 +35,5 @@ export function useEditorProcess<T extends { runtime: Runtime }>(
 }
 
 export function useEditor(profile: (typeof profiles)[number]) {
-  return useEditorProcess(useRuntime('cli', seedEditorDatabase), profile)
+  return useEditorProcess(useRuntime('cli'), profile)
 }

@@ -68,9 +68,8 @@ mod tests {
                 anchor_kind: "general".into(),
                 file_path: None,
                 side: None,
-                reviewed_commit: None,
                 selected_text: None,
-                source_kind: crate::types::SourceKind::Legacy,
+                source_kind: crate::types::SourceKind::Unavailable,
                 source_blob_oid: None,
                 source_commit: None,
                 source_content_hash: None,
@@ -86,7 +85,6 @@ mod tests {
                 observed_side: None,
                 observed_start: None,
                 observed_end: None,
-                observed_commit: None,
 
                 start_line: None,
                 end_line: None,

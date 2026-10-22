@@ -23,15 +23,13 @@ service IdentityService {
   rpc GetCapabilities(GetCapabilitiesRequest) returns (GetCapabilitiesResponse);
 }
 
-// kind: general, file or line; side: old/new. content_hash anchors non-Git files.
+// Location only: general, file or line; side: old/new. Source identifies the saved bytes.
 message Anchor {
   string kind = 1;
   string path = 2;
   int64 start = 3;
   int64 end = 4;
   string side = 5;
-  string commit = 6;
-  string content_hash = 7;
   AnchorSource source = 8;
   AnchorEvidence evidence = 9;
 }

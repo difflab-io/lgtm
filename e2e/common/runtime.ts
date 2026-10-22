@@ -242,11 +242,7 @@ export class Runtime {
     else await rm(this.directory, { recursive: true, force: true })
   }
 
-  static async create(
-    kind: 'backend' | 'cli' = 'backend',
-    seed?: (home: string) => Promise<void>,
-    env: NodeJS.ProcessEnv = {},
-  ) {
+  static async create(kind: 'backend' | 'cli' = 'backend', env: NodeJS.ProcessEnv = {}) {
     const parent = join(ROOT, 'target/e2e', kind)
     await mkdir(parent, { recursive: true })
     const directory = await mkdtemp(join(parent, 'journey-'))
@@ -257,7 +253,6 @@ export class Runtime {
     const runtime = new Runtime(directory, home, workspace, kind)
     Object.assign(runtime.env, env)
     try {
-      if (seed) await seed(home)
       await runtime.launch()
       return runtime
     } catch (error) {

@@ -1149,20 +1149,14 @@ impl ReviewService {
     ) -> Result<()> {
         use crate::database::types::SourceKind;
         evidence.validate()?;
-        let (path, range, side, commit) = match anchor {
+        let (path, range, side) = match anchor {
             Anchor::Line {
                 path,
                 start,
                 end,
                 side,
-                commit,
-            } => (
-                path,
-                Some((*start, *end)),
-                side.as_str(),
-                Some(commit.as_str()),
-            ),
-            Anchor::File { path } => (path, None, "new", None),
+            } => (path, Some((*start, *end)), side.as_str()),
+            Anchor::File { path } => (path, None, "new"),
             Anchor::General => return Err(invalid("Review-level feedback has no file source")),
         };
         if range.is_none()
@@ -1185,8 +1179,7 @@ impl ReviewService {
         };
         if kind == SourceKind::Commit {
             let matches = if range.is_some() {
-                (context.key.is_forge_backed() || source_commit.as_deref() == expected_commit)
-                    && source_commit.as_deref() == commit
+                context.key.is_forge_backed() || source_commit.as_deref() == expected_commit
             } else {
                 context.key.is_forge_backed()
                     || source_commit == session.commits.base
@@ -1197,10 +1190,6 @@ impl ReviewService {
                     "Anchor commit differs from the selected comparison".into(),
                 ));
             }
-        } else if commit.is_some_and(|commit| commit != evidence.source.content_hash()) {
-            return Err(invalid(
-                "Mutable anchor must identify the actual selected bytes",
-            ));
         }
         let allowed = if context.key.is_notes() {
             kind == SourceKind::LocalFile && side == "new"
@@ -1635,7 +1624,7 @@ impl ReviewService {
         // Original anchors are immutable; only mark their current applicability.
         let rows = tx.comments.get_threads(&context.id).await?;
         for mut t in Self::threads_from_db_models(rows, &tx).await? {
-            if let Anchor::Line { side, commit, .. } = &t.anchor {
+            if let Anchor::Line { side, .. } = &t.anchor {
                 let current = if side == "old" {
                     &s.commits.base
                 } else {
@@ -1645,7 +1634,10 @@ impl ReviewService {
                     .forge_observation
                     .as_ref()
                     .map(|observation| observation.outdated)
-                    .unwrap_or_else(|| current.as_ref().is_none_or(|head| head != commit));
+                    .unwrap_or_else(|| match t.evidence.as_ref().map(|e| &e.source) {
+                        Some(AnchorSource::Commit { sha, .. }) => current.as_ref() != Some(sha),
+                        _ => false,
+                    });
                 tx.comments.update_thread(&threads::Model::from(&t)).await?;
             }
         }
@@ -1695,43 +1687,6 @@ impl ReviewService {
             return Ok(saved);
         }
         let mut selected_text = None;
-        if let Anchor::Line {
-            path,
-            start,
-            end,
-            commit,
-            ..
-        } = &anchor
-            && commit.starts_with("sha256:")
-            && evidence.is_none()
-        {
-            let context = self.load_context(&tx, &seed.context_id).await?;
-            if !context.key.is_notes() {
-                return Err(invalid(
-                    "Content hashes are supported only for local notes roots",
-                ));
-            }
-            let (_, files) = super::workspace::get_workspace(&context, path)?;
-            selected_text = files.iter().find(|file| file.path == *path).map(|file| {
-                file.content
-                    .lines()
-                    .skip((*start - 1) as usize)
-                    .take((*end - *start + 1) as usize)
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            });
-            if !files.iter().any(|file| {
-                file.path == *path
-                    && file.status == "present"
-                    && file.content_hash == *commit
-                    && *start >= 1
-                    && *end <= file.content.lines().count() as i64
-            }) {
-                return Err(Error::Conflict(
-                    "File content or line range changed; refresh before commenting".into(),
-                ));
-            }
-        }
         let s = self.require_active_session(&tx, session_id).await?;
         let context = self.load_context(&tx, &s.context_id).await?;
         if guard.is_some() {
@@ -1747,23 +1702,8 @@ impl ReviewService {
             )
             .await?;
             selected_text = Some(evidence.selected_text.clone());
-        } else {
-            if let Anchor::Line { side, commit, .. } = &anchor {
-                let reviewed = if side == "old" {
-                    &s.commits.base
-                } else {
-                    &s.commits.head
-                };
-                if reviewed.as_deref() != Some(commit.as_str())
-                    && !(self.load_context(&tx, &s.context_id).await?.key.is_notes()
-                        && commit.starts_with("sha256:")
-                        && commit.len() == 71)
-                {
-                    return Err(invalid(
-                        "Line anchor must reference the session's available reviewed commit",
-                    ));
-                }
-            }
+        } else if matches!(anchor, Anchor::Line { .. }) {
+            return Err(invalid("Line comments require saved source evidence"));
         }
         let source_path = Self::get_saved_source_location(
             &context,
@@ -1916,17 +1856,8 @@ impl ReviewService {
             if let Some(evidence) = target_evidence {
                 self.validate_anchor_evidence(&target_context, &target, anchor, evidence, None)
                     .await?;
-            } else if let Anchor::Line { commit, side, .. } = anchor {
-                let expected = if side == "old" {
-                    &target.commits.base
-                } else {
-                    &target.commits.head
-                };
-                if expected.as_deref() != Some(commit) {
-                    return Err(invalid(
-                        "Promotion requires a target review commit anchor or explicit file/general fallback",
-                    ));
-                }
+            } else if matches!(anchor, Anchor::Line { .. }) {
+                return Err(invalid("Line promotion requires target source evidence"));
             }
             let payload = if target_evidence.is_some() {
                 serde_json::to_vec(&(&source.body, &source.author, anchor, target_evidence))?
@@ -2689,13 +2620,6 @@ impl ReviewService {
                     Some(Anchor::File { path } | Anchor::Line { path, .. }) => Some(path.clone()),
                     _ => thread.current_path,
                 };
-            } else if let Anchor::Line { commit, side, .. } = &thread.anchor {
-                thread.outdated = Some(commit)
-                    != if side == "old" {
-                        snapshot.base.as_ref()
-                    } else {
-                        Some(&snapshot.head)
-                    };
             }
             tx.comments
                 .update_thread(&threads::Model::from(&thread))

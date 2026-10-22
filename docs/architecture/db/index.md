@@ -269,7 +269,8 @@ erDiagram
         text anchor_kind
         text file_path "nullable"
         text side "nullable"
-        text reviewed_commit "nullable"
+        text source_commit "nullable"
+        text source_content_hash "nullable"
         bigint start_line "nullable"
         bigint end_line "nullable"
         text state
@@ -486,7 +487,7 @@ The additive `m20261018_200000_note_promotions` migration creates `note_promotio
 
 The source UUID remains after source-note deletion. Target deletion sets `target_comment_id` to NULL and retains a retry tombstone. A target-session foreign key preserves review ownership. `PromotionRepository` exposes named reads/insertion rather than raw database access.
 
-For non-Git notes, `threads.reviewed_commit` also accepts a `sha256:`-prefixed content identity. This reuses the existing immutable line-anchor shape without changing context identity or adding snapshot tables. Git anchors continue to store commit IDs. Services validate which identity is allowed for a context.
+`Anchor` stores location only. `AnchorSource` stores the immutable source identity: a commit SHA and content hash, an index blob ID and content hash, or a saved-file content hash. The database stores these in `source_commit`, `source_blob_oid`, and `source_content_hash`. Forge observations use their base/head revisions and diff side; they do not store a second per-line commit.
 
 `CommentRepository::delete_draft` and `delete_empty_thread` support owned unposted draft deletion under the service's context transaction. A root with replies must have its replies removed first. Submission receipt/state updates use the existing session columns and named repository methods; no second submission store exists.
 

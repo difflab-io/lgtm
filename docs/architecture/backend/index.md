@@ -186,7 +186,8 @@ erDiagram
         text anchor_kind
         text file_path "nullable"
         text side "nullable"
-        text reviewed_commit "nullable"
+        text source_commit "nullable"
+        text source_content_hash "nullable"
         bigint start_line "nullable"
         bigint end_line "nullable"
         text state
@@ -276,7 +277,7 @@ These protobuf services share a router, process and database. Service names orga
 
 DiffService supplies descriptors, paged file metadata, and selected content without review persistence. CodeDiff supplies local Git content in Neovim. Explicit symlink roots resolve to physical identities; nested links and selected escapes are rejected. Binary and oversized files have explicit statuses.
 
-Original anchors retain typed source identities and bounded excerpts. Thread current paths, immutable saved-file source paths, notes current roots, and separate forge observations preserve discussion identity across confirmed moves. Clients derive placements from the displayed source; ReviewService does not rewrite response anchors or serve file bodies. Unknown legacy evidence stays unknown.
+Original anchors retain typed source identities and bounded excerpts. Thread current paths, immutable saved-file source paths, notes current roots, and separate forge observations preserve discussion identity across confirmed moves. Clients derive placements from the displayed source; ReviewService does not rewrite response anchors or serve file bodies. Provider coordinates without saved-byte evidence remain unverified outside their confirmed PR comparison.
 
 Promotion preserves source notes and attribution in one transaction. Markdown exports contain numbered feedback and useful original locations without internal IDs. Export does not mutate review state. The [review contract](reviews.md) defines lifecycle and retry behavior.
 

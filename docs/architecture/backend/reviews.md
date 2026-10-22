@@ -432,12 +432,15 @@ flowchart TB
 #### Original anchors and source evidence
 
 ```text
-OriginalAnchor = {
-  path, side, start, end,
+Anchor = General
+       | File { path }
+       | Line { path, side, start, end }
+
+AnchorEvidence = {
   source,
-  contentHash?,
   selectedText,
-  surroundingContext
+  contextBefore,
+  contextAfter
 }
 
 Source = Commit { sha, contentHash }
@@ -456,7 +459,7 @@ Placement = {
 }
 ```
 
-The original path, side, range, source, and selected text remain immutable. Replies share their thread's anchor. Edits to comment text, resolution, commits, and refreshes do not replace it. Imported history retains the provider's original fields when its original source cannot be established. Never invent a commit identity for that history.
+`Anchor` stores location only. `AnchorEvidence.source` is the single source of commit, index blob, and content identity. The original path, side, range, source, and selected text remain immutable. Replies share their thread's anchor. Edits to comment text, resolution, commits, and refreshes do not replace it. Imported history retains the provider's original fields when its original source cannot be established. Never invent a commit identity for that history.
 
 | Content being annotated | Required source identity |
 | --- | --- |

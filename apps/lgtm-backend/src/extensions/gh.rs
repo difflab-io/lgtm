@@ -150,4 +150,4 @@ pub(crate) fn opaque(v: &Value, key: &str) -> Result<String> {
         .ok_or_else(|| invalid(format!("GitHub response missing {key}")))
 }
 
-pub(crate) const COMMENTS_QUERY: &str = r#"query($id:ID!,$cursor:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$cursor){nodes{id databaseId viewerDidAuthor path body updatedAt commit{oid} originalCommit{oid} author{login ... on User{databaseId} ... on Bot{databaseId}} pullRequestReview{databaseId state}} pageInfo{hasNextPage endCursor}}}}}"#;
+pub(crate) const COMMENTS_QUERY: &str = r#"query($id:ID!,$cursor:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$cursor){nodes{id databaseId viewerDidAuthor path body updatedAt author{login ... on User{databaseId} ... on Bot{databaseId}} pullRequestReview{databaseId state}} pageInfo{hasNextPage endCursor}}}}}"#;

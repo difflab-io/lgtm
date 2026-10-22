@@ -60,7 +60,6 @@ async fn should_anchor_ignored_non_git_files_and_guard_owned_draft_mutations() {
             start: 1,
             end: 2,
             side: "new".into(),
-            commit: files[0].content_hash.clone(),
         };
         let note = service
             .add_comment(
@@ -68,7 +67,17 @@ async fn should_anchor_ignored_non_git_files_and_guard_owned_draft_mutations() {
                 &alice,
                 "Clarify this",
                 anchor.clone(),
-                None,
+                Some(
+                    AnchorEvidence::capture(
+                        AnchorSource::LocalFile {
+                            content_hash: files[0].content_hash.clone(),
+                        },
+                        files[0].content.as_bytes(),
+                        1,
+                        2,
+                    )
+                    .unwrap(),
+                ),
                 None,
             )
             .await
@@ -406,13 +415,22 @@ async fn should_relocate_unique_text_and_fall_back_for_ambiguous_or_deleted_text
                 &actor,
                 "Original",
                 Anchor::Line {
-                    path: file.path,
+                    path: file.path.clone(),
                     start: 2,
                     end: 2,
                     side: "new".into(),
-                    commit: file.content_hash.clone(),
                 },
-                None,
+                Some(
+                    AnchorEvidence::capture(
+                        AnchorSource::LocalFile {
+                            content_hash: file.content_hash.clone(),
+                        },
+                        file.content.as_bytes(),
+                        2,
+                        2,
+                    )
+                    .unwrap(),
+                ),
                 None,
             )
             .await
@@ -442,11 +460,14 @@ async fn should_relocate_unique_text_and_fall_back_for_ambiguous_or_deleted_text
                 ..
             }
         ));
-        std::fs::write(root.join("PLAN.md"), "second\nfirst\nsecond\n").unwrap();
+        std::fs::write(root.join("PLAN.md"), "first\nsecond\nfirst\nsecond\n").unwrap();
         let reopened = common::service(&url).await.unwrap();
         let ambiguous = reopened.get_conversation(&context.id, true).await.unwrap();
         assert!(matches!(
-            placement(&ambiguous.threads[0], Some("second\nfirst\nsecond\n")),
+            placement(
+                &ambiguous.threads[0],
+                Some("first\nsecond\nfirst\nsecond\n")
+            ),
             AnchorPlacement::Outdated { .. }
         ));
         assert!(matches!(
@@ -532,7 +553,7 @@ async fn should_relocate_unique_text_and_fall_back_for_ambiguous_or_deleted_text
         assert_eq!(stored.selected_text.as_deref(), Some("second"));
         assert_eq!(stored.start_line, Some(2));
         assert_eq!(
-            stored.reviewed_commit.as_deref(),
+            stored.source_content_hash.as_deref(),
             Some(file.content_hash.as_str())
         );
     }
@@ -622,7 +643,7 @@ fn should_capture_index_bytes_separately_from_working_and_committed_content() {
         "source reads must not change the checkout or index"
     );
     assert!(get_source(root, "../outside", SourceKind::WorkingFile, None).is_err());
-    assert!(get_source(root, "file[1].txt", SourceKind::Legacy, None).is_err());
+    assert!(get_source(root, "file[1].txt", SourceKind::Unavailable, None).is_err());
 }
 
 #[test]

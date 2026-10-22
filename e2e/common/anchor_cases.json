@@ -6,8 +6,7 @@
       "path": "file.txt",
       "start": 2,
       "end": 2,
-      "side": "new",
-      "commit": "sha256:199f7e420107d7e2f7000f5c2fe14f0a5b20d120e6a35193fd750724960fa68d"
+      "side": "new"
     },
     "evidence": {
       "source": {
@@ -41,8 +40,7 @@
       "path": "file.txt",
       "start": 2,
       "end": 2,
-      "side": "new",
-      "commit": "sha256:199f7e420107d7e2f7000f5c2fe14f0a5b20d120e6a35193fd750724960fa68d"
+      "side": "new"
     },
     "evidence": {
       "source": {
@@ -76,8 +74,7 @@
       "path": "file.txt",
       "start": 2,
       "end": 2,
-      "side": "new",
-      "commit": "sha256:199f7e420107d7e2f7000f5c2fe14f0a5b20d120e6a35193fd750724960fa68d"
+      "side": "new"
     },
     "evidence": {
       "source": {
@@ -111,8 +108,7 @@
       "path": "file.txt",
       "start": 2,
       "end": 2,
-      "side": "new",
-      "commit": "sha256:199f7e420107d7e2f7000f5c2fe14f0a5b20d120e6a35193fd750724960fa68d"
+      "side": "new"
     },
     "evidence": {
       "source": {
@@ -146,8 +142,7 @@
       "path": "file.txt",
       "start": 2,
       "end": 2,
-      "side": "new",
-      "commit": "sha256:199f7e420107d7e2f7000f5c2fe14f0a5b20d120e6a35193fd750724960fa68d"
+      "side": "new"
     },
     "evidence": {
       "source": {
@@ -178,8 +173,7 @@
       "path": "file.txt",
       "start": 2,
       "end": 2,
-      "side": "new",
-      "commit": "sha256:199f7e420107d7e2f7000f5c2fe14f0a5b20d120e6a35193fd750724960fa68d"
+      "side": "new"
     },
     "evidence": {
       "source": {
@@ -210,8 +204,7 @@
       "path": "file.txt",
       "start": 2,
       "end": 2,
-      "side": "new",
-      "commit": "sha256:199f7e420107d7e2f7000f5c2fe14f0a5b20d120e6a35193fd750724960fa68d"
+      "side": "new"
     },
     "evidence": {
       "source": {
@@ -242,8 +235,7 @@
       "path": "file.txt",
       "start": 2,
       "end": 2,
-      "side": "new",
-      "commit": "sha256:199f7e420107d7e2f7000f5c2fe14f0a5b20d120e6a35193fd750724960fa68d"
+      "side": "new"
     },
     "evidence": {
       "source": {
@@ -277,8 +269,7 @@
       "path": "file.txt",
       "start": 2,
       "end": 2,
-      "side": "new",
-      "commit": "sha256:199f7e420107d7e2f7000f5c2fe14f0a5b20d120e6a35193fd750724960fa68d"
+      "side": "new"
     },
     "evidence": {
       "source": {
@@ -309,8 +300,7 @@
       "path": "file.txt",
       "start": 2,
       "end": 2,
-      "side": "new",
-      "commit": "sha256:199f7e420107d7e2f7000f5c2fe14f0a5b20d120e6a35193fd750724960fa68d"
+      "side": "new"
     },
     "evidence": {
       "source": {
@@ -340,8 +330,7 @@
       "path": "file.txt",
       "start": 2,
       "end": 2,
-      "side": "new",
-      "commit": "sha256:199f7e420107d7e2f7000f5c2fe14f0a5b20d120e6a35193fd750724960fa68d"
+      "side": "new"
     },
     "evidence": {
       "source": {
@@ -368,14 +357,13 @@
     }
   },
   {
-    "name": "legacy Git data stays unverified",
+    "name": "source without saved-byte evidence stays unverified",
     "anchor": {
       "kind": "line",
       "path": "file.txt",
       "start": 2,
       "end": 2,
-      "side": "new",
-      "commit": "sha256:199f7e420107d7e2f7000f5c2fe14f0a5b20d120e6a35193fd750724960fa68d"
+      "side": "new"
     },
     "evidence": null,
     "path": "file.txt",
@@ -397,8 +385,7 @@
       "path": "file.txt",
       "start": 2,
       "end": 2,
-      "side": "new",
-      "commit": "sha256:199f7e420107d7e2f7000f5c2fe14f0a5b20d120e6a35193fd750724960fa68d"
+      "side": "new"
     },
     "evidence": {
       "source": {
@@ -425,8 +412,7 @@
       "path": "file.txt",
       "start": 2,
       "end": 2,
-      "side": "new",
-      "commit": "sha256:199f7e420107d7e2f7000f5c2fe14f0a5b20d120e6a35193fd750724960fa68d"
+      "side": "new"
     },
     "evidence": {
       "source": {
@@ -457,8 +443,7 @@
       "path": "file.txt",
       "start": 2,
       "end": 2,
-      "side": "new",
-      "commit": "sha256:199f7e420107d7e2f7000f5c2fe14f0a5b20d120e6a35193fd750724960fa68d"
+      "side": "new"
     },
     "evidence": {
       "source": {
@@ -489,8 +474,7 @@
       "path": "file.txt",
       "start": 2,
       "end": 2,
-      "side": "new",
-      "commit": "sha256:199f7e420107d7e2f7000f5c2fe14f0a5b20d120e6a35193fd750724960fa68d"
+      "side": "new"
     },
     "evidence": {
       "source": {
@@ -521,8 +505,7 @@
       "path": "file.txt",
       "start": 2,
       "end": 2,
-      "side": "new",
-      "commit": "sha256:6e004b5e9a1932fe06d0f4430aab691b171919d7047f0c33f16e6382064fd696"
+      "side": "new"
     },
     "evidence": {
       "source": {
@@ -556,8 +539,7 @@
       "path": "file.txt",
       "start": 2,
       "end": 2,
-      "side": "new",
-      "commit": "sha256:3afc1e3f8b1862f0b92ff5525bb6d4d2cb54c61e0c4f02caa17efc7dc7f37b8c"
+      "side": "new"
     },
     "evidence": {
       "source": {
@@ -591,8 +573,7 @@
       "path": "file.txt",
       "start": 1,
       "end": 1,
-      "side": "new",
-      "commit": "sha256:01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      "side": "new"
     },
     "evidence": {
       "source": {
@@ -623,8 +604,7 @@
       "path": "file.txt",
       "start": 1,
       "end": 1,
-      "side": "new",
-      "commit": "sha256:94913c6a8de6130b11d1fa9d5de98aaacd1920339cea3ea3d3f3ff219741f3f2"
+      "side": "new"
     },
     "evidence": {
       "source": {
@@ -632,7 +612,7 @@
         "content_hash": "sha256:94913c6a8de6130b11d1fa9d5de98aaacd1920339cea3ea3d3f3ff219741f3f2",
         "blob_oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
       },
-      "selected_text": " ",
+      "selected_text": "\u2003",
       "context_before": "",
       "context_after": ""
     },
@@ -642,7 +622,7 @@
       "content_hash": "sha256:59e5f373f5a541173f13f6fb5c226bbefa21da4ce81795385d499c8d159af5a8",
       "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     },
-    "content": "\n \n",
+    "content": "\n\u2003\n",
     "path_confirmed": true,
     "expected": {
       "status": "outdated"

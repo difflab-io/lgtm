@@ -140,13 +140,13 @@ pub enum ComparisonKind {
     PullRequest,
 }
 
-/// The immutable source of annotated bytes. Legacy means evidence is unknown.
+/// The immutable source of annotated bytes. Unavailable means no saved-byte evidence was supplied.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::None)")]
 #[serde(rename_all = "snake_case")]
 pub enum SourceKind {
-    #[sea_orm(string_value = "legacy")]
-    Legacy,
+    #[sea_orm(string_value = "unavailable")]
+    Unavailable,
     #[sea_orm(string_value = "commit")]
     Commit,
     #[sea_orm(string_value = "index_file")]

@@ -64,7 +64,7 @@ e2e/
 └── tsconfig.json
 ```
 
-The editor profiles pin CodeDiff, WhichKey and nvim-notify. The second profile adds Kak with compatible keys; Kak remains optional for users. Both exercise native CodeDiff views and an upgrade from the installed database schema. Lua contains editor runtime setup. TypeScript owns the scenarios, input, assertions and process lifecycle.
+The editor profiles pin CodeDiff, WhichKey and nvim-notify. The second profile adds Kak with compatible keys; Kak remains optional for users. Both exercise native CodeDiff views against a fresh database created by the current backend. Lua contains editor runtime setup. TypeScript owns the scenarios, input, assertions and process lifecycle.
 
 `common/` owns processes, credentials, GitHub resources and test configuration. Backend fixtures construct API states. Neovim fixtures perform editor actions. Large feature setups live beside their spec as `*.fixtures.ts`. Small setups used by one file stay private in that file. Tests keep the actions and assertions that describe the behavior under test.
 

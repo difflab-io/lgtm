@@ -182,9 +182,6 @@ impl Github {
                     .collect::<Result<Vec<_>>>()?;
                 let path = text(node, "path")?;
                 let outdated = node["isOutdated"] == true;
-                let original_commit = comments[0]["originalCommit"]["oid"]
-                    .as_str()
-                    .or_else(|| comments[0]["commit"]["oid"].as_str());
                 let current = if node["subjectType"] == "FILE" {
                     Some(Anchor::File { path: path.clone() })
                 } else if let Some(end) = node["line"].as_i64() {
@@ -194,11 +191,6 @@ impl Github {
                         start: node["startLine"].as_i64().unwrap_or(end),
                         end,
                         side: if old { "old" } else { "new" }.into(),
-                        commit: if old {
-                            initial.base.clone()
-                        } else {
-                            initial.head.clone()
-                        },
                     })
                 } else {
                     None
@@ -233,17 +225,6 @@ impl Github {
                         start,
                         end,
                         side: if old { "old" } else { "new" }.into(),
-                        // This is provider revision evidence, not proof of old-side bytes.
-                        // Current coordinates use the observed comparison above.
-                        commit: original_commit.map(str::to_owned).unwrap_or_else(|| {
-                            if outdated {
-                                "unknown".into()
-                            } else if old {
-                                initial.base.clone()
-                            } else {
-                                initial.head.clone()
-                            }
-                        }),
                     }
                 };
                 anchor.validate()?;
@@ -473,4 +454,4 @@ fn remote_rest_comment(v: &Value, kind: &str) -> Result<RemoteComment> {
         reply_to: None,
     })
 }
-const THREADS_QUERY: &str = r#"query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$cursor){nodes{id path line startLine originalLine originalStartLine diffSide startDiffSide subjectType isResolved isOutdated comments(first:100){nodes{id databaseId path body updatedAt commit{oid} originalCommit{oid} author{login ... on User{databaseId} ... on Bot{databaseId}} pullRequestReview{databaseId state}} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}}}}}"#;
+const THREADS_QUERY: &str = r#"query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$cursor){nodes{id path line startLine originalLine originalStartLine diffSide startDiffSide subjectType isResolved isOutdated comments(first:100){nodes{id databaseId path body updatedAt author{login ... on User{databaseId} ... on Bot{databaseId}} pullRequestReview{databaseId state}} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}}}}}"#;

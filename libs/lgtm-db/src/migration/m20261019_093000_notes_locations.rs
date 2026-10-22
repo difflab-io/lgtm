@@ -13,7 +13,7 @@ impl MigrationTrait for Migration {
                 .add_column(
                     ColumnDef::new("source_path")
                         .text()
-                        .extra("CHECK (source_path IS NULL OR (source_kind IN ('legacy', 'local_file') AND source_path LIKE '/%'))"),
+                        .extra("CHECK (source_path IS NULL OR (source_kind IN ('unavailable', 'local_file') AND source_path LIKE '/%'))"),
                 )
                 .to_owned(),
         )

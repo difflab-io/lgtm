@@ -13,6 +13,8 @@
 
 ## Code Style
 
+- During alpha, update branch-introduced contracts directly. Do not retain duplicate fields or add compatibility code for earlier versions of this branch.
+
 - Keep stateless SDK and CLI adapters in `apps/lgtm-backend/src/extensions/` (for example, `extensions/gh.rs`). Call existing library features directly and share external-tool wrappers here instead of duplicating them in services or providers. Keep domain mapping and review behavior in their existing model and service modules.
 - Name mutating operations and factories with imperative verbs (for example, `promote`, not `promoted`).
 

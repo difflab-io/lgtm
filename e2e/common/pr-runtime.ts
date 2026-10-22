@@ -3,7 +3,7 @@ import { GithubFixture } from './github.js'
 import { useRuntime } from './fixtures.js'
 
 /** Share one owned PR per state group, with a fresh process and database for each case. */
-export function usePrRuntime(kind: 'backend' | 'cli', seed?: (home: string) => Promise<void>) {
+export function usePrRuntime(kind: 'backend' | 'cli') {
   let github: GithubFixture
   const fixtures: GithubFixture[] = []
 
@@ -31,6 +31,6 @@ export function usePrRuntime(kind: 'backend' | 'cli', seed?: (home: string) => P
       .map((result) => result.reason)
     if (errors.length) throw new AggregateError(errors, 'GitHub fixture cleanup failed')
   })
-  const runtime = useRuntime(kind, seed, () => github.env)
+  const runtime = useRuntime(kind, () => github.env)
   return () => ({ ...runtime(), github })
 }

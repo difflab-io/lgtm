@@ -54,7 +54,6 @@ fn thread(context_id: Uuid, author_id: Uuid) -> threads::Model {
         anchor_kind: "line".into(),
         file_path: Some("original.rs".into()),
         side: Some("new".into()),
-        reviewed_commit: Some(format!("sha256:{}", "a".repeat(64))),
         selected_text: Some("selected".into()),
         start_line: Some(3),
         end_line: Some(3),
@@ -81,7 +80,6 @@ fn thread(context_id: Uuid, author_id: Uuid) -> threads::Model {
         observed_side: None,
         observed_start: None,
         observed_end: None,
-        observed_commit: None,
     }
 }
 

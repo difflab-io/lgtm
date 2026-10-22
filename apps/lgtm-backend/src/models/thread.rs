@@ -14,7 +14,7 @@ pub struct Thread {
     pub anchor: Anchor,
     /// Original selected text for local content anchors; no full-file snapshot is stored.
     pub selected_text: Option<String>,
-    /// Immutable source evidence. None means a legacy source has not been proven.
+    /// Immutable source evidence. None means the provider supplied no saved-byte evidence.
     pub evidence: Option<AnchorEvidence>,
     /// Confirmed current path; absent when no move has been observed.
     pub current_path: Option<String>,
@@ -43,26 +43,8 @@ impl Thread {
             v.clone()
                 .ok_or_else(|| invalid("Persisted anchor evidence is incomplete"))
         };
-        let evidence = if v.source_kind == SourceKind::Legacy {
-            // Earlier non-Git notes already validated and saved this exact byte hash and excerpt.
-            // Legacy Git anchors have no equivalent proof and remain unknown.
-            match (&v.reviewed_commit, &v.selected_text) {
-                (Some(hash), Some(selected))
-                    if hash.starts_with("sha256:") && v.anchor_kind == "line" =>
-                {
-                    let evidence = AnchorEvidence {
-                        source: AnchorSource::LocalFile {
-                            content_hash: hash.clone(),
-                        },
-                        selected_text: selected.clone(),
-                        context_before: String::new(),
-                        context_after: String::new(),
-                    };
-                    evidence.validate()?;
-                    Some(evidence)
-                }
-                _ => None,
-            }
+        let evidence = if v.source_kind == SourceKind::Unavailable {
+            None
         } else {
             let content_hash = required(&v.source_content_hash)?;
             let source = match v.source_kind {
@@ -76,7 +58,7 @@ impl Thread {
                 },
                 SourceKind::WorkingFile => AnchorSource::WorkingFile { content_hash },
                 SourceKind::LocalFile => AnchorSource::LocalFile { content_hash },
-                SourceKind::Legacy => unreachable!(),
+                SourceKind::Unavailable => unreachable!(),
             };
             let evidence = AnchorEvidence {
                 source,
@@ -96,7 +78,6 @@ impl Thread {
                         start,
                         end,
                         side: required(&v.observed_side)?,
-                        commit: required(&v.observed_commit)?,
                     }),
                     (Some(path), None, None) => Some(Anchor::File { path: path.clone() }),
                     (None, None, None) => None,
@@ -140,7 +121,6 @@ impl Thread {
                     start: v.start_line.unwrap_or_default(),
                     end: v.end_line.unwrap_or_default(),
                     side: v.side.unwrap_or_default(),
-                    commit: v.reviewed_commit.unwrap_or_default(),
                 },
                 _ => Anchor::General,
             },
@@ -169,7 +149,7 @@ impl From<&Thread> for threads::Model {
                 Anchor::Line { side, .. } => Some(side.clone()),
                 _ => None,
             },
-            source_kind: SourceKind::Legacy,
+            source_kind: SourceKind::Unavailable,
             source_blob_oid: None,
             source_commit: None,
             source_content_hash: None,
@@ -185,12 +165,7 @@ impl From<&Thread> for threads::Model {
             observed_side: None,
             observed_start: None,
             observed_end: None,
-            observed_commit: None,
             selected_text: v.selected_text.clone(),
-            reviewed_commit: match &v.anchor {
-                Anchor::Line { commit, .. } => Some(commit.clone()),
-                _ => None,
-            },
             start_line: match &v.anchor {
                 Anchor::Line { start, .. } => Some(*start),
                 _ => None,
@@ -235,13 +210,11 @@ impl From<&Thread> for threads::Model {
                     start,
                     end,
                     side,
-                    commit,
                 }) => {
                     row.observed_path = Some(path.clone());
                     row.observed_start = Some(*start);
                     row.observed_end = Some(*end);
                     row.observed_side = Some(side.clone());
-                    row.observed_commit = Some(commit.clone());
                 }
                 Some(Anchor::File { path }) => row.observed_path = Some(path.clone()),
                 _ => {}

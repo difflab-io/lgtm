@@ -179,20 +179,15 @@ impl DiffService {
         else {
             return Err(invalid("Draft placement requires a PR comparison"));
         };
-        let (original, old, original_commit) = match anchor {
+        let (original, old) = match anchor {
             Anchor::General => return Ok(anchor.clone()),
-            Anchor::File { path } => (
-                path.as_str(),
-                false,
-                evidence.and_then(|e| match &e.source {
-                    AnchorSource::Commit { sha, .. } => Some(sha.as_str()),
-                    _ => None,
-                }),
-            ),
-            Anchor::Line {
-                path, side, commit, ..
-            } => (path.as_str(), side == "old", Some(commit.as_str())),
+            Anchor::File { path } => (path.as_str(), false),
+            Anchor::Line { path, side, .. } => (path.as_str(), side == "old"),
         };
+        let original_commit = evidence.and_then(|e| match &e.source {
+            AnchorSource::Commit { sha, .. } => Some(sha.as_str()),
+            _ => None,
+        });
         if matches!(anchor, Anchor::File { .. }) && original_commit.is_none() {
             return Ok(Anchor::File {
                 path: current_path.unwrap_or(original).into(),

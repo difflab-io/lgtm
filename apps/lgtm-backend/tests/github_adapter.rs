@@ -126,11 +126,29 @@ async fn should_keep_original_single_line_coordinates_separate_from_relocated_cu
         .await
         .unwrap();
     let thread = &snapshot.threads[0];
+    assert!(matches!(
+        &thread.anchor,
+        Anchor::Line {
+            start: 2,
+            end: 2,
+            ..
+        }
+    ));
+    assert!(matches!(
+        &thread.observation.as_ref().unwrap().current,
+        Some(Anchor::Line {
+            start: 3,
+            end: 3,
+            ..
+        })
+    ));
+    let observation = thread.observation.as_ref().unwrap();
+    assert_eq!(observation.head, "current");
     assert!(
-        matches!(&thread.anchor, Anchor::Line {start:2,end:2,commit,..} if commit == "original")
-    );
-    assert!(
-        matches!(&thread.observation.as_ref().unwrap().current, Some(Anchor::Line {start:3,end:3,commit,..}) if commit == "current")
+        serde_json::to_value(&thread.anchor)
+            .unwrap()
+            .get("commit")
+            .is_none()
     );
 }
 

@@ -300,7 +300,6 @@ impl<C: ConnectionTrait + TransactionTrait> CommentRepository<C> {
                 observed_side: sea_orm::Set(row.observed_side.clone()),
                 observed_start: sea_orm::Set(row.observed_start),
                 observed_end: sea_orm::Set(row.observed_end),
-                observed_commit: sea_orm::Set(row.observed_commit.clone()),
 
                 ..Default::default()
             })

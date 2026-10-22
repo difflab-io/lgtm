@@ -221,8 +221,6 @@ pub enum Anchor {
         start: i64,
         end: i64,
         side: String,
-        /// Git commit identity, or sha256:-prefixed content identity for local non-Git notes.
-        commit: String,
     },
 }
 
@@ -331,16 +329,11 @@ impl Anchor {
                 reason: "Original selection was lost, changed, or became ambiguous".into(),
             };
         };
-        let commit = match displayed_source {
-            AnchorSource::Commit { sha, .. } => sha.clone(),
-            _ => displayed_source.content_hash().into(),
-        };
         let location = Self::Line {
             path: path.into(),
             start,
             end,
             side: side.clone(),
-            commit,
         };
         if at_original && original_path == path && evidence.source == *displayed_source {
             AnchorPlacement::Exact {
@@ -353,46 +346,6 @@ impl Anchor {
                 displayed_source: displayed_source.clone(),
             }
         }
-    }
-
-    /// Relocate local content anchors only when their selected lines match uniquely.
-    /// The caller supplies current text and identity; original persisted coordinates remain unchanged.
-    pub fn relocate(
-        &self,
-        content: &str,
-        content_hash: &str,
-        selected_text: Option<&str>,
-    ) -> Option<Self> {
-        let Self::Line {
-            path, side, commit, ..
-        } = self
-        else {
-            return None;
-        };
-        if !commit.starts_with("sha256:") {
-            return None;
-        }
-        if commit == content_hash {
-            return Some(self.clone());
-        }
-        let selected: Vec<_> = selected_text?.split('\n').collect();
-        let lines: Vec<_> = content.lines().collect();
-        let mut matches = lines
-            .windows(selected.len())
-            .enumerate()
-            .filter(|(_, window)| *window == selected.as_slice())
-            .map(|(line, _)| line);
-        let line = matches.next()?;
-        if matches.next().is_some() {
-            return None;
-        }
-        Some(Self::Line {
-            path: path.clone(),
-            start: line as i64 + 1,
-            end: (line + selected.len()) as i64,
-            side: side.clone(),
-            commit: content_hash.into(),
-        })
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -411,19 +364,12 @@ impl Anchor {
             ));
         }
         if let Self::Line {
-            start,
-            end,
-            side,
-            commit,
-            ..
+            start, end, side, ..
         } = self
-            && (*start < 1
-                || end < start
-                || !["old", "new"].contains(&side.as_str())
-                || commit.is_empty())
+            && (*start < 1 || end < start || !["old", "new"].contains(&side.as_str()))
         {
             return Err(invalid(
-                "Line anchor requires positive ordered lines, old/new side and reviewed commit",
+                "Line anchor requires positive ordered lines and old/new side",
             ));
         }
         Ok(())

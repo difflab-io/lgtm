@@ -191,7 +191,6 @@ function M.place(anchor, evidence, path, source, content, path_confirmed)
       side = anchor.side,
       start = range[1],
       ["end"] = range[2],
-      commit = source.sha or source.content_hash,
     },
     displayed_source = source,
   }
@@ -227,9 +226,6 @@ function M.from_wire(original)
     start = tonumber(original.start),
     ["end"] = tonumber(original["end"]),
     side = original.side,
-    commit = source and (source.sha or source.content_hash)
-      or original.commit
-      or original.contentHash,
   }
   local evidence = source
       and original.evidence
@@ -296,7 +292,11 @@ function M.resolve(thread, view)
       and (current.path == view.logical_path or current.path == view.path)
       and (current.kind == "file" or current.side == view.side)
       and view.source
-      and (current.kind == "file" or current.commit == view.source.sha)
+      and (
+        current.kind == "file"
+        or view.source.kind == "commit"
+          and view.source.sha == (current.side == "old" and observed.base or observed.head)
+      )
     then
       local location = M.from_wire(current)
       local lines = M.lines(view.content or "")

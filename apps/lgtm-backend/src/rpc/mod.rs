@@ -77,37 +77,24 @@ fn anchor(v: m::Anchor) -> Anchor {
             start,
             end,
             side,
-            commit,
         } => {
             out.kind = "line".into();
             out.path = path;
             out.start = start;
             out.end = end;
             out.side = side;
-            if commit.starts_with("sha256:") {
-                out.content_hash = commit;
-            } else {
-                out.commit = commit;
-            }
         }
     }
     out
 }
 fn input_anchor(v: &Anchor) -> Result<m::Anchor, ConnectError> {
-    if (!v.commit.is_empty() && !v.content_hash.is_empty())
-        || (v.kind != "line"
-            && (v.start != 0
-                || v.end != 0
-                || !v.side.is_empty()
-                || !v.commit.is_empty()
-                || !v.content_hash.is_empty()))
+    if (v.kind != "line" && (v.start != 0 || v.end != 0 || !v.side.is_empty()))
         || ((v.kind.is_empty() || v.kind == "general") && !v.path.is_empty())
     {
         return Err(ConnectError::invalid_argument(
             "Anchor fields do not match its kind",
         ));
     }
-    let evidence = input_evidence(v)?;
     let out = match v.kind.as_str() {
         "" | "general" => m::Anchor::General,
         "file" => m::Anchor::File {
@@ -121,16 +108,6 @@ fn input_anchor(v: &Anchor) -> Result<m::Anchor, ConnectError> {
                 "new".into()
             } else {
                 v.side.clone()
-            },
-            commit: if let Some(evidence) = &evidence {
-                match &evidence.source {
-                    m::AnchorSource::Commit { sha, .. } => sha.clone(),
-                    _ => evidence.source.content_hash().into(),
-                }
-            } else if v.content_hash.is_empty() {
-                v.commit.clone()
-            } else {
-                v.content_hash.clone()
             },
         },
         _ => return Err(ConnectError::invalid_argument("Unknown anchor kind")),
@@ -470,12 +447,9 @@ fn input_evidence(v: &Anchor) -> Result<Option<m::AnchorEvidence>, ConnectError>
     if !v.source.is_set() {
         return Ok(None);
     }
-    if !["line", "file"].contains(&v.kind.as_str())
-        || !v.commit.is_empty()
-        || !v.content_hash.is_empty()
-    {
+    if !["line", "file"].contains(&v.kind.as_str()) {
         return Err(ConnectError::invalid_argument(
-            "Typed anchor evidence cannot mix legacy source fields",
+            "Source evidence requires a file or line anchor",
         ));
     }
     let evidence = m::AnchorEvidence {
@@ -523,8 +497,6 @@ fn comment(v: m::Comment) -> Comment {
 fn thread(v: m::Thread) -> Thread {
     let mut original = anchor(v.anchor);
     if let Some(evidence) = v.evidence {
-        original.commit.clear();
-        original.content_hash.clear();
         original.source = Some(source(evidence.source)).into();
         original.evidence = Some(AnchorEvidence {
             selected_text: evidence.selected_text,
