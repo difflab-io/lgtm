@@ -3,6 +3,10 @@
  * @module-tag nvim
  */
 import { describe, it, expect } from 'vitest'
+import { cp, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { command, isolatedEnv, ROOT } from '../common/test-harness.js'
 import { profiles, useEditor } from './fixtures.js'
 import { waitFor } from '../common/test-utils.js'
 
@@ -161,3 +165,62 @@ for (const profile of profiles) {
     })
   })
 }
+
+describe('When installing the monorepo as a native Neovim package', { tags: ['required'] }, () => {
+  it('The documented setup loads the plugin command and discovers its help from the package root', async () => {
+    // Arrange
+    const home = await mkdtemp(join(tmpdir(), 'lgtm-package-'))
+    try {
+      const env = isolatedEnv(home)
+      const root = join(env.XDG_DATA_HOME!, 'nvim/site/pack/plugins/start/lgtm')
+      await mkdir(join(root, 'apps'), { recursive: true })
+      await cp(join(ROOT, 'apps/lgtm.nvim'), join(root, 'apps/lgtm.nvim'), { recursive: true })
+      await symlink(await readlink(join(ROOT, 'doc')), join(root, 'doc'))
+      const readme = await readFile(join(ROOT, 'apps/lgtm.nvim/README.md'), 'utf8')
+      const setup = readme.split('### Native Git packages')[1].match(/```lua\n([\s\S]*?)```/)![1]
+      const dependencies = ['codediff.nvim', 'which-key.nvim', 'nvim-notify']
+        .map(
+          (name) =>
+            `vim.opt.runtimepath:append(${JSON.stringify(join(ROOT, 'e2e/nvim/.cache', name))})`,
+        )
+        .join('\n')
+      const init = join(home, 'init.lua')
+      await writeFile(init, dependencies + '\n' + setup)
+      const verify = join(home, 'verify.lua')
+      await writeFile(
+        verify,
+        `
+        assert(vim.fn.exists(":Lgtm") == 2, "LGTM command missing")
+        assert(require("lgtm.config").options.identity.name == "Your Name", "Setup options lost")
+        assert(debug.getinfo(require("lgtm").setup).source:find(${JSON.stringify(root)}, 1, true), "Loaded another installation")
+        vim.cmd("helptags " .. vim.fn.fnameescape(${JSON.stringify(join(root, 'doc'))}))
+        vim.cmd("help lgtm.txt")
+        assert(vim.api.nvim_buf_get_name(0):find(${JSON.stringify(root)}, 1, true), "Help did not load from package")
+      `,
+      )
+
+      // Act
+      const result = await command(
+        'nvim',
+        [
+          '--headless',
+          '-u',
+          init,
+          '-i',
+          'NONE',
+          '-c',
+          `lua local ok, err = pcall(dofile, ${JSON.stringify(verify)}); if not ok then vim.api.nvim_err_writeln(tostring(err)); vim.cmd("cquit 1") end`,
+          '-c',
+          'qa!',
+        ],
+        { env, cwd: home },
+      )
+
+      // Assert
+      expect(result.code, result.stderr).toBe(0)
+      expect(result.stderr).not.toContain('Error detected')
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+})

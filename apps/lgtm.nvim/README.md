@@ -16,11 +16,17 @@ Required plugins:
 | `folke/which-key.nvim` | Discoverable review mappings | `3aab2147e74890957785941f0c1ad87d0a44c15a` |
 | `rcarriga/nvim-notify` | Draft/submission/error notifications | `8701bece920b38ea289b457f902e2ad184131a5d` |
 
-CodeDiff downloads a platform-specific native library; allow the download or follow its source-build instructions. `nui.nvim` is not needed. `lazy.nvim` below is an installation example, not a runtime dependency. While this plugin lives in the LGTM monorepo, use its local directory:
+CodeDiff downloads a platform-specific native library; allow the download or follow its source-build instructions. `nui.nvim` is not needed. `lazy.nvim` below is an installation example, not a runtime dependency. The plugin lives in `apps/lgtm.nvim` inside the LGTM monorepo. Like MmdToImg, install the Git repository and add the plugin subdirectory to Neovim’s runtime path. The root `doc` symlink exposes editor help. No plugin build or release artifact is required.
+
+### lazy.nvim
+
+Use the feature branch below until this PR merges; then remove the `branch` field to follow the default branch:
 
 ```lua
 {
-  dir = "/absolute/path/to/lgtm/apps/lgtm.nvim",
+  "difflab-io/lgtm",
+  branch = "feature/diff-210-nvim-plugin",
+  lazy = false,
   dependencies = {
     { "esmuellert/codediff.nvim", commit = "09d9ebef2cc5a5c04db7a349cd6c61bdf84ecc8e", opts = {} },
     { "folke/which-key.nvim", commit = "3aab2147e74890957785941f0c1ad87d0a44c15a", opts = {} },
@@ -32,15 +38,63 @@ CodeDiff downloads a platform-specific native library; allow the download or fol
     prefix = "<leader>r",
     -- mappings = { ["K"] = "<leader>rk" }, -- thread map overrides
   },
+  config = function(plugin, opts)
+    vim.opt.runtimepath:append(plugin.dir .. "/apps/lgtm.nvim")
+    require("lgtm").setup(opts)
+    vim.cmd("runtime plugin/lgtm.lua")
+  end,
 }
 ```
+
+For development, replace the repository and branch fields with `dir = "/absolute/path/to/lgtm"`. Keep the same `config` callback. If `dir` points directly to `apps/lgtm.nvim`, use `main = "lgtm"` and omit the callback instead.
+
+### vim-plug
+
+Install CodeDiff, WhichKey and nvim-notify through your plugin manager, using the verified revisions above. Add LGTM to your vim-plug block:
+
+```vim
+Plug 'difflab-io/lgtm', { 'branch': 'feature/diff-210-nvim-plugin' }
+```
+
+After `plug#end()`, add its plugin subdirectory before setup:
+
+```lua
+local root = vim.fn.stdpath("data") .. "/plugged/lgtm"
+vim.opt.runtimepath:append(root .. "/apps/lgtm.nvim")
+require("lgtm").setup({ identity = { name = "Your Name", email = "you@example.com" } })
+vim.cmd("runtime plugin/lgtm.lua")
+```
+
+Change `root` if your vim-plug directory differs. Remove the branch option after this PR merges.
+
+### Native Git packages
+
+Install the required plugins first, then clone LGTM into a native package directory:
+
+```sh
+git clone --depth 1 --branch feature/diff-210-nvim-plugin https://github.com/difflab-io/lgtm.git \
+  ~/.local/share/nvim/site/pack/plugins/start/lgtm
+```
+
+Add this to your Neovim configuration:
+
+```lua
+local root = vim.fn.stdpath("data") .. "/site/pack/plugins/start/lgtm"
+vim.opt.runtimepath:append(root .. "/apps/lgtm.nvim")
+require("lgtm").setup({ identity = { name = "Your Name", email = "you@example.com" } })
+vim.cmd("runtime plugin/lgtm.lua")
+```
+
+Change `root` for a custom package directory. Omit `--branch` after this PR merges. Run `:helptags ALL` once after a manual installation, then use `:help lgtm.txt`.
+
+### CLI and backend
 
 Build the CLI from this checkout; older published CLI releases do not include these review RPCs:
 
 ```sh
 mise trust
 mise install
-premise run lgtm-cli:build
+premise run //apps/lgtm-cli:build
 export PATH="$PWD/target/debug:$PATH"
 lgtm up --no-open
 ```

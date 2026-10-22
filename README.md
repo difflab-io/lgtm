@@ -28,6 +28,8 @@ lgtm up
 
 The executable is named `lgtm`. It opens the interface at `http://127.0.0.1:8080`. Use `lgtm status` to inspect the running instance and `lgtm down` to stop it.
 
+Install the Neovim plugin from Git using the [plugin setup guide](apps/lgtm.nvim/README.md#setup). The plugin needs the compatible CLI built from this branch; the older release candidate above does not provide its review API.
+
 ## Docs
 
 - [Development](docs/development.md): local setup, live updates, builds, checks, and releases.
