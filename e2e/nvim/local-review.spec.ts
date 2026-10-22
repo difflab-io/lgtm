@@ -539,7 +539,7 @@ for (const profile of profiles) {
       await r.restart()
       await e.start()
       // Assert
-      const reviews = await r.json(['sessions', 'list', '--all'])
+      const reviews = await r.json(['session', 'list', '--all'])
       expect(
         reviews.reviews.some(
           (v: Json) => v.id === directoryReview.review.id && v.state === 'completed',
@@ -571,7 +571,7 @@ for (const profile of profiles) {
       // Assert
       expect(resumed.review.id).toBe(directoryReview.review.id)
       expect(resumed.conversation.comments).toHaveLength(3)
-      const before = (await r.json(['sessions', 'list', '--all'])).reviews.length
+      const before = (await r.json(['session', 'list', '--all'])).reviews.length
 
       // Act
       await e.command('tabnew')
@@ -591,7 +591,7 @@ for (const profile of profiles) {
         'Directory general review',
       ])
         expect(await e.text()).toContain(text)
-      expect((await r.json(['sessions', 'list', '--all'])).reviews).toHaveLength(before)
+      expect((await r.json(['session', 'list', '--all'])).reviews).toHaveLength(before)
 
       // Act
       await e.command('tabclose')
