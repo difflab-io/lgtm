@@ -369,10 +369,12 @@ for (const profile of profiles) {
       await e.keys('f')
 
       // Assert
+      await e.wait('require("lgtm.context").current.explorer.win == nil', 'explorer hidden')
       expect(await e.value('require("lgtm.context").current.explorer.win')).toBeNull()
 
       // Act
       await e.keys('f')
+      await e.wait('require("lgtm.context").current.explorer.win ~= nil', 'explorer shown')
       await e.lua('vim.api.nvim_win_set_cursor(require("lgtm.context").current.explorer.win,{2,0})')
       await e.keys('<CR>')
 
@@ -392,29 +394,53 @@ for (const profile of profiles) {
       await e.keys(' rm')
 
       // Assert
+      await e.wait(
+        'require("lgtm.context").current.reviewed["PLAN.md"] ~= nil',
+        'PLAN.md marked reviewed',
+      )
       expect((await e.state())!.reviewed['PLAN.md']).toBeTruthy()
 
       // Act
       await e.keys(' rm')
 
       // Assert
+      await e.wait(
+        'require("lgtm.context").current.reviewed["PLAN.md"] == nil',
+        'PLAN.md mark removed',
+      )
       expect((await e.state())!.reviewed['PLAN.md']).toBeUndefined()
 
       // Act
       await e.keys(' rm')
+      await e.wait(
+        'require("lgtm.context").current.reviewed["PLAN.md"] ~= nil',
+        'PLAN.md marked before explorer navigation',
+      )
       await e.lua(
         'vim.api.nvim_set_current_win(require("lgtm.context").current.explorer.win); vim.api.nvim_win_set_cursor(0,{2,0})',
       )
       await e.keys('m')
 
       // Assert
+      await e.wait(
+        'require("lgtm.context").current.reviewed["SECOND.md"] ~= nil',
+        'SECOND.md marked reviewed',
+      )
       expect((await e.state())!.reviewed['SECOND.md']).toBeTruthy()
+      const explorerLines = await e.value<string[]>(
+        'vim.api.nvim_buf_get_lines(require("lgtm.context").current.explorer.buf, 0, -1, false)',
+      )
+      expect(explorerLines[1]).toMatch(/✓ .*SECOND\.md/)
       expect(await e.value('vim.api.nvim_win_get_cursor(0)[1]')).toBe(2)
 
       // Act
       await e.keys('m')
 
       // Assert
+      await e.wait(
+        'require("lgtm.context").current.reviewed["SECOND.md"] == nil',
+        'SECOND.md mark removed',
+      )
       expect((await e.state())!.reviewed['SECOND.md']).toBeUndefined()
 
       // Act

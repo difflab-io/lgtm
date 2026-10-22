@@ -94,6 +94,7 @@ export class Editor {
   async command(command: string) {
     await this.request('nvim_command', [command])
   }
+  /** Key input is asynchronous; callers wait for each operation’s observable result. */
   async keys(keys: string) {
     await this.request('nvim_input', [keys])
     await delay(35)
