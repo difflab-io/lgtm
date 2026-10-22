@@ -8,7 +8,7 @@ The main module parses CLI commands and connects them to the daemon, server, sto
 
 ### Functional
 
-- FR1: Route `up`, `down`, `status`, `review`, `session`, `sessions` and `comments` to their module APIs.
+- FR1: Route `up`, `down`, `status`, `review`, `session` and `comments` to their module APIs.
 - FR2: Support foreground serving and the internal background startup command.
 - FR3: Apply one store directory to every command.
 
@@ -52,7 +52,7 @@ flowchart TD
     MAIN["main: parse CLI command"] --> STORE["Store: select runtime directory"]
     MAIN --> DAEMON["daemon: up / down / status"]
     MAIN --> SERVER["server: serve"]
-    MAIN --> COMMANDS["commands: review / session / sessions / comments"]
+    MAIN --> COMMANDS["commands: review / session / comments"]
     COMMANDS --> MODELS["models: shared CLI arguments"]
     COMMANDS --> CLIENT["rpc_client: generated gRPC clients"]
     COMMANDS --> UI["ui: browser review path"]
@@ -128,7 +128,7 @@ Uncertain remote writes use saved receipts and explicit reconciliation. They are
 | `review`            | Open the current directory in the UI      |
 | `review --json` | Start or resume a review through the backend |
 | `session` | Start, show, refresh, export, complete or submit a review |
-| `sessions` | List saved review attempts |
+| `session list` | List saved review attempts |
 | `comments` | Add, reply, edit, delete, resolve, reopen or promote feedback |
 | `serve --daemonize` | Internal background startup |
 
@@ -148,8 +148,7 @@ apps/lgtm-cli/src/
 └── commands/
     ├── mod.rs                Shared selection, identity and output helpers
     ├── review.rs             Browser and machine review entry points
-    ├── session.rs            Start, show, refresh, export, complete and submit
-    ├── sessions.rs           Saved-review listing
+    ├── session.rs            List, start, show, refresh, export, complete and submit
     └── comments.rs           Comments, replies, resolution and promotion
 ```
 

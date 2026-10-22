@@ -2,7 +2,6 @@
 pub mod comments;
 pub mod review;
 pub mod session;
-pub mod sessions;
 
 use crate::{
     models::{ActorArgs, ContextArgs},

@@ -16,7 +16,7 @@ mod review_commands {
             vec!["session", "export", "--notes"],
             vec!["session", "refresh", "--pr", "acme/repo#1"],
             vec!["session", "submit", "--pr", "acme/repo#1"],
-            vec!["sessions", "list", "--all"],
+            vec!["session", "list", "--all"],
             vec!["comments", "list", "--notes"],
             vec!["comments", "add", "--notes", "--body", "Dummy"],
             vec!["comments", "reply", "thread", "--notes", "--body", "Dummy"],
@@ -43,7 +43,7 @@ mod review_commands {
 
     #[test]
     fn should_expose_review_command_help() {
-        for command in ["review", "session", "sessions", "comments"] {
+        for command in ["review", "session", "comments"] {
             let out = Command::new(env!("CARGO_BIN_EXE_lgtm"))
                 .args([command, "--help"])
                 .output()

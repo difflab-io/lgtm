@@ -36,6 +36,10 @@ The old location must be absent and the destination must exist. A copy is reject
 
 Exports use numbered Markdown feedback, compact file/range locations, `~` for old-side lines, useful replies, original excerpts for lost locations, and optional overall feedback. They omit internal IDs and synchronization metadata. Local completion accepts `--body` for final feedback and has no GitHub outcome.
 
+### Find saved reviews
+
+Use `lgtm session list` to list active review attempts. Add `--completed` for completed attempts or `--all` for both. Filter local reviews with `--path DIRECTORY` or PR reviews with `--repo REPOSITORY_URL`. Ordinary file notes do not appear in this list.
+
 ## Git and GitHub reviews
 
 `--mode working|staged|branch --path CHECKOUT` selects a local comparison. `--mode branch --base BASE` compares the merge base with HEAD; `--base` requires branch mode. `--branch NAME` selects the checked-out local branch context; `--pr NUMBER --repo https://github.com/OWNER/REPO --path CHECKOUT` selects GitHub. A full GitHub PR URL also works. Start/select a session, then use the same comment commands. `session refresh` imports GitHub state; `session submit --outcome approve|reject|comment --body TEXT --request-key KEY` submits the review and optional final comment. GitHub permission and self-review restrictions still apply. Retain a request key when retrying a known request; uncertain writes require `session reconcile --session UUID` (or the same context flags) rather than blind resubmission.
@@ -52,6 +56,6 @@ The backend obtains credentials from the local `gh` account; run `gh auth login`
 
 See [lgtm.nvim setup and usage](../lgtm.nvim/README.md). The plugin calls Connect JSON directly; the CLI uses generated Rust gRPC clients against the same backend.
 
-Run checks through Premise, for example `premise run lgtm-cli:test`. The bundle task embeds backend/database sources and generated protobuf code so the published CLI does not depend on unpublished workspace crates. App tests cover component/argument contracts; real-process workflows live in [e2e/cli](../../e2e/cli/), with their own Mise config, and run with `premise run e2e:cli`.
+Run checks through Premise, for example `premise run //apps/lgtm-cli:test`. The bundle task embeds backend/database sources and generated protobuf code so the published CLI does not depend on unpublished workspace crates. App tests cover component/argument contracts; real-process workflows live in [e2e/cli](../../e2e/cli/), with their own Mise config, and run with `premise run e2e:cli`.
 
 PR line/file comments and replies sync to a private pending GitHub review after the backend saves them locally. Adding a comment never submits the review. JSON results include `syncError` when local persistence succeeded but GitHub sync did not. Use `lgtm comments sync COMMENT_ID --pr PR_URL --json` to sync an existing local draft or recover an accepted draft after a lost response. General PR comments stay local until explicit review submission.

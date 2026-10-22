@@ -190,7 +190,7 @@ flowchart TB
 - Private `Migrator`: Apply ordered Rust migrations and maintain the framework's migration history.
 - SchemaManager and SeaQuery: Build schema operations for the selected database driver.
 
-The client exposes five fields: `identities`, `review_contexts`, `workspace`, `sessions` and `comments`. The comment repository also owns thread operations. Callers use `db.sessions.get_active(&context_id)` directly.
+The client exposes six repository fields: `identities`, `review_contexts`, `workspace`, `sessions`, `comments` and `mutations`. The comment repository also owns thread operations. Callers use `db.sessions.get_active(&context_id)` directly.
 
 ### Data and Control Flow
 

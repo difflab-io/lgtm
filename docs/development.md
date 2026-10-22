@@ -155,6 +155,8 @@ premise run //apps/lgtm-backend:test
 LGTM_TEST_POSTGRES_URL=postgres://USER@127.0.0.1:5432/lgtm_test premise run test:postgres
 ```
 
+The root Mise file tasks `test-rust-project` and `with-postgres` own database test selection and container cleanup. Backend and database project test hooks call these tasks. Their tracked scripts live in `mise-tasks/`.
+
 Use a disposable PostgreSQL 17 database whose test user can create schemas. Each shared test isolates its schema. All-feature tests require the URL and fail rather than silently skip PostgreSQL. Premise invokes each project’s standard Mise test hook in the declared platform matrix. Linux DB/backend test hooks run SQLite/PostgreSQL contracts using an isolated PostgreSQL 17 Docker container (or an explicit LGTM_TEST_POSTGRES_URL); other/local invocations use SQLite unless a URL is supplied. Database checks are not a separate Actions job.
 
 SeaORM and sea-orm-migration 2.0.4 use one shared ordered Rust migration history, with SeaQuery 1.0.2 schema builders. Explicit transactions keep schema and `seaql_migrations` updates atomic on both backends. The framework rejects unknown applied migration names; it does not checksum source files. SQLite keeps foreign keys enabled and the driver's five-second busy timeout, using one connection per service pool and the default journal mode. A sibling migration lock serializes SQLite startup. PostgreSQL deployments must run one migration job before parallel application startup. Test-only upgrades cover populated data and failure recovery; there are no older shipped schema upgrades or destructive migrations yet. Future destructive SQLite changes need consistent backups and a table rebuild plan.

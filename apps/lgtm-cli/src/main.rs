@@ -25,11 +25,9 @@ enum Command {
     Status,
     /// Open the current directory in the web interface.
     Review(commands::review::ReviewArgs),
-    /// Scaffold for future backend session RPC commands.
+    /// Manage review attempts and list saved reviews.
     Session(commands::session::SessionArgs),
-    /// Scaffold for future backend session listing.
-    Sessions(commands::sessions::SessionsArgs),
-    /// Scaffold for future backend comment RPC commands.
+    /// Add, edit and manage feedback through the backend.
     Comments(commands::comments::CommentsArgs),
     #[command(hide = true)]
     Serve {
@@ -104,7 +102,6 @@ fn run() -> anyhow::Result<()> {
         Command::Status => "status",
         Command::Review(_) => "review",
         Command::Session(_) => "session",
-        Command::Sessions(_) => "sessions",
         Command::Comments(_) => "comments",
         Command::Serve { .. } => "serve",
     };
@@ -119,7 +116,6 @@ fn run() -> anyhow::Result<()> {
                 Command::Status => daemon::status(&store, cli.json).await,
                 Command::Review(args) => commands::review::run(args, &store, cli.json).await,
                 Command::Session(args) => commands::session::run(args, &store, cli.json).await,
-                Command::Sessions(args) => commands::sessions::run(args, &store, cli.json).await,
                 Command::Comments(args) => commands::comments::run(args, &store, cli.json).await,
                 Command::Serve { port, daemonize } => server::serve(port, &store, daemonize).await,
             }

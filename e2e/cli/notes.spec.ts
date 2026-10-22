@@ -16,11 +16,10 @@ describe('When the backend is unavailable', () => {
     const { runtime: r } = fixture()
     const home = join(r.directory, 'offline')
 
-    // Act
     await mkdir(home)
 
-    // Arrange
-    const result = await command(binary('lgtm'), ['sessions', 'list', '--json'], {
+    // Act
+    const result = await command(binary('lgtm'), ['session', 'list', '--json'], {
       env: isolatedEnv(home),
     })
 
@@ -70,7 +69,7 @@ describe('When taking notes while browsing files', () => {
       expect(notes.comments).toHaveLength(1)
       expect(notes.threads[0].anchor.evidence.selectedText).toBe('selected')
       expect(notes.threads[0].anchor.source.localFile.contentHash).toMatch(/^sha256:/)
-      expect((await r.json(['sessions', 'list', '--all'])).reviews).toEqual([])
+      expect((await r.json(['session', 'list', '--all'])).reviews).toEqual([])
       expect((await r.json(['session', 'export', '--notes', file])).markdown).toContain(
         '1. **[NOTE]**',
       )

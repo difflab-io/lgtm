@@ -4,7 +4,6 @@
 monorepo_root = true
 
 [env]
-_.path = ["{{config_root}}/bin"]
 # Keep Git diagnostics stable and Unicode fixtures usable on both CI platforms.
 LC_ALL = "{% if os() == 'macos' %}en_US.UTF-8{% else %}C.UTF-8{% endif %}"
 
@@ -76,7 +75,7 @@ depends = ["//apps/lgtm-backend:dev", "//apps/lgtm-web:dev"]
 
 [tasks."test:postgres"]
 description = "Run database and backend contracts on SQLite and PostgreSQL"
-run = "{{config_root}}/bin/with-postgres cargo test --locked -p lgtm-db -p lgtm-backend --all-features"
+run = "mise run //:with-postgres -- cargo test --locked -p lgtm-db -p lgtm-backend --all-features"
 
 [tasks."e2e:backend"]
 description = "Run backend E2E suite via its own Mise configuration"

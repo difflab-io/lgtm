@@ -1,6 +1,7 @@
 //! Session command arguments and RPC callbacks.
 use super::{
-    client_for_actor, get_conversation, get_review, get_scope, key, location, print_result, start,
+    client_for_actor, get_conversation, get_review, get_reviews, get_scope, key, location,
+    print_result, start,
 };
 use crate::{
     models::{ActorArgs, ContextArgs, MutationArgs},
@@ -16,6 +17,17 @@ use std::path::PathBuf;
 
 #[derive(Subcommand)]
 pub enum SessionCommand {
+    /// List saved review attempts, active by default.
+    List {
+        #[arg(long)]
+        path: Option<PathBuf>,
+        #[arg(long)]
+        repo: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        completed: bool,
+    },
     /// Start or resume the matching review comparison.
     Start {
         #[command(flatten)]
@@ -96,6 +108,39 @@ pub struct SessionArgs {
 
 pub async fn run(args: SessionArgs, store: &Store, json_output: bool) -> Result<()> {
     match args.command {
+        SessionCommand::List {
+            path,
+            repo,
+            all,
+            completed,
+        } => {
+            let client = Client::new(store)?;
+            let mut reviews = get_reviews(
+                &client,
+                None,
+                if all {
+                    None
+                } else if completed {
+                    Some("completed")
+                } else {
+                    Some("active")
+                },
+            )
+            .await?;
+            if let Some(path) = path {
+                let path = path.canonicalize()?.to_string_lossy().into_owned();
+                reviews.retain(|review| {
+                    review["target"]["localGit"]["path"] == path
+                        || review["target"]["directory"]["path"] == path
+                });
+            }
+            if let Some(repository) = repo {
+                reviews.retain(|review| {
+                    review["target"]["pullRequest"]["repositoryUrl"] == repository
+                });
+            }
+            print_result(&json!({"reviews":reviews}), json_output)
+        }
         SessionCommand::Start { context, actor } => {
             let client = client_for_actor(store, &actor).await?;
             print_result(&start(&client, &context).await?, json_output)

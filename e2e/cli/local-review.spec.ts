@@ -128,21 +128,31 @@ describe('When completing and resuming a local review', () => {
     // Act
     await r.restart()
     const resumedReview = await r.json(['session', 'start', '--notes', plans])
+    const active = await r.json(['session', 'list', '--path', plans])
 
     // Assert
     expect(resumedReview.review.id).toBe(review.id)
+    expect(active.reviews.map((saved: Json) => saved.id)).toEqual([review.id])
 
     // Act
     const completedReview = await r.json(['session', 'complete', '--notes', plans])
+    const completed = await r.json(['session', 'list', '--completed', '--path', plans])
+    const remaining = await r.json(['session', 'list', '--path', plans])
 
     // Assert
     expect(completedReview.review.state).toBe('completed')
+    expect(completed.reviews.map((saved: Json) => saved.id)).toEqual([review.id])
+    expect(remaining.reviews).toEqual([])
 
     // Act
     const successor = await r.json(['session', 'start', '--notes', plans])
+    const history = await r.json(['session', 'list', '--all', '--path', plans])
 
     // Assert
     expect(successor.review.id).not.toBe(review.id)
+    expect(history.reviews.map((saved: Json) => saved.id)).toEqual(
+      expect.arrayContaining([review.id, successor.review.id]),
+    )
     expect(JSON.stringify(await r.json(['comments', 'list', '--notes', plans]))).toContain(
       'Clarify the acceptance test',
     )
