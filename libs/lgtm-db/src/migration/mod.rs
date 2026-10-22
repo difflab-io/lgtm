@@ -147,7 +147,6 @@ mod tests {
                 anchor_kind: Set("general".into()),
                 state: Set("open".into()),
                 updated_at: Set("now".into()),
-                outdated: Set(false),
                 ..Default::default()
             }
             .insert(db.connection())
@@ -159,13 +158,14 @@ mod tests {
                 thread_id: Set(fixture_id("thread")),
                 origin_session_id: Set(Some(session.id)),
                 author_id: Set(identity.id),
+                owner_id: Set(Some(identity.id)),
                 body: Set("Survives migrations".into()),
                 position: Set(0),
                 visibility: Set("published".into()),
                 created_at: Set("now".into()),
                 updated_at: Set("now".into()),
                 posting_state: Set(crate::entities::common::PostingState::Unposted),
-                remote_presence: Set("local".into()),
+
                 ..Default::default()
             }
             .insert(db.connection())
@@ -173,6 +173,22 @@ mod tests {
             .unwrap();
 
             let raw = sea_orm::Database::connect(&url).await.unwrap();
+            // Reopening the current fresh schema preserves records without extra migrations.
+            apply::<Migrator>(&raw).await.unwrap();
+            let preserved = db
+                .comments
+                .get_thread(&fixture_id("context"), &fixture_id("thread"))
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(preserved.source_evidence.is_none());
+            assert_eq!(
+                db.comments
+                    .get_comment_by_id(&fixture_id("context"), &comment.id)
+                    .await
+                    .unwrap(),
+                Some(comment.clone())
+            );
             assert!(apply::<Failing>(&raw).await.is_err());
             assert!(
                 !SchemaManager::new(&raw)
@@ -182,7 +198,7 @@ mod tests {
             );
             assert_eq!(
                 Migrator::get_applied_migrations(&raw).await.unwrap().len(),
-                1
+                Migrator::migrations().len()
             );
             // Retrying a failure is safe, with no successful history row or partial DDL.
             assert!(apply::<Failing>(&raw).await.is_err());
@@ -196,7 +212,7 @@ mod tests {
             );
             assert_eq!(
                 Upgraded::get_applied_migrations(&raw).await.unwrap().len(),
-                2
+                Migrator::migrations().len() + 1
             );
             // The exact release refuses an applied migration absent from this executable.
             assert!(Database::connect(&url).await.is_err());
@@ -249,7 +265,7 @@ mod tests {
             );
             assert_eq!(
                 db.comments
-                    .get_by_id(&fixture_id("context"), &comment.id)
+                    .get_comment_by_id(&fixture_id("context"), &comment.id)
                     .await
                     .unwrap(),
                 Some(comment.clone())
@@ -264,7 +280,7 @@ mod tests {
             assert_eq!(
                 reopened
                     .comments
-                    .get_by_id(&fixture_id("context"), &comment.id)
+                    .get_comment_by_id(&fixture_id("context"), &comment.id)
                     .await
                     .unwrap(),
                 Some(comment)

@@ -2,7 +2,10 @@
 
 pub use lgtm_db as database;
 pub mod error;
+pub mod extensions;
+pub mod forge;
 pub mod models;
+pub mod rpc;
 pub mod services;
 pub mod utils;
 
@@ -42,5 +45,23 @@ pub fn router() -> (Router, Arc<StaticChecker>) {
     install_static(
         Router::new().add_service(Arc::new(Greeter)),
         [GREETER_SERVICE_SERVICE_NAME],
+    )
+}
+
+/// Construct a stateful API router sharing one database across all RPC services.
+pub fn router_with_database(database: database::Database) -> (Router, Arc<StaticChecker>) {
+    let api = Arc::new(rpc::Api::new(database));
+    install_static(
+        Router::new()
+            .add_service(Arc::new(Greeter))
+            .add_service::<rpc::Api, proto::lgtm::v1::IdentityServiceRegisterMarker>(api.clone())
+            .add_service::<rpc::Api, proto::lgtm::v1::ReviewServiceRegisterMarker>(api.clone())
+            .add_service::<rpc::Api, proto::lgtm::v1::DiffServiceRegisterMarker>(api),
+        [
+            GREETER_SERVICE_SERVICE_NAME,
+            proto::lgtm::v1::IDENTITY_SERVICE_SERVICE_NAME,
+            proto::lgtm::v1::REVIEW_SERVICE_SERVICE_NAME,
+            proto::lgtm::v1::DIFF_SERVICE_SERVICE_NAME,
+        ],
     )
 }

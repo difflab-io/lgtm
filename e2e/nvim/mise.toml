@@ -1,0 +1,36 @@
+[tools]
+neovim = "0.12.5"
+
+[tasks.test]
+depends = ["install", "//apps/lgtm-cli:build"]
+description = "Readable TypeScript nvim E2E journeys"
+dir = "{{config_root}}/../.."
+run = "bun x vitest run --config e2e/nvim/vitest.config.ts"
+
+[tasks.lint]
+dir = "{{config_root}}/../.."
+run = "bun x eslint e2e/nvim e2e/common"
+
+[tasks.format]
+dir = "{{config_root}}/../.."
+run = "bun x prettier --write e2e/nvim/**/*.ts e2e/common/**/*.ts"
+
+[tasks."format:check"]
+dir = "{{config_root}}/../.."
+run = "bun x prettier --check e2e/nvim/**/*.ts e2e/common/**/*.ts"
+
+[tasks.install]
+description = "Ensure pinned real editor dependencies, fetching only missing revisions"
+dir = "{{config_root}}/../.."
+run = "bun run e2e/nvim/install.ts"
+
+[tasks.list]
+description = "List the nvim BDD journeys without running them"
+dir = "{{config_root}}/../.."
+run = "bun x vitest list --config e2e/nvim/vitest.config.ts"
+
+[tasks.smoke]
+depends = ["install", "//apps/lgtm-cli:build"]
+description = "Run representative nvim E2E flows for local iteration"
+dir = "{{config_root}}/../.."
+run = "bun x vitest run --config e2e/nvim/vitest.config.ts --tags-filter=smoke --hideSkippedTests"

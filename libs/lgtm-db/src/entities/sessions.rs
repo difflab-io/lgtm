@@ -15,10 +15,12 @@ pub struct Model {
     pub creator_id: uuid::Uuid,
     /// Current lifecycle discriminator for this record.
     pub state: crate::entities::common::SessionState,
-    /// Base commit reviewed by this session; immutable after creation.
+    /// Base comparison identity; active PR reviews follow updates, and completed reviews retain their final identity.
     pub base_commit: Option<String>,
-    /// Head commit reviewed by this session; immutable after creation.
+    /// Head comparison identity; active PR reviews follow updates, and completed reviews retain their final identity.
     pub head_commit: Option<String>,
+    /// Selected comparison kind.
+    pub comparison_kind: crate::entities::common::ComparisonKind,
     /// UTC creation timestamp; immutable after insertion.
     pub created_at: String,
     /// UTC completion time; required only for completed sessions.
@@ -27,7 +29,7 @@ pub struct Model {
     pub completed_by_id: Option<uuid::Uuid>,
     /// Completion outcome: saved, ready-to-address, approve, reject or comment as allowed by context.
     pub outcome: Option<String>,
-    /// User-authored comment text, or optional session completion summary.
+    /// Final review text; retained as a draft when a rejected submission resumes editing.
     pub body: Option<String>,
     /// Opaque remote review object ID when known; scoped by the owning context and forge.
     pub forge_review_id: Option<String>,

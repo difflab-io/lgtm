@@ -2,26 +2,49 @@
 
 ## Overview
 
-The Rust backend owns domain validation, requester identity and review workflows over lgtm-db. The production RPC router currently exposes greeting and health only. Review RPCs and forge adapters are not implemented. The CLI manages the daemon and opens the dummy UI; review/session/comment commands are scaffolds and do not access persistence.
+The Rust backend owns domain validation, requester identity and review workflows over lgtm-db. The stateful RPC router exposes IdentityService, ReviewService and DiffService alongside greeting and health. Both native gRPC clients and direct Connect JSON clients call the same services. The CLI and Neovim plugin use these RPCs; neither owns persistence or depends on the web UI.
+
+See [review architecture](reviews.md) for context requirements, backend data flows, and the intended review contracts. The [system architecture](../index.md) defines shared concepts and comment lifecycle behavior. The [DiffService](diffs.md) owns backend file listing and content access for the web UI. Neovim uses CodeDiff for analogous content access. The review service owns review data and state transitions. The review document's [Usage](reviews.md#usage) covers API consumer request sequences and recovery. The [LGTM user guide](../../user-guide.md) covers Neovim review workflows and the web interface's availability.
 
 ## Requirement
 
 ### Functional
 
-- Persist notes, local branch reviews and forge-review conversations through services.
-- Track human identities (email) and agent identities (model/provider), independently of forge posting accounts.
-- Keep one active session per context shared by identities; publish drafts on completion and retain completed metadata.
-- Preserve context-owned threads/comments and scoped forge IDs across later sessions.
-- Reconcile supplied complete observations and verified posting receipts without performing network calls.
+- FR1: Persist notes, local branch reviews and forge-review conversations through services.
+- FR2: Track human identities (email) and agent identities (model/provider), independently of forge posting accounts.
+- FR3: Keep one active session per context shared by identities; publish drafts on completion and retain completed metadata.
+- FR4: Preserve context-owned threads/comments and scoped forge IDs across later sessions.
+- FR5: Reconcile complete GitHub observations and verified posting receipts through the Octocrab adapter.
 
 ### Non-Functional
 
-- Keep all database interaction in services; models only validate, map supplied values and implement domain behavior.
-- Share transaction semantics across SQLite and PostgreSQL.
-- Keep review persistence out of the CLI until backend RPCs exist.
-- Inherit caller tracing context without retaining request spans.
+- NFR1: Keep all database interaction in services; models only validate, map supplied values and implement domain behavior.
+- NFR2: Share transaction semantics across SQLite and PostgreSQL.
+- NFR3: Keep review persistence in the backend; CLI commands call its RPCs.
+- NFR4: Inherit caller tracing context without retaining request spans.
 
 ## Design
+
+### Usage
+
+#### API clients
+
+Start the bundled backend with `lgtm up --no-open`. Read its endpoint through `lgtm status --json`. Use [review usage](reviews.md#usage) for review data and state transitions. Use [diff usage](diffs.md#usage) for backend content access. Neovim uses CodeDiff for now.
+
+#### Internal callers
+
+Create the shared database and services at startup:
+
+```rust
+let db = Database::connect(database_url).await?;
+let auth = AuthService::new(db.clone());
+let human = auth.ensure_human("Alice", "alice@example.com").await?;
+let agent = auth.ensure_agent("Reviewer", "model-name", "provider-name").await?;
+let review = ReviewService::new(db.clone(), auth);
+```
+
+Call domain services for application workflows. Keep database access behind named repository operations.
+
 
 ### Components and Responsibilities
 
@@ -55,18 +78,23 @@ flowchart TB
     Schema --> Storage
 ```
 
-- lib.rs: greeting RPC and health router; future review handlers will translate requests into service calls.
-- models/: Actor/ActorKind, Context/ContextKey, Session/SessionStatus, Comment/PostingStatus, Thread/Anchor and domain inputs.
+- lib.rs: greeting/health router and router_with_database for stateful identity/review/diff APIs.
+- rpc/: review and diff handlers, per-request tracing and requester metadata.
+- services/workspace.rs: ignored-inclusive notes content and Git working/index/revision reads.
+- services/forge.rs and forge/: GitHub review orchestration, Octocrab HTTP calls and local credential lookup.
+- models/: domain types, validators and `from_proto` / `into_proto` conversions. Each main type has its own file.
 - services/auth.rs: requester metadata resolution, explicit human/agent lookup/create and requester validation. Authentication and authorization remain future work.
 - services/review.rs: contexts, session lifecycle, comments, resolution, exports and forge reconciliation.
 - services/actor.rs: batch actor loading into a plain UUID-to-Actor lookup for service mappings.
-- utils.rs: shared formatting/path helpers and forge import/export contracts.
-- error.rs: application-defined validation, conflict and not-found errors.
+- forge/client.rs: typed forge discovery and snapshot contract, implemented by GithubClient.
+- forge/models.rs: repository addresses and normalized forge response models.
+- utils.rs: general time, path and serialization helpers.
+- error.rs: application-defined errors and their Connect error conversion.
 - lgtm-db: repositories, typed SeaORM models, transactions and private migrations.
 
 ### Data and Control Flow
 
-Future review RPC handlers establish tracing context, resolve the requester and call ReviewService. The service validates actions, opens a transaction, loads identities/workspace paths and converts supplied DB values into domain models. Domain conversion functions do not perform I/O.
+Review RPC handlers establish tracing context, resolve the requester and call ReviewService. The service validates actions, opens a transaction, loads identities/workspace paths and converts supplied DB values into domain models. Domain conversion functions do not perform I/O.
 
 ```mermaid
 flowchart TD
@@ -95,11 +123,6 @@ Context identity uses these serialized variants:
 A local notes location contains `{"kind":"notes","path":"/work/notes"}` instead of branch fields. The backend validates absolute local paths and full branch refs. Forge repository URLs require HTTP(S), a host and a namespace/project path, with no credentials, query or fragment. This validates the address shape, not the existence of a live forge repository.
 
 
-    let db = Database::connect(database_url).await?;
-    let auth = AuthService::new(db.clone());
-    let human = auth.ensure_human("Alice", "alice@example.com").await?;
-    let agent = auth.ensure_agent("Reviewer", "model-name", "provider-name").await?;
-    let review = ReviewService::new(db.clone(), auth);
 
 Internal IDs are uuid::Uuid. External forge IDs remain opaque strings scoped by host/context/object kind. Human and agent records have mutually exclusive required fields, checked in Rust and SQL. Context keys distinguish Local locations from ForgeBacked reviews. Local locations are notes paths or Git-directory/branch pairs. Forge-backed reviews require a parsed HTTP(S) repository_url and positive PR/MR number. Forge origins are derived from the URL; remote operations reject local contexts.
 
@@ -108,16 +131,14 @@ SessionStatus separates Active from Completed metadata. PostingStatus only carri
 ```mermaid
 erDiagram
     direction LR
-    REPOSITORIES {
-        text repository_url PK
-    }
     REVIEW_CONTEXTS {
         uuid id PK
         ContextKind kind
         text notes_path "nullable"
+        text current_notes_path "nullable"
         text git_dir "nullable"
         text branch "nullable"
-        text repository_url FK "nullable"
+        text repository_url "nullable"
         bigint number "nullable"
         bigint revision
         text last_refreshed_at "nullable"
@@ -125,6 +146,7 @@ erDiagram
         text refreshed_base "nullable"
         text refresh_error "nullable"
         text refresh_status
+        ForgeState forge_state "nullable"
     }
     WORKSPACE_PATHS {
         uuid context_id PK,FK
@@ -146,6 +168,7 @@ erDiagram
         SessionState state
         text base_commit "nullable"
         text head_commit "nullable"
+        ComparisonKind comparison_kind
         text created_at
         text completed_at "nullable"
         uuid completed_by_id FK "nullable"
@@ -165,7 +188,11 @@ erDiagram
         text anchor_kind
         text file_path "nullable"
         text side "nullable"
-        text reviewed_commit "nullable"
+        json source_evidence "nullable"
+        json forge_observation "nullable"
+        text source_path "nullable"
+        text current_path "nullable"
+        OrphanReason orphan_reason "nullable"
         bigint start_line "nullable"
         bigint end_line "nullable"
         text state
@@ -174,7 +201,6 @@ erDiagram
         uuid updated_by_id FK "nullable"
         text updated_at
         text forge_thread_id "nullable"
-        boolean outdated
     }
     COMMENTS {
         uuid id PK
@@ -182,6 +208,8 @@ erDiagram
         uuid thread_id FK
         uuid origin_session_id FK "nullable"
         uuid author_id FK
+        uuid owner_id FK "nullable"
+        uuid source_note_id "nullable"
         text body
         bigint position
         text visibility
@@ -197,9 +225,28 @@ erDiagram
         text posting_error "nullable"
         text posting_request_key "nullable"
         text payload_hash "nullable"
-        text remote_presence
     }
-    REPOSITORIES |o--o{ REVIEW_CONTEXTS : repository_url
+    MUTATION_RECEIPTS {
+        uuid context_id PK,FK
+        uuid actor_id PK,FK
+        text request_key PK
+        text method
+        text request_hash
+        text result_json
+        bigint version
+        uuid object_id "nullable"
+        boolean pending
+    }
+    FILE_REVIEWS {
+        uuid context_id PK,FK
+        uuid actor_id PK,FK
+        text path PK
+        text content_identity
+    }
+    REVIEW_CONTEXTS ||--o{ MUTATION_RECEIPTS : context_id
+    IDENTITIES ||--o{ MUTATION_RECEIPTS : actor_id
+    REVIEW_CONTEXTS ||--o{ FILE_REVIEWS : context_id
+    IDENTITIES ||--o{ FILE_REVIEWS : actor_id
     REVIEW_CONTEXTS ||--o{ WORKSPACE_PATHS : context_id
     REVIEW_CONTEXTS ||--o{ SESSIONS : context_id
     REVIEW_CONTEXTS ||--o{ THREADS : context_id
@@ -227,11 +274,39 @@ CLI/RPC boundaries instrument futures. Services emit ordinary tracing macros and
 
 ### Forge boundary
 
-Only supplied observations and receipts are supported. A fresh complete observation is required before each new PR session. Scoped remote IDs preserve known logical authors. Forge account bindings are separate from agent providers. Uncertain posts require reconciliation. Future forge adapters belong in the backend.
+Octocrab performs GitHub REST/GraphQL operations using privately captured local gh credentials. Complete observations and verified receipts feed the existing review service. Scoped remote IDs preserve known logical authors independently of posting accounts. Submission preparation freezes the exact comment set, payloads and session retry identity in one transaction before network writes. Reconciliation confirms accepted outcomes, or finishes an existing pending review only after exact comment/account/head verification. Missing or ambiguous receipts never trigger replay; the user must inspect and complete or discard the pending review on GitHub before retrying.
 
 ### Verification
 
 Service integration tests cover lifecycle, concurrency, identity normalization, immutable attribution/anchors, dummy-provider failures and remote reconciliation. Public DB-client integration tests compose repositories across notes, local and forge contexts, including successor sessions and multiple actors. Private unit tests are colocated; shared fixtures live in test modules.
+
+### Editor and CLI API
+
+```mermaid
+flowchart LR
+    Neovim["Neovim: async Connect JSON"] --> RPC["IdentityService + ReviewService"]
+    CLI["CLI: generated gRPC client"] --> RPC
+    RPC --> Review["Existing review and auth services"]
+    RPC --> Workspace["Filesystem and Git selection"]
+    RPC --> Forge["Forge orchestration → Octocrab"]
+    Review --> DB["Named repositories"]
+    Forge --> Review
+    Forge --> GitHub["GitHub API"]
+```
+
+These protobuf services share a router, process and database. Service names organize method contracts; they do not start separate daemons. Standalone endpoints have no prefix. The CLI daemon also mounts the router below `/rpc`.
+
+`EnsureIdentity` bootstraps human or agent attribution. Mutations use one `x-lgtm-identity` UUID header. This is claimed local attribution, not remote authentication. Wire discriminators are validated into the existing ContextKey, LocalLocation and Anchor enums; incompatible combinations are rejected.
+
+`StartReview` accepts a target and comparison. `GetConversation` and mutations accept a review or saved-file scope. Context lookup and write-session selection remain internal. Capability flags identify target, scope, anchor-evidence, and diff support; API version alone is insufficient for older clients.
+
+DiffService supplies descriptors, paged file metadata, and selected content without review persistence. CodeDiff supplies local Git content in Neovim. Explicit symlink roots resolve to physical identities; nested links and selected escapes are rejected. Binary and oversized files have explicit statuses.
+
+Original anchors retain typed source identities and bounded excerpts. Thread current paths, immutable saved-file source paths, notes current roots, and separate forge observations preserve discussion identity across confirmed moves. Clients derive placements from the displayed source; ReviewService does not rewrite response anchors or serve file bodies. Provider coordinates without saved-byte evidence remain unverified outside their confirmed PR comparison.
+
+Promotion preserves source notes and attribution in one transaction. Markdown exports contain numbered feedback and useful original locations without internal IDs. Export does not mutate review state. The [review contract](reviews.md) defines lifecycle and retry behavior.
+
+PR draft saves persist locally first, then synchronize line/file comments and replies through Octocrab to one pending GitHub review. Session and comment receipts survive daemon/editor restart; no separate submission store is added. The shared forge service serializes refresh and remote mutations so a refresh cannot import a newly accepted draft before its receipt is recorded. A lost response is reconciled against exact account, review and payload evidence. General comments remain local until submission. `SyncDraftComment` explicitly recovers or synchronizes saved drafts without publishing the review. Add/reply RPC responses expose `sync_error` separately from durable local-save success.
 
 ## References
 
@@ -239,4 +314,4 @@ Service integration tests cover lifecycle, concurrency, identity normalization, 
 - [Services](../../../apps/lgtm-backend/src/services).
 - [Domain models](../../../apps/lgtm-backend/src/models).
 - [Integration tests](../../../apps/lgtm-backend/tests).
-- [CLI scaffold](../cli/index.md).
+- [CLI architecture](../cli/index.md).

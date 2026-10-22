@@ -23,12 +23,14 @@ pub struct Database<C = DatabaseConnection> {
     pub workspace: WorkspaceRepository<C>,
     /// Thread, root comment and reply operations.
     pub comments: CommentRepository<C>,
+    /// Atomically saved results for local mutation retries.
+    pub mutations: MutationRepository<C>,
 }
 
 /// Client-owned transaction exposing the same repositories as a pool-backed client.
 pub type Transaction = Database<DatabaseTransaction>;
 
-impl<C> Database<C> {
+impl<C: ConnectionTrait + TransactionTrait> Database<C> {
     fn from_connection(connection: C) -> Self {
         let pool = Arc::new(connection);
         Self {
@@ -37,6 +39,7 @@ impl<C> Database<C> {
             review_contexts: ReviewContextRepository::new(Arc::clone(&pool)),
             workspace: WorkspaceRepository::new(Arc::clone(&pool)),
             comments: CommentRepository::new(Arc::clone(&pool)),
+            mutations: MutationRepository::new(Arc::clone(&pool)),
             pool,
         }
     }
@@ -121,8 +124,16 @@ impl Database<DatabaseTransaction> {
             review_contexts,
             workspace,
             comments,
+            mutations,
         } = self;
-        drop((identities, sessions, review_contexts, workspace, comments));
+        drop((
+            identities,
+            sessions,
+            review_contexts,
+            workspace,
+            comments,
+            mutations,
+        ));
         Arc::try_unwrap(pool)
             .map_err(|_| invalid("Transaction still has repository handles in use"))
     }

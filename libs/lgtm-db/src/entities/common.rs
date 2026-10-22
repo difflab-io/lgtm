@@ -117,3 +117,71 @@ impl std::fmt::Display for PostingState {
         f.write_str(self.as_str())
     }
 }
+
+/// The selected content comparison, independent of context identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::None)")]
+#[serde(rename_all = "snake_case")]
+pub enum ComparisonKind {
+    /// Internal notes writes have no visible review attempt.
+    #[sea_orm(string_value = "notes")]
+    Notes,
+    #[sea_orm(string_value = "working")]
+    Working,
+    #[sea_orm(string_value = "staged")]
+    Staged,
+    #[sea_orm(string_value = "branch")]
+    Branch,
+    #[sea_orm(string_value = "directory")]
+    Directory,
+    #[sea_orm(string_value = "pull_request")]
+    PullRequest,
+}
+
+/// The selected source of annotated bytes. Absence of evidence is represented by None.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::None)")]
+#[serde(rename_all = "snake_case")]
+pub enum SourceKind {
+    #[sea_orm(string_value = "commit")]
+    Commit,
+    #[sea_orm(string_value = "index_file")]
+    IndexFile,
+    #[sea_orm(string_value = "working_file")]
+    WorkingFile,
+    #[sea_orm(string_value = "local_file")]
+    LocalFile,
+}
+
+/// Confirmed loss of a file or an ephemeral working source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::None)")]
+#[serde(rename_all = "snake_case")]
+pub enum OrphanReason {
+    #[sea_orm(string_value = "file_deleted")]
+    FileDeleted,
+    #[sea_orm(string_value = "working_source_changed")]
+    WorkingSourceChanged,
+}
+
+/// Last observed forge review lifecycle; local contexts never have this value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::None)")]
+#[serde(rename_all = "snake_case")]
+pub enum ForgeState {
+    #[sea_orm(string_value = "open")]
+    Open,
+    #[sea_orm(string_value = "closed")]
+    Closed,
+    #[sea_orm(string_value = "merged")]
+    Merged,
+}
+impl ForgeState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Closed => "closed",
+            Self::Merged => "merged",
+        }
+    }
+}

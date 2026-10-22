@@ -1,6 +1,8 @@
 use super::super::database::models::threads;
 use super::super::error::Result;
-use super::{Actor, Anchor};
+use super::{Actor, Anchor, AnchorEvidence, ForgeObservation, OrphanReason};
+use crate::{models as m, proto::lgtm::v1 as p};
+use connectrpc::ConnectError;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -10,23 +12,52 @@ pub struct Thread {
     pub origin_session_id: Option<uuid::Uuid>,
     pub author: Actor,
     pub anchor: Anchor,
+    /// Immutable source evidence. None means the provider supplied no saved-byte evidence.
+    pub evidence: Option<AnchorEvidence>,
+    /// Confirmed current path; absent when no move has been observed.
+    pub current_path: Option<String>,
+    /// Original absolute source location for saved-file notes. It never follows a move.
+    #[serde(default)]
+    pub source_path: Option<String>,
+    pub orphan_reason: Option<OrphanReason>,
+    pub forge_observation: Option<ForgeObservation>,
     pub state: String,
     pub resolved_by: Option<Actor>,
     pub resolved_at: Option<String>,
     pub updated_by: Option<Actor>,
     pub updated_at: String,
     pub forge_thread_id: Option<String>,
-    pub outdated: bool,
 }
 
 impl Thread {
+    // Public ------------------------------------------------------------------
+
     pub fn from_db_model(
         v: threads::Model,
         author: Actor,
         resolved_by: Option<Actor>,
         updated_by: Option<Actor>,
     ) -> Result<Self> {
+        let evidence: Option<AnchorEvidence> =
+            v.source_evidence.map(serde_json::from_value).transpose()?;
+        if let Some(evidence) = &evidence {
+            evidence.validate()?;
+        }
+        let forge_observation: Option<ForgeObservation> = v
+            .forge_observation
+            .map(serde_json::from_value)
+            .transpose()?;
+        if let Some(observation) = &forge_observation
+            && let Some(anchor) = &observation.current
+        {
+            anchor.validate()?;
+        }
         Ok(Thread {
+            evidence,
+            current_path: v.current_path,
+            source_path: v.source_path,
+            orphan_reason: v.orphan_reason,
+            forge_observation,
             id: v.id,
             context_id: v.context_id,
             origin_session_id: v.origin_session_id,
@@ -34,7 +65,6 @@ impl Thread {
             resolved_at: v.resolved_at,
             updated_at: v.updated_at,
             forge_thread_id: v.forge_thread_id,
-            outdated: v.outdated,
             author,
             resolved_by,
             updated_by,
@@ -47,11 +77,76 @@ impl Thread {
                     start: v.start_line.unwrap_or_default(),
                     end: v.end_line.unwrap_or_default(),
                     side: v.side.unwrap_or_default(),
-                    commit: v.reviewed_commit.unwrap_or_default(),
                 },
                 _ => Anchor::General,
             },
         })
+    }
+
+    // RPC conversion ----------------------------------------------------------
+
+    /// Convert the domain value and include its concurrency token.
+    pub(crate) fn into_versioned_proto(
+        self,
+        version: i64,
+    ) -> std::result::Result<p::Thread, ConnectError> {
+        let value = self;
+        let token = crate::models::ExpectedObject::get_version(
+            m::ObjectKind::Thread,
+            version,
+            value.id,
+            &value,
+        )
+        .map_err(ConnectError::from)?;
+        let mut value = m::Thread::into_proto(value);
+        value.version = token;
+        Ok(value)
+    }
+
+    /// Convert the domain value to its RPC representation.
+    pub(crate) fn into_proto(self) -> p::Thread {
+        let v = self;
+        let mut original = m::Anchor::into_proto(v.anchor);
+        if let Some(evidence) = v.evidence {
+            original.source = Some(m::AnchorSource::into_proto(evidence.source)).into();
+            original.evidence = Some(p::AnchorEvidence {
+                selected_text: evidence.selected_text,
+                context_before: evidence.context_before,
+                context_after: evidence.context_after,
+                ..Default::default()
+            })
+            .into();
+        }
+        p::Thread {
+            id: v.id.to_string(),
+            anchor: Some(original).into(),
+            current_path: v.current_path.unwrap_or_default(),
+            source_path: v.source_path.unwrap_or_default(),
+            orphan_reason: v
+                .orphan_reason
+                .map(|r| {
+                    match r {
+                        m::OrphanReason::FileDeleted => "file_deleted",
+                        m::OrphanReason::WorkingSourceChanged => "working_source_changed",
+                    }
+                    .to_owned()
+                })
+                .unwrap_or_default(),
+            forge_observation: v
+                .forge_observation
+                .map(|o| p::ForgeObservation {
+                    base: o.base,
+                    head: o.head,
+                    outdated: o.outdated,
+                    current: o.current.map(m::Anchor::into_proto).into(),
+                    ..Default::default()
+                })
+                .into(),
+            state: v.state,
+            author: Some(m::Actor::into_proto(v.author)).into(),
+            forge_thread_id: v.forge_thread_id.unwrap_or_default(),
+            ..Default::default()
+        }
     }
 }
 
@@ -76,10 +171,17 @@ impl From<&Thread> for threads::Model {
                 Anchor::Line { side, .. } => Some(side.clone()),
                 _ => None,
             },
-            reviewed_commit: match &v.anchor {
-                Anchor::Line { commit, .. } => Some(commit.clone()),
-                _ => None,
-            },
+            source_evidence: v
+                .evidence
+                .as_ref()
+                .map(|value| serde_json::to_value(value).expect("anchor evidence serializes")),
+            forge_observation: v
+                .forge_observation
+                .as_ref()
+                .map(|value| serde_json::to_value(value).expect("forge observation serializes")),
+            current_path: v.current_path.clone(),
+            source_path: v.source_path.clone(),
+            orphan_reason: v.orphan_reason,
             start_line: match &v.anchor {
                 Anchor::Line { start, .. } => Some(*start),
                 _ => None,
@@ -94,7 +196,6 @@ impl From<&Thread> for threads::Model {
             updated_by_id: v.updated_by.as_ref().map(|a| a.id),
             updated_at: v.updated_at.clone(),
             forge_thread_id: v.forge_thread_id.clone(),
-            outdated: v.outdated,
         }
     }
 }

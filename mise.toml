@@ -4,15 +4,17 @@
 monorepo_root = true
 
 [env]
-_.path = ["{{config_root}}/bin"]
+# Keep Git diagnostics stable and Unicode fixtures usable on both CI platforms.
+LC_ALL = "{% if os() == 'macos' %}en_US.UTF-8{% else %}C.UTF-8{% endif %}"
 
 [monorepo]
-config_roots = ["apps/*", "libs/*"]
+config_roots = ["apps/*", "libs/*", "e2e/backend", "e2e/cli", "e2e/nvim"]
 
 [tools]
 buf = "1.73.0"
 rust = { version = "1.94.0", components = "rustfmt,clippy,rust-analyzer" }
 bun = "1.4.2"
+node = "26.10.0"
 goreleaser = "2.18.1"
 "cargo:cargo-zigbuild" = "0.23.4"
 zig = "0.16.0"
@@ -25,19 +27,19 @@ depends = ["//apps/lgtm-cli:bundle"]
 run = ["cargo build --workspace", "bun run --filter lgtm-web build"]
 
 [tasks.test]
-depends = ["//apps/lgtm-cli:bundle"]
+depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:test", "e2e:typecheck"]
 run = ["cargo test --workspace", "bun run --filter lgtm-web test"]
 
 [tasks.lint]
-depends = ["//apps/lgtm-cli:bundle"]
+depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:lint", "e2e:lint"]
 run = ["cargo clippy --workspace --all-targets --all-features -- -D warnings", "mise run //apps/lgtm-web:lint"]
 
 [tasks.format]
-depends = ["//apps/lgtm-cli:bundle"]
+depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:format", "e2e:format"]
 run = ["cargo fmt --all", "mise run //apps/lgtm-web:format"]
 
 [tasks."format:check"]
-depends = ["//apps/lgtm-cli:bundle"]
+depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:format:check", "e2e:format:check"]
 run = ["cargo fmt --all --check", "mise run //apps/lgtm-web:format:check"]
 
 [tasks."run:cli"]
@@ -73,4 +75,64 @@ depends = ["//apps/lgtm-backend:dev", "//apps/lgtm-web:dev"]
 
 [tasks."test:postgres"]
 description = "Run database and backend contracts on SQLite and PostgreSQL"
-run = "{{config_root}}/bin/with-postgres cargo test --locked -p lgtm-db -p lgtm-backend --all-features"
+run = "mise run //:with-postgres -- cargo test --locked -p lgtm-db -p lgtm-backend --all-features"
+
+[tasks."e2e:backend"]
+description = "Run backend E2E suite via its own Mise configuration"
+depends = ["//e2e/backend:test"]
+
+[tasks."e2e:cli"]
+description = "Run cli E2E suite via its own Mise configuration"
+depends = ["//e2e/cli:test"]
+
+[tasks."e2e:nvim"]
+description = "Run nvim E2E suite via its own Mise configuration"
+depends = ["//e2e/nvim:test"]
+
+[tasks.e2e]
+description = "Run every E2E suite and complete cleanup even if a suite fails"
+run = "mise run --continue-on-error //e2e/backend:test ::: //e2e/cli:test ::: //e2e/nvim:test"
+
+[tasks."nvim:lint"]
+depends = ["//apps/lgtm.nvim:lint"]
+
+[tasks."nvim:format"]
+depends = ["//apps/lgtm.nvim:format"]
+
+[tasks."nvim:format:check"]
+depends = ["//apps/lgtm.nvim:format:check"]
+
+[tasks."nvim:test"]
+depends = ["//apps/lgtm.nvim:test"]
+
+[tasks."e2e:format"]
+run = "bun x prettier --write 'e2e/{common,backend,cli,nvim}/**/*.ts' e2e/tsconfig.json"
+
+[tasks."e2e:format:check"]
+run = "bun x prettier --check 'e2e/{common,backend,cli,nvim}/**/*.ts' e2e/tsconfig.json"
+
+[tasks."e2e:typecheck"]
+run = "bun x tsc -p e2e/tsconfig.json"
+
+[tasks."e2e:lint"]
+run = "bun x eslint e2e/common e2e/backend e2e/cli e2e/nvim"
+
+[tasks."e2e:nvim:run"]
+description = "Run editor journeys against existing binaries without rebuilding"
+run = "bun x vitest run --config e2e/nvim/vitest.config.ts"
+
+[tasks."e2e:list"]
+description = "List local BDD journeys without running them"
+depends = ["//e2e/backend:list", "//e2e/cli:list", "//e2e/nvim:list"]
+
+[tasks."e2e:backend:run"]
+description = "Run backend journeys against existing binaries without rebuilding"
+run = "bun x vitest run --config e2e/backend/vitest.config.ts"
+
+[tasks."e2e:cli:run"]
+description = "Run CLI journeys against existing binaries without rebuilding"
+run = "bun x vitest run --config e2e/cli/vitest.config.ts"
+
+[tasks."e2e:smoke"]
+description = "Run representative E2E flows across backend, CLI and Neovim"
+run = "mise run --continue-on-error //e2e/backend:smoke ::: //e2e/cli:smoke ::: //e2e/nvim:smoke"

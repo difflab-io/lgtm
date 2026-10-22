@@ -17,6 +17,10 @@ pub struct Model {
     pub origin_session_id: Option<uuid::Uuid>,
     /// UUID of the logical human or agent author, independent of the posting account.
     pub author_id: uuid::Uuid,
+    /// Actor allowed to change this locally created draft; independent of source attribution.
+    pub owner_id: Option<uuid::Uuid>,
+    /// Original note UUID for promoted copies; survives source deletion.
+    pub source_note_id: Option<uuid::Uuid>,
     /// User-authored comment text, or optional session completion summary.
     pub body: String,
     /// Stable zero-based reply order within a thread; zero is the root comment.
@@ -47,8 +51,6 @@ pub struct Model {
     pub posting_request_key: Option<String>,
     /// Hash of the exact rendered outbound payload, used to correlate receipts and retries.
     pub payload_hash: Option<String>,
-    /// Latest complete observation: local, present or missing. Partial fetches never mark records missing.
-    pub remote_presence: String,
 
     #[sea_orm(belongs_to, relation_enum = "Author", from = "author_id", to = "id")]
     /// Loaded relationship; not an additional stored column.

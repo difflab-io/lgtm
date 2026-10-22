@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#MISE description="Run a command against supplied or isolated PostgreSQL 17"
 # Run a test command against supplied PostgreSQL or an isolated PostgreSQL 17 container.
 set -euo pipefail
 if [[ -n "${LGTM_TEST_POSTGRES_URL:-}" ]]; then

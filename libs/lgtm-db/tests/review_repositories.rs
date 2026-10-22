@@ -1,8 +1,8 @@
 //! Integration tests for review repositories.
+mod common;
 mod review_repositories {
     //! Public client usage: multi-repository transactions over notes, local and forge contexts.
     use lgtm_db::{
-        Database,
         models::{comments, identities, review_contexts, sessions, threads},
         types::{ContextKind, IdentityKind, PostingState, SessionState},
     };
@@ -29,6 +29,7 @@ mod review_repositories {
             state: SessionState::Active,
             base_commit: None,
             head_commit: None,
+            comparison_kind: lgtm_db::types::ComparisonKind::Directory,
             created_at: "2026-10-17T00:00:00Z".into(),
             completed_at: None,
             completed_by_id: None,
@@ -54,6 +55,8 @@ mod review_repositories {
             thread_id: thread.id,
             origin_session_id: Some(session.id),
             author_id: author,
+            owner_id: Some(author),
+            source_note_id: None,
             body: format!("Comment {position}"),
             position,
             visibility: "draft".into(),
@@ -69,46 +72,14 @@ mod review_repositories {
             posting_error: None,
             posting_request_key: None,
             payload_hash: None,
-            remote_presence: "local".into(),
         }
-    }
-
-    async fn databases() -> Vec<Database> {
-        #[allow(unused_mut)]
-        let mut result = vec![Database::connect("sqlite::memory:").await.unwrap()];
-        #[cfg(feature = "postgres")]
-        {
-            use sea_orm::ConnectionTrait;
-            let url = std::env::var("LGTM_TEST_POSTGRES_URL")
-                .expect("PostgreSQL contracts require an explicit disposable database");
-            let raw = sea_orm::Database::connect(&url).await.unwrap();
-            let schema = format!("workflow_{}", Uuid::new_v4().simple());
-            raw.execute_unprepared(&format!("CREATE SCHEMA {schema}"))
-                .await
-                .unwrap();
-            raw.close().await.unwrap();
-            let scoped = format!(
-                "{url}{}options=-c%20search_path%3D{schema}",
-                if url.contains('?') { '&' } else { '?' }
-            );
-            result.push(Database::connect(&scoped).await.unwrap());
-        }
-        result
     }
 
     // tests ------------------------------------------------------------------
 
     #[tokio::test]
     async fn should_support_multi_actor_reviews_and_successor_sessions() {
-        for db in databases().await {
-            assert!(
-                db.workspace
-                    .insert_repository(&lgtm_db::models::repositories::Model {
-                        repository_url: "local:/repo".into()
-                    })
-                    .await
-                    .is_err()
-            );
+        for db in super::common::databases().await {
             for location in ["notes", "branch", "forge"] {
                 let kind = if location == "forge" {
                     ContextKind::ForgeBacked
@@ -132,6 +103,7 @@ mod review_repositories {
                     id: context_id,
                     kind,
                     notes_path: (location == "notes").then(|| format!("/notes/{context_id}")),
+                    current_notes_path: None,
                     git_dir: (location == "branch").then(|| format!("/repos/{context_id}")),
                     branch: (location == "branch").then(|| "refs/heads/main".into()),
                     repository_url: (location == "forge").then(|| key.clone()),
@@ -142,8 +114,14 @@ mod review_repositories {
                     refreshed_base: (location == "forge").then(|| "base".into()),
                     refresh_error: None,
                     refresh_status: if location == "forge" { "live" } else { "never" }.into(),
+                    forge_state: None,
                 };
                 let mut review = session(context_id, first.id);
+                review.comparison_kind = match location {
+                    "notes" => lgtm_db::types::ComparisonKind::Directory,
+                    "branch" => lgtm_db::types::ComparisonKind::Branch,
+                    _ => lgtm_db::types::ComparisonKind::PullRequest,
+                };
                 if location != "notes" {
                     review.base_commit = Some("base".into());
                     review.head_commit = Some("head".into());
@@ -159,7 +137,13 @@ mod review_repositories {
                     anchor_kind: "general".into(),
                     file_path: None,
                     side: None,
-                    reviewed_commit: None,
+
+                    source_evidence: None,
+                    forge_observation: None,
+                    current_path: None,
+                    source_path: None,
+                    orphan_reason: None,
+
                     start_line: None,
                     end_line: None,
                     state: "open".into(),
@@ -168,7 +152,6 @@ mod review_repositories {
                     updated_by_id: None,
                     updated_at: "2026-10-17T00:00:00Z".into(),
                     forge_thread_id: None,
-                    outdated: false,
                 };
                 let mut root = comment(&thread, &review, first.id, 0);
                 let mut reply = comment(&thread, &review, agent.id, 1);
@@ -187,23 +170,16 @@ mod review_repositories {
                 for actor in [&first, &second, &agent] {
                     tx.identities.insert(actor).await.unwrap();
                 }
-                if location == "forge" {
-                    tx.workspace
-                        .insert_repository(&lgtm_db::models::repositories::Model {
-                            repository_url: key,
-                        })
-                        .await
-                        .unwrap();
-                }
                 tx.review_contexts.insert(&context).await.unwrap();
                 tx.sessions.insert(&review).await.unwrap();
                 tx.comments.insert_thread(&thread).await.unwrap();
-                tx.comments.insert(&root).await.unwrap();
-                tx.comments.insert(&reply).await.unwrap();
+                tx.comments.insert_comment(&root).await.unwrap();
+                tx.comments.insert_comment(&reply).await.unwrap();
                 tx.commit().await.unwrap();
 
                 // Different identities still share a single active session in this context.
                 let mut successor = session(context_id, second.id);
+                successor.comparison_kind = review.comparison_kind;
                 successor.base_commit = review.base_commit.clone();
                 successor.head_commit = review.head_commit.clone();
                 successor.submission_status = review.submission_status.clone();
@@ -225,7 +201,7 @@ mod review_repositories {
                 );
                 assert!(
                     db.comments
-                        .get_by_id(&Uuid::new_v4(), &root.id)
+                        .get_comment_by_id(&Uuid::new_v4(), &root.id)
                         .await
                         .unwrap()
                         .is_none()
@@ -238,7 +214,7 @@ mod review_repositories {
                     .unwrap();
                 for row in [&mut root, &mut reply] {
                     row.visibility = "published".into();
-                    tx.comments.update(row).await.unwrap();
+                    tx.comments.update_comment(row).await.unwrap();
                 }
                 review.completed_at = Some("2026-10-17T00:01:00Z".into());
                 review.completed_by_id = Some(first.id);
@@ -259,7 +235,7 @@ mod review_repositories {
                 assert!(!db.sessions.complete(&review).await.unwrap());
                 assert!(
                     db.comments
-                        .get_session_drafts(&review.id)
+                        .get_session_draft_comments(&review.id)
                         .await
                         .unwrap()
                         .is_empty()
@@ -283,9 +259,12 @@ mod review_repositories {
                     &thread,
                     &successor,
                     second.id,
-                    tx.comments.get_next_position(&thread.id).await.unwrap(),
+                    tx.comments
+                        .get_next_reply_position(&thread.id)
+                        .await
+                        .unwrap(),
                 );
-                tx.comments.insert(&response).await.unwrap();
+                tx.comments.insert_comment(&response).await.unwrap();
                 thread.state = "resolved".into();
                 thread.resolved_by_id = Some(second.id);
                 thread.resolved_at = Some("2026-10-17T00:02:00Z".into());
@@ -293,7 +272,7 @@ mod review_repositories {
                 tx.comments.update_thread(&thread).await.unwrap();
                 tx.commit().await.unwrap();
 
-                let stored = db.comments.get_all(&context_id).await.unwrap();
+                let stored = db.comments.get_comments(&context_id).await.unwrap();
                 assert_eq!(stored.len(), 3);
                 assert_eq!(stored[0].author_id, first.id);
                 assert_eq!(stored[1].author_id, agent.id);
@@ -318,7 +297,7 @@ mod review_repositories {
                 let tx = db.begin().await.unwrap();
                 let mut response = stored[2].clone();
                 response.visibility = "published".into();
-                tx.comments.update(&response).await.unwrap();
+                tx.comments.update_comment(&response).await.unwrap();
                 tx.sessions.complete(&finished).await.unwrap();
                 tx.commit().await.unwrap();
                 assert!(db.sessions.get_active(&context_id).await.unwrap().is_none());
@@ -339,7 +318,7 @@ mod review_repositories {
                 assert!(db.identities.insert(&invalid).await.is_err());
                 let mut inconsistent = root.clone();
                 inconsistent.posting_error = Some("error on an unposted record".into());
-                assert!(db.comments.update(&inconsistent).await.is_err());
+                assert!(db.comments.update_comment(&inconsistent).await.is_err());
             }
             db.close().await;
         }

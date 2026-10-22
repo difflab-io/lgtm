@@ -1,7 +1,8 @@
 pub mod comments;
 pub mod common;
+pub mod file_reviews;
 pub mod identities;
-pub mod repositories;
+pub mod mutation_receipts;
 pub mod review_contexts;
 pub mod sessions;
 pub mod threads;
@@ -43,6 +44,7 @@ mod tests {
                     id: fixture_id("context"),
                     kind: crate::entities::common::ContextKind::Local,
                     notes_path: Some("/notes".into()),
+                    current_notes_path: None,
                     git_dir: None,
                     branch: None,
                     repository_url: None,
@@ -53,6 +55,7 @@ mod tests {
                     refreshed_base: None,
                     refresh_error: None,
                     refresh_status: "never".into(),
+                    forge_state: None,
                 })
                 .await
                 .unwrap();
@@ -64,7 +67,13 @@ mod tests {
                 anchor_kind: "general".into(),
                 file_path: None,
                 side: None,
-                reviewed_commit: None,
+
+                source_evidence: None,
+                forge_observation: None,
+                current_path: None,
+                source_path: None,
+                orphan_reason: None,
+
                 start_line: None,
                 end_line: None,
                 state: "resolved".into(),
@@ -73,7 +82,6 @@ mod tests {
                 updated_by_id: Some(fixture_id("updater")),
                 updated_at: "now".into(),
                 forge_thread_id: None,
-                outdated: false,
             };
             db.comments.insert_thread(&thread).await.unwrap();
             let loaded = threads::Entity::load()

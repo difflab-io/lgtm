@@ -2,7 +2,7 @@
 //MISE description="Bundle the private backend and web UI into the publishable CLI"
 //MISE depends=["//apps/lgtm-backend:build", "//apps/lgtm-web:build"]
 
-import { cp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 const cli = process.cwd()
@@ -27,15 +27,35 @@ if (!generated) throw new Error('Backend did not report generated Protobuf outpu
 const stage = join(cli, '.bundle-stage')
 await rm(stage, { recursive: true, force: true })
 await mkdir(stage)
-const backendSource = await readFile(join(root, 'apps/lgtm-backend/src/lib.rs'), 'utf8')
-// Bundle the existing RPC router, not the backend's review-domain/database modules.
-// Future CLI review commands will use the generated RPC client.
-await writeFile(
-  join(stage, 'backend.rs'),
-  backendSource
-    .replace(/^pub use lgtm_db as database;\n|^pub mod (?:error|models|services|utils);\n/gm, '')
-    .replace(/\n{3,}/g, '\n\n'),
+// Include the real backend and DB sources so the standalone published CLI serves
+// the same review API without depending on unpublished workspace crates.
+async function bundleRust(sourceDir, targetDir, crateRoot) {
+  await mkdir(targetDir, { recursive: true })
+  for (const entry of await readdir(sourceDir, { withFileTypes: true })) {
+    if (entry.name === 'tests' || entry.name === 'main.rs') continue
+    const source = join(sourceDir, entry.name)
+    const target = join(targetDir, entry.name === 'lib.rs' ? 'mod.rs' : entry.name)
+    if (entry.isDirectory()) {
+      await bundleRust(source, target, crateRoot)
+    } else if (entry.name.endsWith('.rs')) {
+      let content = (await readFile(source, 'utf8'))
+        .replace(/\n\/\/ tests -+[\s\S]*$/, '\n')
+        .replace(/    #\[cfg\(test\)\]\n    pub\(crate\) fn connection\(&self\) -> &C \{\n        self\.pool\.as_ref\(\)\n    \}\n/, '')
+        .replace(/\bcrate::/g, `${crateRoot}::`)
+      if (entry.name === 'lib.rs' && crateRoot === 'crate::backend') {
+        content = content.replace('pub use lgtm_db as database;', 'pub mod database;')
+      }
+      await writeFile(target, content)
+    }
+  }
+}
+await bundleRust(join(root, 'apps/lgtm-backend/src'), join(stage, 'backend'), 'crate::backend')
+await bundleRust(join(root, 'libs/lgtm-db/src'), join(stage, 'backend/database'), 'crate::backend::database')
+const formatted = Bun.spawnSync(
+  ['rustfmt', '--edition', '2024', join(stage, 'backend/mod.rs')],
+  { cwd: root, stdout: 'inherit', stderr: 'inherit' },
 )
+if (formatted.exitCode !== 0) throw new Error('Bundled backend formatting failed')
 await cp(generated, join(stage, 'proto'), { recursive: true })
 await cp(join(root, 'apps/lgtm-web/build'), join(stage, 'web'), { recursive: true })
 // Fail before replacing the previous bundle if the web build is incomplete.

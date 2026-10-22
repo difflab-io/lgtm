@@ -4,6 +4,21 @@ use lgtm_backend::{
     services::{AuthService, ReviewService},
 };
 
+/// Default selection for service fixtures; public clients always select an explicit comparison.
+#[allow(dead_code)]
+pub fn comparison(context: &lgtm_backend::models::Context) -> lgtm_backend::models::ComparisonKind {
+    use lgtm_backend::models::{ComparisonKind, ContextKey, LocalLocation};
+    match context.key {
+        ContextKey::ForgeBacked { .. } => ComparisonKind::PullRequest,
+        ContextKey::Local {
+            location: LocalLocation::Branch { .. },
+        } => ComparisonKind::Branch,
+        ContextKey::Local {
+            location: LocalLocation::Notes { .. },
+        } => ComparisonKind::Directory,
+    }
+}
+
 // fixtures --------------------------------------------------------------------
 pub async fn databases() -> Vec<(ReviewService, String, tempfile::TempDir)> {
     let temp = tempfile::tempdir().unwrap();
@@ -45,3 +60,6 @@ pub async fn service(url: &str) -> Result<ReviewService> {
 
 #[allow(dead_code)] // Used only by remote contract tests.
 pub mod forge;
+
+#[allow(dead_code)]
+pub mod github_http;

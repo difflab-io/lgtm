@@ -1,26 +1,19 @@
 use clap::{Args, Parser, Subcommand};
 use tracing::Instrument;
 
-#[path = "../bundle/backend.rs"]
+#[path = "../bundle/backend/mod.rs"]
 pub mod backend;
-mod context;
 mod daemon;
 mod log;
+mod models;
 
-mod reviews;
+mod commands;
+mod rpc_client;
 mod server;
 mod store;
 mod ui;
 
 // types -----------------------------------------------------------------------
-
-/// Run LGTM with a bundled web UI and gRPC server.
-#[derive(Parser)]
-#[command(name = "lgtm", version, about)]
-struct Cli {
-    #[command(subcommand)]
-    command: Command,
-}
 
 #[derive(Subcommand)]
 enum Command {
@@ -29,19 +22,13 @@ enum Command {
     /// Stop the background server.
     Down,
     /// Show whether the server is running.
-    Status {
-        /// Print server discovery information as JSON.
-        #[arg(long)]
-        json: bool,
-    },
+    Status,
     /// Open the current directory in the web interface.
-    Review(reviews::ReviewArgs),
-    /// Scaffold for future backend session RPC commands.
-    Session(reviews::SessionArgs),
-    /// Scaffold for future backend session listing.
-    Sessions(reviews::SessionsArgs),
-    /// Scaffold for future backend comment RPC commands.
-    Comments(reviews::CommentsArgs),
+    Review(commands::review::ReviewArgs),
+    /// Manage review attempts and list saved reviews.
+    Session(commands::session::SessionArgs),
+    /// Add, edit and manage feedback through the backend.
+    Comments(commands::comments::CommentsArgs),
     #[command(hide = true)]
     Serve {
         #[arg(long, default_value_t = 8080)]
@@ -64,9 +51,37 @@ struct Up {
     no_open: bool,
 }
 
-// api -------------------------------------------------------------------------
+// Command ---------------------------------------------------------------------
 
-fn main() -> anyhow::Result<()> {
+/// Run LGTM with a bundled web UI and gRPC server.
+#[derive(Parser)]
+#[command(name = "lgtm", version, about)]
+struct Cli {
+    /// Return machine-readable JSON, with diagnostics on stderr.
+    #[arg(long, global = true)]
+    json: bool,
+    #[command(subcommand)]
+    command: Command,
+}
+
+// Callbacks -------------------------------------------------------------------
+
+fn main() {
+    let json_output = std::env::args().any(|arg| arg == "--json");
+    if let Err(error) = run() {
+        if json_output {
+            println!(
+                "{}",
+                serde_json::json!({"error":{"code":"command_failed","message":error.to_string()}})
+            );
+        } else {
+            eprintln!("{error:#}");
+        }
+        std::process::exit(1);
+    }
+}
+
+fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let store = store::Store::new()?;
     // Fork only in the fresh server process, before starting Tokio threads.
@@ -84,10 +99,9 @@ fn main() -> anyhow::Result<()> {
     let command = match &cli.command {
         Command::Up(_) => "up",
         Command::Down => "down",
-        Command::Status { .. } => "status",
+        Command::Status => "status",
         Command::Review(_) => "review",
         Command::Session(_) => "session",
-        Command::Sessions(_) => "sessions",
         Command::Comments(_) => "comments",
         Command::Serve { .. } => "serve",
     };
@@ -99,11 +113,10 @@ fn main() -> anyhow::Result<()> {
                 }
                 Command::Up(options) => daemon::up(options.port, !options.no_open, &store).await,
                 Command::Down => daemon::down(&store).await,
-                Command::Status { json } => daemon::status(&store, json).await,
-                Command::Review(args) => reviews::review(args, &store).await,
-                Command::Session(args) => reviews::session(args, &store).await,
-                Command::Sessions(args) => reviews::sessions(args, &store).await,
-                Command::Comments(args) => reviews::comments(args, &store).await,
+                Command::Status => daemon::status(&store, cli.json).await,
+                Command::Review(args) => commands::review::run(args, &store, cli.json).await,
+                Command::Session(args) => commands::session::run(args, &store, cli.json).await,
+                Command::Comments(args) => commands::comments::run(args, &store, cli.json).await,
                 Command::Serve { port, daemonize } => server::serve(port, &store, daemonize).await,
             }
         }

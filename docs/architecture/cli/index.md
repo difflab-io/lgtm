@@ -1,43 +1,62 @@
-# CLI architecture
+# CLI — software architecture
 
 ## Overview
 
 The main module parses CLI commands and connects them to the daemon, server, store, log, and UI modules.
 
-## Modules
-
-<!-- prettier-ignore -->
-| Module              | Responsibility                         |
-| ------------------- | -------------------------------------- |
-| [Daemon](daemon.md) | Start, discover, and stop the server   |
-| [Server](server.md) | Serve web assets and API requests      |
-| [Store](store.md)   | Own runtime paths and PID/port files   |
-| `ui`                | Build review URLs and open the browser |
-| Bundled backend     | Provide greeting and health services   |
-
 ## Requirement
 
 ### Functional
 
-- Route `up`, `down`, `status`, `review`, `session`, `sessions` and `comments` to their module APIs.
-- Support foreground serving and the internal background startup command.
-- Apply one store directory to every command.
+- FR1: Route `up`, `down`, `status`, `review`, `session` and `comments` to their module APIs.
+- FR2: Support foreground serving and the internal background startup command.
+- FR3: Apply one store directory to every command.
 
 ### Non-Functional
 
-- Detach the background server before starting Tokio threads.
-- Return command errors through the process exit status.
+- NFR1: Detach the background server before starting Tokio threads.
+- NFR2: Return command errors through the process exit status.
 
 ## Design
 
+### Usage
+
+Start the local application, inspect its connection details, then stop it when finished:
+
+```sh
+lgtm up --no-open
+lgtm status --json
+lgtm down
+```
+
+Neovim connects to the running backend. Review and comment commands use the same backend data. See the [product guide](../../user-guide.md) for review workflows.
+
+
 ### Components and Responsibilities
+
+#### Modules
+
+<!-- prettier-ignore -->
+- [Daemon](daemon.md): Start, discover, and stop the server
+- [Server](server.md): Serve web assets and API requests
+- [Store](store.md): Own runtime paths and PID/port files
+- `commands/`: Own one command group per file; share target, identity and output helpers in its module
+- `models.rs`: Shared command arguments; no RPC transport or persistence
+- `rpc_client.rs`: Generated Rust gRPC clients and connection discovery
+- `ui`: Build review URLs and open the browser
+- Bundled backend: Serve review, diff, identity, greeting and health services
+
 
 ```mermaid
 flowchart TD
     MAIN["main: parse CLI command"] --> STORE["Store: select runtime directory"]
     MAIN --> DAEMON["daemon: up / down / status"]
     MAIN --> SERVER["server: serve"]
-    MAIN --> UI["ui: review path"]
+    MAIN --> COMMANDS["commands: review / session / comments"]
+    COMMANDS --> MODELS["models: shared CLI arguments"]
+    COMMANDS --> CLIENT["rpc_client: generated gRPC clients"]
+    COMMANDS --> UI["ui: browser review path"]
+    CLIENT --> BACKEND["Shared backend API"]
     MAIN --> LOG["log: initialize server logging"]
 ```
 
@@ -52,75 +71,49 @@ flowchart TD
 
 The entry point parses arguments and constructs a store. For `serve --daemonize`, it detaches before creating the Tokio runtime. Server commands initialize logging before creating the runtime. The entry point then calls the selected module API inside it.
 
-`review` uses the review scaffold to select a local path and passes that path to `ui::open_review`. This function obtains a ready server, encodes the path as a query parameter, and opens the browser. The server's working directory is the store.
+`review` uses the browser compatibility entry point to select a local path and passes that path to `ui::open_review`. This function obtains a ready server, encodes the path as a query parameter, and opens the browser. The server's working directory is the store.
 
-ReviewService and database access stay in the backend; the CLI keeps only review command shapes pending RPCs. The daemon uses the store for discovery and the log module for background output. The server uses the same store for PID ownership and its listening port. These modules share one `Store` value from the entry point.
+ReviewService and database access stay in the backend. Session/comment commands use generated Rust gRPC clients; the bundled server initializes the real backend and its database. The daemon uses the store for discovery and the log module for background output. The server uses the same store for PID ownership and its listening port. These modules share one `Store` value from the entry point.
 
-### Review-situation flows
+#### Review flows
 
-These diagrams describe planned review commands through backend RPCs. The current CLI opens the dummy UI and retains session/comment command shapes. It does not call review services or access the database.
-
-```mermaid
-flowchart TD
-    A["Active session with draft comments"] -->|Complete in one transaction| C["Completed review metadata"]
-    A -->|Publish drafts on completion| P["Context conversation keeps stable comment IDs"]
-    C --> N["Next start creates another active session"]
-    P --> N
-    N --> R["Reply to or resolve existing context threads"]
-    P --> L["Bodies and resolution remain current; no snapshots"]
-```
-
-A context has one active session shared by identities. Completion publishes its drafts and retains completed metadata. Later sessions reuse the same context conversation, without copying or snapshotting comments.
+Session and comment commands use generated backend clients. The browser `review` entry point opens the demonstration UI; `review --json` starts a review through RPC. Only the server opens review storage or calls the forge. Adding or replying after a confirmed PR submission selects a new active attempt for the same PR; the submitted attempt remains immutable.
 
 ```mermaid
 flowchart TD
-    P["Planned CLI: canonical notes path"] --> RPC["Request session through backend RPC"]
-    RPC --> S["Backend selects or creates active session"]
-    S --> D["CLI requests draft annotations"]
-    D --> C["Backend completes session and publishes locally"]
-    C --> H["Retain completed metadata and stable comments"]
-    H --> N["Next session continues context conversation"]
-    N --> D
-    C --> E["Side effects: backend database writes only"]
+    Args["CLI arguments"] --> Target["Infer target and comparison"]
+    Target --> Start["StartReview or select saved review"]
+    File["Saved-file notes path"] --> Scope["Notes scope; no visible review"]
+    Start --> Scope
+    Scope --> Action["Read or mutate conversation"]
+    Content["Selected local bytes or DiffService file"] --> Evidence["Typed source identity and bounded excerpt"]
+    Evidence --> Action
+    Action --> Local["Exact local completion"]
+    Action --> PR["Private PR draft; explicit submission"]
+    Action --> Export["Read-only Markdown export"]
 ```
 
-Notes use a canonical local path as their context key. Planned commands create drafts and complete sessions through the backend. Their effects are database writes, without Git or forge writes.
-
-```mermaid
-flowchart TD
-    G["Planned CLI: supply Git directory, branch and commits"] --> RPC["Request session through backend RPC"]
-    RPC --> S["Backend starts active session"]
-    S --> D["CLI requests draft comments and replies"]
-    D --> C["Backend publishes and records ready-to-address"]
-    C --> N["Next session sees the same context threads"]
-    N --> A["Retain original anchors and mark outdated locations"]
-    A --> D
-    C --> E["Side effects: read Git metadata and write review database"]
-```
-
-Local branch reviews use an absolute Git directory, branch and reviewed commits. A forge remote is optional for these local contexts. Planned commands preserve original comment anchors and continue existing threads. Git metadata is read for context, while review changes remain in backend persistence.
+Working, staged, and branch comparisons share their local branch conversation. PRs retain a separate conversation. Commands capture selected source evidence before commenting. A confirmed saved-file or directory move uses `session refresh --notes NEW --moved-from OLD` and keeps discussion IDs.
 
 ```mermaid
 sequenceDiagram
     participant CLI
     participant Backend
-    participant Forge as Live PR provider - planned
-    Note over CLI,Forge: Planned RPC and provider flow, not current CLI behavior
-    CLI->>Backend: Start a forge session
-    Backend->>Forge: Fetch current PR and all comment pages
-    Forge-->>Backend: Current comments, threads and scoped IDs
-    Backend->>Backend: Reconcile IDs and preserve known identities
-    Backend-->>CLI: Active session and current conversation
-    CLI->>Backend: Add draft comments and complete review
-    Backend->>Forge: Publish through supported provider operations
-    Forge-->>Backend: Confirm remote IDs or return failure
-    Backend->>Backend: Record confirmed IDs or uncertain posting state
-    Note over Backend,Forge: A later session fetches the live PR again
+    participant GitHub
+    CLI->>Backend: StartReview with PR target
+    Backend->>GitHub: Observe lifecycle and comparison
+    Backend-->>CLI: Review ID and version
+    CLI->>Backend: AddComment with scope and source evidence
+    Backend->>Backend: Save local draft
+    Backend->>GitHub: Save eligible private pending draft
+    Backend-->>CLI: Local save and separate remote result
+    CLI->>Backend: Explicit SubmitReview with final body
+    Backend->>GitHub: Submit the saved pending review
+    GitHub-->>Backend: Receipt or uncertain result
+    Backend-->>CLI: Confirmed result or recovery required
 ```
 
-A forge-backed context requires a repository URL and PR/MR number. A new forge session must fetch current PR comments before the backend uses them as context. The backend matches scoped forge IDs to local records and retains known agent attribution. Local history does not prove that a live PR is current.
-
-Forge publication changes the PR and records confirmed remote IDs locally. A failed or uncertain operation requires reconciliation before retry. There is no live provider implementation yet. Backend integration tests use an explicit dummy provider, and submission remains unsubmitted in the current fixture.
+Uncertain remote writes use saved receipts and explicit reconciliation. They are not blindly replayed. `--json` returns one machine-readable result; errors retain a nonzero exit status. Export contains reader-facing Markdown, not database state.
 
 ### Interfaces and Contracts
 
@@ -133,7 +126,11 @@ Forge publication changes the PR and records confirmed remote IDs locally. A fai
 | `status`            | Print server URLs                         |
 | `status --json`     | Print discovery data                      |
 | `review`            | Open the current directory in the UI      |
-| `serve --daemonize` | Internal background startup               |
+| `review --json` | Start or resume a review through the backend |
+| `session` | Start, show, refresh, export, complete or submit a review |
+| `session list` | List saved review attempts |
+| `comments` | Add, reply, edit, delete, resolve, reopen or promote feedback |
+| `serve --daemonize` | Internal background startup |
 
 The default port is `8080`. Port `0` asks the operating system for an available port. `--no-open` suppresses browser launch for `up` and `review`.
 
@@ -141,9 +138,25 @@ The default port is `8080`. Port `0` asks the operating system for an available 
 
 ## Implementation
 
+### File organization
+
+```text
+apps/lgtm-cli/src/
+├── main.rs                   Root parsing and dispatch
+├── models.rs                 Shared command arguments
+├── rpc_client.rs             RPC transport and discovery
+└── commands/
+    ├── mod.rs                Shared selection, identity and output helpers
+    ├── review.rs             Browser and machine review entry points
+    ├── session.rs            List, start, show, refresh, export, complete and submit
+    └── comments.rs           Comments, replies, resolution and promotion
+```
+
+Each command file puts local types first, then its command argument struct, callbacks and private helpers. Backend services retain persistence and forge behavior.
+
 ### Command definitions
 
-Clap derives argument parsing from Rust types. The internal `serve` command is hidden from normal help. `main()` returns `anyhow::Result<()>`, so parsing and runtime errors do not report command success.
+Clap derives argument parsing from Rust types. The internal `serve` command is hidden from normal help. `run()` returns `anyhow::Result<()>`. `main()` prints errors to stderr or as JSON and exits with a nonzero status.
 
 ### Runtime boundary
 
@@ -151,7 +164,7 @@ Background startup uses a fresh copy of the executable. That copy calls `daemon:
 
 ### Backend inclusion
 
-The `backend` module comes from `bundle/backend.rs`. The bundle task copies only the current greeting/health RPC router into the CLI package before compilation.
+The `backend` module comes from `bundle/backend/mod.rs`. The tracked bundle task includes the backend router, generated review/diff protocol types, and database sources before compilation. Review commands never embed a second persistence workflow.
 
 ## References
 

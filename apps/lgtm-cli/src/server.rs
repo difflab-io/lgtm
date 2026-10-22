@@ -26,7 +26,14 @@ pub async fn serve(port: u16, store: &Store, detached: bool) -> anyhow::Result<(
     };
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await?;
     let port = listener.local_addr()?.port();
-    let (router, health) = backend::router();
+    let database_url = std::env::var("LGTM_DATABASE_URL").unwrap_or_else(|_| {
+        format!(
+            "sqlite://{}?mode=rwc",
+            store.path("reviews.sqlite").display()
+        )
+    });
+    let database = backend::database::Database::connect(&database_url).await?;
+    let (router, health) = backend::router_with_database(database);
     let rpc = router.into_axum_service();
     let app = Router::new()
         .route(

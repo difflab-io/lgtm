@@ -10,23 +10,25 @@ The backend is the library's application client. Backend services own domain val
 
 ### Functional
 
-- Persist identities, forge repository URLs, workspace paths, contexts, sessions, threads and comments.
-- Expose the queries and mutations required by backend services.
-- Support transactions across repositories, with explicit commit and rollback.
-- Apply pending schema migrations before returning a connected client.
-- Enforce record relationships, unique keys and valid field combinations.
+- FR1: Persist identities, forge repository URLs, workspace paths, contexts, sessions, threads and comments.
+- FR2: Expose the queries and mutations required by backend services.
+- FR3: Support transactions across repositories, with explicit commit and rollback.
+- FR4: Apply pending schema migrations before returning a connected client.
+- FR5: Enforce record relationships, unique keys and valid field combinations.
 
 ### Non-Functional
 
-- Share repository implementations and Rust migrations across SQLite and PostgreSQL.
-- Expose SeaORM `Model` values while keeping entity operations and raw connections private.
-- Keep backend services, forge providers and network operations outside the library.
+- NFR1: Share repository implementations and Rust migrations across SQLite and PostgreSQL.
+- NFR2: Expose SeaORM `Model` values while keeping entity operations and raw connections private.
+- NFR3: Keep backend services, forge providers and network operations outside the library.
 
-## Usage
+## Design
+
+### Usage
 
 This mini tutorial shows the API that backend code uses. Start with a connection, insert and query a record, then compose operations in a transaction. The comment-edit example assumes that its context and comment already exist.
 
-### Connect, insert and query
+#### Connect, insert and query
 
 The default feature enables SQLite. A PostgreSQL build must enable the `postgres` feature. Both drivers use the same client and repository API.
 
@@ -58,7 +60,7 @@ async fn example() -> Result<()> {
 }
 ```
 
-### Look up a context
+#### Look up a context
 
 The database `ContextKey` is independent of the backend domain type:
 
@@ -73,7 +75,7 @@ let context = db.review_contexts
     .await?;
 ```
 
-### Change records atomically
+#### Change records atomically
 
 ```mermaid
 sequenceDiagram
@@ -132,7 +134,7 @@ async fn edit_comment(
 }
 ```
 
-### Cancel or nest work
+#### Cancel or nest work
 
 For explicit cancellation, call `tx.rollback().await?`. For a nested boundary, call `let nested = tx.begin().await?`, use `nested` repository fields, then commit or roll back `nested`. The outer transaction still controls the final database commit.
 
@@ -140,13 +142,12 @@ For explicit cancellation, call `tx.rollback().await?`. For a nested boundary, c
 
 The backend can await other fallible work before commit and roll back database changes if that work fails. A database rollback cannot undo a completed network operation. External side effects require a separate application policy.
 
-### Handle startup and shutdown
+#### Handle startup and shutdown
 
 `Database::connect()` applies pending migrations automatically. Callers do not run a separate migration API. If startup or migration fails, the call returns an error instead of a client.
 
 Cloned database clients share their connection pool. Call `db.close().await` after all users finish. Closing one client closes that shared pool.
 
-## Design
 
 ### Components and Responsibilities
 
@@ -180,18 +181,29 @@ flowchart TB
     Schema --> Storage
 ```
 
-| Component | Responsibility |
-| --- | --- |
-| Backend services | Supply validated values, call repository methods and decide transaction boundaries. |
-| `Database<C>` | Bind repository fields to one shared connection or transaction. The default `C` is SeaORM's pool-backed `DatabaseConnection`. |
-| `Transaction` | Alias for `Database<DatabaseTransaction>`. Expose the same repositories, plus consuming `commit()` and `rollback()` methods. |
-| Repository structs | Execute the supported queries and mutations. Select writable columns explicitly. |
-| `models` | Re-export each table's actual SeaORM `Model` type through a public namespace. |
-| Private `entities/` | Define columns and relationships. Shared SeaORM enums live in `entities/common.rs` and are re-exported as `types`. |
-| Private `Migrator` | Apply ordered Rust migrations and maintain the framework's migration history. |
-| SchemaManager and SeaQuery | Build schema operations for the selected database driver. |
+- Backend services: Supply validated values, call repository methods and decide transaction boundaries.
+- `Database<C>`: Bind repository fields to one shared connection or transaction. The default `C` is SeaORM's pool-backed `DatabaseConnection`.
+- `Transaction`: Alias for `Database<DatabaseTransaction>`. Expose the same repositories, plus consuming `commit()` and `rollback()` methods.
+- Repository structs: Execute the supported queries and mutations. Select writable columns explicitly.
+- `models`: Re-export each table's actual SeaORM `Model` type through a public namespace.
+- Private `entities/`: Define columns and relationships. Shared SeaORM enums live in `entities/common.rs` and are re-exported as `types`.
+- Private `Migrator`: Apply ordered Rust migrations and maintain the framework's migration history.
+- SchemaManager and SeaQuery: Build schema operations for the selected database driver.
 
-The client exposes five fields: `identities`, `review_contexts`, `workspace`, `sessions` and `comments`. The comment repository also owns thread operations. Callers use `db.sessions.get_active(&context_id)` directly.
+The client exposes six repository fields: `identities`, `review_contexts`, `workspace`, `sessions`, `comments` and `mutations`. The comment repository also owns thread operations. Callers use `db.sessions.get_active(&context_id)` directly.
+
+### Data and Control Flow
+
+```mermaid
+flowchart LR
+    Caller["Backend service"] --> Handle["Database or transaction handle"]
+    Handle --> Repository["Named repository operation"]
+    Repository --> SQL["SQLite or PostgreSQL"]
+    SQL --> Rows["SeaORM models or error"]
+    Rows --> Caller
+```
+
+The caller chooses the transaction boundary. All operations on its transaction use the same SQL transaction. Repositories return records. Backend services apply domain rules to those records.
 
 ### Interfaces and Contracts
 
@@ -200,16 +212,14 @@ The client exposes five fields: `identities`, `review_contexts`, `workspace`, `s
 ```mermaid
 erDiagram
     direction LR
-    REPOSITORIES {
-        text repository_url PK
-    }
     REVIEW_CONTEXTS {
         uuid id PK
         ContextKind kind
         text notes_path "nullable"
+        text current_notes_path "nullable"
         text git_dir "nullable"
         text branch "nullable"
-        text repository_url FK "nullable"
+        text repository_url "nullable"
         bigint number "nullable"
         bigint revision
         text last_refreshed_at "nullable"
@@ -217,6 +227,7 @@ erDiagram
         text refreshed_base "nullable"
         text refresh_error "nullable"
         text refresh_status
+        ForgeState forge_state "nullable"
     }
     WORKSPACE_PATHS {
         uuid context_id PK,FK
@@ -238,6 +249,7 @@ erDiagram
         SessionState state
         text base_commit "nullable"
         text head_commit "nullable"
+        ComparisonKind comparison_kind
         text created_at
         text completed_at "nullable"
         uuid completed_by_id FK "nullable"
@@ -257,7 +269,11 @@ erDiagram
         text anchor_kind
         text file_path "nullable"
         text side "nullable"
-        text reviewed_commit "nullable"
+        json source_evidence "nullable"
+        json forge_observation "nullable"
+        text source_path "nullable"
+        text current_path "nullable"
+        OrphanReason orphan_reason "nullable"
         bigint start_line "nullable"
         bigint end_line "nullable"
         text state
@@ -266,7 +282,6 @@ erDiagram
         uuid updated_by_id FK "nullable"
         text updated_at
         text forge_thread_id "nullable"
-        boolean outdated
     }
     COMMENTS {
         uuid id PK
@@ -274,6 +289,8 @@ erDiagram
         uuid thread_id FK
         uuid origin_session_id FK "nullable"
         uuid author_id FK
+        uuid owner_id FK "nullable"
+        uuid source_note_id "nullable"
         text body
         bigint position
         text visibility
@@ -289,9 +306,28 @@ erDiagram
         text posting_error "nullable"
         text posting_request_key "nullable"
         text payload_hash "nullable"
-        text remote_presence
     }
-    REPOSITORIES |o--o{ REVIEW_CONTEXTS : repository_url
+    MUTATION_RECEIPTS {
+        uuid context_id PK,FK
+        uuid actor_id PK,FK
+        text request_key PK
+        text method
+        text request_hash
+        text result_json
+        bigint version
+        uuid object_id "nullable"
+        boolean pending
+    }
+    FILE_REVIEWS {
+        uuid context_id PK,FK
+        uuid actor_id PK,FK
+        text path PK
+        text content_identity
+    }
+    REVIEW_CONTEXTS ||--o{ MUTATION_RECEIPTS : context_id
+    IDENTITIES ||--o{ MUTATION_RECEIPTS : actor_id
+    REVIEW_CONTEXTS ||--o{ FILE_REVIEWS : context_id
+    IDENTITIES ||--o{ FILE_REVIEWS : actor_id
     REVIEW_CONTEXTS ||--o{ WORKSPACE_PATHS : context_id
     REVIEW_CONTEXTS ||--o{ SESSIONS : context_id
     REVIEW_CONTEXTS ||--o{ THREADS : context_id
@@ -307,7 +343,7 @@ erDiagram
     IDENTITIES ||--o{ COMMENTS : author_id
 ```
 
-The ERD above includes every stored field. `PK` marks a primary key and `FK` marks a foreign key. A `nullable` field can contain SQL `NULL`.
+The ERD shows the main review records. Retry metadata and reviewed-file marks are described below. `PK` marks a primary key and `FK` marks a foreign key. A `nullable` field can contain SQL `NULL`.
 
 The diagram describes the current schema. UUID fields use native PostgreSQL UUID storage and SQLite UUID text storage. Timestamp fields currently use text in both the models and migration. The diagram does not imply a timestamp-type conversion.
 
@@ -323,7 +359,7 @@ The shared migration also enforces constraints that relationship lines cannot ex
 - Human identities require email and exclude model/provider. Agent identities require model/provider and exclude email.
 - Active/completed sessions and posting states have constraints for their associated metadata and errors.
 
-Fields that contain complete URLs use a `_url` suffix. `repositories.repository_url` identifies a forge repository, and `review_contexts.repository_url` references it. Local branch contexts use `git_dir` instead. The backend derives the forge origin from the URL, including its scheme and port.
+Fields that contain complete URLs use a `_url` suffix. `review_contexts.repository_url` identifies the forge repository directly; there is no separate repository registry. Local branch contexts use `git_dir` instead. The backend derives the forge origin from the URL, including its scheme and port.
 
 The backend represents local locations as `LocalLocation::Notes` or `LocalLocation::Branch`. Forge-backed contexts require a parsed `ForgeRepositoryUrl`. Refresh, posting and remote receipt operations reject persisted local contexts before mutating records.
 
@@ -352,14 +388,16 @@ Every query below is asynchronous and returns `lgtm_db::error::Result<T>`. UUID 
 | `comments` | `get_thread(context_id, id)` | Optional thread within the selected context. |
 | `comments` | `get_thread_by_remote_id(context_id, remote)` | Optional thread matching a context-scoped forge ID. |
 | `comments` | `get_threads(context_id)` | Context threads ordered by UUID. |
-| `comments` | `get_by_id(context_id, id)` | Optional comment within the selected context. |
-| `comments` | `get_by_remote_id(context_id, kind, remote)` | Optional comment matching a scoped forge object. |
-| `comments` | `get_all(context_id)` | Comments ordered by thread UUID and reply position. Includes drafts. |
-| `comments` | `get_remote(context_id)` | Comments with a forge comment ID. |
-| `comments` | `get_session_drafts(session_id)` | Draft comments originating in the selected session. |
-| `comments` | `get_next_position(thread_id)` | Next reply position, or zero for an empty thread. Hold the context write lock before using it. |
+| `comments` | `get_comment_by_id(context_id, id)` | Optional comment within the selected context. |
+| `comments` | `get_comment_by_remote_id(context_id, kind, remote)` | Optional comment matching a scoped forge object. |
+| `comments` | `get_comments(context_id)` | Comments ordered by thread UUID and reply position. Includes drafts. |
+| `comments` | `get_remote_comments(context_id)` | Comments with a forge comment ID. |
+| `comments` | `get_session_draft_comments(session_id)` | Draft comments originating in the selected session. |
+| `comments` | `get_next_reply_position(thread_id)` | Next reply position, or zero for an empty thread. Hold the context write lock before using it. |
 
 A single-record query returns `Ok(None)` when no record matches. Context-scoped comment/thread queries also return `None` when the UUID belongs to another context. Query ordering exists only where the table specifies it.
+
+The query table lists core entity reads. Paging uses `sessions.get_review_page` and `comments.get_comment_page`; selected-path reads use `comments.get_threads_for_paths` and `get_threads_by_ids`. `review_contexts.get_notes_for_path` finds a saved-file context after confirmed moves. `get_file_reviews` reads local progress. The `mutations` repository reads accepted retry results, unresolved intents and verified remote deletion receipts.
 
 #### Repository mutations
 
@@ -368,7 +406,6 @@ All record arguments below are borrowed SeaORM models. Mutations return `Result<
 | Repository field | Mutation | Contract |
 | --- | --- | --- |
 | `identities` | `insert(row)` | Insert without replacing conflicting records. Re-read the natural key to obtain an existing identity. |
-| `workspace` | `insert_repository(row)` | Insert a forge repository URL if absent. |
 | `workspace` | `insert_path(row)` | Associate a path with a context if absent. |
 | `review_contexts` | `insert(row)` | Insert without replacing a conflicting context. Re-read its key after insertion. |
 | `review_contexts` | `advance_revision(id, expected)` | Return `bool`. Increment the revision and acquire the context write lock. If `expected` is supplied, require that revision. |
@@ -376,9 +413,11 @@ All record arguments below are borrowed SeaORM models. Mutations return `Result<
 | `sessions` | `insert(row)` | Insert a session. Conflicting keys or invalid field combinations return errors. |
 | `sessions` | `complete(row)` | Return `bool`. Complete only a matching active session, without changing its creator, creation time or reviewed commits. |
 | `comments` | `insert_thread(row)` | Insert a thread with its author, ownership and original anchor. |
-| `comments` | `insert(row)` | Insert a root comment or reply. Constraint violations return errors. |
+| `comments` | `insert_comment(row)` | Insert a root comment or reply. Constraint violations return errors. |
 | `comments` | `update_thread(row)` | Return `bool`. Update resolution, latest editor, remote linkage and applicability. Preserve author, ownership and original anchor. |
-| `comments` | `update(row)` | Return `bool`. Update content, publication and posting fields. Preserve author, ownership, origin session, position and creation time. |
+| `comments` | `update_comment(row)` | Return `bool`. Update content, publication and posting fields. Preserve author, ownership, origin session, position and creation time. |
+
+Additional workflow operations update submission receipts, reopen definitely rejected submissions, advance PR comparisons, delete comments and empty threads, move notes, and store file progress. These are named repository methods; callers cannot issue raw queries. The `mutations` repository inserts and updates request receipts in the same transaction as the accepted change.
 
 A boolean mutation returns `false` when no eligible row matches. A unit-returning mutation does not report whether it inserted or updated a row. Insert-if-absent methods ignore conflicts and do not merge supplied values into existing records.
 
@@ -386,7 +425,7 @@ These methods enforce persistence contracts, not complete backend workflows. The
 
 #### Public values and errors
 
-The public model namespaces are `identities`, `repositories`, `workspace_paths`, `review_contexts`, `sessions`, `threads` and `comments`. The `types` module exports `IdentityKind`, `ContextKind`, `SessionState` and `PostingState`.
+The public model namespaces are `identities`, `workspace_paths`, `review_contexts`, `sessions`, `threads`, `comments`, `mutation_receipts` and `file_reviews`. The `types` module exports shared enums, including `IdentityKind`, `ContextKind`, `SessionState`, `PostingState`, `ComparisonKind`, `ForgeState` and `OrphanReason`.
 
 Model fields are mutable in memory. Repository methods persist only their explicit writable columns. Entity and ActiveModel module paths remain private, as do connection access and migration entry points.
 
@@ -456,7 +495,7 @@ To add a schema change, add a migration under `src/migration/` and register it i
 
 SQLite startup uses a sibling filesystem lock to serialize migration attempts. PostgreSQL deployments must complete startup migrations before launching parallel backend instances. The library exposes no public migrate, downgrade or reset method.
 
-The current initial migration targets a fresh development database. Desktop upgrade policy and local/remote synchronization remain [future ADR topics](../../../adr/README.md).
+Additive migrations preserve populated databases and their original anchors. Desktop distribution upgrade policy and local/remote synchronization remain [future ADR topics](../../../adr/README.md).
 
 ### Drivers and verification
 
@@ -467,6 +506,28 @@ SQLite uses one connection per pool. PostgreSQL permits up to eight connections 
 SQLite enables foreign keys and uses the driver's five-second busy timeout with its default journal mode. Updating the context revision serializes dependent writes. PostgreSQL acquires the corresponding row lock through that update.
 
 Private tests cover entity relationships and migration history. Public integration tests compose repository queries and mutations, transactions, rollback and savepoints. The contracts run on real SQLite and PostgreSQL databases.
+
+### Review ownership and recovery
+
+```mermaid
+flowchart LR
+    Local["Local notes and reviews"] --> Threads["Durable threads and comments"]
+    GitHub["GitHub owns PR discussions and Viewed state"] --> Cache["Cached PR threads and comments"]
+    Evidence["Immutable source identity and bounded excerpt"] --> Threads
+    Observation["Current provider coordinates"] --> Cache
+    Retry["Actor and request key"] --> LocalResult["Local result for safe retries"]
+    Retry --> PRResult["PR cache IDs or remote acknowledgment"]
+```
+
+One initial migration creates the alpha schema. There is no upgrade path for earlier versions of this branch and no separate repository registry or promotion history.
+
+`threads.source_evidence` stores one immutable source identity with its bounded excerpt. `threads.forge_observation` stores the provider's base, head, current location and outdated status as one replaceable value. Original coordinates remain separate from confirmed current paths and orphan reasons. There is no duplicate selected-text or derived outdated column. Confirmed deletions remove comment rows; there is no soft-delete or duplicate remote-presence flag. Repository methods validate evidence and observation shapes; SQL constrains anchor shapes, relationships, unique locations and unresolved mutation ownership.
+
+Promotion copies a note into the target review in the same transaction as its retry result. `comments.source_note_id` preserves source attribution without requiring the source note to survive. The copy keeps the original author; its owner controls edits. Repeating the same request cannot recreate a deleted copy. A new request may deliberately promote it again. There is no promotion table, per-target deduplication rule or deleted-target tombstone.
+
+Local mutation receipts retain the committed result because a retry must return the same result even after the source file changes, disappears or the returned draft is deleted. PR creation receipts retain only cache IDs. Remote edit, delete and resolution receipts retain operation identity, a payload hash and pending/terminal acknowledgment; they never retain another comment or thread body. Pending writes remain recoverable after restart without blindly replaying a write that GitHub may have accepted. Confirmed deletions retain only scoped remote identity to reject stale provider pages.
+
+`file_reviews` stores local progress by `(context_id, actor_id, path)` and the exact compared-content identity. Marks survive editor restarts and disappear when that identity changes. GitHub owns PR Viewed state; it is read and updated directly without a local mirror. Notes have no reviewed-file marks.
 
 ## References
 

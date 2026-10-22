@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
+#MISE description="Run project contracts with SQLite locally and PostgreSQL on Linux CI"
 # Normal project test hook: local SQLite, and SQLite/PostgreSQL on Linux CI or with an explicit URL.
 set -euo pipefail
 project=$1
-root=$(git rev-parse --show-toplevel)
+shift
 if [[ -n "${LGTM_TEST_POSTGRES_URL:-}" || ( "${CI:-}" == true && "$(uname -s)" == Linux ) ]]; then
-  exec "$root/bin/with-postgres" cargo test --locked -p "$project" --all-features
+  exec mise run //:with-postgres -- cargo test --locked -p "$project" --all-features "$@"
 fi
-exec cargo test --locked -p "$project"
+exec cargo test --locked -p "$project" "$@"

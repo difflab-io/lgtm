@@ -4,8 +4,8 @@ mod common;
 mod review_service {
     //! Review service persistence, lifecycle and external failure contracts.
     mod concurrency {
+        use lgtm_backend::forge::models::*;
         use lgtm_backend::models::*;
-        use lgtm_backend::utils::*;
 
         use crate::common;
 
@@ -48,7 +48,14 @@ mod review_service {
                 let mut actor = actor.clone();
                 actor.id = uuid::Uuid::new_v4();
                 tasks.push(tokio::spawn(async move {
-                    db.start_session(&c, &actor, CommitContext::default()).await
+                    db.start_session(
+                        &c,
+                        &actor,
+                        CommitContext::default(),
+                        crate::common::comparison(&c),
+                        None,
+                    )
+                    .await
                 }));
             }
             for task in tasks {
@@ -107,6 +114,7 @@ mod review_service {
                         db.apply_remote(
                             &context,
                             ForgeSnapshot {
+                                state: None,
                                 complete: true,
                                 head: "head".into(),
                                 base: None,
@@ -127,7 +135,13 @@ mod review_service {
                         starts.push(tokio::spawn(async move {
                             let other = common::service(&url).await.unwrap();
                             let session = other
-                                .start_session(&context, &actor, CommitContext::default())
+                                .start_session(
+                                    &context,
+                                    &actor,
+                                    CommitContext::default(),
+                                    crate::common::comparison(&context),
+                                    None,
+                                )
                                 .await
                                 .unwrap();
                             other.database().close().await;
@@ -153,6 +167,8 @@ mod review_service {
                                         submit: false,
                                     },
                                     "finish-race",
+                                    None,
+                                    None,
                                 )
                                 .await
                                 .unwrap()
@@ -162,14 +178,26 @@ mod review_service {
                         let other = db.clone();
                         let start = tokio::spawn(async move {
                             other
-                                .start_session(&c, &a, CommitContext::default())
+                                .start_session(
+                                    &c,
+                                    &a,
+                                    CommitContext::default(),
+                                    crate::common::comparison(&c),
+                                    None,
+                                )
                                 .await
                                 .unwrap()
                         });
                         assert_eq!(complete.await.unwrap().id, session.id);
                         let raced = start.await.unwrap();
                         let successor = db
-                            .start_session(&context, &actor, CommitContext::default())
+                            .start_session(
+                                &context,
+                                &actor,
+                                CommitContext::default(),
+                                crate::common::comparison(&context),
+                                None,
+                            )
                             .await
                             .unwrap();
                         assert_ne!(successor.id, session.id);
@@ -181,7 +209,7 @@ mod review_service {
         }
     }
     mod forge {
-        use lgtm_backend::utils::*;
+        use lgtm_backend::{forge::models::*, utils::*};
         use lgtm_backend::{models::*, services::*};
         use lgtm_db::types as lgtm_db_types;
 
@@ -206,14 +234,18 @@ mod review_service {
 
         fn snapshot(head: &str) -> ForgeSnapshot {
             ForgeSnapshot {
+                state: None,
                 complete: true,
                 head: head.into(),
                 base: Some("base".into()),
                 threads: vec![RemoteThread {
+                    observation: None,
+                    orphan_reason: None,
                     id: "thread-1".into(),
                     anchor: Anchor::General,
                     resolved: false,
                     comments: vec![RemoteComment {
+                        pending: false,
                         id: "remote-root".into(),
                         kind: "review_comment".into(),
                         review_id: Some("review-1".into()),
@@ -260,6 +292,47 @@ mod review_service {
         // tests --------------------------------------------------------------
 
         #[tokio::test]
+        async fn should_preserve_provider_confirmed_orphans_and_clear_them_after_restoration() {
+            for (db, _, _) in databases().await {
+                let context = db
+                    .ensure_context(
+                        ContextKey::ForgeBacked {
+                            repository_url: ForgeRepositoryUrl::parse(
+                                "https://github.com/acme/repo",
+                            )
+                            .unwrap(),
+                            number: 42,
+                        },
+                        None,
+                    )
+                    .await
+                    .unwrap();
+                let mut observed = snapshot("head");
+                observed.threads[0].anchor = Anchor::File {
+                    path: "deleted.rs".into(),
+                };
+                observed.threads[0].orphan_reason = Some(OrphanReason::FileDeleted);
+                db.refresh(&context, &FixtureProvider(observed.clone()))
+                    .await
+                    .unwrap();
+                let orphaned = db.get_conversation(&context.id, true).await.unwrap();
+                assert_eq!(
+                    orphaned.threads[0].orphan_reason,
+                    Some(OrphanReason::FileDeleted)
+                );
+                observed.threads[0].orphan_reason = None;
+                let current = db.get_context(&context.key).await.unwrap().unwrap();
+                db.refresh(&current, &FixtureProvider(observed))
+                    .await
+                    .unwrap();
+                let restored = db.get_conversation(&context.id, true).await.unwrap();
+                assert_eq!(restored.threads[0].orphan_reason, None);
+                assert_eq!(restored.threads[0].anchor, orphaned.threads[0].anchor);
+                db.database().close().await;
+            }
+        }
+
+        #[tokio::test]
         async fn should_reconcile_forge_refreshes_and_preserve_attribution_on_post_failures() {
             for (db, _, _) in databases().await {
                 let alice = actor(&db, "Alice", None).await;
@@ -278,9 +351,15 @@ mod review_service {
                     .await
                     .unwrap();
                 assert!(
-                    db.start_session(&c, &alice, CommitContext::default())
-                        .await
-                        .is_err()
+                    db.start_session(
+                        &c,
+                        &alice,
+                        CommitContext::default(),
+                        crate::common::comparison(&c),
+                        None
+                    )
+                    .await
+                    .is_err()
                 );
                 let c = db.get_context(&c.key).await.unwrap().unwrap();
                 let c = db
@@ -296,11 +375,20 @@ mod review_service {
                             base: Some("base".into()),
                             head: Some("head".into()),
                         },
+                        crate::common::comparison(&c),
+                        None,
                     )
                     .await
                     .unwrap();
                 let local = db
-                    .add_comment(&s.id, &bot, "An agent authored this", Anchor::General)
+                    .add_comment(
+                        &s.id,
+                        &bot,
+                        "An agent authored this",
+                        Anchor::General,
+                        None,
+                        None,
+                    )
                     .await
                     .unwrap();
                 let rendered = db.prepare_post(&s.id, &local.id, "post-1").await.unwrap();
@@ -325,10 +413,13 @@ mod review_service {
                 .unwrap();
                 let mut remote = snapshot("head");
                 remote.threads.push(RemoteThread {
+                    observation: None,
+                    orphan_reason: None,
                     id: "agent-thread".into(),
                     anchor: Anchor::General,
                     resolved: false,
                     comments: vec![RemoteComment {
+                        pending: false,
                         id: "agent-comment".into(),
                         kind: "review_comment".into(),
                         review_id: Some("review-2".into()),
@@ -369,7 +460,7 @@ mod review_service {
                     "Edited live by account"
                 );
                 // A local write makes the previous revision stale: do not overwrite it.
-                db.reply(&s.id, &local.thread_id, &alice, "Pending local reply")
+                db.reply(&s.id, &local.thread_id, &alice, "Pending local reply", None)
                     .await
                     .unwrap();
                 assert!(
@@ -401,21 +492,15 @@ mod review_service {
                     .await
                     .unwrap();
                 let live = db.get_conversation(&c.id, true).await.unwrap();
-                assert_eq!(
-                    live.comments
-                        .iter()
-                        .find(|x| x.id == local.id)
-                        .unwrap()
-                        .remote_presence,
-                    "missing"
-                );
+                assert!(!live.comments.iter().any(|x| x.id == local.id));
+                assert!(db.get_comment(&c.id, &local.id).await.is_err());
                 assert!(
                     live.comments
                         .iter()
                         .any(|x| x.body == "Pending local reply")
                 );
                 assert!(
-                    db.complete(&c.id, &alice, completion(), "bad-outcome")
+                    db.complete(&c.id, &alice, completion(), "bad-outcome", None, None)
                         .await
                         .is_err()
                 );
@@ -429,6 +514,8 @@ mod review_service {
                             submit: true,
                         },
                         "pr-done",
+                        None,
+                        None,
                     )
                     .await
                     .unwrap();
@@ -436,9 +523,15 @@ mod review_service {
                 assert!(completed.forge_review_id.is_none());
                 let c = db.get_context(&c.key).await.unwrap().unwrap();
                 assert!(
-                    db.start_session(&c, &alice, CommitContext::default())
-                        .await
-                        .is_err()
+                    db.start_session(
+                        &c,
+                        &alice,
+                        CommitContext::default(),
+                        crate::common::comparison(&c),
+                        None
+                    )
+                    .await
+                    .is_err()
                 );
                 // Refresh once more, then create the next review without copying comments.
                 tokio::time::sleep(std::time::Duration::from_millis(2)).await;
@@ -448,7 +541,13 @@ mod review_service {
                     .await
                     .unwrap();
                 let next = db
-                    .start_session(&c, &alice, CommitContext::default())
+                    .start_session(
+                        &c,
+                        &alice,
+                        CommitContext::default(),
+                        crate::common::comparison(&c),
+                        None,
+                    )
                     .await
                     .unwrap();
                 assert_ne!(next.id, s.id);
@@ -458,7 +557,7 @@ mod review_service {
                         .unwrap()
                         .comments
                         .len(),
-                    before
+                    before - 1
                 );
                 db.database().close().await;
             }
@@ -492,11 +591,24 @@ mod review_service {
                     .await
                     .unwrap();
                 let session = review
-                    .start_session(&current, &actor, CommitContext::default())
+                    .start_session(
+                        &current,
+                        &actor,
+                        CommitContext::default(),
+                        crate::common::comparison(&current),
+                        None,
+                    )
                     .await
                     .unwrap();
                 let root = review
-                    .add_comment(&session.id, &actor, "Committed root", Anchor::General)
+                    .add_comment(
+                        &session.id,
+                        &actor,
+                        "Committed root",
+                        Anchor::General,
+                        None,
+                        None,
+                    )
                     .await
                     .unwrap();
 
@@ -522,7 +634,7 @@ mod review_service {
                 draft.author_id = identity.id;
                 draft.position = 1;
                 draft.body = "Discard on failure".into();
-                tx.comments.insert(&draft).await.unwrap();
+                tx.comments.insert_comment(&draft).await.unwrap();
 
                 let provider = FailingProvider(std::sync::atomic::AtomicUsize::new(0));
                 assert!(provider.fetch(&context.key).await.is_err());
@@ -540,7 +652,7 @@ mod review_service {
                     review
                         .database()
                         .comments
-                        .get_by_id(&context.id, &draft.id)
+                        .get_comment_by_id(&context.id, &draft.id)
                         .await
                         .unwrap()
                         .is_none()
@@ -611,9 +723,15 @@ mod review_service {
                     let c = context.clone();
                     let a = alice.clone();
                     starts.push(tokio::spawn(async move {
-                        db.start_session(&c, &a, CommitContext::default())
-                            .await
-                            .unwrap()
+                        db.start_session(
+                            &c,
+                            &a,
+                            CommitContext::default(),
+                            crate::common::comparison(&c),
+                            None,
+                        )
+                        .await
+                        .unwrap()
                     }));
                 }
                 let first = starts.remove(0).await.unwrap();
@@ -628,11 +746,13 @@ mod review_service {
                         Anchor::File {
                             path: "src/lib.rs".into(),
                         },
+                        None,
+                        None,
                     )
                     .await
                     .unwrap();
                 let reply = db
-                    .reply(&first.id, &c.thread_id, &bot, "Agent reply")
+                    .reply(&first.id, &c.thread_id, &bot, "Agent reply", None)
                     .await
                     .unwrap();
                 assert_eq!(reply.position, 1);
@@ -644,7 +764,14 @@ mod review_service {
                         .is_empty()
                 );
                 let closed = db
-                    .complete(&context.id, &alice, completion(), "complete-one")
+                    .complete(
+                        &context.id,
+                        &alice,
+                        completion(),
+                        "complete-one",
+                        None,
+                        None,
+                    )
                     .await
                     .unwrap();
                 assert_eq!(
@@ -652,47 +779,69 @@ mod review_service {
                     Some("saved")
                 );
                 assert!(
-                    db.add_comment(&first.id, &alice, "closed", Anchor::General)
+                    db.add_comment(&first.id, &alice, "closed", Anchor::General, None, None)
                         .await
                         .is_err()
                 );
                 let next = db
-                    .start_session(&context, &bot, CommitContext::default())
+                    .start_session(
+                        &context,
+                        &bot,
+                        CommitContext::default(),
+                        crate::common::comparison(&context),
+                        None,
+                    )
                     .await
                     .unwrap();
                 assert_ne!(next.id, first.id);
                 assert_eq!(
-                    db.complete(&context.id, &alice, completion(), "complete-one")
-                        .await
-                        .unwrap()
-                        .id,
+                    db.complete(
+                        &context.id,
+                        &alice,
+                        completion(),
+                        "complete-one",
+                        None,
+                        None
+                    )
+                    .await
+                    .unwrap()
+                    .id,
                     first.id
                 );
                 assert!(
-                    db.complete(&context.id, &bot, completion(), "complete-one")
+                    db.complete(&context.id, &bot, completion(), "complete-one", None, None)
                         .await
                         .is_err()
                 );
                 let resolved = db
-                    .resolve(&next.id, &c.thread_id, &bot, true)
+                    .resolve(&next.id, &c.thread_id, &bot, true, None)
                     .await
                     .unwrap();
                 assert_eq!(resolved.author.id, alice.id);
                 assert_eq!(resolved.resolved_by.unwrap().id, bot.id);
                 let reopened = db
-                    .resolve(&next.id, &c.thread_id, &alice, false)
+                    .resolve(&next.id, &c.thread_id, &alice, false, None)
                     .await
                     .unwrap();
                 assert!(reopened.resolved_at.is_none() && reopened.resolved_by.is_none());
                 assert_eq!(reopened.updated_by.unwrap().id, alice.id);
-                db.reply(&next.id, &c.thread_id, &alice, "New review, same thread")
-                    .await
-                    .unwrap();
+                db.reply(
+                    &next.id,
+                    &c.thread_id,
+                    &alice,
+                    "New review, same thread",
+                    None,
+                )
+                .await
+                .unwrap();
                 let live = db.get_conversation(&context.id, true).await.unwrap();
                 assert_eq!(live.threads.len(), 1);
                 assert_eq!(live.comments.len(), 3);
                 assert_eq!(live.sessions.len(), 2);
-                assert!(ReviewService::export(&live, &closed).contains("New review, same thread"));
+                assert!(
+                    live.export_feedback(&closed)
+                        .contains("New review, same thread")
+                );
                 assert_eq!(
                     db.get_session(&first.id)
                         .await
@@ -708,16 +857,22 @@ mod review_service {
                     .await
                     .unwrap();
                 let other_s = db
-                    .start_session(&other, &alice, CommitContext::default())
+                    .start_session(
+                        &other,
+                        &alice,
+                        CommitContext::default(),
+                        crate::common::comparison(&other),
+                        None,
+                    )
                     .await
                     .unwrap();
                 assert!(
-                    db.reply(&other_s.id, &c.thread_id, &alice, "wrong context")
+                    db.reply(&other_s.id, &c.thread_id, &alice, "wrong context", None)
                         .await
                         .is_err()
                 );
                 assert!(
-                    db.resolve(&other_s.id, &reply.id, &alice, true)
+                    db.resolve(&other_s.id, &reply.id, &alice, true, None)
                         .await
                         .is_err()
                 );
@@ -735,24 +890,22 @@ mod review_service {
                         start: 0,
                         end: 2,
                         side: "new".into(),
-                        commit: "abc".into(),
                     },
                     Anchor::Line {
                         path: "a".into(),
                         start: 3,
                         end: 2,
                         side: "new".into(),
-                        commit: "abc".into(),
                     },
                 ] {
                     assert!(
-                        db.add_comment(&next.id, &alice, "invalid", anchor)
+                        db.add_comment(&next.id, &alice, "invalid", anchor, None, None)
                             .await
                             .is_err()
                     );
                 }
                 assert!(
-                    db.add_comment(&next.id, &alice, " ", Anchor::General)
+                    db.add_comment(&next.id, &alice, " ", Anchor::General, None, None)
                         .await
                         .is_err()
                 );
@@ -793,7 +946,9 @@ mod review_service {
                     let t = c.thread_id;
                     let a = alice.clone();
                     writes.push(tokio::spawn(async move {
-                        db.reply(&s, &t, &a, &format!("reply {i}")).await.unwrap()
+                        db.reply(&s, &t, &a, &format!("reply {i}"), None)
+                            .await
+                            .unwrap()
                     }));
                 }
                 let mut positions = std::collections::HashSet::new();
@@ -804,7 +959,7 @@ mod review_service {
                 let raw = sea_orm::Database::connect(&url).await.unwrap();
                 // Completed review metadata is immutable through the domain service.
                 assert!(
-                    db.add_comment(&closed.id, &alice, "tampered", Anchor::General)
+                    db.add_comment(&closed.id, &alice, "tampered", Anchor::General, None, None)
                         .await
                         .is_err()
                 );
@@ -812,13 +967,13 @@ mod review_service {
                     let mut row = db
                         .database()
                         .comments
-                        .get_by_id(&context.id, &c.id)
+                        .get_comment_by_id(&context.id, &c.id)
                         .await
                         .unwrap()
                         .unwrap();
                     row.context_id = other.id;
                     matches!(
-                        db.database().comments.update(&row).await,
+                        db.database().comments.update_comment(&row).await,
                         Ok(false) | Err(_)
                     )
                 });
@@ -843,6 +998,34 @@ mod review_service {
             for (db, url, temp) in databases().await {
                 let a = actor(&db, "Reviewer", None).await;
                 let root = temp.path().to_str().unwrap();
+                let git = |args: &[&str]| {
+                    let output = std::process::Command::new("git")
+                        .current_dir(root)
+                        .args(args)
+                        .output()
+                        .unwrap();
+                    assert!(
+                        output.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+                };
+                git(&["init", "-q"]);
+                git(&["config", "user.name", "Reviewer"]);
+                git(&["config", "user.email", "reviewer@example.test"]);
+                std::fs::write(temp.path().join("file.rs"), "first\nsecond\nthird\n").unwrap();
+                git(&["add", "file.rs"]);
+                git(&["commit", "-qm", "initial source"]);
+                let first = git(&["rev-parse", "HEAD"]);
+                let (source, bytes) = lgtm_backend::services::workspace::get_source(
+                    temp.path(),
+                    "file.rs",
+                    lgtm_backend::database::types::SourceKind::Commit,
+                    Some(&first),
+                )
+                .unwrap();
+                let evidence = AnchorEvidence::capture(source, &bytes, 1, 3).unwrap();
                 let c = db
                     .ensure_context(
                         ContextKey::Local {
@@ -860,33 +1043,35 @@ mod review_service {
                         &c,
                         &a,
                         CommitContext {
-                            base: Some("old".into()),
-                            head: Some("head-1".into()),
+                            base: Some(first.clone()),
+                            head: Some(first.clone()),
                         },
+                        ComparisonKind::Branch,
+                        None,
                     )
                     .await
                     .unwrap();
+                let anchor = Anchor::Line {
+                    path: "file.rs".into(),
+                    start: 1,
+                    end: 3,
+                    side: "new".into(),
+                };
+                assert!(
+                    db.add_comment(&s.id, &a, "Missing evidence", anchor.clone(), None, None)
+                        .await
+                        .is_err()
+                );
                 let line = db
-                    .add_comment(
-                        &s.id,
-                        &a,
-                        "Line range",
-                        Anchor::Line {
-                            path: "file.rs".into(),
-                            start: 1,
-                            end: 3,
-                            side: "new".into(),
-                            commit: "head-1".into(),
-                        },
-                    )
+                    .add_comment(&s.id, &a, "Line range", anchor, Some(evidence), None)
                     .await
                     .unwrap();
                 let general = db
-                    .add_comment(&s.id, &a, "General", Anchor::General)
+                    .add_comment(&s.id, &a, "General", Anchor::General, None, None)
                     .await
                     .unwrap();
                 assert!(
-                    db.resolve(&s.id, &line.id, &a, true).await.is_err(),
+                    db.resolve(&s.id, &line.id, &a, true, None).await.is_err(),
                     "A reply/comment ID is not a thread ID"
                 );
                 assert!(
@@ -898,38 +1083,49 @@ mod review_service {
                             body: None,
                             submit: false
                         },
-                        "invalid"
+                        "invalid",
+                        None,
+                        None
                     )
                     .await
                     .is_err()
                 );
-                db.complete(&c.id, &a, completion(), "first").await.unwrap();
+                db.complete(&c.id, &a, completion(), "first", None, None)
+                    .await
+                    .unwrap();
+                std::fs::write(temp.path().join("other.txt"), "next\n").unwrap();
+                git(&["add", "other.txt"]);
+                git(&["commit", "-qm", "next source"]);
+                let second = git(&["rev-parse", "HEAD"]);
                 let next = db
                     .start_session(
                         &c,
                         &a,
                         CommitContext {
-                            base: Some("head-1".into()),
-                            head: Some("head-2".into()),
+                            base: Some(first.clone()),
+                            head: Some(second),
                         },
+                        ComparisonKind::Branch,
+                        None,
                     )
                     .await
                     .unwrap();
                 let live = db.get_conversation(&c.id, true).await.unwrap();
+                let anchored = live
+                    .threads
+                    .iter()
+                    .find(|t| t.id == line.thread_id)
+                    .unwrap();
+                assert!(
+                    matches!(&anchored.evidence.as_ref().unwrap().source, AnchorSource::Commit { sha, .. } if sha == &first)
+                );
                 assert!(
                     live.threads
                         .iter()
-                        .find(|t| t.id == line.thread_id)
-                        .unwrap()
-                        .outdated
-                );
-                assert!(
-                    !live
-                        .threads
-                        .iter()
                         .find(|t| t.id == general.thread_id)
                         .unwrap()
-                        .outdated
+                        .evidence
+                        .is_none()
                 );
                 for filter in [
                     SessionFilter {
@@ -992,8 +1188,15 @@ mod review_service {
                     let a = a.clone();
                     let context = c.id;
                     completions.push(tokio::spawn(async move {
-                        db.complete(&context, &a, completion(), &format!("finish-{i}"))
-                            .await
+                        db.complete(
+                            &context,
+                            &a,
+                            completion(),
+                            &format!("finish-{i}"),
+                            None,
+                            None,
+                        )
+                        .await
                     }));
                 }
                 let mut successes = 0;
@@ -1014,11 +1217,24 @@ mod review_service {
                 let a = actor(&db, "Alice", None).await;
                 let c = db.ensure_context(notes("/authorship"), None).await.unwrap();
                 let s = db
-                    .start_session(&c, &a, CommitContext::default())
+                    .start_session(
+                        &c,
+                        &a,
+                        CommitContext::default(),
+                        crate::common::comparison(&c),
+                        None,
+                    )
                     .await
                     .unwrap();
                 let root = db
-                    .add_comment(&s.id, &a, "Original attribution", Anchor::General)
+                    .add_comment(
+                        &s.id,
+                        &a,
+                        "Original attribution",
+                        Anchor::General,
+                        None,
+                        None,
+                    )
                     .await
                     .unwrap();
                 assert!(
@@ -1031,15 +1247,18 @@ mod review_service {
                             start: 1,
                             end: 1,
                             side: "new".into(),
-                            commit: "invented".into()
-                        }
+                        },
+                        None,
+                        None
                     )
                     .await
                     .is_err()
                 );
-                db.resolve(&s.id, &root.thread_id, &a, true).await.unwrap();
+                db.resolve(&s.id, &root.thread_id, &a, true, None)
+                    .await
+                    .unwrap();
                 let completed = db
-                    .complete(&c.id, &a, completion(), "profile-retry")
+                    .complete(&c.id, &a, completion(), "profile-retry", None, None)
                     .await
                     .unwrap();
                 let raw = sea_orm::Database::connect(&url).await.unwrap();
@@ -1089,13 +1308,13 @@ mod review_service {
                 );
                 let current = db.auth().get_identity(&a.id).await.unwrap();
                 let replay = db
-                    .complete(&c.id, &current, completion(), "profile-retry")
+                    .complete(&c.id, &current, completion(), "profile-retry", None, None)
                     .await
                     .unwrap();
                 assert_eq!(replay.id, completed.id);
                 assert_eq!(replay.creator.name, "Renamed profile");
-                let exported = ReviewService::export(&conversation, &replay);
-                assert!(exported.contains("Renamed profile <renamed@example.com>"));
+                let exported = conversation.export_feedback(&replay);
+                assert!(exported.contains("Renamed profile"));
                 assert!(!exported.contains("Alice <alice@example.com>"));
                 let mut changed_model = current.clone();
                 changed_model.kind = ActorKind::Agent {
@@ -1103,9 +1322,15 @@ mod review_service {
                     provider: "test-provider".into(),
                 };
                 assert!(
-                    db.start_session(&c, &changed_model, CommitContext::default())
-                        .await
-                        .is_err()
+                    db.start_session(
+                        &c,
+                        &changed_model,
+                        CommitContext::default(),
+                        crate::common::comparison(&c),
+                        None
+                    )
+                    .await
+                    .is_err()
                 );
 
                 // A remote ID must always carry its object kind for scoped uniqueness.
@@ -1113,12 +1338,12 @@ mod review_service {
                     let mut row = db
                         .database()
                         .comments
-                        .get_by_id(&c.id, &root.id)
+                        .get_comment_by_id(&c.id, &root.id)
                         .await
                         .unwrap()
                         .unwrap();
                     row.forge_comment_id = Some("unscoped".into());
-                    db.database().comments.update(&row).await.is_err()
+                    db.database().comments.update_comment(&row).await.is_err()
                 });
                 raw.close().await.unwrap();
                 db.database().close().await;
@@ -1190,11 +1415,17 @@ mod review_service {
                     .await
                     .unwrap();
                 let session = review
-                    .start_session(&context, &actor, CommitContext::default())
+                    .start_session(
+                        &context,
+                        &actor,
+                        CommitContext::default(),
+                        crate::common::comparison(&context),
+                        None,
+                    )
                     .await
                     .unwrap();
                 let comment = review
-                    .add_comment(&session.id, &actor, "Root", Anchor::General)
+                    .add_comment(&session.id, &actor, "Root", Anchor::General, None, None)
                     .await
                     .unwrap();
 
@@ -1208,14 +1439,14 @@ mod review_service {
                 row.thread_id = uuid::Uuid::new_v4();
                 row.position = 999;
                 row.created_at = "cannot-rewrite-created-at".into();
-                assert!(tx.comments.update(&row).await.unwrap());
+                assert!(tx.comments.update_comment(&row).await.unwrap());
                 tx.commit().await.unwrap();
                 let saved = review.get_comment(&context.id, &comment.id).await.unwrap();
                 assert_eq!(saved.body, row.body);
                 assert_eq!(saved.author.name, "Alice");
                 let stored = db
                     .comments
-                    .get_by_id(&context.id, &comment.id)
+                    .get_comment_by_id(&context.id, &comment.id)
                     .await
                     .unwrap()
                     .unwrap();
@@ -1228,11 +1459,11 @@ mod review_service {
                 let tx = db.begin().await.unwrap();
                 let nested = tx.begin().await.unwrap();
                 row.body = "Nested savepoint".into();
-                nested.comments.update(&row).await.unwrap();
+                nested.comments.update_comment(&row).await.unwrap();
                 nested.commit().await.unwrap();
                 assert_eq!(
                     tx.comments
-                        .get_by_id(&context.id, &comment.id)
+                        .get_comment_by_id(&context.id, &comment.id)
                         .await
                         .unwrap()
                         .unwrap()
@@ -1251,7 +1482,7 @@ mod review_service {
 
                 let tx = db.begin().await.unwrap();
                 row.body = "Dropped".into();
-                tx.comments.update(&row).await.unwrap();
+                tx.comments.update_comment(&row).await.unwrap();
                 drop(tx);
                 assert_eq!(
                     review
@@ -1265,9 +1496,9 @@ mod review_service {
                 // A constraint error lets the caller discard earlier work as well.
                 let tx = db.begin().await.unwrap();
                 row.body = "Discarded".into();
-                tx.comments.update(&row).await.unwrap();
+                tx.comments.update_comment(&row).await.unwrap();
                 row.visibility = "invalid".into();
-                assert!(tx.comments.update(&row).await.is_err());
+                assert!(tx.comments.update_comment(&row).await.is_err());
                 tx.rollback().await.unwrap();
                 assert_eq!(
                     review
@@ -1308,7 +1539,7 @@ mod review_service {
                 thread.origin_session_id = None;
                 thread.anchor_kind = "file".into();
                 thread.file_path = Some("cannot-change-anchor.rs".into());
-                thread.outdated = true;
+                thread.state = "resolved".into();
                 assert!(db.comments.update_thread(&thread).await.unwrap());
                 let stored = db
                     .comments
@@ -1320,7 +1551,7 @@ mod review_service {
                 assert_eq!(stored.origin_session_id, original_thread.origin_session_id);
                 assert_eq!(stored.anchor_kind, original_thread.anchor_kind);
                 assert_eq!(stored.file_path, original_thread.file_path);
-                assert!(stored.outdated);
+                assert_eq!(stored.state, "resolved");
                 db.close().await;
             }
         }
@@ -1328,8 +1559,8 @@ mod review_service {
     mod context_boundaries {
         use crate::common;
         use lgtm_backend::{
+            forge::models::{ForgeSnapshot, PostReceipt},
             models::*,
-            utils::{ForgeSnapshot, PostReceipt},
         };
 
         // tests ---------------------------------------------------------------
@@ -1355,14 +1586,28 @@ mod review_service {
                         .await
                         .unwrap();
                     let session = review
-                        .start_session(&context, &actor, CommitContext::default())
+                        .start_session(
+                            &context,
+                            &actor,
+                            CommitContext::default(),
+                            crate::common::comparison(&context),
+                            None,
+                        )
                         .await
                         .unwrap();
                     let comment = review
-                        .add_comment(&session.id, &actor, "Keep local", Anchor::General)
+                        .add_comment(
+                            &session.id,
+                            &actor,
+                            "Keep local",
+                            Anchor::General,
+                            None,
+                            None,
+                        )
                         .await
                         .unwrap();
                     let observation = ForgeSnapshot {
+                        state: None,
                         complete: true,
                         head: "head".into(),
                         base: None,
@@ -1424,6 +1669,7 @@ mod review_service {
                             .apply_remote(
                                 &forged,
                                 ForgeSnapshot {
+                                    state: None,
                                     complete: true,
                                     head: "head".into(),
                                     base: None,
@@ -1437,6 +1683,447 @@ mod review_service {
                 }
                 review.database().close().await;
             }
+        }
+    }
+}
+
+mod mutation_guards {
+    use crate::common;
+    use lgtm_backend::{models::*, services::ReviewService};
+
+    // fixtures ----------------------------------------------------------------
+    async fn notes(service: &ReviewService, path: &std::path::Path) -> (Context, Actor, Session) {
+        let context = service
+            .ensure_context(
+                ContextKey::Local {
+                    location: LocalLocation::Notes {
+                        path: path.to_str().unwrap().into(),
+                    },
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        let actor = service
+            .auth()
+            .ensure_human("Reviewer", "guard@example.test")
+            .await
+            .unwrap();
+        let session = service
+            .start_session(
+                &context,
+                &actor,
+                CommitContext::default(),
+                ComparisonKind::Directory,
+                None,
+            )
+            .await
+            .unwrap();
+        (context, actor, session)
+    }
+
+    async fn version(service: &ReviewService, context: &Context) -> i64 {
+        service
+            .get_context_by_id(&context.id)
+            .await
+            .unwrap()
+            .revision
+    }
+
+    // tests -------------------------------------------------------------------
+    #[tokio::test]
+    async fn should_return_the_saved_creation_after_other_writes_without_changing_the_version() {
+        for (service, _, temp) in common::databases().await {
+            let (context, actor, session) = notes(&service, temp.path()).await;
+            let guard = MutationGuard::new(
+                Some(version(&service, &context).await),
+                "create-comment".into(),
+            );
+            let comment = service
+                .add_comment(
+                    &session.id,
+                    &actor,
+                    "Check the timeout",
+                    Anchor::General,
+                    None,
+                    Some(&guard),
+                )
+                .await
+                .unwrap();
+            let reply_guard =
+                MutationGuard::new(Some(version(&service, &context).await), "reply".into());
+            service
+                .reply(
+                    &session.id,
+                    &comment.thread_id,
+                    &actor,
+                    "Keep the fallback",
+                    Some(&reply_guard),
+                )
+                .await
+                .unwrap();
+            let before_retry = version(&service, &context).await;
+            let retry = service
+                .add_comment(
+                    &session.id,
+                    &actor,
+                    "Check the timeout",
+                    Anchor::General,
+                    None,
+                    Some(&guard),
+                )
+                .await
+                .unwrap();
+            assert_eq!(retry.id, comment.id);
+            assert_eq!(
+                version(&service, &context).await,
+                before_retry,
+                "retry is a saved result, not a new mutation"
+            );
+            assert_eq!(
+                service
+                    .get_conversation(&context.id, true)
+                    .await
+                    .unwrap()
+                    .comments
+                    .len(),
+                2
+            );
+            assert!(
+                service
+                    .add_comment(
+                        &session.id,
+                        &actor,
+                        "Different body",
+                        Anchor::General,
+                        None,
+                        Some(&guard)
+                    )
+                    .await
+                    .is_err()
+            );
+            assert!(
+                service
+                    .reply(
+                        &session.id,
+                        &comment.thread_id,
+                        &actor,
+                        "Different operation",
+                        Some(&guard)
+                    )
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                version(&service, &context).await,
+                before_retry,
+                "conflicting reuse rolls back"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn should_reject_a_stale_edit_without_overwriting_an_accepted_edit() {
+        for (service, _, temp) in common::databases().await {
+            let (context, actor, session) = notes(&service, temp.path()).await;
+            let comment = service
+                .add_comment(&session.id, &actor, "Original", Anchor::General, None, None)
+                .await
+                .unwrap();
+            let seen = version(&service, &context).await;
+            let accepted = MutationGuard::new(Some(seen), "first-editor".into());
+            service
+                .edit_comment(
+                    &session.id,
+                    &comment.id,
+                    &actor,
+                    "Accepted edit",
+                    Some(&accepted),
+                )
+                .await
+                .unwrap();
+            let stale = MutationGuard::new(Some(seen), "second-editor".into());
+            assert!(
+                service
+                    .edit_comment(&session.id, &comment.id, &actor, "Stale edit", Some(&stale))
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                service
+                    .get_comment(&context.id, &comment.id)
+                    .await
+                    .unwrap()
+                    .body,
+                "Accepted edit"
+            );
+            let retry = service
+                .edit_comment(
+                    &session.id,
+                    &comment.id,
+                    &actor,
+                    "Accepted edit",
+                    Some(&accepted),
+                )
+                .await
+                .unwrap();
+            assert_eq!(retry.body, "Accepted edit");
+        }
+    }
+
+    #[tokio::test]
+    async fn should_retry_a_saved_source_comment_after_the_file_changes_and_backend_restarts() {
+        for (service, url, temp) in common::databases().await {
+            let file = temp.path().join("notes.md");
+            std::fs::write(&file, b"before\r\nselected\r\nafter").unwrap();
+            let (context, actor, session) = notes(&service, temp.path()).await;
+            let bytes = std::fs::read(&file).unwrap();
+            let evidence = AnchorEvidence::capture(
+                AnchorSource::LocalFile {
+                    content_hash: AnchorSource::hash(&bytes),
+                },
+                &bytes,
+                2,
+                2,
+            )
+            .unwrap();
+            let anchor = Anchor::Line {
+                path: "notes.md".into(),
+                side: "new".into(),
+                start: 2,
+                end: 2,
+            };
+            let guard = MutationGuard::new(
+                Some(version(&service, &context).await),
+                "source-comment".into(),
+            );
+            let saved = service
+                .add_comment(
+                    &session.id,
+                    &actor,
+                    "Explain this",
+                    anchor.clone(),
+                    Some(evidence.clone()),
+                    Some(&guard),
+                )
+                .await
+                .unwrap();
+            std::fs::write(&file, "changed after the response was lost\n").unwrap();
+            service.database().close().await;
+            let restarted = common::service(&url).await.unwrap();
+            let retry = restarted
+                .add_comment(
+                    &session.id,
+                    &actor,
+                    "Explain this",
+                    anchor,
+                    Some(evidence.clone()),
+                    Some(&guard),
+                )
+                .await
+                .unwrap();
+            assert_eq!(retry.id, saved.id);
+            let stored = restarted
+                .database()
+                .comments
+                .get_thread(&context.id, &saved.thread_id)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                stored.source_evidence.as_ref().unwrap()["selected_text"].as_str(),
+                Some("selected")
+            );
+            assert_eq!(
+                stored.source_evidence.as_ref().unwrap()["source"]["content_hash"].as_str(),
+                Some(evidence.source.content_hash())
+            );
+            assert_eq!(stored.start_line, Some(2));
+        }
+    }
+
+    #[tokio::test]
+    async fn should_keep_comparison_selection_and_complete_only_the_requested_attempt() {
+        for (service, _, temp) in common::databases().await {
+            let context = service
+                .ensure_context(
+                    ContextKey::Local {
+                        location: LocalLocation::Branch {
+                            git_dir: temp.path().join(".git").to_str().unwrap().into(),
+                            branch: "refs/heads/topic".into(),
+                        },
+                    },
+                    None,
+                )
+                .await
+                .unwrap();
+            let actor = service
+                .auth()
+                .ensure_human("Reviewer", "compare@example.test")
+                .await
+                .unwrap();
+            let commits = CommitContext {
+                base: Some("a".repeat(40)),
+                head: Some("a".repeat(40)),
+            };
+            let session = service
+                .start_session(
+                    &context,
+                    &actor,
+                    commits.clone(),
+                    ComparisonKind::Staged,
+                    None,
+                )
+                .await
+                .unwrap();
+            assert!(
+                service
+                    .start_session(
+                        &context,
+                        &actor,
+                        commits.clone(),
+                        ComparisonKind::Working,
+                        None
+                    )
+                    .await
+                    .is_err()
+            );
+            let completed = service
+                .complete(
+                    &context.id,
+                    &actor,
+                    Completion::default(),
+                    "finish-first",
+                    Some(&session.id),
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(completed.id, session.id);
+            let next = service
+                .start_session(&context, &actor, commits, ComparisonKind::Branch, None)
+                .await
+                .unwrap();
+            assert!(
+                service
+                    .complete(
+                        &context.id,
+                        &actor,
+                        Completion::default(),
+                        "wrong-attempt",
+                        Some(&session.id),
+                        None
+                    )
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                service.get_session(&next.id).await.unwrap().state(),
+                "active"
+            );
+        }
+    }
+}
+
+mod file_reviews {
+    use lgtm_backend::models::*;
+
+    // tests ------------------------------------------------------------------
+    #[tokio::test]
+    async fn should_persist_local_marks_per_reviewer_without_changing_the_conversation() {
+        for (reviews, url, _) in crate::common::databases().await {
+            let alice = reviews
+                .auth()
+                .ensure_human("Alice", "marks-alice@example.com")
+                .await
+                .unwrap();
+            let bob = reviews
+                .auth()
+                .ensure_human("Bob", "marks-bob@example.com")
+                .await
+                .unwrap();
+            let context = reviews
+                .ensure_context(
+                    ContextKey::Local {
+                        location: LocalLocation::Notes {
+                            path: "/reviewed-directory".into(),
+                        },
+                    },
+                    None,
+                )
+                .await
+                .unwrap();
+            let session = reviews
+                .start_session(
+                    &context,
+                    &alice,
+                    CommitContext::default(),
+                    ComparisonKind::Directory,
+                    None,
+                )
+                .await
+                .unwrap();
+            let revision = reviews
+                .get_context_by_id(&context.id)
+                .await
+                .unwrap()
+                .revision;
+            for identity in ["first-comparison", "changed-comparison"] {
+                reviews
+                    .set_file_reviewed(&session.id, &alice, "file.txt", Some(identity))
+                    .await
+                    .unwrap();
+            }
+            let reopened = crate::common::service(&url).await.unwrap();
+            assert_eq!(
+                reopened
+                    .get_file_reviews(&session.id, &alice)
+                    .await
+                    .unwrap(),
+                vec![("file.txt".into(), "changed-comparison".into())]
+            );
+            assert!(
+                reopened
+                    .get_file_reviews(&session.id, &bob)
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+            assert_eq!(
+                reopened
+                    .get_context_by_id(&context.id)
+                    .await
+                    .unwrap()
+                    .revision,
+                revision
+            );
+            assert!(
+                reopened
+                    .get_conversation(&context.id, true)
+                    .await
+                    .unwrap()
+                    .comments
+                    .is_empty()
+            );
+            assert!(
+                reopened
+                    .set_file_reviewed(&session.id, &alice, "../escape", Some("content"))
+                    .await
+                    .is_err()
+            );
+            reopened
+                .set_file_reviewed(&session.id, &alice, "file.txt", None)
+                .await
+                .unwrap();
+            assert!(
+                reopened
+                    .get_file_reviews(&session.id, &alice)
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+            reopened.database().close().await;
+            reviews.database().close().await;
         }
     }
 }

@@ -16,8 +16,8 @@ description = "Remove build artifacts"
 run = "bun run clean"
 
 [tasks.test]
-description = "Run the Bun test suite"
-depends = ["install"]
+description = "Run the Bun test suite against the built backend"
+depends = ["install", "//apps/lgtm-backend:build"]
 run = "bun run test"
 
 [tasks.lint]
@@ -90,11 +90,6 @@ fi
 description = "Report deferred deployment"
 run = 'echo "deploy: no deployment target configured"'
 
-[tasks.e2e]
-description = "Run the finite application smoke test"
-depends = ["install"]
-run = "sh -c 'bun run test'"
-
 [tasks.typecheck]
 description = "Run project-specific type checks"
 hide = true
@@ -104,4 +99,4 @@ run = 'bunx --no-install svelte-kit sync && bunx --no-install svelte-check --tsc
 [tasks.generate]
 description = "Regenerate the web RPC client from the backend Protobuf schema"
 depends = ["install"]
-run = ["buf lint ../lgtm-backend/proto", "buf generate ../lgtm-backend/proto --template buf.gen.yaml"]
+run = ["buf lint ../lgtm-backend/proto", "buf generate ../lgtm-backend/proto --template buf.gen.yaml --path ../lgtm-backend/proto/lgtm/v1/hello.proto"]
