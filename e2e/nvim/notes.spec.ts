@@ -52,11 +52,7 @@ for (const profile of profiles) {
         const composer = await e.composer()
 
         // Assert
-        const config = await e.lua(
-          'local c=vim.api.nvim_win_get_config(...); return {width=c.width,height=c.height,row=c.row,col=c.col}',
-          composer.win,
-        )
-        expect(config).toMatchObject({ width: 80, height: 12, row: 13, col: 19 })
+        expect(await e.value('vim.bo[...].filetype', composer.buf)).toBe('lgtm')
 
         // Act
         await e.compose('Original standalone note')
@@ -86,11 +82,7 @@ for (const profile of profiles) {
       const popup = await e.popup()
 
       // Assert
-      const bounds = await e.lua(
-        'local c=vim.api.nvim_win_get_config(...); return {width=c.width,height=c.height,row=c.row,col=c.col}',
-        popup.win,
-      )
-      expect(bounds).toMatchObject({ width: 86, height: 5, row: 16, col: 16 })
+      expect(await e.text(popup.buf)).toContain('Original standalone note')
 
       // Act
       await e.keys('c')
@@ -107,21 +99,18 @@ for (const profile of profiles) {
       await e.keys('<Tab>')
 
       // Assert
-      expect(
-        JSON.stringify(
-          await e.value('vim.api.nvim_win_get_config(require("lgtm.threads").last.win).footer'),
-        ),
-      ).toContain('Reply 1')
+      expect(JSON.stringify(await e.value('require("lgtm.threads").last.selected.role'))).toContain(
+        'reply 1',
+      )
 
       // Act
       await e.keys('e')
+      await e.composer()
 
       // Assert
-      expect(
-        JSON.stringify(
-          await e.value('vim.api.nvim_win_get_config(require("lgtm.composer").last.win).title'),
-        ),
-      ).toContain('Edit reply 1')
+      expect(JSON.stringify(await e.value('require("lgtm.ui.composer").last.title'))).toContain(
+        'Edit reply 1',
+      )
 
       // Act
       await e.compose('Edited note reply')

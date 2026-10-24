@@ -1,5 +1,7 @@
 local M = {}
 local api = vim.api
+M.winhighlight =
+  "Normal:LgtmNormal,NormalNC:LgtmNormal,NormalFloat:LgtmNormal,FloatBorder:LgtmBorder,FloatTitle:LgtmTitle,FloatFooter:LgtmMuted,CursorLine:LgtmSelection"
 local names = {
   normal = "LgtmNormal",
   border = "LgtmBorder",
@@ -21,8 +23,7 @@ function M.highlights()
 end
 
 function M.apply(win)
-  vim.wo[win].winhighlight =
-    "Normal:LgtmNormal,NormalNC:LgtmNormal,NormalFloat:LgtmNormal,FloatBorder:LgtmBorder,FloatTitle:LgtmTitle,FloatFooter:LgtmMuted,CursorLine:LgtmSelection"
+  vim.wo[win].winhighlight = M.winhighlight
   vim.wo[win].number = false
   vim.wo[win].relativenumber = false
   vim.wo[win].signcolumn = "no"
@@ -53,11 +54,40 @@ function M.border()
   return result
 end
 
-function M.open(buf, enter, options)
+-- Component props leave border construction to NUI, including custom border tables.
+function M.get_component_options()
+  return { border_style = "none", window = { highlight = M.winhighlight } }
+end
+
+function M.get_popup_options(title, footer)
   M.highlights()
-  options.border = require("lgtm.config").options.ui.border
-  local win = api.nvim_open_win(buf, enter, options)
-  M.apply(win)
-  return win
+  return {
+    border = {
+      style = require("lgtm.config").options.ui.border,
+      text = { top = title and (" " .. title .. " "), bottom = footer },
+    },
+    buf_options = { filetype = "lgtm" },
+    win_options = {
+      winhighlight = M.winhighlight,
+      number = false,
+      relativenumber = false,
+      signcolumn = "no",
+      foldcolumn = "0",
+      linebreak = true,
+    },
+  }
+end
+
+function M.available()
+  for _, module in ipairs({ "nui-components", "nui.split", "nui.tree" }) do
+    if not pcall(require, module) then
+      vim.notify(
+        "LGTM: missing dependency " .. module .. "; see :help lgtm and :checkhealth lgtm",
+        vim.log.levels.ERROR
+      )
+      return false
+    end
+  end
+  return true
 end
 return M

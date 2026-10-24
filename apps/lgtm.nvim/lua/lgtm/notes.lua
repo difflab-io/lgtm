@@ -160,7 +160,7 @@ function M.add(range)
       requestKey = contexts.request_key(),
       anchor = anchor,
     }
-    require("lgtm.composer").open("Note", "", function(body, done)
+    require("lgtm.ui.composer").open("Note", "", function(body, done)
       if input.body and input.body ~= body then
         input.requestKey = contexts.request_key()
       end

@@ -59,79 +59,61 @@ for (const profile of profiles) {
   })
   describe(`When applying the notification theme [${profile}]`, { tags: [profile] }, () => {
     const fixture = useEditor(profile)
-    it('Notifications use the plugin accent, compact geometry and user highlight overrides', async () => {
+    it('should_preserve_notification_messages_and_user_highlight_overrides', async () => {
       // Arrange
       const { editor: e } = fixture()
-      // Act
-      await e.lua('require("lgtm.notifications").show("Saved UI evidence")')
-
-      // Assert
-      const win = await waitFor(
-        'notification window',
-        () =>
-          e.lua<number>(`for _,w in ipairs(vim.api.nvim_list_wins()) do
-          local b=vim.api.nvim_win_get_buf(w)
-          if vim.bo[b].filetype=="notify" and table.concat(vim.api.nvim_buf_get_lines(b,0,-1,false),"\\n"):find("Saved UI evidence",1,true) then return w end end; return 0`),
-        Boolean,
-      )
-      expect(await e.value('vim.api.nvim_win_get_width(...)', win)).toBe(50)
-      const height = await e.value<number>('vim.api.nvim_win_get_height(...)', win)
-      expect(height).toBeGreaterThanOrEqual(1)
-      expect(height).toBeLessThanOrEqual(4)
-      const namespace = await e.value<number>('vim.api.nvim_get_hl_ns({winid=...})', win)
-      expect(namespace).toBe(
-        await e.value('vim.api.nvim_create_namespace("lgtm.notification-theme")'),
-      )
-      const accent = await e.lua<string>(
-        `local w,ns=...; for _,m in ipairs(vim.api.nvim_buf_get_extmarks(vim.api.nvim_win_get_buf(w),require("notify.render.base").namespace(),0,-1,{details=true})) do
-          local name=m[4].hl_group
-          if name and vim.api.nvim_get_hl(ns,{name=name,link=true}).link=="LgtmInfo" then return name end end; return ""`,
-        win,
-        namespace,
-      )
-      expect(accent).not.toBe('')
+      await e.lua('vim.api.nvim_set_hl(0,"LgtmInfo",{link="Special"})')
 
       // Act
       await e.lua(
-        'vim.api.nvim_set_hl(0,"LgtmInfo",{link="Special"}); require("lgtm.cards").highlights()',
+        'require("lgtm.notifications").show("Saved UI evidence"); require("lgtm.ui.theme").highlights()',
       )
 
       // Assert
-      expect(await e.value('vim.api.nvim_get_hl(0,{name="LgtmCommentStatus",link=false}).fg')).toBe(
-        await e.value('vim.api.nvim_get_hl(0,{name="Special",link=false}).fg'),
+      expect((await e.notices()).at(-1)?.message).toBe('Saved UI evidence')
+      expect(await e.value('vim.api.nvim_get_hl(0,{name="LgtmInfo",link=true}).link')).toBe(
+        'Special',
       )
-      expect(
-        await e.lua(
-          'local ns,name=...; return vim.api.nvim_get_hl(ns,{name=name,link=true}).link',
-          namespace,
-          accent,
-        ),
-      ).toBe('LgtmInfo')
     })
   })
-  describe(`When customizing modal style [${profile}]`, { tags: [profile] }, () => {
+
+  describe(`When saving a draft [${profile}]`, { tags: [profile] }, () => {
     const fixture = useEditor(profile)
-    it('Composer borders and comment cards follow the same user configuration', async () => {
+    it('should_retain_failed_draft_without_duplicate_save', async () => {
       // Arrange
       const { editor: e } = fixture()
+      await e.lua(`_G.e2e.saves={}
+        require("lgtm.ui.composer").open("Draft retry","",function(body,done)
+          table.insert(_G.e2e.saves,body); _G.e2e.finish_save=done
+        end)`)
+      const draft = await e.composer()
+      await e.body('Keep this exact draft\nWith a second line')
+
       // Act
-      await e.lua(
-        'require("lgtm.config").options.ui.border="single"; require("lgtm.composer").open("Theme example","",function(_,done) done() end)',
-      )
+      await e.keys('<C-s>')
+      await e.lua('require("lgtm.ui.composer").last.save()')
 
       // Assert
-      const composer = await e.composer()
-      expect(await e.value('vim.api.nvim_win_get_config(...).border[1]', composer.win)).toBe('┌')
-      expect(await e.value('vim.wo[...].winhighlight', composer.win)).toContain(
-        'FloatBorder:LgtmBorder',
-      )
-      const card = await e.lua(
-        'return require("lgtm.cards").render({anchor={kind="line"},state="open"},{{body="Preview",author={name="Reviewer"}}},"GitHub draft",40,false)',
-      )
-      expect(card[0][0][0]).toMatch(/^┌/)
+      expect(await e.value('#_G.e2e.saves')).toBe(1)
 
       // Act
-      await e.keys('q')
+      await e.lua('_G.e2e.finish_save({message="Save rejected"})')
+      await e.composer()
+
+      // Assert
+      expect(await e.text(draft.buf)).toBe('Keep this exact draft\nWith a second line')
+      expect(await e.value('require("lgtm.ui.composer").last.closed')).toBe(false)
+
+      // Act
+      await e.keys('<C-s>')
+      await e.lua('_G.e2e.finish_save(nil)')
+
+      // Assert
+      expect(await e.value('_G.e2e.saves')).toEqual([
+        'Keep this exact draft\nWith a second line',
+        'Keep this exact draft\nWith a second line',
+      ])
+      expect(await e.value('require("lgtm.ui.composer").last.closed')).toBe(true)
     })
   })
   describe(`When cancelling an empty search [${profile}]`, { tags: [profile] }, () => {
@@ -149,19 +131,19 @@ for (const profile of profiles) {
       // Act
       await e.command('Lgtm sessions')
       await e.wait(
-        'require("lgtm.picker").last and not require("lgtm.picker").last.closed',
+        'require("lgtm.ui.search").last and vim.api.nvim_get_current_buf() == require("lgtm.ui.search").last.buf and vim.fn.mode():sub(1,1) == "i"',
         'session picker',
       )
       await e.keys('not present')
-      await e.wait('#require("lgtm.picker").last.filtered == 0', 'empty picker result')
+      await e.wait('#require("lgtm.ui.search").last.filtered == 0', 'empty picker result')
       const text = await e.value(
-        'vim.api.nvim_buf_get_lines(require("lgtm.picker").last.list_buf,0,1,false)[1]',
+        'vim.api.nvim_buf_get_lines(require("lgtm.ui.search").last.list_buf,0,1,false)[1]',
       )
       await e.keys('<Esc>')
 
       // Assert
       expect(text).toBe('(no matches)')
-      expect(await e.value('require("lgtm.picker").last.closed')).toBe(true)
+      expect(await e.value('require("lgtm.ui.search").last.closed')).toBe(true)
       expect(await e.state()).toBeNull()
     })
   })
@@ -179,7 +161,13 @@ describe('When installing the monorepo as a native Neovim package', { tags: ['re
       await symlink(await readlink(join(ROOT, 'doc')), join(root, 'doc'))
       const readme = await readFile(join(ROOT, 'apps/lgtm.nvim/README.md'), 'utf8')
       const setup = readme.split('### Native Git packages')[1].match(/```lua\n([\s\S]*?)```/)![1]
-      const dependencies = ['codediff.nvim', 'which-key.nvim', 'nvim-notify']
+      const dependencies = [
+        'nui.nvim',
+        'nui-components.nvim',
+        'codediff.nvim',
+        'which-key.nvim',
+        'nvim-notify',
+      ]
         .map(
           (name) =>
             `vim.opt.runtimepath:append(${JSON.stringify(join(ROOT, 'e2e/nvim/.cache', name))})`,

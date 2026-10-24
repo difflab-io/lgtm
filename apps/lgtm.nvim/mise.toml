@@ -10,7 +10,7 @@ run = "nvim --headless -u NONE -l {{config_root}}/tests/contracts.lua"
 run = "nvim --headless -u NONE -l {{config_root}}/tests/contracts.lua"
 
 [tasks.format]
-run = "stylua {{config_root}}/lua {{config_root}}/plugin {{config_root}}/tests"
+run = "stylua --config-path {{config_root}}/.stylua.toml {{config_root}}/../../lazy.lua {{config_root}}/lua {{config_root}}/plugin {{config_root}}/tests"
 
 [tasks."format:check"]
-run = "stylua --check {{config_root}}/lua {{config_root}}/plugin {{config_root}}/tests"
+run = "stylua --check --config-path {{config_root}}/.stylua.toml {{config_root}}/../../lazy.lua {{config_root}}/lua {{config_root}}/plugin {{config_root}}/tests"

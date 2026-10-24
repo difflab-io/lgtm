@@ -11,5 +11,6 @@
     "skipLibCheck": true,
     "resolveJsonModule": true
   },
+  "exclude": ["**/.cache/**"],
   "include": ["common/**/*.ts", "backend/**/*.ts", "cli/**/*.ts", "nvim/**/*.ts"]
 }

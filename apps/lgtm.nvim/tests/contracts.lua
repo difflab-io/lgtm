@@ -6,6 +6,7 @@ local function should_validate_plugin_contracts()
     assert(loadfile(file))
   end
   assert(loadfile(root .. "/plugin/lgtm.lua"))
+  assert(loadfile(root .. "/../../lazy.lua"))
   local repository_url = require("lgtm.sessions").repository_url
   for _, remote in ipairs({
     "https://github.com/acme/repo.git",
@@ -87,6 +88,8 @@ local function should_validate_plugin_contracts()
   vim.health = original_health
   assert(table.concat(health_errors, "\n"):find("Missing dependency which-key", 1, true))
   assert(table.concat(health_errors, "\n"):find("Backend unavailable", 1, true))
+  assert(table.concat(health_errors, "\n"):find("Missing dependency nui-components", 1, true))
+  assert(table.concat(health_errors, "\n"):find("Missing dependency nui.split", 1, true))
   local rpc = require("lgtm.rpc")
   local old_call, old_identity, old_caps = transport.call, rpc.identity, rpc.capabilities
   local old_config = require("lgtm.config").options.identity

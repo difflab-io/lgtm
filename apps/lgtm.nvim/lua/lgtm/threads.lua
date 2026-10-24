@@ -163,7 +163,19 @@ local function blocks(state, buf, path, side, width)
       end
       vim.list_extend(
         groups[line].rows,
-        require("lgtm.cards").render(thread, cs, status, width, M.expanded[thread.id], placement)
+        require("lgtm.ui.cards").render({
+          resolved = thread.state == "resolved",
+          file = thread.anchor.kind == "file",
+          status = status,
+          location_status = placement and not placement.location and placement.status or nil,
+          comments = vim.tbl_map(function(comment)
+            return {
+              body = comment.body,
+              author = comment.author and comment.author.name or "Unknown",
+              is_reply = tonumber(comment.position or 0) > 0,
+            }
+          end, cs),
+        }, width, M.expanded[thread.id])
       )
     end
   end
@@ -201,7 +213,7 @@ function M.render(state, buf, path, side)
   if not M.visible then
     return
   end
-  require("lgtm.cards").highlights()
+  require("lgtm.ui.cards").highlights()
   local windows = vim.fn.win_findbuf(buf)
   local width = windows[1] and api.nvim_win_get_width(windows[1]) or 80
   for _, block in ipairs(blocks(state, buf, path, side, width)) do
@@ -223,7 +235,7 @@ function M.render_review(state, panes, path)
   if not M.visible then
     return
   end
-  require("lgtm.cards").highlights()
+  require("lgtm.ui.cards").highlights()
   if not visible.old or not visible.new or visible.old.buf == visible.new.buf then
     for side, pane in pairs(visible) do
       M.render(state, pane.buf, path, side)
@@ -237,7 +249,7 @@ function M.render_review(state, panes, path)
   for _, side in ipairs({ "old", "new" }) do
     local pane, other = visible[side], visible[side == "old" and "new" or "old"]
     for _, block in ipairs(blocks(state, pane.buf, path, side, api.nvim_win_get_width(pane.win))) do
-      local mapped = require("lgtm.cards").other_line(
+      local mapped = require("lgtm.codediff").other_line(
         block.line,
         side,
         changes,
@@ -444,225 +456,114 @@ function M.description(state, thread)
   end
 end
 
-function M.open(state, threads, pane)
-  threads = vim.tbl_filter(function(thread)
-    return #comments(state, thread) > 0
+function M.open(state, threads, pane, on_ready)
+  local ids = vim.tbl_map(function(thread)
+    return thread.id
   end, threads)
-  local origin = api.nvim_get_current_win()
-  local cursor = api.nvim_win_get_cursor(origin)
-  local buf = api.nvim_create_buf(false, true)
-  local win
-  local rows, lines, entries, spans = {}, {}, {}, {}
-  local width = math.max(20, math.min(pane and 42 or 86, vim.o.columns - 6))
-  local headers = {}
-  local function banner(t, index, replies)
-    local text = (t.state == "resolved" and "RESOLVED" or "OPEN")
-      .. " · "
-      .. replies
-      .. (replies == 1 and " reply" or " replies")
-    if #threads > 1 then
-      text = "THREAD " .. index .. " / " .. #threads .. " · " .. text
-    end
-    if pane then
-      local a = t.anchor or {}
-      text = text .. " · " .. (a.path or "Review") .. (a.start and ":" .. a.start or "")
-    end
-    local location_status, location_reason = M.description(state, t)
-    if location_status then
-      text = location_status:upper() .. " · " .. text
-    end
-    return text, location_reason
-  end
-  for index, t in ipairs(threads) do
-    local cs = comments(state, t)
-    local replies = 0
-    for _, comment in ipairs(cs) do
-      if tonumber(comment.position or 0) > 0 then
-        replies = replies + 1
-      end
-    end
-    local title, location_reason = banner(t, index, replies)
-    lines[#lines + 1] = " " .. title
-    local heading = { line = #lines, group = t.state == "resolved" and "LgtmSuccess" or "LgtmInfo" }
-    spans[#spans + 1] = heading
-    headers[t.id] = { span = heading, index = index, replies = replies }
-    rows[#lines] = { thread = t }
-    lines[#lines + 1] = string.rep("─", width)
-    spans[#spans + 1] = { line = #lines, group = "LgtmBorder" }
-    rows[#lines] = { thread = t }
-    if location_reason then
-      lines[#lines + 1] = " " .. location_reason
-      rows[#lines] = { thread = t }
-      spans[#spans + 1] = { line = #lines, group = "LgtmWarning" }
-      if t.anchor.start then
-        lines[#lines + 1] = " Original lines " .. t.anchor.start .. "–" .. t.anchor["end"]
-        rows[#lines] = { thread = t }
-      end
-      local excerpt = t.anchor.evidence and t.anchor.evidence.selectedText
-      if excerpt and excerpt ~= "" then
-        local source_lines = vim.split(excerpt, "\n", { plain = true })
-        for index = 1, math.min(6, #source_lines) do
-          lines[#lines + 1] = " > " .. source_lines[index]
-          rows[#lines] = { thread = t }
-        end
-      end
-      lines[#lines + 1] = ""
-    end
-    for i, c in ipairs(cs) do
-      local position = tonumber(c.position or 0)
-      local role = position == 0 and "top-level comment" or "reply " .. position
-      local entry =
-        { thread = t, comment = c, role = role, line = #lines + 1, index = #entries + 1 }
-      entries[#entries + 1] = entry
-      local prefix = i == 1 and " " or "   └─ "
-      lines[#lines + 1] = prefix
-        .. role:upper()
-        .. " · "
-        .. (c.author and c.author.name or "Unknown")
-        .. " · "
-        .. comment_status(c)
-      spans[#spans + 1] = { line = #lines, group = i == 1 and "LgtmTitle" or "LgtmMuted" }
-      rows[#lines] = entry
-      for _, text in ipairs(vim.split(c.body, "\n", { plain = true })) do
-        lines[#lines + 1] = (i == 1 and "   " or "      ") .. text
-        rows[#lines] = entry
-      end
-      entry.last_line = #lines
-      lines[#lines + 1] = ""
-      rows[#lines] = entry
-    end
-  end
-  if #lines == 0 then
-    lines = { "No comments" }
-  end
-  api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.bo[buf].filetype = "lgtm"
-  vim.bo[buf].syntax = "markdown"
-  vim.bo[buf].modifiable = false
-  vim.bo[buf].bufhidden = "wipe"
-  if pane then
-    vim.cmd("botright 42vsplit")
-    win = api.nvim_get_current_win()
-    api.nvim_win_set_buf(win, buf)
-  else
-    local display_rows = 0
-    for _, line in ipairs(lines) do
-      display_rows = display_rows + math.max(1, math.ceil(vim.fn.strdisplaywidth(line) / width))
-    end
-    local height = math.max(3, math.min(display_rows, vim.o.lines - 7))
-    win = require("lgtm.ui").open(buf, true, {
-      relative = "editor",
-      row = math.max(0, math.floor((vim.o.lines - height - 2) / 2)),
-      col = math.max(0, math.floor((vim.o.columns - width - 2) / 2)),
-      width = width,
-      height = height,
-      border = "rounded",
-      title = #threads == 1 and " Review thread " or " Review threads ",
-      footer = " c reply · e edit · dd delete · x resolve · q close ",
-    })
-  end
-  vim.wo[win].number = false
-  vim.wo[win].relativenumber = false
-  vim.wo[win].signcolumn = "no"
-  vim.wo[win].foldcolumn = "0"
-  vim.wo[win].wrap = true
-  vim.wo[win].linebreak = true
-  vim.wo[win].cursorline = false
-  vim.keymap.set("n", "j", "gj", { buffer = buf, silent = true })
-  vim.keymap.set("n", "k", "gk", { buffer = buf, silent = true })
-  local function selected()
-    return rows[api.nvim_win_get_cursor(win)[1]]
-  end
-  local selection_namespace = api.nvim_create_namespace("lgtm.thread-selection")
-  api.nvim_set_hl(0, "LgtmThreadSelection", { link = "LgtmSelection", default = true })
-  for _, span in ipairs(spans) do
-    span.mark = api.nvim_buf_set_extmark(
-      buf,
-      selection_namespace,
-      span.line - 1,
-      0,
-      { end_col = #lines[span.line], hl_group = span.group, priority = 120 }
-    )
-  end
-  local active_mark
-  local function selection()
-    if not api.nvim_win_is_valid(win) then
-      return
-    end
-    if active_mark then
-      api.nvim_buf_del_extmark(buf, selection_namespace, active_mark)
-    end
-    local entry = selected()
-    local label = "Select a comment with Tab"
-    if entry and entry.comment then
-      label = entry.role == "top-level comment" and "Top-level comment"
-        or entry.role:gsub("^reply", "Reply")
-      active_mark = api.nvim_buf_set_extmark(buf, selection_namespace, entry.line - 1, 0, {
-        end_row = entry.last_line,
-        hl_group = "LgtmThreadSelection",
-        hl_eol = true,
-        priority = 110,
-      })
-    end
-    if not pane then
-      api.nvim_win_set_config(win, {
-        footer = " "
-          .. label
-          .. " · Tab next · c reply · e edit · dd delete"
-          .. (entry and can_resolve(state, entry.thread) and " · x resolve" or "")
-          .. " · q close ",
-      })
-    end
-  end
-  api.nvim_create_autocmd("CursorMoved", { buffer = buf, callback = selection })
-  if entries[1] then
-    api.nvim_win_set_cursor(win, { entries[1].line, 0 })
-  end
-  selection()
-  local function refresh()
-    if not api.nvim_win_is_valid(win) or not api.nvim_buf_is_valid(buf) then
-      return
-    end
-    for _, thread in ipairs(state.conversation.threads or {}) do
-      local header = headers[thread.id]
-      if header then
-        for _, row in pairs(rows) do
-          if row.thread.id == thread.id then
-            row.thread = thread
+  local view, requested
+  local actions = {}
+  local function find(thread_id, comment_id)
+    for _, thread in ipairs((state.conversation or {}).threads or {}) do
+      if thread.id == thread_id then
+        local row = { thread = thread }
+        for _, comment in ipairs(comments(state, thread)) do
+          if comment.id == comment_id then
+            row.comment = comment
+            local position = tonumber(comment.position or 0)
+            row.role = position == 0 and "top-level comment" or "reply " .. position
           end
         end
-        local span = header.span
-        lines[span.line] = " " .. banner(thread, header.index, header.replies)
-        vim.bo[buf].modifiable = true
-        api.nvim_buf_set_lines(buf, span.line - 1, span.line, false, { lines[span.line] })
-        vim.bo[buf].modifiable = false
-        span.group = thread.state == "resolved" and "LgtmSuccess" or "LgtmInfo"
-        api.nvim_buf_set_extmark(buf, selection_namespace, span.line - 1, 0, {
-          id = span.mark,
-          end_col = #lines[span.line],
-          hl_group = span.group,
-          priority = 120,
-        })
+        return row
       end
     end
-    selection()
+  end
+  local function selected()
+    local id = requested or view.selected()
+    return id and find(id.thread_id, id.comment_id)
+  end
+  local function present()
+    local records = {}
+    for _, id in ipairs(ids) do
+      local row = find(id)
+      local thread = row and row.thread
+      local cs = thread and comments(state, thread) or {}
+      if thread and #cs > 0 then
+        local location_status, reason = M.description(state, thread)
+        local a = thread.anchor or {}
+        local record = {
+          id = id,
+          status = thread.state == "resolved" and "RESOLVED" or "OPEN",
+          resolved = thread.state == "resolved",
+          replies = 0,
+          location_status = location_status,
+          location = (a.path or "Review") .. (a.start and ":" .. a.start or ""),
+          details = {},
+          comments = {},
+          can_resolve = can_resolve(state, thread),
+        }
+        if reason then
+          record.details[#record.details + 1] = reason
+          if a.start then
+            record.details[#record.details + 1] = "Original lines " .. a.start .. "–" .. a["end"]
+          end
+          local excerpt = a.evidence and a.evidence.selectedText
+          if excerpt and excerpt ~= "" then
+            local lines = vim.split(excerpt, "\n", { plain = true })
+            for index = 1, math.min(6, #lines) do
+              record.details[#record.details + 1] = "> " .. lines[index]
+            end
+          end
+        end
+        for _, comment in ipairs(cs) do
+          local position = tonumber(comment.position or 0)
+          if position > 0 then
+            record.replies = record.replies + 1
+          end
+          record.comments[#record.comments + 1] = {
+            id = comment.id,
+            root = position == 0,
+            role = position == 0 and "top-level comment" or "reply " .. position,
+            author = comment.author and comment.author.name or "Unknown",
+            status = comment_status(comment),
+            body = comment.body,
+          }
+        end
+        records[#records + 1] = record
+      end
+    end
+    return records
+  end
+  local function snapshot(component)
+    local rows, entries = {}, {}
+    for line, id in pairs(component.rows) do
+      local row = find(id.thread_id, id.comment_id)
+      if row then
+        row.line, row.last_line = id.line, id.last_line
+        rows[line] = row
+      end
+    end
+    for index, id in ipairs(component.entries) do
+      local row = find(id.thread_id, id.comment_id)
+      row.line, row.last_line, row.index = id.line, id.last_line, index
+      entries[index] = row
+    end
+    M.last = {
+      buf = component.buf,
+      win = component.win,
+      rows = rows,
+      entries = entries,
+      selected = component.selected(),
+    }
   end
   local function close()
-    if api.nvim_win_is_valid(win) then
-      api.nvim_win_close(win, true)
-    end
-    if api.nvim_win_is_valid(origin) then
-      api.nvim_set_current_win(origin)
-      pcall(api.nvim_win_set_cursor, origin, cursor)
-    end
+    view.close()
+  end
+  local function refresh()
+    view.update(present())
   end
   local function map(key, callback)
-    vim.keymap.set(
-      "n",
-      require("lgtm.config").options.mappings[key] or key,
-      vim.schedule_wrap(callback),
-      { buffer = buf, silent = true }
-    )
+    local names = { c = "reply", e = "edit", dd = "delete", x = "resolve", ["<CR>"] = "navigate" }
+    actions[names[key]] = callback
   end
   local function owned(row)
     if not row or not row.comment then
@@ -679,29 +580,12 @@ function M.open(state, threads, pane)
     end
     return true
   end
-  local function move_comment(direction)
-    local entry = selected()
-    local index = entry and entry.index or (direction == 1 and 0 or 1)
-    if #entries > 0 then
-      local next_entry = entries[(index - 1 + direction) % #entries + 1]
-      api.nvim_win_set_cursor(win, { next_entry.line, 0 })
-      selection()
-    end
-  end
-  map("<Tab>", function()
-    move_comment(1)
-  end)
-  map("<S-Tab>", function()
-    move_comment(-1)
-  end)
-  map("q", close)
-  map("<Esc>", close)
   map("c", function()
     local row = selected()
     if not row then
       return
     end
-    require("lgtm.composer").open("Reply in thread", "", function(body, done)
+    require("lgtm.ui.composer").open("Reply in thread", "", function(body, done)
       M.mutate(state, "Reply", { threadId = row.thread.id, body = body }, function(err)
         if not err then
           close()
@@ -715,7 +599,7 @@ function M.open(state, threads, pane)
     if not owned(row) then
       return
     end
-    require("lgtm.composer").open("Edit " .. row.role, row.comment.body, function(body, done)
+    require("lgtm.ui.composer").open("Edit " .. row.role, row.comment.body, function(body, done)
       M.mutate(state, "EditComment", { commentId = row.comment.id, body = body }, function(err)
         if not err then
           close()
@@ -833,7 +717,27 @@ function M.open(state, threads, pane)
       end
     end)
   end
-  M.last = { buf = buf, win = win, rows = rows, entries = entries }
+  view = require("lgtm.ui.conversation").open({
+    mode = pane and "split" or "modal",
+    threads = present(),
+    mappings = require("lgtm.config").options.mappings,
+    on_action = function(action, thread_id, comment_id)
+      requested = { thread_id = thread_id, comment_id = comment_id }
+      if find(thread_id, comment_id) and actions[action] then
+        actions[action]()
+      end
+      requested = nil
+    end,
+    on_navigate = function(thread_id)
+      requested = { thread_id = thread_id }
+      if actions.navigate then
+        actions.navigate()
+      end
+      requested = nil
+    end,
+    on_change = snapshot,
+    on_ready = on_ready,
+  })
   return M.last
 end
 

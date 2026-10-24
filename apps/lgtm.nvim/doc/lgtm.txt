@@ -2,10 +2,11 @@
 
 SETUP                                                        *lgtm-setup*
 
-Requires Neovim 0.11+, lgtm CLI and running backend, curl, CodeDiff including its
-native library, WhichKey and nvim-notify. Kak is optional. Git reviews need Git. GitHub reviews
-need gh auth login as the backend's local user. See README.md for pinned lazy.nvim
-installation, identity and endpoint settings. Run :checkhealth lgtm.
+Requires Neovim 0.11+, the compatible lgtm CLI and backend, curl, NuiComponents, NUI, CodeDiff with its native library, WhichKey, and nvim-notify. Kak is optional. Git reviews need Git. GitHub reviews need gh auth login as the backend's local user.
+
+Supported lazy.nvim installs need one LGTM declaration. Root lazy.lua supplies dependencies and monorepo runtime setup. Keep package loading and its lazy source enabled. Other managers and disabled package metadata need explicit dependencies. See README.md for exact revisions and examples. Run :checkhealth lgtm for missing modules, executables, or backend capabilities.
+
+The nvim:install-dev-plugin and nvim:install-released-plugin Premise tasks select a checkout root or main while retaining user options. The selected revision must contain root lazy.lua. Restart Neovim after switching.
 
 COMMANDS                                                     *lgtm-commands*
 
@@ -42,14 +43,11 @@ Reviewed (seen) marks apply to PR, branch, working-tree, staged and directory
 reviews, not notes. Content changes clear marks. Local marks survive editor
 restarts. PR marks read and update GitHub's Viewed state.
 
-Comments use full-width status/preview cards. Lost selections float above the
-file with their original range and excerpt. Deleted files retain orphaned
+Comments use full-width status/preview cards. Lost selections show a compact status and preview above the file. The full thread view retains the original range and excerpt. Deleted files retain orphaned
 discussions in :Lgtm threads. Staged and branch reviews share local discussions;
 PR discussions remain separate.
 
-The modal labels and indents
-replies, highlights the selected comment, and names the edit/delete target.
-Deletion asks for confirmation.
+The modal labels and indents replies, highlights the selected comment, and names the edit/delete target. Deletion asks for confirmation. The threads pane remains open during Enter navigation and x resolution. OUTSIDE DIFF explains unavailable navigation without moving focus. Stale feedback reveals its card above the file.
 
 Set ui.border and ui.highlights in setup options to customize the shared theme.
 Default highlight links follow NormalFloat, FloatBorder, Title, Comment, Visual

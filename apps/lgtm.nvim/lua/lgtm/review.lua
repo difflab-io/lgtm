@@ -226,8 +226,8 @@ function M.reopen_pr(state)
     if not current() then
       return
     end
-    local composer = require("lgtm.composer").last
-    if composer and vim.api.nvim_win_is_valid(composer.win) then
+    local composer = require("lgtm.ui.composer").last
+    if composer and composer.win and vim.api.nvim_win_is_valid(composer.win) then
       -- Replacing a remote snapshot tab must not discard an open composer.
       vim.api.nvim_create_autocmd("WinClosed", {
         pattern = tostring(composer.win),
@@ -559,7 +559,7 @@ function M.comment(kind, range)
       requestKey = contexts.request_key(),
       anchor = anchor,
     }
-    require("lgtm.composer").open("Review comment", "", function(body, done)
+    require("lgtm.ui.composer").open("Review comment", "", function(body, done)
       contexts.ensure_writable(state, function(write_error)
         if write_error then
           notice.error(write_error)
@@ -627,10 +627,10 @@ function M.comment_action(action)
       notice.show("No comment at cursor")
       return
     end
-    local popup = threads.open(selected, matches)
-    if #matches == 1 then
+    threads.open(selected, matches, nil, #matches == 1 and function()
       vim.api.nvim_input(action)
-    else
+    end or nil)
+    if #matches > 1 then
       notice.show("Select a comment, then " .. action)
     end
   end
@@ -927,27 +927,32 @@ function M.submit()
       local draft = M.submission_drafts[state.review.id]
         or { body = state.review.body or "", requestKey = contexts.request_key() }
       M.submission_drafts[state.review.id] = draft
-      require("lgtm.composer").open("Final review body (optional)", draft.body, function(body, done)
-        draft.body = body
-        draft.outcome = outcome
-        local pending = notice.show("Submitting review…")
-        local input = {
-          reviewId = state.review.id,
-          outcome = outcome,
-          body = body,
-          expectedHead = state.head,
-          expectedBase = state.base,
-          expectedVersion = state.version,
-        }
-        local fingerprint = vim.json.encode(input)
-        if draft.fingerprint ~= fingerprint then
-          draft.requestKey, draft.fingerprint = contexts.request_key(), fingerprint
-        end
-        input.requestKey = draft.requestKey
-        rpc.call("SubmitReview", input, function(err, result)
-          M.submission_result(state, err, result, pending, done)
-        end)
-      end, { action = "submit review" })
+      require("lgtm.ui.composer").open(
+        "Final review body (optional)",
+        draft.body,
+        function(body, done)
+          draft.body = body
+          draft.outcome = outcome
+          local pending = notice.show("Submitting review…")
+          local input = {
+            reviewId = state.review.id,
+            outcome = outcome,
+            body = body,
+            expectedHead = state.head,
+            expectedBase = state.base,
+            expectedVersion = state.version,
+          }
+          local fingerprint = vim.json.encode(input)
+          if draft.fingerprint ~= fingerprint then
+            draft.requestKey, draft.fingerprint = contexts.request_key(), fingerprint
+          end
+          input.requestKey = draft.requestKey
+          rpc.call("SubmitReview", input, function(err, result)
+            M.submission_result(state, err, result, pending, done)
+          end)
+        end,
+        { action = "submit review" }
+      )
     end
   )
 end

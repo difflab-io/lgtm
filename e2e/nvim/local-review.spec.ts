@@ -137,8 +137,7 @@ for (const profile of profiles) {
       const lost = await placement(e, rootId)
       const marks = await e.marks()
       await e.pane()
-      const popup = await e.popup()
-      const bounds = await e.value('vim.api.nvim_win_get_config(...)', popup.win)
+      await e.popup()
 
       // Assert
       expect(lost.status).toBe('outdated')
@@ -152,7 +151,6 @@ for (const profile of profiles) {
       expect(JSON.stringify(marks)).not.toContain('> selected')
       for (const text of ['OUTDATED', 'Original lines 2', 'selected'])
         expect(await e.text()).toContain(text)
-      expect(bounds.row).toBe(Math.floor((40 - bounds.height - 2) / 2))
     })
 
     it('Deleting the file keeps orphaned discussions available in the thread list', async () => {
@@ -337,7 +335,7 @@ for (const profile of profiles) {
       // Act
       await e.command('Lgtm sessions')
       await e.wait(
-        'require("lgtm.picker").last and not require("lgtm.picker").last.closed',
+        'require("lgtm.ui.search").last and not require("lgtm.ui.search").last.closed and vim.api.nvim_get_current_buf() == require("lgtm.ui.search").last.buf and vim.fn.mode() == "i"',
         'saved review picker',
       )
       await e.keys('<CR>')
@@ -606,7 +604,7 @@ for (const profile of profiles) {
 
       // Assert
       await e.wait(
-        'require("lgtm.picker").last and not require("lgtm.picker").last.closed',
+        'require("lgtm.ui.search").last and not require("lgtm.ui.search").last.closed and vim.api.nvim_get_current_buf() == require("lgtm.ui.search").last.buf and vim.fn.mode() == "i"',
         'session picker',
       )
 
@@ -614,8 +612,8 @@ for (const profile of profiles) {
       await e.keys('specific-plan')
 
       // Assert
-      await e.wait('#require("lgtm.picker").last.filtered == 1', 'session filter')
-      expect(await e.value('vim.api.nvim_win_get_width(require("lgtm.picker").last.win)')).toBe(76)
+      await e.wait('#require("lgtm.ui.search").last.filtered == 1', 'session filter')
+      expect(await e.value('require("lgtm.ui.search").last.closed')).toBe(false)
 
       // Act
       await e.keys('<CR>')

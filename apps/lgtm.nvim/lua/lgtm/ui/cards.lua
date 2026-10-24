@@ -18,7 +18,7 @@ local function fit(text, width)
 end
 
 function M.highlights()
-  require("lgtm.ui").highlights()
+  require("lgtm.ui.theme").highlights()
   for name, source in pairs({
     Body = "LgtmNormal",
     Border = "LgtmBorder",
@@ -30,10 +30,11 @@ function M.highlights()
 end
 
 -- Collapsed cards keep a single preview row; expansion reveals the complete conversation.
-function M.render(thread, comments, status, width, expanded, placement)
+function M.render(card, width, expanded)
+  local comments, status = card.comments, card.status
   width = math.max(8, width)
-  local border = require("lgtm.ui").border()
-  local resolved = thread.state == "resolved"
+  local border = require("lgtm.ui.theme").border()
+  local resolved = card.resolved
   if resolved and not expanded then
     return {
       {
@@ -42,22 +43,22 @@ function M.render(thread, comments, status, width, expanded, placement)
       },
     }
   end
-  local heading = (thread.anchor.kind == "file" and "File · " or "")
+  local heading = (card.file and "File · " or "")
     .. (status or (resolved and "Resolved" or "Open"))
   if status then
     heading = heading .. (resolved and " · Resolved" or " · Open")
   end
-  local fallback = placement and not placement.location
+  local fallback = card.location_status
   if fallback then
-    local label = placement.status:sub(1, 1):upper() .. placement.status:sub(2)
-    if placement.status == "stale" or placement.status == "outdated" then
+    local label = card.location_status:sub(1, 1):upper() .. card.location_status:sub(2)
+    if card.location_status == "stale" or card.location_status == "outdated" then
       label = label .. " · anchor lost"
     end
     heading = label .. " · " .. heading
   end
   local replies = 0
   for _, comment in ipairs(comments) do
-    if tonumber(comment.position or 0) > 0 then
+    if comment.is_reply then
       replies = replies + 1
     end
   end
@@ -79,7 +80,7 @@ function M.render(thread, comments, status, width, expanded, placement)
   end
   if expanded then
     for _, comment in ipairs(comments) do
-      content(comment.author and comment.author.name or "Unknown")
+      content(comment.author)
       for _, line in ipairs(vim.split(comment.body, "\n", { plain = true })) do
         if line == "" then
           content("")
@@ -113,10 +114,7 @@ function M.render(thread, comments, status, width, expanded, placement)
     { border[7] .. border[6], { "LgtmNormal", "LgtmCommentBorder" } },
     {
       fit(
-        (
-          not expanded and (comments[1].author and comments[1].author.name or "Unknown") .. " · "
-          or ""
-        )
+        (not expanded and comments[1].author .. " · " or "")
           .. "Enter open · za "
           .. (expanded and "collapse" or "expand"),
         width - 3
@@ -125,32 +123,19 @@ function M.render(thread, comments, status, width, expanded, placement)
     },
     { border[5], { "LgtmNormal", "LgtmCommentBorder" } },
   }
-  return rows
+  local Line, Text = require("nui.line"), require("nui.text")
+  return vim.tbl_map(function(row)
+    local texts = vim.tbl_map(function(chunk)
+      return Text(chunk[1], { hl_group = chunk[2] })
+    end, row)
+    local line = Line(texts)
+    if line:width() == 0 then
+      return { { "", "LgtmNormal" } }
+    end
+    return vim.tbl_map(function(text)
+      return { text:content(), text.extmark.hl_group }
+    end, texts)
+  end, rows)
 end
 
--- Translate an annotation boundary through CodeDiff's actual edit ranges. A comment
--- inside an insertion/deletion pads the other pane at that edit's adjacent real line.
-function M.other_line(line, source, changes, target_count)
-  if line == 0 then
-    return 0
-  end
-  local target = source == "old" and "modified" or "original"
-  source = source == "old" and "original" or "modified"
-  local delta = 0
-  for _, change in ipairs(changes or {}) do
-    local from, to = change[source], change[target]
-    if line < from.start_line then
-      break
-    end
-    if line < from.end_line then
-      local mapped = to.start_line - 1
-      if to.end_line > to.start_line then
-        mapped = to.start_line + math.min(line - from.start_line, to.end_line - to.start_line - 1)
-      end
-      return math.max(0, math.min(mapped, target_count))
-    end
-    delta = to.end_line - from.end_line
-  end
-  return math.max(0, math.min(line + delta, target_count))
-end
 return M

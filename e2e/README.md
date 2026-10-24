@@ -67,13 +67,15 @@ e2e/
 └── tsconfig.json
 ```
 
-The editor profiles pin CodeDiff, WhichKey and nvim-notify. The second profile adds Kak with compatible keys; Kak remains optional for users. Runs use only the required profile by default. Set `LGTM_E2E_NVIM_PROFILES=required,kak` to include Kak, or `kak` to run it alone. Both use native CodeDiff views and fresh databases. Lua contains editor runtime setup. TypeScript owns the scenarios, input, assertions and process lifecycle.
+The editor profiles pin NuiComponents, NUI, CodeDiff, WhichKey, and nvim-notify. The installation journey also pins lazy.nvim and uses a fresh manager root. It installs a snapshot of current source, opens a real note composer, and restarts with existing provider configuration. The second profile adds Kak with compatible keys; Kak remains optional for users. Runs use only the required profile by default. Set `LGTM_E2E_NVIM_PROFILES=required,kak` to include Kak, or `kak` to run it alone. Both use native CodeDiff views and fresh databases. Lua contains editor runtime setup. TypeScript owns the scenarios, input, assertions, and process lifecycle.
 
 `common/` owns processes, credentials, GitHub resources and test configuration. Backend fixtures construct API states. Neovim fixtures perform editor actions. Large feature setups live beside their spec as `*.fixtures.ts`. Small setups used by one file stay private in that file. Tests keep the actions and assertions that describe the behavior under test.
 
 Fixture hooks compose in stack order. Setup creates the PR, starts the backend, then opens the editor. Cleanup closes the editor, stops the backend, resets the PR, then removes the group’s refs. The local and PR editor fixtures share the same editor lifecycle.
 
 Failed runs retain their workspace, database and logs under `target/e2e/`. Editor failure logs also include the rendered screen and window viewports so card visibility failures can be diagnosed from CI output. Successful runs remove temporary local state. Fixture hooks stop processes after each case. Waits, subprocesses and RPC requests have deadlines.
+
+The UI refactor reuses application BDD journeys. Geometry, widget rendering, and library internals stay outside test scope. The failed-save integration case controls the persistence callback while using real UI components.
 
 ## Run and inspect
 

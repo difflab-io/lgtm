@@ -1,0 +1,47 @@
+/**
+ * @module-tag e2e
+ * @module-tag nvim
+ */
+import { describe, it, expect } from 'vitest'
+import { access } from 'node:fs/promises'
+import { usePluginInstallation } from './install.fixtures.js'
+
+describe('When installing LGTM through one lazy.nvim declaration', { tags: ['required'] }, () => {
+  const fixture = usePluginInstallation()
+
+  it('should_install_required_plugins_from_one_lgtm_declaration', async () => {
+    // Arrange
+    const installation = fixture()
+    expect(
+      await access(installation.managerRoot).then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(false)
+
+    // Act
+    const installed = await installation.start()
+
+    // Assert
+    expect(installed.composer_open).toBe(true)
+    expect(installed.plugins).toEqual([
+      'lgtm',
+      'nui.nvim',
+      'nui-components.nvim',
+      'codediff.nvim',
+      'which-key.nvim',
+      'nvim-notify',
+    ])
+
+    // Arrange
+    // The same manager root now contains the installed plugin and its package metadata.
+
+    // Act
+    const restarted = await installation.start(true)
+
+    // Assert
+    expect(restarted.composer_open).toBe(true)
+    expect(restarted.customized).toBe(true)
+    expect(restarted.plugins).toEqual(installed.plugins)
+  })
+})

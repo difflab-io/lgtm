@@ -6,7 +6,7 @@ function M.show(message, level, previous)
     replace = previous,
     timeout = 5000,
     render = function(buf, notification, highlights, config)
-      require("lgtm.ui").highlights()
+      require("lgtm.ui.theme").highlights()
       local accent = notification.level == "ERROR" and "LgtmError"
         or notification.level == "WARN" and "LgtmWarning"
         or "LgtmInfo"

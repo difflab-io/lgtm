@@ -6,38 +6,53 @@ Notes and local/GitHub review through the LGTM backend, with CodeDiff and compac
 
 ## Setup
 
-Install Neovim **0.11+**, the compatible `lgtm` CLI, and `curl`. Git-based reviews also need Git. GitHub reviews need `gh auth login` for the user running the backend. Notes and local reviews work without GitHub credentials.
+Install Neovim 0.11+, the compatible `lgtm` CLI, and curl. Git reviews also need Git. GitHub reviews need `gh auth login` for the backend's user. Notes and local reviews work without GitHub credentials.
 
-Required plugins:
-
-| Plugin | Purpose | Verified revision |
+| Required plugin | Purpose | Tested revision |
 | --- | --- | --- |
-| `esmuellert/codediff.nvim` | Diff engine and native library | `09d9ebef2cc5a5c04db7a349cd6c61bdf84ecc8e` (4.0.6) |
+| `grapp-dev/nui-components.nvim` | Declarative inputs, search, and thread modals | `1654dd709f13874089eefc80d82e0eb667f7fdfb` |
+| `MunifTanjim/nui.nvim` | Splits, trees, and text components | `10fc361835c856ba4233ef5ea135b919bf3dce97` |
+| `esmuellert/codediff.nvim` | Diff views and native library | `09d9ebef2cc5a5c04db7a349cd6c61bdf84ecc8e` (4.0.6) |
 | `folke/which-key.nvim` | Discoverable review mappings | `3aab2147e74890957785941f0c1ad87d0a44c15a` |
-| `rcarriga/nvim-notify` | Draft/submission/error notifications | `8701bece920b38ea289b457f902e2ad184131a5d` |
+| `rcarriga/nvim-notify` | Save, submission, and error messages | `8701bece920b38ea289b457f902e2ad184131a5d` |
 
-CodeDiff downloads a platform-specific native library; allow the download or follow its source-build instructions. `nui.nvim` is not needed. `lazy.nvim` below is an installation example, not a runtime dependency. The plugin lives in `apps/lgtm.nvim` inside the LGTM monorepo. Like MmdToImg, install the Git repository and add the plugin subdirectory to Neovim’s runtime path. The root `doc` symlink exposes editor help. No plugin build or release artifact is required.
+CodeDiff downloads a platform-specific native library. Allow the download or follow its source-build instructions. The Lua UI libraries add no binary build step. LGTM lives in `apps/lgtm.nvim` inside the monorepo. The root `doc` symlink exposes editor help.
 
 ### lazy.nvim
 
-Use the feature branch below until this PR merges; then remove the `branch` field to follow the default branch:
+Declare LGTM once. The root `lazy.lua` installs the plugins above, adds the plugin runtime path, and calls setup. Existing provider configuration stays in place.
 
 ```lua
 {
   "difflab-io/lgtm",
-  branch = "feature/diff-210-nvim-plugin",
+  opts = {
+    identity = { name = "Your Name", email = "you@example.com" },
+    -- endpoint_url = "http://127.0.0.1:PORT/rpc",
+    prefix = "<leader>r",
+  },
+}
+```
+
+This path uses lazy.nvim's `lazy.lua` package source. It is tested with lazy.nvim `306a05526ada86a7b30af95c5cc81ffba93fef97`. Keep package loading enabled and include `"lazy"` in `pkg.sources`. LazyVim uses the same mechanism. LazyVim itself is optional.
+
+These instructions require an LGTM revision containing root `lazy.lua`. For development, replace the repository field with `dir = "/absolute/path/to/lgtm"` at the checkout root. The source-switch tasks below do this for you. A direct `dir` at `apps/lgtm.nvim` cannot read root package metadata and needs explicit dependencies.
+
+#### Explicit lazy.nvim setup
+
+If package metadata is disabled, declare the dependencies and runtime setup yourself:
+
+```lua
+{
+  "difflab-io/lgtm",
   lazy = false,
   dependencies = {
+    { "MunifTanjim/nui.nvim", commit = "10fc361835c856ba4233ef5ea135b919bf3dce97" },
+    { "grapp-dev/nui-components.nvim", commit = "1654dd709f13874089eefc80d82e0eb667f7fdfb" },
     { "esmuellert/codediff.nvim", commit = "09d9ebef2cc5a5c04db7a349cd6c61bdf84ecc8e", opts = {} },
     { "folke/which-key.nvim", commit = "3aab2147e74890957785941f0c1ad87d0a44c15a", opts = {} },
     { "rcarriga/nvim-notify", commit = "8701bece920b38ea289b457f902e2ad184131a5d", opts = {} },
   },
-  opts = {
-    identity = { name = "Your Name", email = "you@example.com" },
-    -- endpoint_url = "http://127.0.0.1:PORT/rpc", -- optional daemon override
-    prefix = "<leader>r",
-    -- mappings = { ["K"] = "<leader>rk" }, -- thread map overrides
-  },
+  opts = { identity = { name = "Your Name", email = "you@example.com" } },
   config = function(plugin, opts)
     vim.opt.runtimepath:append(plugin.dir .. "/apps/lgtm.nvim")
     require("lgtm").setup(opts)
@@ -46,33 +61,41 @@ Use the feature branch below until this PR merges; then remove the `branch` fiel
 }
 ```
 
-For development, replace the repository and branch fields with `dir = "/absolute/path/to/lgtm"`. Keep the same `config` callback. If `dir` points directly to `apps/lgtm.nvim`, use `main = "lgtm"` and omit the callback instead.
+If `dir` points directly to `apps/lgtm.nvim`, use the same dependencies with `main = "lgtm"` and omit the `config` callback. For older LGTM versions without root metadata, use that version's manual setup.
 
 ### vim-plug
 
-Install CodeDiff, WhichKey and nvim-notify through your plugin manager, using the verified revisions above. Add LGTM to your vim-plug block:
+Vim-plug does not read lazy.nvim package metadata. Add all required plugins explicitly:
 
 ```vim
-Plug 'difflab-io/lgtm', { 'branch': 'feature/diff-210-nvim-plugin' }
+Plug 'MunifTanjim/nui.nvim', { 'commit': '10fc361835c856ba4233ef5ea135b919bf3dce97' }
+Plug 'grapp-dev/nui-components.nvim', { 'commit': '1654dd709f13874089eefc80d82e0eb667f7fdfb' }
+Plug 'esmuellert/codediff.nvim', { 'commit': '09d9ebef2cc5a5c04db7a349cd6c61bdf84ecc8e' }
+Plug 'folke/which-key.nvim', { 'commit': '3aab2147e74890957785941f0c1ad87d0a44c15a' }
+Plug 'rcarriga/nvim-notify', { 'commit': '8701bece920b38ea289b457f902e2ad184131a5d' }
+Plug 'difflab-io/lgtm'
 ```
 
-After `plug#end()`, add its plugin subdirectory before setup:
+After `plug#end()`, add the plugin runtime and apply setup:
 
 ```lua
 local root = vim.fn.stdpath("data") .. "/plugged/lgtm"
 vim.opt.runtimepath:append(root .. "/apps/lgtm.nvim")
+require("codediff").setup({})
+require("which-key").setup({})
+require("notify").setup({})
 require("lgtm").setup({ identity = { name = "Your Name", email = "you@example.com" } })
 vim.cmd("runtime plugin/lgtm.lua")
 ```
 
-Change `root` if your vim-plug directory differs. Remove the branch option after this PR merges.
+Change `root` if your vim-plug directory differs. Keep your existing provider setup if you already configured these plugins.
 
 ### Native Git packages
 
-Install the required plugins first, then clone LGTM into a native package directory:
+Clone each required plugin from the table into your native `pack/*/start/` directory and check out its tested revision. Then clone LGTM:
 
 ```sh
-git clone --depth 1 --branch feature/diff-210-nvim-plugin https://github.com/difflab-io/lgtm.git \
+git clone --depth 1 https://github.com/difflab-io/lgtm.git \
   ~/.local/share/nvim/site/pack/plugins/start/lgtm
 ```
 
@@ -81,11 +104,16 @@ Add this to your Neovim configuration:
 ```lua
 local root = vim.fn.stdpath("data") .. "/site/pack/plugins/start/lgtm"
 vim.opt.runtimepath:append(root .. "/apps/lgtm.nvim")
+require("codediff").setup({})
+require("which-key").setup({})
+require("notify").setup({})
 require("lgtm").setup({ identity = { name = "Your Name", email = "you@example.com" } })
 vim.cmd("runtime plugin/lgtm.lua")
 ```
 
-Change `root` for a custom package directory. Omit `--branch` after this PR merges. Run `:helptags ALL` once after a manual installation, then use `:help lgtm.txt`.
+Change `root` for a custom package directory. Preserve existing provider setup. Run `:helptags ALL` after manual installation, then use `:help lgtm.txt`.
+
+A single LGTM clone cannot fetch separate plugin repositories for these managers. LGTM delegates downloads and updates to the selected manager. It does not vendor dependencies or run a downloader during setup.
 
 ### CLI and backend
 
@@ -227,10 +255,14 @@ To install the latest version from `origin/main` or switch back to it, run:
 premise run nvim:install-released-plugin
 ```
 
-Restart Neovim after switching.
+Both commands preserve LGTM options and use repository-root package metadata. The released revision must include `lazy.lua`. Restart Neovim after switching.
+
+### Architecture
+
+See the [plugin architecture](../../docs/architecture/lgtm.nvim/index.md) and its component pages under `ui/`.
 
 ### Checks
 
-Plugin checks live in this package's `mise.toml`. Complete editor workflows live in [`e2e/nvim`](../../e2e/nvim), with their own `mise.toml`, exact dependency pins, isolated child editors and real backend/database. Invoke them through Premise's registered project tasks. Run suite `install` once before `test`. The harness creates only local temporary Git repositories, downloads exact upstream plugins, and cleans up the backend and editor state. Live GitHub tests, when configured separately, must use verified private disposable repositories.
+Plugin checks live in this package's `mise.toml`. Complete editor workflows live in [`e2e/nvim`](../../e2e/nvim), with their own `mise.toml`, exact dependency pins, isolated child editors and real backend/database. Invoke them through Premise's registered project tasks. Run suite `install` once before `test`. The harness downloads pinned real plugins and cleans up editor/backend state. PR tests use only the permanent private fixture repository selected by `LGTM_E2E_GITHUB_REPOSITORY`. They never create or delete repositories.
 
 After submitting a PR review, you can keep using the same diff. The next comment or reply starts a new pending review for that PR while preserving earlier published feedback. Opening or cancelling a composer alone does not create another review.

@@ -14,6 +14,9 @@ function M.check()
     end
   end
   for _, module in ipairs({
+    "nui-components",
+    "nui.split",
+    "nui.tree",
     "codediff",
     "codediff.ui.view",
     "codediff.ui.lifecycle",
@@ -27,6 +30,7 @@ function M.check()
     end
   end
   for module, functions in pairs({
+    ["nui-components"] = { "create_renderer", "create_signal", "text_input", "select" },
     ["codediff.ui.view"] = { "create", "update" },
     ["codediff.ui.lifecycle"] = { "get_session", "get_panel_view" },
     ["codediff.core.git"] = {
@@ -38,9 +42,16 @@ function M.check()
     local available, api = pcall(require, module)
     if available then
       for _, name in ipairs(functions) do
-        if type(api[name]) ~= "function" then
+        if
+          type(api[name]) ~= "function"
+          and not (
+            type(api[name]) == "table"
+            and getmetatable(api[name])
+            and getmetatable(api[name]).__call
+          )
+        then
           vim.health.error(
-            "Incompatible CodeDiff API: "
+            "Incompatible plugin API: "
               .. module
               .. "."
               .. name

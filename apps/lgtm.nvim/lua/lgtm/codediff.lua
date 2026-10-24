@@ -2,6 +2,32 @@
 local M = {}
 local api = vim.api
 
+-- Translate an annotation boundary through CodeDiff's actual edit ranges. A comment
+-- inside an insertion/deletion pads the other pane at that edit's adjacent real line.
+function M.other_line(line, source, changes, target_count)
+  if line == 0 then
+    return 0
+  end
+  local target = source == "old" and "modified" or "original"
+  source = source == "old" and "original" or "modified"
+  local delta = 0
+  for _, change in ipairs(changes or {}) do
+    local from, to = change[source], change[target]
+    if line < from.start_line then
+      break
+    end
+    if line < from.end_line then
+      local mapped = to.start_line - 1
+      if to.end_line > to.start_line then
+        mapped = to.start_line + math.min(line - from.start_line, to.end_line - to.start_line - 1)
+      end
+      return math.max(0, math.min(mapped, target_count))
+    end
+    delta = to.end_line - from.end_line
+  end
+  return math.max(0, math.min(line + delta, target_count))
+end
+
 -- Mirror CodeDiff's metadata after native refreshes. Reuse loaded identities until a selected-source read replaces them.
 function M.sync_files(state, status)
   local previous = {}

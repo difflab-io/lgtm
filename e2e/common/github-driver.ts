@@ -75,7 +75,10 @@ export class LiveGithubDriver implements GithubDriver {
         env: { ...process.env, ...env },
       },
     )
-    if (result.code) throw new Error(`GitHub ${method} ${route}: ${result.stderr}`)
+    if (result.code !== 0)
+      throw new Error(
+        `GitHub ${method} ${route}: ${result.code === null ? 'process timed out or was interrupted' : result.stderr}`,
+      )
     return (result.stdout ? JSON.parse(result.stdout) : {}) as T
   }
 

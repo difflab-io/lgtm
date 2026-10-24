@@ -1,5 +1,19 @@
 local M = {}
 local rpc, picker = require("lgtm.rpc"), require("lgtm.picker")
+local function search(title, entries, format, select)
+  local items = {}
+  for index, entry in ipairs(entries) do
+    items[index] = { id = tostring(index), label = format(entry) }
+  end
+  require("lgtm.ui.search").open({
+    title = title,
+    items = items,
+    on_select = function(id)
+      select(entries[tonumber(id)])
+    end,
+  })
+end
+
 function M.select(completed)
   local reviews = {}
   local function page(token)
@@ -17,7 +31,7 @@ function M.select(completed)
           page(result.nextPageToken)
           return
         end
-        picker.searchable("Local / GitHub reviews", reviews, function(review)
+        search("Local / GitHub reviews", reviews, function(review)
           local target = review.target
           local label = target.pullRequest
               and ("PR #" .. target.pullRequest.number .. " · " .. target.pullRequest.repositoryUrl:gsub(
@@ -130,7 +144,7 @@ function M.pr_page(url, query, page)
       if (result.nextPage or 0) > 0 then
         entries[#entries + 1] = { nextPage = result.nextPage }
       end
-      picker.searchable("Pull requests", entries, function(pr)
+      search("Pull requests", entries, function(pr)
         return pr.nextPage and "Next page…" or ("#" .. pr.number .. " " .. pr.title)
       end, function(pr)
         if pr.nextPage then

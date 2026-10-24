@@ -4,7 +4,7 @@
 
 LGTM provides notes, local reviews, and GitHub reviews through a shared backend managed by the CLI. CLI commands, Neovim, and other API consumers use the same persistence and review workflows. The bundled browser interface currently provides a dummy UI rather than the review frontend.
 
-This page owns the key concepts, component design, and context-specific flow and lifecycle behavior. The [backend review architecture](backend/reviews.md) owns RPC contracts and backend implementation details. The [user guide](../user-guide.md) explains using the Neovim plugin and the availability of the web interface.
+This page owns the key concepts, component design, and context-specific flow and lifecycle behavior. The [backend review architecture](backend/reviews.md) owns RPC contracts and backend implementation details. The [Neovim plugin architecture](lgtm.nvim/index.md) describes its controllers and UI components. The [user guide](../user-guide.md) explains using the Neovim plugin and the availability of the web interface.
 
 General PR dashboards, merge commands, CI browsing, and other forge implementations remain outside the review scope. Execution evidence and remaining implementation gaps belong in the reconciliation plan.
 

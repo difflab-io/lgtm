@@ -1,7 +1,7 @@
 local M = {}
 function M.setup(opts)
   require("lgtm.config").setup(opts)
-  require("lgtm.ui").highlights()
+  require("lgtm.ui.theme").highlights()
   if vim.fn.has("nvim-0.11") == 0 then
     error("lgtm.nvim requires Neovim >= 0.11")
   end
@@ -123,7 +123,7 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd({ "WinResized", "ColorScheme" }, {
     group = group,
     callback = function()
-      require("lgtm.ui").highlights()
+      require("lgtm.ui.theme").highlights()
       vim.schedule(function()
         local state = require("lgtm.context").current
         if state and state.render_ready and state.render then

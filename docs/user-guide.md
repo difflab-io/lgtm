@@ -4,7 +4,7 @@ Use LGTM to review changes, discuss code, and keep notes while browsing files. T
 
 ## Set up Neovim
 
-Install the compatible LGTM CLI and plugin using the [plugin setup instructions](../apps/lgtm.nvim/README.md#setup). The plugin requires CodeDiff with its native library, WhichKey, and nvim-notify. It also needs Neovim 0.11 or later and curl. Git reviews need Git.
+Install the compatible LGTM CLI and plugin using the [plugin setup instructions](../apps/lgtm.nvim/README.md#setup). Supported lazy.nvim installs resolve NuiComponents, NUI, CodeDiff, WhichKey, and nvim-notify from one LGTM declaration. Other managers need explicit dependencies and runtime setup. CodeDiff also needs its native library. It also needs Neovim 0.11 or later and curl. Git reviews need Git.
 
 Start LGTM before opening a review:
 

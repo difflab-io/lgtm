@@ -258,7 +258,7 @@ function M.render(state)
   if not pane or not api.nvim_buf_is_valid(pane.buf) then
     return
   end
-  local lines = {}
+  local items = {}
   state.reviewed = state.reviewed or {}
   for _, file in ipairs(state.files or {}) do
     if
@@ -269,26 +269,14 @@ function M.render(state)
     then
       M.invalidate_reviewed(state, file.path)
     end
-    local changed = state.kind == "pr" or (file.baseContent or "") ~= (file.content or "")
-    lines[#lines + 1] = string.format(
-      "%s %s %s %s",
-      state.file and state.file.path == file.path and "▶" or " ",
-      state.reviewed[file.path] and "✓" or "·",
-      changed and "M" or "=",
-      file.path
-    )
+    items[#items + 1] = {
+      path = file.path,
+      selected = state.file and state.file.path == file.path,
+      reviewed = state.reviewed[file.path] ~= nil,
+      changed = state.kind == "pr" or (file.baseContent or "") ~= (file.content or ""),
+    }
   end
-  vim.bo[pane.buf].modifiable = true
-  api.nvim_buf_set_lines(pane.buf, 0, -1, false, lines)
-  vim.bo[pane.buf].modifiable = false
-  if pane.win and api.nvim_win_is_valid(pane.win) and state.file then
-    for i, file in ipairs(state.files) do
-      if file.path == state.file.path then
-        pcall(api.nvim_win_set_cursor, pane.win, { i, 0 })
-        break
-      end
-    end
-  end
+  pane.update(items, state.file and state.file.path)
 end
 
 function M.toggle_reviewed(state, file)
@@ -362,13 +350,9 @@ function M.observe(state, buf)
   })
 end
 
-function M.select(state, index)
-  local file = (state.files or {})[index]
-  if not file then
-    return
-  end
+function M.select(state, path)
   state.focus_side = "new"
-  state.show_file(file.path)
+  state.show_file(path)
 end
 
 function M.navigate(state, direction, unreviewed)
@@ -402,56 +386,29 @@ function M.show(state, focus)
   end
   state.explorer_visible = true
   local origin = api.nvim_get_current_win()
-  state.explorer = state.explorer or {}
   local pane = state.explorer
-  if not pane.buf or not api.nvim_buf_is_valid(pane.buf) then
-    pane.buf = api.nvim_create_buf(false, true)
-    vim.bo[pane.buf].filetype = "lgtmfiles"
-    vim.bo[pane.buf].bufhidden = "hide"
-    vim.bo[pane.buf].swapfile = false
-    local function map(key, callback)
-      vim.keymap.set("n", key, vim.schedule_wrap(callback), { buffer = pane.buf, silent = true })
-    end
-    map("<CR>", function()
-      M.select(state, api.nvim_win_get_cursor(pane.win)[1])
-    end)
-    map("f", function()
-      M.toggle(state)
-    end)
-    map("q", function()
-      M.toggle(state)
-    end)
-    map("<Tab>", function()
-      M.navigate(state, 1, true)
-    end)
-    map("<S-Tab>", function()
-      M.navigate(state, -1, true)
-    end)
-    map("]f", function()
-      M.navigate(state, 1, false)
-    end)
-    map("[f", function()
-      M.navigate(state, -1, false)
-    end)
-    map("m", function()
-      local file = state.files[api.nvim_win_get_cursor(pane.win)[1]]
-      if not file then
-        return
-      end
-      require("lgtm.review").reviewed(file.path)
-    end)
-  end
-  if not pane.win or not api.nvim_win_is_valid(pane.win) then
+  if not pane or not pane.win or not api.nvim_win_is_valid(pane.win) then
     api.nvim_set_current_tabpage(state.tab)
-    api.nvim_set_current_win(state.panes.old.win)
-    vim.cmd("topleft 30vsplit")
-    pane.win = api.nvim_get_current_win()
-    api.nvim_win_set_buf(pane.win, pane.buf)
-    vim.wo[pane.win].winfixwidth = true
-    vim.wo[pane.win].number = false
-    vim.wo[pane.win].relativenumber = false
-    vim.wo[pane.win].wrap = false
-    vim.wo[pane.win].winbar = "LGTM files · Enter select · m reviewed"
+    pane = require("lgtm.ui.files").open({
+      anchor_win = state.panes.old.win,
+      focus = focus,
+      on_select = function(path)
+        M.select(state, path)
+      end,
+      on_toggle_reviewed = function(path)
+        require("lgtm.review").reviewed(path)
+      end,
+      on_navigate = function(direction, unreviewed)
+        M.navigate(state, direction, unreviewed)
+      end,
+      on_close = function()
+        M.toggle(state)
+      end,
+    })
+    state.explorer = pane
+  end
+  if not pane then
+    return
   end
   M.render(state)
   if focus then
@@ -474,8 +431,7 @@ function M.toggle(state)
   end
   local pane = state.explorer
   if pane and pane.win and api.nvim_win_is_valid(pane.win) then
-    api.nvim_win_close(pane.win, true)
-    pane.win = nil
+    pane.close()
     state.explorer_visible = false
     if state.panes and api.nvim_win_is_valid(state.panes.new.win) then
       api.nvim_set_current_win(state.panes.new.win)

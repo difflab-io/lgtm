@@ -153,14 +153,14 @@ export class Editor {
 
   async composer() {
     await this.wait(
-      'require("lgtm.composer").last and vim.api.nvim_win_is_valid(require("lgtm.composer").last.win)',
+      'require("lgtm.ui.composer").last and vim.api.nvim_win_is_valid(require("lgtm.ui.composer").last.win)',
       'composer open',
     )
-    return this.lua('local c=require("lgtm.composer").last; return {buf=c.buf,win=c.win}')
+    return this.lua('local c=require("lgtm.ui.composer").last; return {buf=c.buf,win=c.win}')
   }
   async body(body: string) {
     await this.lua(
-      'vim.api.nvim_buf_set_lines(require("lgtm.composer").last.buf, 0, -1, false, vim.split(..., "\\n", {plain=true}))',
+      'vim.api.nvim_buf_set_lines(require("lgtm.ui.composer").last.buf, 0, -1, false, vim.split(..., "\\n", {plain=true}))',
       body,
     )
   }
@@ -168,10 +168,7 @@ export class Editor {
     await this.composer()
     await this.body(body)
     await this.keys('<C-s>')
-    await this.wait(
-      'not vim.api.nvim_win_is_valid(require("lgtm.composer").last.win)',
-      'composer saved',
-    )
+    await this.wait('require("lgtm.ui.composer").last.closed', 'composer saved')
   }
 
   async comments(count: number) {
@@ -263,12 +260,12 @@ export class Editor {
         messages: await this.lua('return vim.api.nvim_exec2("messages",{output=true}).output'),
         notices: await this.notices(),
         state: await this.state(),
-        picker: await this.lua(`local p = require("lgtm.picker").last
+        picker: await this.lua(`local p = require("lgtm.ui.search").last
           if not p then return vim.NIL end
           return {query=p.query,closed=p.closed,index=p.index,mode=vim.fn.mode(),
             text=vim.api.nvim_buf_is_valid(p.buf) and vim.api.nvim_buf_get_lines(p.buf,0,-1,false) or {},
-            entries=vim.tbl_map(function(pr) return {number=pr.number,title=pr.title,next_page=pr.nextPage} end,p.entries),
-            filtered=vim.tbl_map(function(pr) return {number=pr.number,title=pr.title,next_page=pr.nextPage} end,p.filtered)}`),
+            entries=p.entries,
+            filtered=p.filtered}`),
         current: await this.lua(
           'return {buf=vim.api.nvim_get_current_buf(),win=vim.api.nvim_get_current_win(),tab=vim.api.nvim_get_current_tabpage(),mapping=vim.fn.maparg("c","n",false,true).desc}',
         ),
