@@ -130,7 +130,7 @@ jobs:
         run: premise run e2e-budget:test
       - name: Wait for GitHub fixture API budget
         env:
-          LGTM_E2E_GITHUB_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_TOKEN }}
+          LGTM_E2E_GITHUB_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
           LGTM_E2E_GITHUB_REPOSITORY: ${{ vars.LGTM_E2E_GITHUB_REPOSITORY || 'skapoor8/lgtm-e2e' }}
         run: premise run e2e-budget
 
@@ -151,8 +151,10 @@ jobs:
           install-premise: build
       - name: Run E2E suites
         env:
-          LGTM_E2E_GITHUB_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_TOKEN }}
-          LGTM_E2E_GITHUB_SECONDARY_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
+          LGTM_E2E_GITHUB_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
+          LGTM_E2E_GITHUB_SECONDARY_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_TOKEN }}
+          LGTM_E2E_GITHUB_PRIMARY_USER: skapoor81
+          LGTM_E2E_GITHUB_SECONDARY_USER: skapoor8
           LGTM_E2E_GITHUB_REPOSITORY: ${{ vars.LGTM_E2E_GITHUB_REPOSITORY || 'skapoor8/lgtm-e2e' }}
         run: premise run e2e
 
@@ -173,8 +175,10 @@ jobs:
           install-premise: build
       - name: Run E2E suites
         env:
-          LGTM_E2E_GITHUB_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_TOKEN }}
-          LGTM_E2E_GITHUB_SECONDARY_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
+          LGTM_E2E_GITHUB_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
+          LGTM_E2E_GITHUB_SECONDARY_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_TOKEN }}
+          LGTM_E2E_GITHUB_PRIMARY_USER: skapoor81
+          LGTM_E2E_GITHUB_SECONDARY_USER: skapoor8
           LGTM_E2E_GITHUB_REPOSITORY: ${{ vars.LGTM_E2E_GITHUB_REPOSITORY || 'skapoor8/lgtm-e2e' }}
         run: premise run e2e
 

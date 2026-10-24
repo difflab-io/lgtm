@@ -124,11 +124,11 @@ The default is [skapoor8/lgtm-e2e](https://github.com/skapoor8/lgtm-e2e). Tests 
 
 Locally, log in to both GitHub accounts with `gh auth login`. The fixture reads each stored token by account name. It never switches your active account. The primary account creates the PR. The second account acts as another reviewer and needs write access to the same private repository.
 
-The primary account defaults to `skapoor8`. Override it with `LGTM_E2E_GITHUB_PRIMARY_USER`. The second account defaults to `skapoor81`. Override it with `LGTM_E2E_GITHUB_SECONDARY_USER`. For CI, supply the primary token through `LGTM_E2E_GITHUB_TOKEN` and the second token through `LGTM_E2E_GITHUB_SECONDARY_TOKEN`.
+The primary account defaults to `skapoor8`. Override it with `LGTM_E2E_GITHUB_PRIMARY_USER`. The second account defaults to `skapoor81`. Override it with `LGTM_E2E_GITHUB_SECONDARY_USER`. The test processes read the primary token from `LGTM_E2E_GITHUB_TOKEN` and the second token from `LGTM_E2E_GITHUB_SECONDARY_TOKEN`. CI uses `skapoor81` as the primary account and `skapoor8` as the second reviewer. This keeps most fixture requests on the test account’s API budget. The workflow maps the existing secrets to these roles.
 
 A repository-scoped primary token needs Contents, Issues and Pull requests read/write, plus Metadata read access. Tests need no repository administration permission. Keep tokens in local credential storage or CI secrets.
 
-GitHub does not support fine-grained tokens for a collaborator on another personal account’s repository. The second CI account therefore needs a classic token with the broader `repo` scope for this fixture. See [GitHub’s token limitations](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#fine-grained-personal-access-tokens-limitations). Local runs use the existing account logins and do not need new tokens.
+GitHub does not support fine-grained tokens for a collaborator on another personal account’s repository. The collaborator account `skapoor81` therefore needs a classic token with the broader `repo` scope for this fixture. See [GitHub’s token limitations](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#fine-grained-personal-access-tokens-limitations). Local runs use the existing account logins and do not need new tokens.
 
 ```sh
 # Use another existing private fixture repository:
