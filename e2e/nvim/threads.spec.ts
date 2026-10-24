@@ -322,11 +322,16 @@ for (const profile of profiles) {
         // Arrange
         const { editor: e, runtime: r } = fixture()
         const { workingId } = await prepareOrphanedWorkingFeedback(e, r)
-        await r.write('other.txt', 'changed working selection\n' + 'another line\n'.repeat(120))
+        const content = 'changed working selection\n' + 'another line\n'.repeat(120)
+        await r.write('other.txt', content)
         await e.command('Lgtm refresh')
-        await e.wait(
-          'vim.api.nvim_buf_line_count(require("lgtm.context").current.panes.new.buf) > 100',
-          'long working file rendered',
+        await waitFor('long working file rendered', () =>
+          e.lua(
+            `local s = require("lgtm.context").current
+              return s.render_ready and s.views.new and s.views.new.content == ...
+                and vim.api.nvim_buf_line_count(s.panes.new.buf) > 100`,
+            content,
+          ),
         )
         await e.pane('new', 100)
         await e.command('Lgtm threads')
@@ -341,6 +346,11 @@ for (const profile of profiles) {
         error("Working-tree thread not found")`,
           workingId,
         )
+        expect(
+          await e.lua(
+            'local win = require("lgtm.context").current.panes.new.win; return vim.api.nvim_win_call(win, vim.fn.winsaveview).topline',
+          ),
+        ).toBeGreaterThan(1)
 
         // Act
         await e.keys('<CR>')
@@ -370,6 +380,9 @@ for (const profile of profiles) {
         expect(screen).not.toContain('Original lines')
         expect(screen).not.toContain('Unstaged source changed')
         expect(await e.value('vim.api.nvim_win_is_valid(...)', panel.win)).toBe(true)
+        expect(await e.value('vim.api.nvim_get_current_win()')).toBe(
+          (await e.state())!.panes.new.win,
+        )
         expect(await e.value('vim.api.nvim_win_get_cursor(0)')).toEqual([1, 0])
       })
     },

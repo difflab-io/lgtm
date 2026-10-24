@@ -95,6 +95,12 @@ function M.open(state, on_loaded)
       local panel = require("codediff.ui.lifecycle").get_panel_view(state.tab)
       for _, file in ipairs(state.files) do
         if file.path == path then
+          -- The selected file already has its source state and cards. Selecting it
+          -- again starts another asynchronous bind that can reset the requested view.
+          if state.file == file and state.render_ready then
+            ready()
+            return
+          end
           state.on_ready = (anchor or on_ready) and ready or nil
           panel.on_file_select(file.native_entry)
           return
