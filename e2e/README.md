@@ -104,7 +104,7 @@ Run focused tests during development. Use a file, test name or tag to select cas
 
 CI runs the root `e2e` task on Linux and macOS. The suites share setup and run in parallel. A failed suite does not stop the other suites or their cleanup.
 
-Before E2E starts, `e2e-budget` waits for at least 4,500 GitHub API requests. If the budget is low, it waits for the reset time. It does not retry tests or skip cases. New pushes cancel older runs for the same branch.
+Before E2E starts, `e2e-budget` waits for at least 4,500 GitHub API requests. If the budget is low, it waits across reset times for up to one hour. It does not retry tests or skip cases. New pushes cancel older runs for the same branch.
 
 ## Extended tests
 

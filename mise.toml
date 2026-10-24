@@ -148,3 +148,7 @@ run = "bun x vitest run --config e2e/cli/vitest.config.ts"
 [tasks."e2e:smoke"]
 description = "Run representative E2E flows across backend, CLI and Neovim"
 run = "mise run --continue-on-error //e2e/backend:smoke ::: //e2e/cli:smoke ::: //e2e/nvim:smoke"
+
+[tasks."e2e-budget:test"]
+description = "Check GitHub budget waits with an isolated clock and API responses"
+run = "bash tests/e2e-budget.sh"

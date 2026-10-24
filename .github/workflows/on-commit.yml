@@ -126,6 +126,8 @@ jobs:
         with:
           setup-only: true
           install-premise: build
+      - name: Check GitHub budget wait behavior
+        run: premise run e2e-budget:test
       - name: Wait for GitHub fixture API budget
         env:
           LGTM_E2E_GITHUB_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_TOKEN }}

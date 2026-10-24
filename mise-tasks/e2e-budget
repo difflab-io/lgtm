@@ -4,8 +4,9 @@ set -euo pipefail
 : "${LGTM_E2E_GITHUB_TOKEN:?CI requires the primary fixture token}"
 fixture_repository=${LGTM_E2E_GITHUB_REPOSITORY:-skapoor8/lgtm-e2e}
 
-# Read the budget from an authenticated request to the actual fixture repository.
-for attempt in 1 2; do
+# Other jobs share this account's budget. A reset does not guarantee a full bucket.
+deadline=$(( $(date +%s) + 3600 ))
+while true; do
   succeeded=false
   response=$(GH_TOKEN="$LGTM_E2E_GITHUB_TOKEN" gh api --include "repos/$fixture_repository" 2>&1) && succeeded=true
   remaining=$(printf '%s\n' "$response" | awk 'tolower($1) == "x-ratelimit-remaining:" {gsub("\r", "", $2); print $2; exit}')
@@ -22,9 +23,14 @@ for attempt in 1 2; do
     echo "GitHub fixture API budget ready: $remaining requests remain"
     exit 0
   fi
-  wait_seconds=$(( reset - $(date +%s) + 5 ))
-  if (( attempt == 2 || wait_seconds <= 0 || wait_seconds > 3605 )); then
-    echo "Insufficient GitHub fixture API budget: $remaining requests remain" >&2
+  now=$(date +%s)
+  wait_seconds=$(( reset - now + 5 ))
+  # A stale reset header must trigger another check, not a tight loop or a failure.
+  if (( wait_seconds < 5 )); then
+    wait_seconds=5
+  fi
+  if (( now + wait_seconds > deadline )); then
+    echo "GitHub fixture API budget cannot reach 4500 requests within one hour: $remaining remain; next check in ${wait_seconds}s" >&2
     exit 1
   fi
   echo "GitHub fixture API budget has $remaining requests left; waiting ${wait_seconds}s for reset"
