@@ -8,49 +8,107 @@ The PR and session pickers show searchable candidates. Controllers supply labels
 
 ### Layout
 
+The query has its own border above the results. Typing `draft` filters both matching titles. Arrow keys move the highlighted result while the cursor stays in the query.
+
 ```text
-+ Search pull requests ----------------+
-| #123 Search text                      |
-+--------------------------------------+
-| #123 Review title                     |
-| #124 Another review                   |
-+ Enter select / Esc cancel ------------+
+ 13 -- review implementation
+ 14 -- revi╭─────────────────────────── Search pull requests ───────────────────────────╮
+ 15 -- revi│draft                                                                       │
+ 16 -- revi╰────────────────────────────────────────────────────────────────────────────╯
+ 17 -- revi╭────────────────────────────────────────────────────────────────────────────╮
+ 18 -- revi│#248 Keep failed drafts editable                                            │
+ 19        │#251 Block duplicate draft saves                                            │
+ 20 local f│                                                                            │
+ 21   submi│                                                                            │
+ 22 end    │                                                                            │
+           │                                                                            │
+           │                                                                            │
+           │                                                                            │
+           │                                                                            │
+           │                                                                            │
+           ╰─────────────── Enter select · Esc cancel · Up/Down navigate ───────────────╯
+```
+
+With no matching title, the results area stays open and Enter does nothing. Escape returns to the source buffer.
+
+```text
+ 13 -- review implementation
+ 14 -- revi╭─────────────────────────── Search pull requests ───────────────────────────╮
+ 15 -- revi│zzzz                                                                        │
+ 16 -- revi╰────────────────────────────────────────────────────────────────────────────╯
+ 17 -- revi╭────────────────────────────────────────────────────────────────────────────╮
+ 18 -- revi│(no matches)                                                                │
+ 19        │                                                                            │
+ 20 local f│                                                                            │
+ 21   submi│                                                                            │
+ 22 end    │                                                                            │
+           │                                                                            │
+           │                                                                            │
+           │                                                                            │
+           │                                                                            │
+           │                                                                            │
+           ╰─────────────── Enter select · Esc cancel · Up/Down navigate ───────────────╯
 ```
 
 ### Behavior
 
-| State or action | Result |
-| --- | --- |
-| --- | --- |
-| Open | Focus the search input in insert mode. |
-| Type | Filter display labels without changing candidate IDs. |
-| Arrows / Ctrl-N / Ctrl-P | Move through matches using the library tree. |
-| Enter | Close and return the focused ID. |
-| No matches | Keep the picker open and ignore selection. |
-| Esc | Close without selecting and restore source focus. |
+```mermaid
+stateDiagram-v2
+  [*] --> Results: Open picker
+  Results --> Results: Type a matching query / move highlight
+  Results --> Empty: Query has no matches
+  Empty --> Results: Query matches again
+  Empty --> Empty: Enter does nothing
+  Results --> Selected: Enter
+  Results --> Cancelled: Esc or q
+  Empty --> Cancelled: Esc or q
+  Selected --> [*]: Return item ID
+  Cancelled --> [*]: Restore source focus
+```
 
 ## Implementation
 
 ### Public API
 
+Keyboard API:
+
+| Keys | Mode | Result |
+| --- | --- | --- |
+| Text entry | Insert | Filter labels. |
+| Up / Down, Ctrl-P / Ctrl-N | Normal or Insert | Move the focused result. |
+| Enter | Normal or Insert | Select the focused ID. Ignore an empty result. |
+| Esc | Normal, Insert, or Visual | Close without selecting. |
+| q | Normal | Close without selecting. |
+
+Lua API:
+
 ```lua
 require("lgtm.ui.search").open({
   title = "Reviews",
-  items = { { id = "review-id", label = "Review title" } },
-  on_select = function(id) end,
+  items = {
+    {
+      id = "review-id",
+      label = "Review title",
+    },
+  },
+  on_select = function(id)
+  end,
 })
 ```
 
 ### State and Data Flow
 
-NuiComponents TextInput and Select share a data signal. A signal is a value that updates subscribed components. `sessions.lua` maps returned IDs to its candidates. The view owns only query and selection. It schedules filtering outside the text-change callback before updating the tree.
-
-### Styling and Responsiveness
-
-The renderer centers the picker and sizes it to the editor. A resize hook calls the upstream size API. Semantic LGTM highlights style focused options without changing other plugins.
+```mermaid
+flowchart LR
+  Controller["sessions.lua<br/>Candidates and opaque IDs"] -->|"items: id + label"| Query["Query text"]
+  Query -->|"Filter labels"| Matches["Matching items<br/>Original IDs retained"]
+  Matches --> Highlight["Focused result"]
+  Highlight -->|"Enter: selected ID"| Controller
+  Query -->|"Esc: no selection"| Close["Close picker"]
+```
 
 ### Maintainer Notes
 
-Wait for the query buffer and insert mode before sending test input. Renderer mounting is asynchronous. Reuse PR selection and empty-search cases in the editor suite. Do not assert exact cell positions.
+Schedule filtering outside the text-change callback. Updating the tree during that callback can hit Neovim's text lock.
 
 See the [implementation](../../../../apps/lgtm.nvim/lua/lgtm/ui/search.lua) and [plugin architecture](../index.md).

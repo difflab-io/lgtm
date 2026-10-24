@@ -24,6 +24,31 @@ The plugin does not access the database or use the web frontend. CodeDiff owns d
 
 ## Design
 
+### Review workspace
+
+The layouts use text captured from Neovim at 100 columns with sample feedback. This example shows the NUI thread pane beside a source buffer. The selected comment uses a background highlight in the editor. The pane stays open when Enter returns focus to code.
+
+```text
+  8 -- review implementation                             │ OPEN · 1 reply · src/review.lua:21
+  9 -- review implementation                             │──────────────────────────────────────────
+ 10 -- review implementation                             │ TOP-LEVEL COMMENT · Alex · Published
+ 11 -- review implementation                             │   Keep the draft after a failed save.
+ 12 -- review implementation                             │
+ 13 -- review implementation                             │   └─ REPLY 1 · You · GitHub draft
+ 14 -- review implementation                             │      Agreed. This now retains the text.
+ 15 -- review implementation                             │
+ 16 -- review implementation                             │
+ 17 -- review implementation                             │
+ 18 -- review implementation                             │
+ 19                                                      │
+ 20 local function save(body)                            │
+ 21   submit(body, done)                                 │
+ 22 end                                                  │
+                                                         │
+```
+
+Git reviews also include CodeDiff's diff buffers and native explorer. Explicit directory reviews use the [directory file pane](ui/files.md). [Search](ui/search.md) and the [composer](ui/composer.md) float over the workspace. Each component page shows its rendered layout in different states.
+
 ### Components and Responsibilities
 
 ```mermaid
@@ -68,9 +93,25 @@ sequenceDiagram
 
 A controller is a feature module that runs application actions. A view is a mounted UI component. Controllers retain review IDs, permissions, and source evidence. Components retain display selection and temporary text. The backend keeps comments, replies, sessions, and receipts.
 
-NuiComponents mounts asynchronously. A global edit/delete shortcut waits for `threads.open` readiness before sending its action. `x` refreshes a thread pane in place. Enter navigates to code while keeping the pane open. Outside-diff feedback keeps its discussion and explains why navigation is unavailable.
-
 ### Interfaces and Contracts
+
+Global keyboard API uses the configured prefix, which defaults to `<leader>r`. These keys come from `keymaps.lua`. Component-local keys appear in each component's Public API section.
+
+| Prefix + key | Action | Mode |
+| --- | --- | --- |
+| b / r | Review the branch / working tree. | Normal |
+| p / S | Search PRs / resume a session. | Normal |
+| D | Review a directory. | Normal |
+| n / c | Add a note / line comment. | Normal or Visual |
+| f / g | Add a file / general comment. | Normal |
+| e / d | Edit / delete the selected comment through its conversation. | Normal |
+| t / F | Open all threads / review files. | Normal |
+| m | Toggle the current file's reviewed mark. | Normal |
+| P | Promote a note. | Normal |
+| x | Export the active review, or notes when no review is active. | Normal |
+| s / y | Submit the review / sync GitHub drafts. | Normal |
+| q | Close the review view. | Normal |
+
 
 The user API remains `require("lgtm").setup(opts)` and `:Lgtm` commands. See the [plugin guide](../../../apps/lgtm.nvim/README.md) for configuration and commands.
 
@@ -105,15 +146,16 @@ Other managers and disabled package metadata need explicit dependencies and runt
 
 ### UI and review state
 
-NuiComponents supplies declarative floating views. NUI supplies persistent splits and tree/text primitives. A declarative view describes components and their data. The library mounts and updates their windows.
-
-Neovim extmarks attach card lines to existing source buffers. LGTM keeps this small adapter because CodeDiff alignment is application-specific. Card display records contain no review model or RPC client.
-
-`ui/theme.lua` maps semantic `Lgtm*` groups to configured highlights. Window configuration stays local to LGTM. `ColorScheme` refreshes default links without replacing explicit user overrides.
-
-The current backend permits one active session per review context. Session lifetime stays outside UI components. A possible future persistent-session model requires a separate change.
-
-Existing Vitest BDD journeys cover application outcomes. The install journey uses an empty manager root and an uncommitted source snapshot. Framework geometry and widget internals remain upstream responsibilities.
+```mermaid
+flowchart LR
+  Backend["Backend<br/>Sessions, comments, receipts"] --> Controller["Feature controllers<br/>Active review and source locations"]
+  Controller -->|"Display records"| Views["UI components<br/>Selection and mounted windows"]
+  Controller -->|"draft_id + initial body"| Drafts["Composer draft cache<br/>Cancelled or failed text"]
+  Drafts -->|"Reopen the same draft"| Views
+  Views -->|"Stable IDs and user actions"| Controller
+  Controller -->|"Explicit mutations"| Backend
+  Controller -->|"Card rows and source-side mapping"| Adapter["Extmark adapter<br/>CodeDiff alignment"]
+```
 
 ## References
 
