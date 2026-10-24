@@ -112,31 +112,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  e2e-budget:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-22.04
-    timeout-minutes: 65
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - uses: cloudvoyant/premise@v0
-        with:
-          setup-only: true
-          install-premise: build
-      - name: Check GitHub budget wait behavior
-        run: premise run e2e-budget:test
-      - name: Wait for GitHub fixture API budget
-        env:
-          LGTM_E2E_GITHUB_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
-          LGTM_E2E_GITHUB_REPOSITORY: ${{ vars.LGTM_E2E_GITHUB_REPOSITORY || 'skapoor8/lgtm-e2e' }}
-        run: premise run e2e-budget
-
   # TODO: Move E2E into the Premise flow when it supports test suites.
   e2e-linux:
-    needs: e2e-budget
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-22.04
     permissions:
@@ -149,6 +126,11 @@ jobs:
         with:
           setup-only: true
           install-premise: build
+      - name: Record shared fixture API counters before E2E
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
+        run: gh api rate_limit --jq '.resources | {core, graphql}'
       - name: Run E2E suites
         env:
           LGTM_E2E_GITHUB_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
@@ -157,10 +139,15 @@ jobs:
           LGTM_E2E_GITHUB_SECONDARY_USER: skapoor8
           LGTM_E2E_GITHUB_REPOSITORY: ${{ vars.LGTM_E2E_GITHUB_REPOSITORY || 'skapoor8/lgtm-e2e' }}
         run: premise run e2e
+      - name: Record shared fixture API counters after E2E
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
+        run: gh api rate_limit --jq '.resources | {core, graphql}'
 
   # TODO: Move E2E into the Premise flow when it supports test suites.
   e2e-macos:
-    needs: e2e-budget
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: macos-latest
     permissions:
@@ -173,6 +160,11 @@ jobs:
         with:
           setup-only: true
           install-premise: build
+      - name: Record shared fixture API counters before E2E
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
+        run: gh api rate_limit --jq '.resources | {core, graphql}'
       - name: Run E2E suites
         env:
           LGTM_E2E_GITHUB_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
@@ -181,6 +173,12 @@ jobs:
           LGTM_E2E_GITHUB_SECONDARY_USER: skapoor8
           LGTM_E2E_GITHUB_REPOSITORY: ${{ vars.LGTM_E2E_GITHUB_REPOSITORY || 'skapoor8/lgtm-e2e' }}
         run: premise run e2e
+      - name: Record shared fixture API counters after E2E
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
+        run: gh api rate_limit --jq '.resources | {core, graphql}'
 
   publish-release:
     needs: [plan, single, matrix, e2e-linux, e2e-macos]
