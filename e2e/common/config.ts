@@ -17,6 +17,7 @@ export function suiteConfig(
         'pr-review',
         'local-review',
         'notes',
+        'threads',
         'diffs',
         'required',
         'kak',

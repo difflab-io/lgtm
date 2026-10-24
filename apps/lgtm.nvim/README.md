@@ -146,7 +146,7 @@ vim.api.nvim_exec_autocmds("User", {
 })
 ```
 
-The old path must be absent and the destination must exist. A failed read alone does not prove deletion. LGTM does not scan for renamed files. Refresh retries an unresolved move with its saved operation identity. Lost-line cards retain the original range and excerpt; orphaned discussions remain in `:Lgtm threads` and exports.
+The old path must be absent and the destination must exist. A failed read alone does not prove deletion. LGTM does not scan for renamed files. Refresh retries an unresolved move with its saved operation identity. Cards with a lost anchor show a status and comment preview. The full thread view retains the original range and excerpt. When a working-tree file changes, its comments appear as stale cards above the file. Deleted-file discussions remain in `:Lgtm threads` and exports. The threads pane labels files outside the selected comparison as `OUTSIDE DIFF`.
 
 ### Keys and selection
 
@@ -180,7 +180,7 @@ Comments use full-width bordered cards with draft/resolved status, reply count, 
 | `za` / `zA` | Expand/collapse at cursor / across file |
 | `gH` | Toggle overlays |
 
-File/general threads appear in `:Lgtm threads`; Enter navigates to their file. Inline layout places deleted old-side text in CodeDiff virtual lines; use the thread pane or switch to side-by-side to create/navigate old-side line comments. Composers save with `Ctrl-S`. Failed saves keep the text in the composer. Closing with `q`/Esc hides the draft buffer; it is not sent. A notification confirms a save only after the backend acknowledges it. PR line/file comments and replies sync to a private pending review on GitHub as you save. The notification says “Draft saved on GitHub” only after GitHub confirms it. A failed sync keeps the saved local draft and reports the failure. Use `:Lgtm sync` (`<leader>ry`) to sync existing local drafts or recover uncertain saves; accepted comments are never blindly reposted. Notes and local reviews stay local. General PR comments are posted only at review submission. GitHub has no private standalone general-comment draft. Closing or opening a review never uploads existing local drafts automatically.
+File/general threads appear in `:Lgtm threads`. Enter navigates to the selected file and focuses the code while keeping the threads pane open. For stale comments, Enter reveals the card above the file. For files outside the diff, it shows an explanation and keeps focus in the threads pane. In this pane, `x` resolves or reopens the selected thread and refreshes its status without closing the pane or moving the selection. Inline layout places deleted old-side text in CodeDiff virtual lines; use the thread pane or switch to side-by-side to create/navigate old-side line comments. Composers save with `Ctrl-S`. Failed saves keep the text in the composer. Closing with `q`/Esc hides the draft buffer; it is not sent. A notification confirms a save only after the backend acknowledges it. PR line/file comments and replies sync to a private pending review on GitHub as you save. The notification says “Draft saved on GitHub” only after GitHub confirms it. A failed sync keeps the saved local draft and reports the failure. Use `:Lgtm sync` (`<leader>ry`) to sync existing local drafts or recover uncertain saves; accepted comments are never blindly reposted. Notes and local reviews stay local. General PR comments are posted only at review submission. GitHub has no private standalone general-comment draft. Closing or opening a review never uploads existing local drafts automatically.
 
 A successful remote submission is announced only after confirmation; uncertain results retain the draft and offer `:Lgtm reconcile`. Pending/sending/reconciling/failed results cannot start a new submission through the UI; use explicit reconciliation. Reconciliation may finish an existing pending review only when every receipt is verified. Missing or ambiguous receipts require inspecting/completing or discarding the pending review on GitHub; the plugin never blindly reposts comments. Other users' comments cannot be edited/deleted. Posted remote comment actions require provider support and surface backend permission errors.
 
@@ -212,6 +212,24 @@ You can also override `LgtmNormal`, `LgtmBorder`, `LgtmTitle`, `LgtmMuted`, `Lgt
 The thread modal separates its status banner from the conversation. Replies are indented and numbered below the **Top-level comment**. The selected comment block is highlighted; Tab/Shift-Tab changes the selected comment. Edit titles and deletion prompts identify the selected root or reply. The modal omits the filename already visible in the diff; the all-files thread pane retains locations.
 
 ## Development
+
+### Switch the editor plugin source
+
+To use the plugin from this worktree in Neovim, run:
+
+```sh
+premise run nvim:install-dev-plugin
+```
+
+To install the latest version from `origin/main` or switch back to it, run:
+
+```sh
+premise run nvim:install-released-plugin
+```
+
+Restart Neovim after switching.
+
+### Checks
 
 Plugin checks live in this package's `mise.toml`. Complete editor workflows live in [`e2e/nvim`](../../e2e/nvim), with their own `mise.toml`, exact dependency pins, isolated child editors and real backend/database. Invoke them through Premise's registered project tasks. Run suite `install` once before `test`. The harness creates only local temporary Git repositories, downloads exact upstream plugins, and cleans up the backend and editor state. Live GitHub tests, when configured separately, must use verified private disposable repositories.
 

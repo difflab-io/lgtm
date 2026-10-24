@@ -18,6 +18,27 @@ local function comments(state, thread)
   return result
 end
 
+-- Membership in a comparison is independent of whether a discussion is resolved or stale.
+local function outside_diff(state, thread)
+  local anchor = thread.anchor or {}
+  if state.note or not state.files or state.initializing or anchor.kind == "general" then
+    return false
+  end
+  local path = thread.currentPath and thread.currentPath ~= "" and thread.currentPath or anchor.path
+  if state.kind == "directory" and path and state.root then
+    local prefix = state.root .. "/"
+    if path:sub(1, #prefix) == prefix then
+      path = path:sub(#prefix + 1)
+    end
+  end
+  for _, file in ipairs(state.files) do
+    if file.path == path or file.confirmedRename and file.previousPath == path then
+      return false
+    end
+  end
+  return path ~= nil and path ~= ""
+end
+
 -- Resolve against the selected source every time; raw stored ranges are never cursor targets.
 function M.placement(state, thread, path, side)
   local view = state.views and state.views[side]
@@ -54,7 +75,18 @@ function M.placement(state, thread, path, side)
       return nil
     end
   end
-  return require("lgtm.anchors").resolve(thread, view)
+  local placement = require("lgtm.anchors").resolve(thread, view)
+  local source = anchor.source and anchor.source.workingFile
+  -- Retain changed working-source feedback without asserting that its old lines are current.
+  if
+    placement.status == "orphaned"
+    and source
+    and view.source
+    and source.contentHash ~= view.source.content_hash
+  then
+    return { status = "stale", reason = "Unstaged source changed; original evidence is retained" }
+  end
+  return placement
 end
 
 function M.at(state, path, side, line)
@@ -393,8 +425,11 @@ function M.description(state, thread)
   if thread.orphanReason == "file_deleted" then
     return "Orphaned", "File was deleted; the discussion is retained"
   end
+  if outside_diff(state, thread) then
+    return "Outside diff", "File is outside the current diff; the discussion is retained"
+  end
   if thread.orphanReason == "working_source_changed" then
-    return "Orphaned", "Unstaged source changed; original evidence is retained"
+    return "Stale", "Unstaged source changed; original evidence is retained"
   end
   if thread.forgeObservation and thread.forgeObservation.outdated then
     return "Outdated", "Original PR selection is no longer current"
@@ -419,6 +454,25 @@ function M.open(state, threads, pane)
   local win
   local rows, lines, entries, spans = {}, {}, {}, {}
   local width = math.max(20, math.min(pane and 42 or 86, vim.o.columns - 6))
+  local headers = {}
+  local function banner(t, index, replies)
+    local text = (t.state == "resolved" and "RESOLVED" or "OPEN")
+      .. " · "
+      .. replies
+      .. (replies == 1 and " reply" or " replies")
+    if #threads > 1 then
+      text = "THREAD " .. index .. " / " .. #threads .. " · " .. text
+    end
+    if pane then
+      local a = t.anchor or {}
+      text = text .. " · " .. (a.path or "Review") .. (a.start and ":" .. a.start or "")
+    end
+    local location_status, location_reason = M.description(state, t)
+    if location_status then
+      text = location_status:upper() .. " · " .. text
+    end
+    return text, location_reason
+  end
   for index, t in ipairs(threads) do
     local cs = comments(state, t)
     local replies = 0
@@ -427,24 +481,11 @@ function M.open(state, threads, pane)
         replies = replies + 1
       end
     end
-    local banner = (t.state == "resolved" and "RESOLVED" or "OPEN")
-      .. " · "
-      .. replies
-      .. (replies == 1 and " reply" or " replies")
-    if #threads > 1 then
-      banner = "THREAD " .. index .. " / " .. #threads .. " · " .. banner
-    end
-    if pane then
-      local a = t.anchor or {}
-      banner = banner .. " · " .. (a.path or "Review") .. (a.start and ":" .. a.start or "")
-    end
-    local location_status, location_reason = M.description(state, t)
-    if location_status then
-      banner = location_status:upper() .. " · " .. banner
-    end
-    lines[#lines + 1] = " " .. banner
-    spans[#spans + 1] =
-      { line = #lines, group = t.state == "resolved" and "LgtmSuccess" or "LgtmInfo" }
+    local title, location_reason = banner(t, index, replies)
+    lines[#lines + 1] = " " .. title
+    local heading = { line = #lines, group = t.state == "resolved" and "LgtmSuccess" or "LgtmInfo" }
+    spans[#spans + 1] = heading
+    headers[t.id] = { span = heading, index = index, replies = replies }
     rows[#lines] = { thread = t }
     lines[#lines + 1] = string.rep("─", width)
     spans[#spans + 1] = { line = #lines, group = "LgtmBorder" }
@@ -535,7 +576,7 @@ function M.open(state, threads, pane)
   local selection_namespace = api.nvim_create_namespace("lgtm.thread-selection")
   api.nvim_set_hl(0, "LgtmThreadSelection", { link = "LgtmSelection", default = true })
   for _, span in ipairs(spans) do
-    api.nvim_buf_set_extmark(
+    span.mark = api.nvim_buf_set_extmark(
       buf,
       selection_namespace,
       span.line - 1,
@@ -578,6 +619,34 @@ function M.open(state, threads, pane)
     api.nvim_win_set_cursor(win, { entries[1].line, 0 })
   end
   selection()
+  local function refresh()
+    if not api.nvim_win_is_valid(win) or not api.nvim_buf_is_valid(buf) then
+      return
+    end
+    for _, thread in ipairs(state.conversation.threads or {}) do
+      local header = headers[thread.id]
+      if header then
+        for _, row in pairs(rows) do
+          if row.thread.id == thread.id then
+            row.thread = thread
+          end
+        end
+        local span = header.span
+        lines[span.line] = " " .. banner(thread, header.index, header.replies)
+        vim.bo[buf].modifiable = true
+        api.nvim_buf_set_lines(buf, span.line - 1, span.line, false, { lines[span.line] })
+        vim.bo[buf].modifiable = false
+        span.group = thread.state == "resolved" and "LgtmSuccess" or "LgtmInfo"
+        api.nvim_buf_set_extmark(buf, selection_namespace, span.line - 1, 0, {
+          id = span.mark,
+          end_col = #lines[span.line],
+          hl_group = span.group,
+          priority = 120,
+        })
+      end
+    end
+    selection()
+  end
   local function close()
     if api.nvim_win_is_valid(win) then
       api.nvim_win_close(win, true)
@@ -695,7 +764,11 @@ function M.open(state, threads, pane)
           require("lgtm.notifications").error(err)
         end
         if not err then
-          close()
+          if pane then
+            refresh()
+          else
+            close()
+          end
         end
       end
     )
@@ -706,7 +779,12 @@ function M.open(state, threads, pane)
       if not row then
         return
       end
-      close()
+      if outside_diff(state, row.thread) then
+        require("lgtm.notifications").show(
+          "File is outside the current diff; the discussion is retained"
+        )
+        return
+      end
       if state.show_file and row.thread.anchor.path then
         local path = row.thread.currentPath ~= "" and row.thread.currentPath
           or row.thread.anchor.path
@@ -717,6 +795,37 @@ function M.open(state, threads, pane)
             if placement and placement.location and placement.location.kind == "line" then
               api.nvim_set_current_win(state.panes[side].win)
               api.nvim_win_set_cursor(0, { placement.location.start, 0 })
+              return
+            end
+          end
+          -- Stale and file-level feedback can select a file without asserting a line.
+          for _, side in ipairs({ "new", "old" }) do
+            local target = state.panes[side]
+            local view = state.views and state.views[side]
+            if
+              target
+              and target.win
+              and api.nvim_win_is_valid(target.win)
+              and view
+              and view.source
+            then
+              api.nvim_set_current_win(target.win)
+              api.nvim_win_set_cursor(target.win, { 1, 0 })
+              local padding = 0
+              for _, namespace in ipairs({ M.namespace, M.padding_namespace }) do
+                for _, mark in
+                  ipairs(
+                    api.nvim_buf_get_extmarks(target.buf, namespace, 0, -1, { details = true })
+                  )
+                do
+                  if mark[2] == 0 and mark[4].virt_lines_above then
+                    padding = padding + #(mark[4].virt_lines or {})
+                  end
+                end
+              end
+              api.nvim_win_call(target.win, function()
+                vim.fn.winrestview({ topline = 1, topfill = padding })
+              end)
               return
             end
           end

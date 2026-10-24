@@ -96,6 +96,14 @@ run = "mise run --continue-on-error //e2e/backend:test ::: //e2e/cli:test ::: //
 [tasks."nvim:lint"]
 depends = ["//apps/lgtm.nvim:lint"]
 
+[tasks."nvim:install-dev-plugin"]
+description = "Point Neovim's local LGTM plugin at this checkout"
+run = "mise run //apps/lgtm.nvim:install-plugin --source worktree"
+
+[tasks."nvim:install-released-plugin"]
+description = "Install the latest LGTM plugin from main"
+run = "mise run //apps/lgtm.nvim:install-plugin --source main"
+
 [tasks."nvim:format"]
 depends = ["//apps/lgtm.nvim:format"]
 
