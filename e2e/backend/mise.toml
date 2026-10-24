@@ -26,3 +26,9 @@ depends = ["//apps/lgtm-backend:build"]
 description = "Run representative backend E2E flows for local iteration"
 dir = "{{config_root}}/../.."
 run = "bun x vitest run --config e2e/backend/vitest.config.ts --tags-filter=smoke --hideSkippedTests"
+
+[tasks.ci]
+depends = ["//apps/lgtm-backend:build"]
+description = "Run backend E2E coverage excluding overlapping extended journeys"
+dir = "{{config_root}}/../.."
+run = "bun x vitest run --config e2e/backend/vitest.config.ts --tags-filter='!extended'"

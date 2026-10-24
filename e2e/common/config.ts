@@ -10,6 +10,7 @@ export function suiteConfig(
       tags: [
         'e2e',
         'smoke',
+        'extended',
         'backend',
         'cli',
         'nvim',

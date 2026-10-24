@@ -45,7 +45,7 @@ describe('When starting a fresh draft review', () => {
     ).toHaveLength(0)
   })
 
-  it('Reopening the same PR resumes the existing review', async () => {
+  it('Reopening the same PR resumes the existing review', { tags: ['extended'] }, async () => {
     // Arrange
     const { runtime, github } = fixture()
     const { target, review } = await prepareReview(runtime, github)
@@ -119,29 +119,35 @@ describe('When starting a fresh draft review', () => {
     })
   })
 
-  it('User can save general feedback without inventing a file anchor', async () => {
-    // Arrange
-    const { runtime, github } = fixture()
-    const { scope } = await prepareReview(runtime, github)
+  it(
+    'User can save general feedback without inventing a file anchor',
+    { tags: ['extended'] },
+    async () => {
+      // Arrange
+      const { runtime, github } = fixture()
+      const { scope } = await prepareReview(runtime, github)
 
-    // Act
-    const saved = await saveDraft(runtime, scope, 'Overall feedback', { kind: 'general' })
-    await runtime.restart()
-    const conversation = await runtime.rpc('GetConversation', { scope })
+      // Act
+      const saved = await saveDraft(runtime, scope, 'Overall feedback', { kind: 'general' })
+      await runtime.restart()
+      const conversation = await runtime.rpc('GetConversation', { scope })
 
-    // Assert
-    expect(conversation.comments).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: saved.comment.id,
-          body: 'Overall feedback',
-          visibility: 'draft',
-        }),
-      ]),
-    )
-    const thread = conversation.threads.find((thread: Json) => thread.id === saved.comment.threadId)
-    expect(thread).toMatchObject({ id: saved.comment.threadId, anchor: { kind: 'general' } })
-  })
+      // Assert
+      expect(conversation.comments).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: saved.comment.id,
+            body: 'Overall feedback',
+            visibility: 'draft',
+          }),
+        ]),
+      )
+      const thread = conversation.threads.find(
+        (thread: Json) => thread.id === saved.comment.threadId,
+      )
+      expect(thread).toMatchObject({ id: saved.comment.threadId, anchor: { kind: 'general' } })
+    },
+  )
 
   it('Agent can immediately persist draft comments with an identity notice', async () => {
     // Arrange
@@ -254,7 +260,7 @@ describe('When starting a fresh draft review', () => {
     expect(String(remote[0].id)).toBe(accepted.comment.forgeCommentId)
   })
 
-  it('User can reply to a draft comment', async () => {
+  it('User can reply to a draft comment', { tags: ['extended'] }, async () => {
     // Arrange
     const { runtime, github } = fixture()
     const { scope, anchor } = await prepareReview(runtime, github)
@@ -283,7 +289,7 @@ describe('When starting a fresh draft review', () => {
     expect(remote.body).toContain('Draft reply')
   })
 
-  it('User can edit their own draft comment', async () => {
+  it('User can edit their own draft comment', { tags: ['extended'] }, async () => {
     // Arrange
     const { runtime, github } = fixture()
     const { scope, anchor } = await prepareReview(runtime, github)
@@ -306,7 +312,7 @@ describe('When starting a fresh draft review', () => {
     expect(remote.body).not.toContain('Original draft')
   })
 
-  it('User cannot resolve an unpublished draft thread', async () => {
+  it('User cannot resolve an unpublished draft thread', { tags: ['extended'] }, async () => {
     // Arrange
     const { runtime, github } = fixture()
     const { scope, anchor } = await prepareReview(runtime, github)
@@ -330,99 +336,116 @@ describe('When starting a fresh draft review', () => {
     expect(retained.threads.find((thread: Json) => thread.id === root.threadId).state).toBe('open')
   })
 
-  it('User can delete a draft comment without leaving a placeholder', async () => {
-    // Arrange
-    const { runtime, github } = fixture()
-    const { scope, anchor } = await prepareReview(runtime, github)
-    const root = (await saveDraft(runtime, scope, 'Delete this draft', anchor)).comment
-    const current = await runtime.rpc('GetConversation', { scope })
-    root.version = current.comments.find((comment: Json) => comment.id === root.id).version
+  it(
+    'User can delete a draft comment without leaving a placeholder',
+    { tags: ['extended'] },
+    async () => {
+      // Arrange
+      const { runtime, github } = fixture()
+      const { scope, anchor } = await prepareReview(runtime, github)
+      const root = (await saveDraft(runtime, scope, 'Delete this draft', anchor)).comment
+      const current = await runtime.rpc('GetConversation', { scope })
+      root.version = current.comments.find((comment: Json) => comment.id === root.id).version
 
-    // Act
-    await runtime.rpc('DeleteComment', {
-      scope,
-      commentId: root.id,
-      expectedVersion: root.version,
-      requestKey: randomUUID(),
-    })
-    await refreshReview(runtime, scope)
-    const conversation = await runtime.rpc('GetConversation', { scope })
-    const exported = await runtime.rpc('Export', { scope })
+      // Act
+      await runtime.rpc('DeleteComment', {
+        scope,
+        commentId: root.id,
+        expectedVersion: root.version,
+        requestKey: randomUUID(),
+      })
+      await refreshReview(runtime, scope)
+      const conversation = await runtime.rpc('GetConversation', { scope })
+      const exported = await runtime.rpc('Export', { scope })
 
-    // Assert
-    expect(conversation.comments ?? []).toHaveLength(0)
-    expect(conversation.threads ?? []).toHaveLength(0)
-    expect(exported.markdown).not.toContain('Delete this draft')
-    expect(exported.markdown).not.toContain('comment deleted')
-  })
+      // Assert
+      expect(conversation.comments ?? []).toHaveLength(0)
+      expect(conversation.threads ?? []).toHaveLength(0)
+      expect(exported.markdown).not.toContain('Delete this draft')
+      expect(exported.markdown).not.toContain('comment deleted')
+    },
+  )
 })
 
 describe('When resuming an existing draft review', () => {
   const fixture = usePrFixture('backend')
 
-  it('User continues to see existing GitHub drafts after a backend restart', async () => {
-    // Arrange
-    const { runtime, github } = fixture()
-    const { scope, anchor, target, review } = await prepareReview(runtime, github)
-    const root = (await saveDraft(runtime, scope, 'Persist through restart', anchor)).comment
+  it(
+    'User continues to see existing GitHub drafts after a backend restart',
+    { tags: ['extended'] },
+    async () => {
+      // Arrange
+      const { runtime, github } = fixture()
+      const { scope, anchor, target, review } = await prepareReview(runtime, github)
+      const root = (await saveDraft(runtime, scope, 'Persist through restart', anchor)).comment
 
-    // Act
-    await runtime.restart()
-    const resumed = (await runtime.rpc('StartReview', { target, requestKey: randomUUID() })).review
-    await refreshReview(runtime, scope)
-    const conversation = await runtime.rpc('GetConversation', { scope })
+      // Act
+      await runtime.restart()
+      const resumed = (await runtime.rpc('StartReview', { target, requestKey: randomUUID() }))
+        .review
+      await refreshReview(runtime, scope)
+      const conversation = await runtime.rpc('GetConversation', { scope })
 
-    // Assert
-    expect(resumed).toMatchObject({ id: review.id, forgeReviewId: expect.any(String) })
-    expect(conversation.comments).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: root.id,
-          body: 'Persist through restart',
-          visibility: 'draft',
-        }),
-      ]),
-    )
-  })
+      // Assert
+      expect(resumed).toMatchObject({ id: review.id, forgeReviewId: expect.any(String) })
+      expect(conversation.comments).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: root.id,
+            body: 'Persist through restart',
+            visibility: 'draft',
+          }),
+        ]),
+      )
+    },
+  )
 
-  it('User can add more drafts to the same pending GitHub review', async () => {
-    // Arrange
-    const { runtime, github } = fixture()
-    const { scope, anchor, review } = await prepareReview(runtime, github)
-    await saveDraft(runtime, scope, 'First draft', anchor)
-    const before = (await runtime.rpc('GetReview', { reviewId: review.id })).review
-    await runtime.restart()
+  it(
+    'User can add more drafts to the same pending GitHub review',
+    { tags: ['extended'] },
+    async () => {
+      // Arrange
+      const { runtime, github } = fixture()
+      const { scope, anchor, review } = await prepareReview(runtime, github)
+      await saveDraft(runtime, scope, 'First draft', anchor)
+      const before = (await runtime.rpc('GetReview', { reviewId: review.id })).review
+      await runtime.restart()
 
-    // Act
-    await saveDraft(runtime, scope, 'Second draft', { kind: 'file', path: github.path })
-    const after = (await runtime.rpc('GetReview', { reviewId: review.id })).review
-    const remote = await github.api(
-      `repos/${github.repository}/pulls/${github.number}/reviews/${after.forgeReviewId}/comments`,
-    )
+      // Act
+      await saveDraft(runtime, scope, 'Second draft', { kind: 'file', path: github.path })
+      const after = (await runtime.rpc('GetReview', { reviewId: review.id })).review
+      const remote = await github.api(
+        `repos/${github.repository}/pulls/${github.number}/reviews/${after.forgeReviewId}/comments`,
+      )
 
-    // Assert
-    expect(after.forgeReviewId).toBe(before.forgeReviewId)
-    expect(remote).toHaveLength(2)
-  })
+      // Assert
+      expect(after.forgeReviewId).toBe(before.forgeReviewId)
+      expect(remote).toHaveLength(2)
+    },
+  )
 
-  it('Drafts deleted directly on GitHub disappear from refresh and export', async () => {
-    // Arrange
-    const { runtime, github } = fixture()
-    const { scope, anchor } = await prepareReview(runtime, github)
-    const root = (await saveDraft(runtime, scope, 'Externally deleted draft', anchor)).comment
-    await github.api(`repos/${github.repository}/pulls/comments/${root.forgeCommentId}`, 'DELETE')
+  it(
+    'Drafts deleted directly on GitHub disappear from refresh and export',
+    { tags: ['extended'] },
+    async () => {
+      // Arrange
+      const { runtime, github } = fixture()
+      const { scope, anchor } = await prepareReview(runtime, github)
+      const root = (await saveDraft(runtime, scope, 'Externally deleted draft', anchor)).comment
+      await github.api(`repos/${github.repository}/pulls/comments/${root.forgeCommentId}`, 'DELETE')
 
-    // Act
-    await refreshReview(runtime, scope)
-    await runtime.restart()
-    const conversation = await runtime.rpc('GetConversation', { scope })
-    const exported = await runtime.rpc('Export', { scope })
+      // Act
+      await refreshReview(runtime, scope)
+      await runtime.restart()
+      const conversation = await runtime.rpc('GetConversation', { scope })
+      const exported = await runtime.rpc('Export', { scope })
 
-    // Assert
-    expect(conversation.comments ?? []).toHaveLength(0)
-    expect(exported.markdown).not.toContain('Externally deleted draft')
-    expect(exported.markdown).not.toContain('comment deleted')
-  })
+      // Assert
+      expect(conversation.comments ?? []).toHaveLength(0)
+      expect(exported.markdown).not.toContain('Externally deleted draft')
+      expect(exported.markdown).not.toContain('comment deleted')
+    },
+  )
 })
 
 describe('When there are changes during a PR review', () => {
@@ -738,20 +761,24 @@ describe('When addressing published comments or change requests', () => {
     return { ...current, comment, thread }
   }
 
-  it('User sees another author’s published thread and its author', async () => {
-    // Arrange
-    const { runtime, scope, comment } = await publishedConcern()
+  it(
+    'User sees another author’s published thread and its author',
+    { tags: ['extended'] },
+    async () => {
+      // Arrange
+      const { runtime, scope, comment } = await publishedConcern()
 
-    // Act
-    const conversation = await runtime.rpc('GetConversation', { scope })
+      // Act
+      const conversation = await runtime.rpc('GetConversation', { scope })
 
-    // Assert
-    expect(conversation.comments.find((item: Json) => item.id === comment.id)).toMatchObject({
-      visibility: 'published',
-      body: expect.stringContaining('Please address this concern'),
-    })
-    expect(comment.author).toBeTruthy()
-  })
+      // Assert
+      expect(conversation.comments.find((item: Json) => item.id === comment.id)).toMatchObject({
+        visibility: 'published',
+        body: expect.stringContaining('Please address this concern'),
+      })
+      expect(comment.author).toBeTruthy()
+    },
+  )
 
   it('User cannot edit another author’s comment', async () => {
     // Arrange
@@ -771,30 +798,34 @@ describe('When addressing published comments or change requests', () => {
     expect(rejected.body.message).toMatch(/own|owner|author/i)
   })
 
-  it('User can respond to another author’s comment with a draft reply', async () => {
-    // Arrange
-    const { runtime, github, scope, thread } = await publishedConcern()
+  it(
+    'User can respond to another author’s comment with a draft reply',
+    { tags: ['extended'] },
+    async () => {
+      // Arrange
+      const { runtime, github, scope, thread } = await publishedConcern()
 
-    // Act
-    const reply = await runtime.rpc('Reply', {
-      scope,
-      threadId: thread.id,
-      body: 'Proposed response',
-      expectedVersion: thread.version,
-      requestKey: randomUUID(),
-    })
-    const remote = await readPendingComment(
-      runtime,
-      github,
-      scope.reviewId,
-      reply.comment.forgeCommentId,
-    )
+      // Act
+      const reply = await runtime.rpc('Reply', {
+        scope,
+        threadId: thread.id,
+        body: 'Proposed response',
+        expectedVersion: thread.version,
+        requestKey: randomUUID(),
+      })
+      const remote = await readPendingComment(
+        runtime,
+        github,
+        scope.reviewId,
+        reply.comment.forgeCommentId,
+      )
 
-    // Assert
-    expect(reply.syncError).toBeFalsy()
-    expect(reply.comment.visibility).toBe('draft')
-    expect(remote.body).toContain('Proposed response')
-  })
+      // Assert
+      expect(reply.syncError).toBeFalsy()
+      expect(reply.comment.visibility).toBe('draft')
+      expect(remote.body).toContain('Proposed response')
+    },
+  )
 
   it('User can submit responses with comments and a final message', async () => {
     // Arrange
@@ -819,7 +850,7 @@ describe('When addressing published comments or change requests', () => {
     expect(remote.body).toContain('Ready for another look')
   })
 
-  it('User can resolve and reopen a published thread', async () => {
+  it('User can resolve and reopen a published thread', { tags: ['extended'] }, async () => {
     // Arrange
     const { runtime, github, scope, thread } = await publishedConcern()
 

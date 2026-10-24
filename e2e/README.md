@@ -69,7 +69,7 @@ The editor profiles pin CodeDiff, WhichKey and nvim-notify. The second profile a
 
 Fixture hooks compose in stack order. Setup creates the PR, starts the backend, then opens the editor. Cleanup closes the editor, stops the backend, resets the PR, then removes the group’s refs. The local and PR editor fixtures share the same editor lifecycle.
 
-Failed runs retain their workspace, database and logs under `target/e2e/`. Successful runs remove temporary local state. Fixture hooks stop processes after each case. Waits, subprocesses and RPC requests have deadlines.
+Failed runs retain their workspace, database and logs under `target/e2e/`. Editor failure logs also include the rendered screen and window viewports so card visibility failures can be diagnosed from CI output. Successful runs remove temporary local state. Fixture hooks stop processes after each case. Waits, subprocesses and RPC requests have deadlines.
 
 ## Run and inspect
 
@@ -100,7 +100,27 @@ premise run e2e:nvim:run -- --tags-filter=smoke
 
 The smoke selection has 11 cases: four backend, three CLI and four Neovim cases. It covers notes, local reviews, diff data and native CodeDiff, plus remote draft creation through each public boundary. The editor smoke cases use the required dependency profile; the full suite also covers Kak. These are the same tests used by the full suite. PR cases use real GitHub and clean up their run-owned PRs and refs. The smoke tasks build changed binaries and install missing editor dependencies; the `:run` example uses existing binaries.
 
-During development, run only the tests relevant to the changed behavior. Use a spec path, test name or tag for focused checks. Use smoke when a quick check across features is useful. Reserve the full suite for final validation or changes to shared fixtures or behavior that require all suites. Do not repeat passing suites whose inputs have not changed. CI continues to run the full suites in dedicated E2E jobs on Linux and macOS, with at most two suites at once. A shared CI preflight waits for at least 4,500 remaining fixture API requests before allocating the E2E runners. If the account budget is low, it waits for the reset shown in GitHub’s response headers, outside test-hook deadlines. It does not retry failed tests or skip cases. The preflight task is `mise-tasks/e2e-budget`. Push and PR updates share a branch concurrency group so duplicate or superseded workflows are cancelled before they consume another full set of GitHub requests. App-level Mise configs do not expose duplicate `e2e` hooks: Premise’s optional deployment-oriented hook passes a target such as `preview`, which is not a Vitest file filter.
+During development, run only the tests relevant to the changed behavior. Use a spec path, test name or tag for focused checks. Use smoke when a quick check across features is useful. Reserve the full suite for final validation or changes to shared fixtures or behavior that require all suites. Do not repeat passing suites whose inputs have not changed. CI runs one E2E job per OS (Linux and macOS). Each job runs backend, CLI and Neovim suites sequentially, reusing the checkout, tools and build artifacts. Later suites still run if an earlier suite fails; the job retains its failed result. Cancellation stops subsequent suites. A shared CI preflight waits for at least 4,500 remaining fixture API requests before allocating the E2E runners. If the account budget is low, it waits for the reset shown in GitHub’s response headers, outside test-hook deadlines. It does not retry failed tests or skip cases because of low API budget. The preflight task is `mise-tasks/e2e-budget`. Push and PR updates share a branch concurrency group so duplicate or superseded workflows are cancelled before they consume another full set of GitHub requests. App-level Mise configs do not expose duplicate `e2e` hooks: Premise’s optional deployment-oriented hook passes a target such as `preview`, which is not a Vitest file filter.
+
+## Default CI and extended coverage
+
+The `extended` tag marks individual expensive review journeys whose behavior is also exercised through another public boundary. Default CI uses each suite's `ci` task to exclude this tag. Backend RPC contracts, edge cases, CLI-specific behavior, all smoke cases and both Neovim profiles remain in default CI. The initial selection tags 12 backend PR cases and three CLI PR cases; it does not exclude whole suites or any Neovim cases.
+
+```sh
+# Match default CI for one suite (including build prerequisites):
+premise run //e2e/backend:ci
+premise run //e2e/cli:ci
+premise run //e2e/nvim:ci
+
+# Full coverage, including extended journeys:
+premise run e2e
+
+# Inspect only extended cases without running hooks or creating PRs:
+premise run //e2e/backend:list -- --tags-filter=extended
+premise run //e2e/cli:list -- --tags-filter=extended
+```
+
+The existing suite `test` tasks and root `e2e:*` commands continue to include every case. Set the GitHub Actions repository variable `LGTM_E2E_FULL` to `true` before triggering a workflow to include extended cases in both OS jobs. Unset it to restore the default selection. Add the tag only when another default test covers the same behavior; keep distinct boundary assertions and failure contracts in default CI. Shared GitHub fixture cases remain sequential to avoid cleanup races.
 
 ## Permanent private GitHub fixture
 

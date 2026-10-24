@@ -34,3 +34,9 @@ depends = ["install", "//apps/lgtm-cli:build"]
 description = "Run representative nvim E2E flows for local iteration"
 dir = "{{config_root}}/../.."
 run = "bun x vitest run --config e2e/nvim/vitest.config.ts --tags-filter=smoke --hideSkippedTests"
+
+[tasks.ci]
+depends = ["install", "//apps/lgtm-cli:build"]
+description = "Run nvim E2E coverage excluding overlapping extended journeys"
+dir = "{{config_root}}/../.."
+run = "bun x vitest run --config e2e/nvim/vitest.config.ts --tags-filter='!extended'"

@@ -140,7 +140,6 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        suite: [backend, cli, nvim]
         runner: [ubuntu-22.04, macos-latest]
     runs-on: ${{ matrix.runner }}
     permissions:
@@ -153,12 +152,26 @@ jobs:
         with:
           setup-only: true
           install-premise: build
-      - name: Run real E2E suite
+      - name: Run backend E2E
         env:
           LGTM_E2E_GITHUB_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_TOKEN }}
           LGTM_E2E_GITHUB_SECONDARY_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
           LGTM_E2E_GITHUB_REPOSITORY: ${{ vars.LGTM_E2E_GITHUB_REPOSITORY || 'skapoor8/lgtm-e2e' }}
-        run: premise run e2e:${{ matrix.suite }}
+        run: premise run //e2e/backend:${{ vars.LGTM_E2E_FULL == 'true' && 'test' || 'ci' }}
+      - name: Run CLI E2E
+        if: ${{ !cancelled() }}
+        env:
+          LGTM_E2E_GITHUB_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_TOKEN }}
+          LGTM_E2E_GITHUB_SECONDARY_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
+          LGTM_E2E_GITHUB_REPOSITORY: ${{ vars.LGTM_E2E_GITHUB_REPOSITORY || 'skapoor8/lgtm-e2e' }}
+        run: premise run //e2e/cli:${{ vars.LGTM_E2E_FULL == 'true' && 'test' || 'ci' }}
+      - name: Run Neovim E2E
+        if: ${{ !cancelled() }}
+        env:
+          LGTM_E2E_GITHUB_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_TOKEN }}
+          LGTM_E2E_GITHUB_SECONDARY_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
+          LGTM_E2E_GITHUB_REPOSITORY: ${{ vars.LGTM_E2E_GITHUB_REPOSITORY || 'skapoor8/lgtm-e2e' }}
+        run: premise run //e2e/nvim:${{ vars.LGTM_E2E_FULL == 'true' && 'test' || 'ci' }}
 
   publish-release:
     needs: [plan, single, matrix, e2e]
