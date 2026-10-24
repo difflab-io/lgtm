@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Wait for a fresh GitHub API budget before the full CI E2E matrix"
+#MISE description="Wait for the GitHub API budget before E2E tests"
 set -euo pipefail
 : "${LGTM_E2E_GITHUB_TOKEN:?CI requires the primary fixture token}"
 fixture_repository=${LGTM_E2E_GITHUB_REPOSITORY:-skapoor8/lgtm-e2e}

@@ -78,20 +78,24 @@ description = "Run database and backend contracts on SQLite and PostgreSQL"
 run = "mise run //:with-postgres -- cargo test --locked -p lgtm-db -p lgtm-backend --all-features"
 
 [tasks."e2e:backend"]
-description = "Run backend E2E suite via its own Mise configuration"
-depends = ["//e2e/backend:test"]
+description = "Run backend E2E tests"
+usage = 'flag "--extended" help="Include extended tests"'
+run = 'LGTM_E2E_EXTENDED="${usage_extended:-false}" mise run //e2e/backend:test'
 
 [tasks."e2e:cli"]
-description = "Run cli E2E suite via its own Mise configuration"
-depends = ["//e2e/cli:test"]
+description = "Run cli E2E tests"
+usage = 'flag "--extended" help="Include extended tests"'
+run = 'LGTM_E2E_EXTENDED="${usage_extended:-false}" mise run //e2e/cli:test'
 
 [tasks."e2e:nvim"]
-description = "Run nvim E2E suite via its own Mise configuration"
-depends = ["//e2e/nvim:test"]
+description = "Run nvim E2E tests"
+usage = 'flag "--extended" help="Include extended tests"'
+run = 'LGTM_E2E_EXTENDED="${usage_extended:-false}" mise run //e2e/nvim:test'
 
 [tasks.e2e]
-description = "Run every E2E suite and complete cleanup even if a suite fails"
-run = "mise run --continue-on-error //e2e/backend:test ::: //e2e/cli:test ::: //e2e/nvim:test"
+description = "Run E2E suites in parallel"
+usage = 'flag "--extended" help="Include extended tests"'
+run = 'LGTM_E2E_EXTENDED="${usage_extended:-false}" mise run --continue-on-error //e2e/backend:test ::: //e2e/cli:test ::: //e2e/nvim:test'
 
 [tasks."nvim:lint"]
 depends = ["//apps/lgtm.nvim:lint"]

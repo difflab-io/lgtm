@@ -132,16 +132,11 @@ jobs:
           LGTM_E2E_GITHUB_REPOSITORY: ${{ vars.LGTM_E2E_GITHUB_REPOSITORY || 'skapoor8/lgtm-e2e' }}
         run: premise run e2e-budget
 
-  # TODO: Remove this standalone job once Premise supports E2E suites.
-  e2e:
+  # TODO: Move E2E into the Premise flow when it supports test suites.
+  e2e-linux:
     needs: e2e-budget
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    strategy:
-      fail-fast: false
-      max-parallel: 2
-      matrix:
-        runner: [ubuntu-22.04, macos-latest]
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
     steps:
@@ -152,33 +147,42 @@ jobs:
         with:
           setup-only: true
           install-premise: build
-      - name: Run backend E2E
+      - name: Run E2E suites
         env:
           LGTM_E2E_GITHUB_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_TOKEN }}
           LGTM_E2E_GITHUB_SECONDARY_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
           LGTM_E2E_GITHUB_REPOSITORY: ${{ vars.LGTM_E2E_GITHUB_REPOSITORY || 'skapoor8/lgtm-e2e' }}
-        run: premise run //e2e/backend:${{ vars.LGTM_E2E_FULL == 'true' && 'test' || 'ci' }}
-      - name: Run CLI E2E
-        if: ${{ !cancelled() }}
+        run: premise run e2e
+
+  # TODO: Move E2E into the Premise flow when it supports test suites.
+  e2e-macos:
+    needs: e2e-budget
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: cloudvoyant/premise@v0
+        with:
+          setup-only: true
+          install-premise: build
+      - name: Run E2E suites
         env:
           LGTM_E2E_GITHUB_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_TOKEN }}
           LGTM_E2E_GITHUB_SECONDARY_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
           LGTM_E2E_GITHUB_REPOSITORY: ${{ vars.LGTM_E2E_GITHUB_REPOSITORY || 'skapoor8/lgtm-e2e' }}
-        run: premise run //e2e/cli:${{ vars.LGTM_E2E_FULL == 'true' && 'test' || 'ci' }}
-      - name: Run Neovim E2E
-        if: ${{ !cancelled() }}
-        env:
-          LGTM_E2E_GITHUB_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_TOKEN }}
-          LGTM_E2E_GITHUB_SECONDARY_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
-          LGTM_E2E_GITHUB_REPOSITORY: ${{ vars.LGTM_E2E_GITHUB_REPOSITORY || 'skapoor8/lgtm-e2e' }}
-        run: premise run //e2e/nvim:${{ vars.LGTM_E2E_FULL == 'true' && 'test' || 'ci' }}
+        run: premise run e2e
 
   publish-release:
-    needs: [plan, single, matrix, e2e]
+    needs: [plan, single, matrix, e2e-linux, e2e-macos]
     outputs:
       version: ${{ needs.plan.outputs.version }}
     if: >-
-      always() && needs.e2e.result == 'success' && needs.plan.outputs.version != '' &&
+      always() && needs.e2e-linux.result == 'success' && needs.e2e-macos.result == 'success' &&
+      needs.plan.outputs.version != '' &&
       needs.plan.result == 'success' &&
       ((needs.plan.outputs.mode == 'single' &&
         needs.single.result == 'success') ||

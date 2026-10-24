@@ -26,9 +26,3 @@ depends = ["//apps/lgtm-cli:build"]
 description = "Run representative cli E2E flows for local iteration"
 dir = "{{config_root}}/../.."
 run = "bun x vitest run --config e2e/cli/vitest.config.ts --tags-filter=smoke --hideSkippedTests"
-
-[tasks.ci]
-depends = ["//apps/lgtm-cli:build"]
-description = "Run cli E2E coverage excluding overlapping extended journeys"
-dir = "{{config_root}}/../.."
-run = "bun x vitest run --config e2e/cli/vitest.config.ts --tags-filter='!extended'"
