@@ -1,56 +1,23 @@
-local M = { submission_drafts = {} }
-local rpc, contexts, notice =
-  require("lgtm.rpc"), require("lgtm.context"), require("lgtm.notifications")
--- Directory and remote fallbacks enumerate metadata, then fetch only the selected file.
-function M.load_diff(state, callback)
-  local previous = {}
-  for _, file in ipairs(state.files or {}) do
-    previous[file.path] = file
-  end
-  rpc.call(
-    "GetDiff",
-    { target = state.target, comparison = state.comparison },
-    function(err, response)
-      if err then
-        callback(err)
-        return
-      end
-      state.diff = response.diff
-      state.root = response.diff.root
-      local files = {}
-      local function page(token)
-        rpc.call(
-          "GetFiles",
-          { diff = state.diff, pageToken = token, pageSize = 100 },
-          function(error, result)
-            if error then
-              callback(error)
-              return
-            end
-            for _, file in ipairs(result.files or {}) do
-              local saved = previous[file.path]
-              files[#files + 1] = saved and saved.identity == file.identity and saved or file
-            end
-            if result.nextPageToken and result.nextPageToken ~= "" then
-              page(result.nextPageToken)
-            else
-              state.files = files
-              callback()
-            end
-          end
-        )
-      end
-      page(nil)
-    end
-  )
-end
+-- State -----------------------------------------------------------------------
 
+local M = {}
+local Private = {}
+local contexts = require("lgtm.services.state")
+local notice = require("lgtm.notifications")
+
+-- Public ----------------------------------------------------------------------
+
+---@param state lgtm.ReviewState
 function M.open(state, on_loaded)
   state.closed = false
+  state.on_error = notice.error
+  state.on_files_changed = function()
+    require("lgtm.files").render(state)
+  end
   contexts.set(state)
   state.refresh = function(done)
     local comparison = vim.deepcopy(state.comparison)
-    contexts.refresh(state, function(err)
+    require("lgtm.services.reviews").refresh(state, function(err)
       if contexts.current ~= state then
         return
       end
@@ -114,27 +81,17 @@ function M.open(state, on_loaded)
         if file.path == path then
           if not file.loaded then
             local pending = notice.show("Loading " .. path .. "…")
-            rpc.latest(
-              "review-file",
-              "GetFile",
-              { diff = state.diff, path = path },
-              function(err, result)
-                if contexts.current ~= state then
-                  return
-                end
-                if err then
-                  notice.error(err, pending)
-                  return
-                end
-                file.sides = { old = result.oldSide, new = result.newSide }
-                file.content = result.newSide and result.newSide.content or ""
-                file.baseContent = result.oldSide and result.oldSide.content or ""
-                file.contentHash = file.identity
-                file.loaded = true
-                state.show_file(path, anchor, on_ready)
-                notice.show("File ready", nil, pending)
+            require("lgtm.services.diffs").get_file(state, file, function(err)
+              if contexts.current ~= state then
+                return
               end
-            )
+              if err then
+                notice.error(err, pending)
+                return
+              end
+              state.show_file(path, anchor, on_ready)
+              notice.show("File ready", nil, pending)
+            end)
           else
             state.on_ready = (anchor or on_ready) and ready or nil
             require("lgtm.codediff").open(state, file)
@@ -162,7 +119,7 @@ function M.open(state, on_loaded)
     if state.git_root then
       require("lgtm.codediff").open_native(state)
     elseif not state.initializing and not state.load_error then
-      M.load_diff(state, function(err)
+      require("lgtm.services.diffs").get_files(state, function(err)
         if contexts.current ~= state then
           return
         end
@@ -215,6 +172,7 @@ function M.open(state, on_loaded)
 end
 
 -- Reuse the tab so an open composer keeps its buffer when a push changes the diff.
+---@param state lgtm.ReviewState
 function M.reopen_pr(state)
   local comparison = vim.deepcopy(state.comparison)
   local function current()
@@ -322,7 +280,7 @@ end
 function M.directory(path)
   local function start(selected)
     local root = vim.fn.fnamemodify(selected, ":p"):gsub("/$", "")
-    contexts.start(
+    require("lgtm.services.reviews").start(
       { directory = { path = root } },
       { directory = vim.empty_dict() },
       root,
@@ -356,52 +314,18 @@ function M.sync()
     notice.show("Local review drafts are already saved")
     return
   end
-  local drafts = {}
-  for _, c in ipairs((state.conversation or {}).comments or {}) do
-    if
-      c.originSessionId == state.review.id
-      and c.author
-      and (c.ownerId ~= "" and c.ownerId or c.author.id) == rpc.identity
-      and c.visibility == "draft"
-    then
-      drafts[#drafts + 1] = c
-    end
-  end
-  table.sort(drafts, function(a, b)
-    return tonumber(a.position or 0) < tonumber(b.position or 0)
-  end)
   local pending = notice.show("Synchronizing review drafts…")
-  local index = 0
-  local function next_draft()
-    index = index + 1
-    if not drafts[index] then
-      state.refresh(function(err)
-        if err then
-          notice.error(err, pending)
-        else
-          notice.show(
-            "Drafts synchronized; general comments remain local until submission",
-            nil,
-            pending
-          )
-        end
-      end)
-      return
+  require("lgtm.services.reviews").sync_drafts(state, function(err)
+    if err then
+      notice.error(err, pending)
+    else
+      notice.show(
+        "Drafts synchronized; general comments remain local until submission",
+        nil,
+        pending
+      )
     end
-    rpc.call(
-      "SyncDraftComment",
-      { reviewId = state.review.id, commentId = drafts[index].id },
-      function(err)
-        if err then
-          notice.error(err, pending)
-          state.refresh()
-          return
-        end
-        next_draft()
-      end
-    )
-  end
-  next_draft()
+  end)
 end
 
 function M.select()
@@ -419,7 +343,7 @@ function M.select()
   )
 end
 
-function M.branch(requested_mode, default_base)
+function M.branch(requested_mode)
   local root = vim.fn.getcwd()
   vim.system({
     "git",
@@ -457,7 +381,7 @@ function M.branch(requested_mode, default_base)
                 local comparison = mode == "branch"
                     and { branch = { baseCommit = refs[1], headCommit = refs[2] } }
                   or { [mode] = { baseCommit = refs[1] } }
-                contexts.start(
+                require("lgtm.services.reviews").start(
                   { localGit = { path = root, branch = identity[3] } },
                   comparison,
                   root,
@@ -467,7 +391,8 @@ function M.branch(requested_mode, default_base)
                     else
                       M.open(state)
                     end
-                  end
+                  end,
+                  { on_conflict = Private.resolve_comparison }
                 )
               end)
             end
@@ -478,13 +403,13 @@ function M.branch(requested_mode, default_base)
             vim.system(
               { "git", "-C", root, "merge-base", base_branch, "HEAD" },
               { text = true },
-              function(result)
+              function(ancestor)
                 vim.schedule(function()
-                  if result.code ~= 0 then
+                  if ancestor.code ~= 0 then
                     notice.error("Cannot find a common ancestor with " .. base_branch)
                     return
                   end
-                  start(vim.trim(result.stdout), "HEAD")
+                  start(vim.trim(ancestor.stdout), "HEAD")
                 end)
               end
             )
@@ -513,7 +438,7 @@ function M.comment(kind, range)
     notice.show("Select a review first, or use :Lgtm note")
     return
   end
-  local unavailable = contexts.readiness_error(state)
+  local unavailable = contexts.get_readiness_error(state)
   if unavailable then
     notice.error(unavailable)
     return
@@ -548,71 +473,44 @@ function M.comment(kind, range)
           or state.file.path,
         side = location.side,
       })
-    local anchor, capture_error = require("lgtm.sources").capture(view, buf, kind, first, last)
+    local anchor, capture_error =
+      require("lgtm.services.sources").capture(view, buf, kind, first, last)
     if not anchor then
       notice.error(capture_error)
       return
     end
-    local input = {
-      scope = state.scope,
-      expectedVersion = state.version,
-      requestKey = contexts.request_key(),
-      anchor = anchor,
-    }
+    local input = require("lgtm.services.feedback").create_draft(state, anchor)
     require("lgtm.ui.composer").open("Review comment", "", function(body, done)
-      contexts.ensure_writable(state, function(write_error)
-        if write_error then
-          notice.error(write_error)
-          done(write_error)
-          return
+      local saving = notice.show("Saving draft…")
+      require("lgtm.services.feedback").save(state, input, body, function(save_error, result)
+        if save_error then
+          notice.error(save_error, saving)
+        elseif result.syncError and result.syncError ~= "" then
+          notice.error(
+            "Draft saved locally; GitHub sync failed: "
+              .. result.syncError
+              .. ". Use :Lgtm sync to recover.",
+            saving
+          )
+        else
+          notice.show(
+            result.comment
+                and result.comment.forgeCommentId
+                and result.comment.forgeCommentId ~= ""
+                and "Draft saved on GitHub"
+              or "Draft saved locally",
+            nil,
+            saving
+          )
         end
-        -- Capture the latest review version on first save; an open PR composer can
-        -- retain verified source bytes across an explicit comparison refresh.
-        if not input.body then
-          input.scope = vim.deepcopy(state.scope)
-          input.expectedVersion = state.version
-        end
-        -- Keep the exact source, version, and operation key when an uncertain save is retried.
-        if input.body and input.body ~= body then
-          input.requestKey = contexts.request_key()
-        end
-        input.body = body
-        local saving = notice.show("Saving draft…")
-        rpc.call("AddComment", input, function(error, result)
-          if error then
-            notice.error(error, saving)
-            done(error)
-            return
-          end
-          state.refresh(function(refresh_error)
-            if result.syncError and result.syncError ~= "" then
-              notice.error(
-                "Draft saved locally; GitHub sync failed: "
-                  .. result.syncError
-                  .. ". Use :Lgtm sync to recover.",
-                saving
-              )
-            else
-              notice.show(
-                result.comment
-                    and result.comment.forgeCommentId
-                    and result.comment.forgeCommentId ~= ""
-                    and "Draft saved on GitHub"
-                  or "Draft saved locally",
-                nil,
-                saving
-              )
-            end
-            done(refresh_error)
-          end)
-        end)
+        done(save_error)
       end)
     end)
   end
   if kind == "general" then
     compose()
   else
-    require("lgtm.sources").read(state, state.file, location.side, compose)
+    require("lgtm.services.sources").read(state, state.file, location.side, compose)
   end
 end
 
@@ -675,62 +573,55 @@ function M.refresh()
   end
   local comparison = vim.deepcopy(state.comparison)
   local pending = notice.show("Refreshing review…")
-  rpc.call(
-    "RefreshReview",
-    { scope = state.scope, expectedVersion = state.version, requestKey = contexts.request_key() },
-    function(err, result)
-      if contexts.current ~= state then
-        return
-      end
-      if err then
-        notice.error(err, pending)
-        return
-      end
-      if result.review then
-        contexts.apply(state, result.review)
-        if vim.deep_equal(comparison, state.comparison) then
-          require("lgtm.files").load_reviewed(state)
-        end
-      end
-      local function content()
-        state.refresh(function(error)
-          if error then
-            notice.error(error, pending)
-            return
-          end
-          if state.native_explorer then
-            state.render_ready = false
-            require("codediff.ui.refresh").request(state.tab, { full = true })
-            state.wait_ready()
-          else
-            local path = state.file and state.file.path
-            M.load_diff(state, function(load_error)
-              if load_error then
-                notice.error(load_error)
-              elseif path then
-                state.show_file(path)
-              else
-                M.files()
-              end
-            end)
-          end
-          notice.show("Review refreshed", nil, pending)
-        end)
-      end
-      if state.kind == "pr" and not vim.deep_equal(comparison, state.comparison) then
-        state.refresh(function(refresh_error)
-          if refresh_error then
-            notice.error(refresh_error, pending)
-            return
-          end
-          M.reopen_pr(state)
-          notice.show("PR updated; pending comments retained", nil, pending)
-        end)
-      else
-        content()
-      end
+  require("lgtm.services.reviews").refresh_comparison(state, function(err)
+    if contexts.current ~= state then
+      return
     end
-  )
+    if err then
+      notice.error(err, pending)
+      return
+    end
+    if vim.deep_equal(comparison, state.comparison) then
+      require("lgtm.services.files").get_reviewed(state)
+    end
+    local function content()
+      state.refresh(function(error)
+        if error then
+          notice.error(error, pending)
+          return
+        end
+        if state.native_explorer then
+          state.render_ready = false
+          require("codediff.ui.refresh").request(state.tab, { full = true })
+          state.wait_ready()
+        else
+          local path = state.file and state.file.path
+          require("lgtm.services.diffs").get_files(state, function(load_error)
+            if load_error then
+              notice.error(load_error)
+            elseif path then
+              state.show_file(path)
+            else
+              M.files()
+            end
+          end)
+        end
+        notice.show("Review refreshed", nil, pending)
+      end)
+    end
+    if state.kind == "pr" and not vim.deep_equal(comparison, state.comparison) then
+      state.refresh(function(refresh_error)
+        if refresh_error then
+          notice.error(refresh_error, pending)
+          return
+        end
+        M.reopen_pr(state)
+        notice.show("PR updated; pending comments retained", nil, pending)
+      end)
+    else
+      content()
+    end
+  end)
 end
 
 function M.save()
@@ -764,159 +655,36 @@ function M.complete()
     notice.error("Use :Lgtm submit for GitHub reviews")
     return
   end
-  rpc.call("CompleteReview", {
-    reviewId = state.review.id,
-    expectedVersion = state.version,
-    requestKey = contexts.request_key(),
-  }, function(err, result)
+  require("lgtm.services.reviews").complete(state, function(err)
     if err then
       notice.error(err)
     else
-      contexts.apply(state, result.review)
       notice.show("Local review completed")
     end
   end)
 end
 
-function M.submission_result(state, err, result, pending, done)
-  if err then
-    local message = (
-      err.uncertain and "Submission response lost. Use :Lgtm reconcile before retrying. "
-      or "Submission failed. "
-    ) .. (err.message or "Unknown error")
-    local draft = M.submission_drafts[state.review.id]
-    if draft then
-      draft.uncertain = err.uncertain
-    end
-    -- Learn durable intent state without observing GitHub again or repeating a write.
-    state.refresh(function()
-      done(err)
-      notice.error(message, pending)
-    end)
-    return
-  end
-  contexts.apply(state, result.review)
-  local status = result.review.submissionStatus
-  if status == "confirmed" then
-    M.submission_drafts[state.review.id] = nil
-    -- Submission already persisted the published visibility. Read local data;
-    -- do not leave draft cards on screen or start another provider observation.
-    contexts.conversation(state, function(read_error)
-      if not read_error and state.render then
-        state.render()
-      end
-      notice.show("Review submitted", nil, pending)
-      done()
-      if read_error then
-        notice.error(
-          "Review published; reload comments with :Lgtm refresh. " .. (read_error.message or "")
-        )
-      end
-    end)
-  elseif status == "unsubmitted" then
-    local draft = M.submission_drafts[state.review.id]
-    if draft then
-      draft.uncertain, draft.fingerprint = false, nil
-    end
-    local message = result.review.submissionError or ""
-    local error = {
-      message = "Review is editable; drafts and final text are saved. Choose an outcome with :Lgtm submit. "
-        .. message,
-    }
-    state.refresh(function()
-      done(error)
-      notice.error(error, pending)
-    end)
-  elseif
-    status == "uncertain"
-    or status == "pending"
-    or status == "posting"
-    or status == "sending"
-    or status == "reconciling"
-  then
-    local error = { message = "Submission " .. status .. "; use :Lgtm reconcile before retrying" }
-    notice.error(error, pending)
-    done(error)
-  else
-    local error = {
-      message = (result.review.submissionError or ("Submission " .. tostring(status)))
-        .. ". Use :Lgtm reconcile to inspect/recover.",
-    }
-    notice.error(error, pending)
-    done(error)
-  end
-end
-
-local function can_recover_rejected(state)
-  if
-    state.review.submissionStatus == "failed"
-    and not vim.list_contains(rpc.capabilities or {}, "rejected_submission_recovery")
-  then
-    notice.error(
-      "Update the LGTM CLI/backend before recovering this rejected submission. Your drafts are preserved."
-    )
-    return false
-  end
-  return true
-end
-
 function M.submit()
-  local unavailable = contexts.current and contexts.readiness_error(contexts.current)
-  if unavailable then
-    notice.error(unavailable)
-    return
-  end
   local state = contexts.current
   if not state then
     return
   end
-  local retained = M.submission_drafts[state.review.id]
-  if retained and retained.uncertain and state.review.submissionStatus ~= "failed" then
-    notice.error("Submission response was lost. Use :Lgtm reconcile before retrying.")
-    return
-  end
-  if (state.review.submissionStatus or ""):match("^draft_") then
-    notice.error("Draft synchronization needs recovery. Use :Lgtm sync before submitting.")
-    return
-  end
-  if
-    state.review.submissionStatus == "uncertain"
-    or state.review.submissionStatus == "pending"
-    or state.review.submissionStatus == "posting"
-    or state.review.submissionStatus == "sending"
-    or state.review.submissionStatus == "reconciling"
-  then
-    notice.error("Submission is pending or uncertain. Use :Lgtm reconcile before retrying.")
+  local service = require("lgtm.services.submissions")
+  local unavailable = service.get_submission_error(state)
+  if unavailable then
+    notice.error(unavailable.message)
     return
   end
   if state.review.submissionStatus == "failed" then
-    if not can_recover_rejected(state) then
-      return
-    end
     local pending = notice.show("Checking rejected submission…")
-    rpc.call("ReconcileSubmission", { reviewId = state.review.id }, function(err, result)
-      if not err and result.review.submissionStatus == "unsubmitted" then
-        contexts.apply(state, result.review)
-        local draft = M.submission_drafts[state.review.id]
-        if draft then
-          draft.uncertain, draft.fingerprint = false, nil
-        end
-        notice.show("Drafts recovered; choose a review outcome", nil, pending)
-        state.refresh(function(refresh_err)
-          if refresh_err then
-            notice.error(refresh_err)
-          else
-            M.submit()
-          end
-        end)
+    service.recover(state, function(err, result)
+      if not err and result.editable then
+        notice.show(result.message, nil, pending)
+        M.submit()
       else
-        M.submission_result(state, err, result, pending, function() end)
+        Private.present_submission(err, result, pending, function() end)
       end
     end)
-    return
-  end
-  if state.kind ~= "pr" then
-    notice.error("Local reviews cannot be submitted to GitHub; use :Lgtm complete")
     return
   end
   require("lgtm.picker").select(
@@ -924,31 +692,14 @@ function M.submit()
     { "comment", "approve", "request_changes" },
     tostring,
     function(outcome)
-      local draft = M.submission_drafts[state.review.id]
-        or { body = state.review.body or "", requestKey = contexts.request_key() }
-      M.submission_drafts[state.review.id] = draft
+      local draft = service.get_draft(state)
       require("lgtm.ui.composer").open(
         "Final review body (optional)",
         draft.body,
         function(body, done)
-          draft.body = body
-          draft.outcome = outcome
           local pending = notice.show("Submitting review…")
-          local input = {
-            reviewId = state.review.id,
-            outcome = outcome,
-            body = body,
-            expectedHead = state.head,
-            expectedBase = state.base,
-            expectedVersion = state.version,
-          }
-          local fingerprint = vim.json.encode(input)
-          if draft.fingerprint ~= fingerprint then
-            draft.requestKey, draft.fingerprint = contexts.request_key(), fingerprint
-          end
-          input.requestKey = draft.requestKey
-          rpc.call("SubmitReview", input, function(err, result)
-            M.submission_result(state, err, result, pending, done)
+          service.submit(state, draft, outcome, body, function(err, result)
+            Private.present_submission(err, result, pending, done)
           end)
         end,
         { action = "submit review" }
@@ -962,17 +713,15 @@ function M.reconcile()
   if not state then
     return
   end
-  local unavailable = contexts.readiness_error(state)
+  local service = require("lgtm.services.submissions")
+  local unavailable = service.get_reconcile_error(state)
   if unavailable then
-    notice.error(unavailable)
-    return
-  end
-  if not can_recover_rejected(state) then
+    notice.error(unavailable.message)
     return
   end
   local pending = notice.show("Checking submission status…")
-  rpc.call("ReconcileSubmission", { reviewId = state.review.id }, function(err, result)
-    M.submission_result(state, err, result, pending, function() end)
+  service.reconcile(state, function(err, result)
+    Private.present_submission(err, result, pending, function() end)
   end)
 end
 
@@ -1018,4 +767,27 @@ function M.reviewed(path)
     end
   end
 end
+-- Private ---------------------------------------------------------------------
+
+function Private.resolve_comparison(_, done)
+  require("lgtm.picker").select(
+    "Saved review uses a different comparison",
+    { "Resume saved review", "Complete saved review and start this comparison" },
+    tostring,
+    done
+  )
+end
+
+function Private.present_submission(err, result, pending, done)
+  done(err)
+  if err then
+    notice.error(result.message, pending)
+  else
+    notice.show(result.message, nil, pending)
+  end
+  if result.warning then
+    notice.error(result.warning)
+  end
+end
+
 return M

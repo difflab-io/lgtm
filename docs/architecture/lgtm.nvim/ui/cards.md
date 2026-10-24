@@ -99,17 +99,22 @@ local rows = require("lgtm.ui.cards").render(
 
 ```mermaid
 flowchart TD
-  Controller["threads.lua<br/>Comments, status, source location"] -->|"Display record + width + expanded flag"| Card["ui.cards.render"]
-  Card --> Text["NUI Line / Text<br/>Highlighted row chunks"]
-  Text --> Adapter["Annotation adapter<br/>Extmarks and virtual lines"]
-  Adapter --> CodeDiff["CodeDiff source pane<br/>Align opposite-side padding"]
-  Keys["Keys in the source buffer"] -->|"Open, expand, hide, navigate"| Controller
-  Controller -->|"Source-side line translation"| Mapping["codediff.other_line"]
-  Mapping --> Adapter
+  Props["Card + width + expanded"] --> Mode{"Resolved and collapsed?"}
+  Mode -->|"Yes"| Summary["Resolved summary"]
+  Mode -->|"No"| Header["Header"]
+  Mode -->|"No"| Body["Preview or conversation body"]
+  Mode -->|"No"| Footer["Footer"]
+  Header --> Sections["Ordered NUI text sections"]
+  Body --> Sections
+  Footer --> Sections
+  Summary --> Sections
+  Sections --> Adapter["One converter to Neovim virtual lines"]
+  Adapter --> Placement["threads.lua + codediff.other_line<br/>Source placement and opposite-side padding"]
 ```
+
 
 ### Maintainer Notes
 
-Keep source-side translation in `codediff.other_line`. NUI composes the card text, but the annotation adapter still aligns its virtual rows with CodeDiff's other pane.
+NuiComponents paragraphs write into their own buffers. Cards decorate existing CodeDiff buffers, so they compose NUI text fragments and convert them at one virtual-line boundary. Text fitting and wrapping stay in the annotation helpers. Source-side translation stays in `codediff.other_line`.
 
 See the [implementation](../../../../apps/lgtm.nvim/lua/lgtm/ui/cards.lua) and [plugin architecture](../index.md).

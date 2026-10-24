@@ -61,7 +61,7 @@ export async function prepareThread(
     await editor.command('Lgtm submit')
     await editor.compose('Thread fixture review')
     await editor.wait(
-      'require("lgtm.context").current.review.submissionStatus == "confirmed"',
+      'require("lgtm.services.state").current.review.submissionStatus == "confirmed"',
       'thread discussion published to GitHub',
     )
     await editor.command('Lgtm close')
@@ -72,7 +72,7 @@ export async function prepareThread(
   const state =
     flow === 'notes'
       ? await editor.lua(
-          'local s=require("lgtm.notes").states[...]; return {conversation=s.conversation}',
+          'local s=require("lgtm.services.state").notes[...]; return {conversation=s.conversation}',
           buf,
         )
       : (await editor.loaded())!
@@ -97,7 +97,7 @@ export async function prepareThread(
 export async function getThreadState(discussion: ThreadDiscussion): Promise<Json> {
   if (discussion.flow === 'notes')
     return discussion.editor.lua(
-      'local s=require("lgtm.notes").states[...]; return {conversation=s.conversation}',
+      'local s=require("lgtm.services.state").notes[...]; return {conversation=s.conversation}',
       discussion.buf,
     )
   return (await discussion.editor.state())!
@@ -106,7 +106,7 @@ export async function getThreadState(discussion: ThreadDiscussion): Promise<Json
 export async function getThreadPlacement(discussion: ThreadDiscussion): Promise<Json> {
   return discussion.editor.lua(
     `local notes, buf, id, path = ...
-    local s = notes and require("lgtm.notes").states[buf] or require("lgtm.context").current
+    local s = notes and require("lgtm.services.state").notes[buf] or require("lgtm.services.state").current
     for _, thread in ipairs(s.conversation.threads) do
       if thread.id == id then return require("lgtm.threads").placement(s, thread, path, "new") end
     end
@@ -144,7 +144,7 @@ export async function changeThreadSource(discussion: ThreadDiscussion) {
     await github.changeFiles({ [path]: changed })
     await editor.command('Lgtm refresh')
     await editor.wait(
-      `require("lgtm.context").current.head == "${github.head}" and not require("lgtm.context").current.initializing`,
+      `require("lgtm.services.state").current.head == "${github.head}" and not require("lgtm.services.state").current.initializing`,
       'changed PR comparison ready',
     )
     await editor.loaded()
@@ -152,7 +152,7 @@ export async function changeThreadSource(discussion: ThreadDiscussion) {
     await runtime.write(path, changed)
     if (discussion.flow === 'notes') {
       await editor.command('edit!')
-      await editor.lua('require("lgtm.notes").states[...].refresh()', discussion.buf)
+      await editor.lua('require("lgtm.services.state").notes[...].refresh()', discussion.buf)
     } else await editor.command('Lgtm refresh')
   }
   await waitFor(

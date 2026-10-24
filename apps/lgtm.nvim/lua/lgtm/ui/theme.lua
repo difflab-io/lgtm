@@ -1,3 +1,5 @@
+-- State -----------------------------------------------------------------------
+
 local M = {}
 local api = vim.api
 M.winhighlight =
@@ -13,6 +15,8 @@ local names = {
   warning = "LgtmWarning",
   error = "LgtmError",
 }
+
+-- Public ----------------------------------------------------------------------
 
 function M.highlights()
   for role, source in pairs(require("lgtm.config").options.ui.highlights) do
@@ -56,7 +60,12 @@ end
 
 -- Component props leave border construction to NUI, including custom border tables.
 function M.get_component_options()
-  return { border_style = "none", window = { highlight = M.winhighlight } }
+  return {
+    border_style = "none",
+    window = {
+      highlight = M.winhighlight,
+    },
+  }
 end
 
 function M.get_popup_options(title, footer)
@@ -64,7 +73,10 @@ function M.get_popup_options(title, footer)
   return {
     border = {
       style = require("lgtm.config").options.ui.border,
-      text = { top = title and (" " .. title .. " "), bottom = footer },
+      text = {
+        top = title and (" " .. title .. " "),
+        bottom = footer,
+      },
     },
     buf_options = { filetype = "lgtm" },
     win_options = {

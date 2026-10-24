@@ -47,6 +47,19 @@ These rules apply to every app and library in the workspace.
 - Organize E2E specs by top-level `When ...` states and native `it` cases for individual observable behaviors. Put suite and feature labels in Vitest tags. A state group may share run-owned PRs through `beforeAll`/`afterAll`; reset relevant remote feedback between independent cases. Keep credentials scoped to test processes and never switch the user’s active GitHub account during tests.
 - Keep shared process and GitHub lifecycle fixtures in `e2e/common/`. Compose editor lifecycle hooks once under `e2e/nvim/`. Keep feature setup in adjacent `*.fixtures.ts` files, and keep small single-file helpers private in their spec. Export only helpers that another module uses.
 
+## Lua and Neovim UI
+
+- Organize view modules as State, Render, Lifecycle, Methods, then Private. Use only sections that contain code. Pad `-- Section` separators with hyphens to column 80. Keep public entry points above module-private helpers.
+- Put private helper definitions at the bottom. Use a module-local namespace or explicit local forward declarations when earlier functions need them. Do not export helpers only to avoid Lua's declaration order.
+- Make each render method reveal the visual structure directly. Compose named sections such as header, body, and footer, or meaningful child components. Keep label calculation, text fitting, wrapping, and annotation conversion outside the composition. Do not hide a large procedure behind a renamed body helper.
+- Build floating views with NuiComponents composition, props, signals, and lifecycle hooks. Use NUI primitives for persistent splits and source annotations. Reuse documented library behavior before writing imperative window code or a generic component framework. Keep the CodeDiff virtual-line adapter small and separate from card composition.
+- Put each component property on its own line. Expand nested property tables. Keep callbacks short and delegate named operations instead of nesting workflow logic in props.
+- Keep RPC calls and business workflows under `lua/lgtm/services/`. Group the reads, guarded writes, retries, and state updates needed for a complete operation. UI handlers supply intent and present results. Services must not import UI components or notification providers.
+- Reuse the shared review, file, conversation, comment, thread, and draft shapes. Keep shared application state in services and transient interaction state in components. Do not invent a new data model or response envelope for every screen or callback.
+- Treat commands and key bindings as public APIs. Document supported keys, modes, remapping, and permission limits alongside Lua APIs. Show UI states with aligned layouts and state/data flows with inline Mermaid. Omit routine styling and maintainer narration.
+- Run StyLua formatting and Selene lint through the plugin's Premise tasks. Complexity checks supplement review of component composition; splitting a procedure into arbitrary helpers does not satisfy these rules.
+- Keep each UI component function at cyclomatic complexity 10 or below. The lint task enforces this limit across `lua/lgtm/ui/`. Controller and service violations remain visible as warnings at the same threshold until a separate cleanup removes them. Do not raise the UI limit or add suppressions to avoid decomposition.
+
 ## CLI
 
 - Keep each command group in its own file under `apps/lgtm-cli/src/commands/`. Order each file as local types, command argument struct, command callbacks, then private helpers. Keep shared command argument types in `src/models.rs` and transport in `src/rpc_client.rs`.

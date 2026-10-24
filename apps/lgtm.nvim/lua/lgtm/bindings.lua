@@ -1,6 +1,11 @@
 -- Buffer mappings belong to a review or notes view. Preserve prior CodeDiff/Kak/user mappings.
+-- State -----------------------------------------------------------------------
+
 local M = {}
 
+-- Public ----------------------------------------------------------------------
+
+---@param state lgtm.ReviewState
 function M.set(state, modes, key, callback, options)
   local buf = options.buffer
   state.bindings = state.bindings or {}
@@ -22,6 +27,7 @@ function M.set(state, modes, key, callback, options)
   end
 end
 
+---@param state lgtm.ReviewState
 function M.restore(state)
   for buf, mappings in pairs(state.bindings or {}) do
     if vim.api.nvim_buf_is_valid(buf) then

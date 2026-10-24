@@ -20,7 +20,7 @@ import type { Editor } from './editor.js'
 
 async function placement(editor: Editor, id: string) {
   return editor.lua(
-    `local id=...; local s=require("lgtm.context").current
+    `local id=...; local s=require("lgtm.services.state").current
     for _,t in ipairs(s.conversation.threads) do
       if t.id==id then return require("lgtm.threads").placement(s,t,s.file.path,"new") end
     end`,
@@ -327,7 +327,7 @@ for (const profile of profiles) {
         await e.command('Lgtm refresh')
         await waitFor('long working file rendered', () =>
           e.lua(
-            `local s = require("lgtm.context").current
+            `local s = require("lgtm.services.state").current
               return s.render_ready and s.views.new and s.views.new.content == ...
                 and vim.api.nvim_buf_line_count(s.panes.new.buf) > 100`,
             content,
@@ -348,7 +348,7 @@ for (const profile of profiles) {
         )
         expect(
           await e.lua(
-            'local win = require("lgtm.context").current.panes.new.win; return vim.api.nvim_win_call(win, vim.fn.winsaveview).topline',
+            'local win = require("lgtm.services.state").current.panes.new.win; return vim.api.nvim_win_call(win, vim.fn.winsaveview).topline',
           ),
         ).toBeGreaterThan(1)
 
@@ -359,7 +359,7 @@ for (const profile of profiles) {
           () =>
             e.lua(
               `vim.cmd("redraw")
-          local win = require("lgtm.context").current.panes.new.win
+          local win = require("lgtm.services.state").current.panes.new.win
           local info = vim.fn.getwininfo(win)[1]
           local lines = {}
           for row = info.winrow, info.winrow + info.height - 1 do

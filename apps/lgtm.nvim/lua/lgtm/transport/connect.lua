@@ -1,6 +1,10 @@
 -- Unary Connect JSON. No shell interpolation and no write retry after an ambiguous response.
+-- State -----------------------------------------------------------------------
+
 local M = {}
 local jobs = {}
+-- Public ----------------------------------------------------------------------
+
 function M.endpoint()
   local configured = require("lgtm.config").options.endpoint_url or vim.env.LGTM_ENDPOINT_URL
   if configured and configured ~= "" then

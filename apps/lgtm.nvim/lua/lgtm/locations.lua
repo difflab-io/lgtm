@@ -1,6 +1,11 @@
 -- Record observed filesystem moves. No searching, polling, or Git index mutation.
+-- State -----------------------------------------------------------------------
+
 local M = {}
-local contexts, rpc = require("lgtm.context"), require("lgtm.rpc")
+local Private = {}
+local contexts = require("lgtm.services.state")
+
+-- Public ----------------------------------------------------------------------
 
 function M.canonical(path)
   local absolute = vim.fn.fnamemodify(path, ":p"):gsub("/$", "")
@@ -18,7 +23,93 @@ function M.canonical(path)
   return absolute
 end
 
-local function relocated(path, from, to)
+---@param state lgtm.ReviewState
+function M.reload(state, callback)
+  local path = state.file and state.file.path
+  state.reload_pending = nil
+  require("lgtm.services.diffs").get_files(state, function(err)
+    if err then
+      callback(err)
+    elseif not state.closed and state.tab == vim.api.nvim_get_current_tabpage() then
+      local selected
+      for _, file in ipairs(state.files) do
+        if file.path == path then
+          selected = file
+        end
+      end
+      selected = selected or state.files[1]
+      if selected then
+        state.show_file(selected.path, nil, callback)
+      else
+        callback()
+      end
+    else
+      callback()
+    end
+  end)
+end
+
+---@param state lgtm.ReviewState
+function M.retry(state, callback)
+  local pending = state.pending_location
+  if not pending or state.moving then
+    callback({ message = "A saved location move is already being recorded" })
+    return
+  end
+  state.moving = true
+  require("lgtm.services.reviews").record_location(state, function(err, result)
+    if err then
+      state.moving = false
+      callback(err)
+    else
+      Private.accept(state, pending, result, callback)
+    end
+  end)
+end
+
+function M.rename(from, to)
+  from, to = M.canonical(from), M.canonical(to)
+  if from == to then
+    return
+  end
+  local source, _, code = vim.uv.fs_lstat(from)
+  if source or code ~= "ENOENT" or not vim.uv.fs_stat(to) then
+    return
+  end
+  local changes = {}
+  for _, state in pairs(contexts.tabs) do
+    if state.kind == "directory" and not state.closed and not state.moving then
+      local destination = Private.relocated(state.root, from, to)
+      if destination then
+        changes[#changes + 1] = { state, state.root, destination }
+      end
+    end
+  end
+  for buf, state in pairs(require("lgtm.services.state").notes) do
+    local old = state.scope.notes.path
+    local destination = Private.relocated(old, from, to)
+    if destination and not state.moving and vim.api.nvim_buf_is_valid(buf) then
+      changes[#changes + 1] = { state, old, destination }
+    end
+  end
+  local function next_change(index)
+    local change = changes[index]
+    if not change then
+      return
+    end
+    Private.record(change[1], change[2], change[3], function(err)
+      if err then
+        require("lgtm.notifications").error(err)
+      end
+      next_change(index + 1)
+    end)
+  end
+  next_change(1)
+end
+
+-- Private ---------------------------------------------------------------------
+
+function Private.relocated(path, from, to)
   if path == from then
     return to
   elseif path:sub(1, #from + 1) == from .. "/" then
@@ -26,12 +117,13 @@ local function relocated(path, from, to)
   end
 end
 
-local function accept(state, pending, result, callback)
+---@param state lgtm.ReviewState
+function Private.accept(state, pending, result, callback)
   state.pending_location, state.moving = nil, true
   state.version = result.version or state.version
   state.views = {}
   if state.note then
-    local target = contexts.notes(pending.destination)
+    local target = contexts.create_notes(pending.destination)
     state.scope, state.scope_key, state.root, state.path =
       target.scope, target.scope_key, target.root, target.path
     if state.buf and not vim.api.nvim_buf_is_valid(state.buf) then
@@ -54,7 +146,7 @@ local function accept(state, pending, result, callback)
     if state.render then
       state.render()
     end
-    contexts.conversation(state, function(err)
+    require("lgtm.services.reviews").get_conversation(state, function(err)
       state.moving = false
       state.reload_pending = true
       if not err and not state.closed and state.tab == vim.api.nvim_get_current_tabpage() then
@@ -69,73 +161,14 @@ local function accept(state, pending, result, callback)
   end
 end
 
-function M.reload(state, callback)
-  local path = state.file and state.file.path
-  state.reload_pending = nil
-  require("lgtm.review").load_diff(state, function(err)
-    if err then
-      callback(err)
-    elseif not state.closed and state.tab == vim.api.nvim_get_current_tabpage() then
-      local selected
-      for _, file in ipairs(state.files) do
-        if file.path == path then
-          selected = file
-        end
-      end
-      selected = selected or state.files[1]
-      if selected then
-        state.show_file(selected.path, nil, callback)
-      else
-        callback()
-      end
-    else
-      callback()
-    end
-  end)
-end
-
-function M.retry(state, callback, can_rebase)
-  local pending = state.pending_location
-  if not pending or state.moving then
-    callback({ message = "A saved location move is already being recorded" })
-    return
-  end
-  state.moving = true
-  rpc.call("RefreshReview", pending.input, function(err, result)
-    if err then
-      if
-        can_rebase ~= false
-        and err.code == "failed_precondition"
-        and (err.message or ""):find("Review data changed", 1, true)
-      then
-        contexts.conversation(state, function(read_error)
-          state.moving = false
-          if read_error then
-            callback(read_error)
-            return
-          end
-          -- The rejected request has no receipt. Read the intervening write before creating a new guarded operation.
-          pending.input.expectedVersion, pending.input.requestKey =
-            state.version, contexts.request_key()
-          M.retry(state, callback, false)
-        end)
-        return
-      end
-      state.moving = false
-      callback(err)
-    else
-      accept(state, pending, result, callback)
-    end
-  end)
-end
-
-local function record(state, from, destination, callback)
+---@param state lgtm.ReviewState
+function Private.record(state, from, destination, callback)
   if state.pending_location then
     M.retry(state, callback)
     return
   end
   state.moving = true
-  contexts.conversation(state, function(err)
+  require("lgtm.services.reviews").get_conversation(state, function(err)
     if err then
       state.moving = false
       callback(err)
@@ -151,52 +184,12 @@ local function record(state, from, destination, callback)
       },
     }
     if state.note and #(state.conversation.threads or {}) == 0 then
-      accept(state, pending, { version = state.version }, callback)
+      Private.accept(state, pending, { version = state.version }, callback)
       return
     end
     state.pending_location, state.moving = pending, false
     M.retry(state, callback)
   end)
-end
-
-function M.rename(from, to)
-  from, to = M.canonical(from), M.canonical(to)
-  if from == to then
-    return
-  end
-  local source, _, code = vim.uv.fs_lstat(from)
-  if source or code ~= "ENOENT" or not vim.uv.fs_stat(to) then
-    return
-  end
-  local changes = {}
-  for _, state in pairs(contexts.tabs) do
-    if state.kind == "directory" and not state.closed and not state.moving then
-      local destination = relocated(state.root, from, to)
-      if destination then
-        changes[#changes + 1] = { state, state.root, destination }
-      end
-    end
-  end
-  for buf, state in pairs(require("lgtm.notes").states) do
-    local old = state.scope.notes.path
-    local destination = relocated(old, from, to)
-    if destination and not state.moving and vim.api.nvim_buf_is_valid(buf) then
-      changes[#changes + 1] = { state, old, destination }
-    end
-  end
-  local function next_change(index)
-    local change = changes[index]
-    if not change then
-      return
-    end
-    record(change[1], change[2], change[3], function(err)
-      if err then
-        require("lgtm.notifications").error(err)
-      end
-      next_change(index + 1)
-    end)
-  end
-  next_change(1)
 end
 
 return M

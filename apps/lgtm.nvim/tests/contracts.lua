@@ -90,7 +90,7 @@ local function should_validate_plugin_contracts()
   assert(table.concat(health_errors, "\n"):find("Backend unavailable", 1, true))
   assert(table.concat(health_errors, "\n"):find("Missing dependency nui-components", 1, true))
   assert(table.concat(health_errors, "\n"):find("Missing dependency nui.split", 1, true))
-  local rpc = require("lgtm.rpc")
+  local rpc = require("lgtm.services.client")
   local old_call, old_identity, old_caps = transport.call, rpc.identity, rpc.capabilities
   local old_config = require("lgtm.config").options.identity
   require("lgtm.config").options.identity = { name = "Reviewer", email = "reviewer@example.test" }
@@ -127,7 +127,7 @@ local function should_validate_plugin_contracts()
   )
   transport.call, rpc.identity, rpc.capabilities = old_call, old_identity, old_caps
   require("lgtm.config").options.identity = old_config
-  local contexts = require("lgtm.context")
+  local contexts = require("lgtm.services.state")
   local previous_state, previous_rpc = contexts.current, rpc.call
   local notifications = require("lgtm.notifications")
   local previous_error, message = notifications.error, nil

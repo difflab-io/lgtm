@@ -1,6 +1,10 @@
-local M = { states = {} }
-local rpc, notice = require("lgtm.rpc"), require("lgtm.notifications")
-local contexts, sources = require("lgtm.context"), require("lgtm.sources")
+-- State -----------------------------------------------------------------------
+
+local M = {}
+local notice = require("lgtm.notifications")
+local contexts, sources = require("lgtm.services.state"), require("lgtm.services.sources")
+
+-- Public ----------------------------------------------------------------------
 
 function M.owns_review_buffer(buf)
   if not vim.api.nvim_buf_is_valid(buf) then
@@ -20,7 +24,7 @@ function M.state(buf, callback)
     callback({ message = "Open a saved file to use notes" })
     return
   end
-  local state = M.states[buf]
+  local state = contexts.notes[buf]
   if state and state.pending_location then
     require("lgtm.locations").retry(state, function(err)
       callback(err, not err and state or nil)
@@ -32,9 +36,10 @@ function M.state(buf, callback)
     return
   end
   if not state or state.scope.notes.path ~= (vim.uv.fs_realpath(path) or path) then
-    state = contexts.notes(path)
+    state = contexts.create_notes(path)
     state.buf = buf
-    M.states[buf] = state
+    state.on_error = notice.error
+    contexts.notes[buf] = state
     state.redraw = function()
       if not M.owns_review_buffer(buf) then
         require("lgtm.threads").attach(state, buf, state.path, "new")
@@ -52,7 +57,7 @@ function M.state(buf, callback)
       local generation = state.render_generation
       sources.file(state.root, state.path, "local_file", function(err, selected)
         if
-          M.states[buf] ~= state
+          contexts.notes[buf] ~= state
           or not vim.api.nvim_buf_is_valid(buf)
           or generation ~= state.render_generation
         then
@@ -79,8 +84,8 @@ function M.state(buf, callback)
           end
           local callbacks = state.render_callbacks
           state.render_callbacks = {}
-          for _, callback in ipairs(callbacks) do
-            callback(error)
+          for _, waiter in ipairs(callbacks) do
+            waiter(error)
           end
         end
         if err then
@@ -91,7 +96,7 @@ function M.state(buf, callback)
       end)
     end
     state.refresh = function(done)
-      contexts.conversation(state, function(err)
+      require("lgtm.services.reviews").get_conversation(state, function(err)
         if err then
           if done then
             done(err)
@@ -154,28 +159,13 @@ function M.add(range)
     end
     -- The backend supplies the relative path, including moved-file associations.
     anchor.path = nil
-    local input = {
-      scope = state.scope,
-      expectedVersion = state.version,
-      requestKey = contexts.request_key(),
-      anchor = anchor,
-    }
+    local input = require("lgtm.services.feedback").create_draft(state, anchor)
     require("lgtm.ui.composer").open("Note", "", function(body, done)
-      if input.body and input.body ~= body then
-        input.requestKey = contexts.request_key()
-      end
-      input.body = body
-      rpc.call("AddComment", input, function(save_error)
-        if save_error then
-          done(save_error)
-          return
+      require("lgtm.services.feedback").save(state, input, body, function(save_error)
+        if not save_error then
+          notice.show("Note saved")
         end
-        state.refresh(function(refresh_error)
-          if not refresh_error then
-            notice.show("Note saved")
-          end
-          done(refresh_error)
-        end)
+        done(save_error)
       end)
     end)
   end)
@@ -252,26 +242,25 @@ function M.promote()
               if choice ~= "Promote" then
                 return
               end
-              rpc.call("PromoteNotes", {
-                source = source.scope,
-                targetReviewId = target.review.id,
-                expectedSourceVersion = source.version,
-                expectedReviewVersion = target.version,
-                commentIds = { comment.id },
-                anchors = { anchor },
-                requestKey = contexts.request_key(),
-              }, function(error, result)
-                if error then
-                  notice.error(error)
-                  return
+              require("lgtm.services.feedback").promote(
+                source,
+                target,
+                comment,
+                anchor,
+                function(error, result)
+                  if error then
+                    notice.error(error)
+                    return
+                  end
+                  if #(result.syncErrors or {}) > 0 then
+                    notice.error(
+                      "Note promoted locally; GitHub sync needs recovery. Use :Lgtm sync."
+                    )
+                  else
+                    notice.show("Note promoted; original retained")
+                  end
                 end
-                target.refresh()
-                if #(result.syncErrors or {}) > 0 then
-                  notice.error("Note promoted locally; GitHub sync needs recovery. Use :Lgtm sync.")
-                else
-                  notice.show("Note promoted; original retained")
-                end
-              end)
+              )
             end
           )
         end)

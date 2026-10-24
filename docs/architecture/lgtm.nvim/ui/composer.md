@@ -125,14 +125,14 @@ sequenceDiagram
   participant Caller as Note / review / thread controller
   participant Draft as Composer + retained drafts
   participant Input as Markdown input
-  participant Store as Backend
+  participant Service as Feedback / submission service
   Caller->>Draft: title, initial text, draft_id, submit callback
   Draft->>Input: Retained text or initial text
   Input->>Draft: Ctrl-S with current body
   Draft->>Draft: Mark pending and hide
   Draft->>Caller: submit(body, done)
-  Caller->>Store: Save with review and identity context
-  Store-->>Caller: Result or error
+  Caller->>Service: Save shared Draft with ReviewState
+  Service-->>Caller: Accepted state or recoverable error
   Caller-->>Draft: done(error)
   alt Save fails
     Draft->>Input: Restore editable body

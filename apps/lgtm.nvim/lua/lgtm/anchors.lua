@@ -1,7 +1,12 @@
 -- Source-bound placement. CodeDiff supplies buffers and rename candidates, not persistent anchors.
+-- State -----------------------------------------------------------------------
+
 local M = {}
+local Private = {}
 
 -- Match Rust str::lines(): CRLF is one ending; final newlines are not extra lines.
+-- Public ----------------------------------------------------------------------
+
 function M.lines(bytes)
   local lines, crlf, start = {}, {}, 1
   while true do
@@ -22,73 +27,11 @@ function M.lines(bytes)
   end
 end
 
-local function valid_source(source)
-  if not source or type(source.content_hash) ~= "string" then
-    return false
-  end
-  if #source.content_hash ~= 71 or not source.content_hash:match("^sha256:%x+$") then
-    return false
-  end
-  local oid = source.kind == "commit" and source.sha
-    or source.kind == "index_file" and source.blob_oid
-  if
-    source.kind ~= "commit"
-    and source.kind ~= "index_file"
-    and source.kind ~= "working_file"
-    and source.kind ~= "local_file"
-  then
-    return false
-  end
-  if source.kind == "commit" or source.kind == "index_file" then
-    return type(oid) == "string" and (#oid == 40 or #oid == 64) and oid:match("^%x+$") ~= nil
-  end
-  return true
-end
-
-local function valid_evidence(evidence)
-  return evidence
-    and valid_source(evidence.source)
-    and type(evidence.selected_text) == "string"
-    and #evidence.selected_text <= 65536
-    and type(evidence.context_before) == "string"
-    and #evidence.context_before <= 8192
-    and type(evidence.context_after) == "string"
-    and #evidence.context_after <= 8192
-end
-
-local function nonblank(value)
-  local remaining = value:gsub("[%s]", "")
-  for _, codepoint in ipairs({
-    0x85,
-    0xA0,
-    0x1680,
-    0x2000,
-    0x2001,
-    0x2002,
-    0x2003,
-    0x2004,
-    0x2005,
-    0x2006,
-    0x2007,
-    0x2008,
-    0x2009,
-    0x200A,
-    0x2028,
-    0x2029,
-    0x202F,
-    0x205F,
-    0x3000,
-  }) do
-    remaining = remaining:gsub(vim.fn.nr2char(codepoint), "")
-  end
-  return remaining ~= ""
-end
-
 function M.matching_range(evidence, content)
   if
-    not nonblank(evidence.selected_text)
-    and not nonblank(evidence.context_before)
-    and not nonblank(evidence.context_after)
+    not Private.nonblank(evidence.selected_text)
+    and not Private.nonblank(evidence.context_before)
+    and not Private.nonblank(evidence.context_after)
   then
     return nil
   end
@@ -147,13 +90,15 @@ function M.place(anchor, evidence, path, source, content, path_confirmed)
   if not source or content == nil then
     return fallback("unverified", "Displayed source content is unavailable")
   end
-  if not valid_source(source) or source.content_hash ~= "sha256:" .. vim.fn.sha256(content) then
+  if
+    not Private.valid_source(source) or source.content_hash ~= "sha256:" .. vim.fn.sha256(content)
+  then
     return fallback("unverified", "Displayed source identity does not match its bytes")
   end
   if not evidence then
     return fallback("unverified", "Original source evidence is unavailable")
   end
-  if not valid_evidence(evidence) then
+  if not Private.valid_evidence(evidence) then
     return fallback("unverified", "Original source evidence is invalid")
   end
   if
@@ -266,7 +211,7 @@ function M.resolve(thread, view)
   if
     view.source
     and (
-      not valid_source(view.source)
+      not Private.valid_source(view.source)
       or view.content == nil
       or view.source.content_hash ~= "sha256:" .. vim.fn.sha256(view.content)
     )
@@ -326,6 +271,70 @@ function M.resolve(thread, view)
     view.content,
     M.path_confirmed(original, evidence, thread.currentPath, view)
   )
+end
+
+-- Private ---------------------------------------------------------------------
+
+function Private.valid_source(source)
+  if not source or type(source.content_hash) ~= "string" then
+    return false
+  end
+  if #source.content_hash ~= 71 or not source.content_hash:match("^sha256:%x+$") then
+    return false
+  end
+  local oid = source.kind == "commit" and source.sha
+    or source.kind == "index_file" and source.blob_oid
+  if
+    source.kind ~= "commit"
+    and source.kind ~= "index_file"
+    and source.kind ~= "working_file"
+    and source.kind ~= "local_file"
+  then
+    return false
+  end
+  if source.kind == "commit" or source.kind == "index_file" then
+    return type(oid) == "string" and (#oid == 40 or #oid == 64) and oid:match("^%x+$") ~= nil
+  end
+  return true
+end
+
+function Private.valid_evidence(evidence)
+  return evidence
+    and Private.valid_source(evidence.source)
+    and type(evidence.selected_text) == "string"
+    and #evidence.selected_text <= 65536
+    and type(evidence.context_before) == "string"
+    and #evidence.context_before <= 8192
+    and type(evidence.context_after) == "string"
+    and #evidence.context_after <= 8192
+end
+
+function Private.nonblank(value)
+  local remaining = value:gsub("[%s]", "")
+  for _, codepoint in ipairs({
+    0x85,
+    0xA0,
+    0x1680,
+    0x2000,
+    0x2001,
+    0x2002,
+    0x2003,
+    0x2004,
+    0x2005,
+    0x2006,
+    0x2007,
+    0x2008,
+    0x2009,
+    0x200A,
+    0x2028,
+    0x2029,
+    0x202F,
+    0x205F,
+    0x3000,
+  }) do
+    remaining = remaining:gsub(vim.fn.nr2char(codepoint), "")
+  end
+  return remaining ~= ""
 end
 
 return M

@@ -26,7 +26,7 @@ import {
 } from './local-review.fixtures.js'
 async function placement(e: Editor, id: string) {
   return e.lua(
-    `local id=...; local s=require("lgtm.context").current
+    `local id=...; local s=require("lgtm.services.state").current
     for _,t in ipairs(s.conversation.threads) do if t.id==id then return require("lgtm.threads").placement(s,t,s.file.path,"new") end end`,
     id,
   )
@@ -388,7 +388,9 @@ for (const profile of profiles) {
       expect(directoryReview.file.path).toBe('PLAN.md')
       expect(await e.text(directoryReview.panes.new.buf)).toContain('# Plan')
       expect(
-        await e.value('vim.api.nvim_win_get_width(require("lgtm.context").current.explorer.win)'),
+        await e.value(
+          'vim.api.nvim_win_get_width(require("lgtm.services.state").current.explorer.win)',
+        ),
       ).toBe(30)
 
       // Act
@@ -396,18 +398,20 @@ for (const profile of profiles) {
       await e.keys('f')
 
       // Assert
-      await e.wait('require("lgtm.context").current.explorer.win == nil', 'explorer hidden')
-      expect(await e.value('require("lgtm.context").current.explorer.win')).toBeNull()
+      await e.wait('require("lgtm.services.state").current.explorer.win == nil', 'explorer hidden')
+      expect(await e.value('require("lgtm.services.state").current.explorer.win')).toBeNull()
 
       // Act
       await e.keys('f')
-      await e.wait('require("lgtm.context").current.explorer.win ~= nil', 'explorer shown')
-      await e.lua('vim.api.nvim_win_set_cursor(require("lgtm.context").current.explorer.win,{2,0})')
+      await e.wait('require("lgtm.services.state").current.explorer.win ~= nil', 'explorer shown')
+      await e.lua(
+        'vim.api.nvim_win_set_cursor(require("lgtm.services.state").current.explorer.win,{2,0})',
+      )
       await e.keys('<CR>')
 
       // Assert
       await e.wait(
-        'require("lgtm.context").current.file.path == "SECOND.md"',
+        'require("lgtm.services.state").current.file.path == "SECOND.md"',
         'selected second file',
       )
 
@@ -415,14 +419,14 @@ for (const profile of profiles) {
       await e.keys('[f')
 
       // Assert
-      await e.wait('require("lgtm.context").current.file.path == "PLAN.md"', 'previous file')
+      await e.wait('require("lgtm.services.state").current.file.path == "PLAN.md"', 'previous file')
 
       // Act
       await e.keys(' rm')
 
       // Assert
       await e.wait(
-        'require("lgtm.context").current.reviewed["PLAN.md"] ~= nil',
+        'require("lgtm.services.state").current.reviewed["PLAN.md"] ~= nil',
         'PLAN.md marked reviewed',
       )
       expect((await e.state())!.reviewed['PLAN.md']).toBeTruthy()
@@ -432,7 +436,7 @@ for (const profile of profiles) {
 
       // Assert
       await e.wait(
-        'require("lgtm.context").current.reviewed["PLAN.md"] == nil',
+        'require("lgtm.services.state").current.reviewed["PLAN.md"] == nil',
         'PLAN.md mark removed',
       )
       expect((await e.state())!.reviewed['PLAN.md']).toBeUndefined()
@@ -440,22 +444,22 @@ for (const profile of profiles) {
       // Act
       await e.keys(' rm')
       await e.wait(
-        'require("lgtm.context").current.reviewed["PLAN.md"] ~= nil',
+        'require("lgtm.services.state").current.reviewed["PLAN.md"] ~= nil',
         'PLAN.md marked before explorer navigation',
       )
       await e.lua(
-        'vim.api.nvim_set_current_win(require("lgtm.context").current.explorer.win); vim.api.nvim_win_set_cursor(0,{2,0})',
+        'vim.api.nvim_set_current_win(require("lgtm.services.state").current.explorer.win); vim.api.nvim_win_set_cursor(0,{2,0})',
       )
       await e.keys('m')
 
       // Assert
       await e.wait(
-        'require("lgtm.context").current.reviewed["SECOND.md"] ~= nil',
+        'require("lgtm.services.state").current.reviewed["SECOND.md"] ~= nil',
         'SECOND.md marked reviewed',
       )
       expect((await e.state())!.reviewed['SECOND.md']).toBeTruthy()
       const explorerLines = await e.value<string[]>(
-        'vim.api.nvim_buf_get_lines(require("lgtm.context").current.explorer.buf, 0, -1, false)',
+        'vim.api.nvim_buf_get_lines(require("lgtm.services.state").current.explorer.buf, 0, -1, false)',
       )
       expect(explorerLines[1]).toMatch(/✓ .*SECOND\.md/)
       expect(await e.value('vim.api.nvim_win_get_cursor(0)[1]')).toBe(2)
@@ -465,7 +469,7 @@ for (const profile of profiles) {
 
       // Assert
       await e.wait(
-        'require("lgtm.context").current.reviewed["SECOND.md"] == nil',
+        'require("lgtm.services.state").current.reviewed["SECOND.md"] == nil',
         'SECOND.md mark removed',
       )
       expect((await e.state())!.reviewed['SECOND.md']).toBeUndefined()
@@ -475,13 +479,19 @@ for (const profile of profiles) {
       await e.keys('<Tab>')
 
       // Assert
-      await e.wait('require("lgtm.context").current.file.path == "SECOND.md"', 'next unreviewed')
+      await e.wait(
+        'require("lgtm.services.state").current.file.path == "SECOND.md"',
+        'next unreviewed',
+      )
 
       // Act
       await e.keys(']f')
 
       // Assert
-      await e.wait('require("lgtm.context").current.file.path == "PLAN.md"', 'all-file navigation')
+      await e.wait(
+        'require("lgtm.services.state").current.file.path == "PLAN.md"',
+        'all-file navigation',
+      )
 
       // Act
       await r.write('.difflab/specific-plan/PLAN.md', '# Plan\nReview ignored content changed\n')
@@ -489,7 +499,7 @@ for (const profile of profiles) {
 
       // Assert
       await e.wait(
-        'require("lgtm.context").current.render_ready and not require("lgtm.context").current.reviewed["PLAN.md"]',
+        'require("lgtm.services.state").current.render_ready and not require("lgtm.services.state").current.reviewed["PLAN.md"]',
         'changed mark invalidated',
       )
     })
@@ -576,7 +586,7 @@ for (const profile of profiles) {
 
       // Assert
       await e.wait(
-        'require("lgtm.context").current.review.state == "completed"',
+        'require("lgtm.services.state").current.review.state == "completed"',
         'local completion',
       )
       const directoryReview = (await e.state())!

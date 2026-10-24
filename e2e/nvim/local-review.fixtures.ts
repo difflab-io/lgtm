@@ -44,7 +44,7 @@ export async function prepareCommittedFeedback(editor: Editor, runtime: TestHarn
   const feedback = await prepareStagedFeedback(editor, runtime)
   await editor.command('Lgtm complete')
   await editor.wait(
-    'require("lgtm.context").current.review.state == "completed"',
+    'require("lgtm.services.state").current.review.state == "completed"',
     'staged review completed',
   )
   await runtime.git(
@@ -122,7 +122,7 @@ export async function prepareWorkingFeedback(editor: Editor, runtime: TestHarnes
   const feedback = await prepareRenamedFeedback(editor, runtime)
   await editor.command('Lgtm complete')
   await editor.wait(
-    'require("lgtm.context").current.review.state == "completed"',
+    'require("lgtm.services.state").current.review.state == "completed"',
     'branch review completed before starting a working review',
   )
   await runtime.write('other.txt', 'working selection\n')

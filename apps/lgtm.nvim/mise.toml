@@ -1,13 +1,22 @@
 [tools]
 stylua = "2.1.0"
 neovim = "0.12.5"
+"cargo:selene" = "0.31.0"
 
 [tasks.test]
 description = "Plugin syntax and public contract checks"
 run = "nvim --headless -u NONE -l {{config_root}}/tests/contracts.lua"
 
 [tasks.lint]
-run = "nvim --headless -u NONE -l {{config_root}}/tests/contracts.lua"
+description = "Lua lint, UI complexity gate, and controller/service complexity report"
+depends = ["lint:ui"]
+dir = "{{config_root}}"
+run = "selene --allow-warnings --config selene.toml lua plugin ../../lazy.lua"
+
+[tasks."lint:ui"]
+description = "Enforce Lua lint and maximum UI function complexity of 10"
+dir = "{{config_root}}"
+run = "selene --config selene-ui.toml lua/lgtm/ui"
 
 [tasks.format]
 run = "stylua --config-path {{config_root}}/.stylua.toml {{config_root}}/../../lazy.lua {{config_root}}/lua {{config_root}}/plugin {{config_root}}/tests"

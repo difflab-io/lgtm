@@ -1,4 +1,8 @@
+-- State -----------------------------------------------------------------------
+
 local M = {}
+-- Public ----------------------------------------------------------------------
+
 function M.setup()
   local prefix = require("lgtm.config").options.prefix
   local groups = {
@@ -111,7 +115,7 @@ function M.setup()
     {
       prefix .. "x",
       function()
-        require("lgtm.export").run(require("lgtm.context").current and "review" or "notes")
+        require("lgtm.export").run(require("lgtm.services.state").current and "review" or "notes")
       end,
       desc = "Export review",
     },

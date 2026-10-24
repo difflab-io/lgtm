@@ -53,45 +53,77 @@ Git reviews also include CodeDiff's diff buffers and native explorer. Explicit d
 
 ```mermaid
 flowchart TD
-  Entry["Commands and keymaps"] --> Features["review / notes / sessions / threads / files"]
-  Features --> RPC["rpc.lua + transport/connect.lua"]
-  RPC --> Backend["LGTM backend"]
-  Features --> Views["ui/<br/>Display records and action callbacks"]
-  Views --> NC["NuiComponents<br/>Renderer, signals, input, trees"]
-  NC --> NUI["NUI<br/>Split, Tree, Line, Text"]
-  Views --> NUI
-  Features --> Diff["codediff.lua<br/>CodeDiff views and annotation alignment"]
+  Entry["Commands and keymaps"] --> Controllers["review / notes / sessions / threads / files<br/>Editor actions and view lifecycle"]
+  Controllers -->|"Shared state + user intent"| Services["services/<br/>Load, save, synchronize, recover"]
+  Services --> Store["services/state.lua<br/>ReviewState, Conversation, Draft"]
+  Services --> Client["services/client.lua<br/>Identity, cancellation, Connect calls"]
+  Client --> Transport["transport/connect.lua"]
+  Transport --> Backend["LGTM backend"]
+  Controllers -->|"Display records + callbacks"| Views["ui/<br/>Component composition"]
+  Views --> NC["NuiComponents<br/>Floating views and signals"]
+  Views --> NUI["NUI<br/>Splits, trees, text"]
+  Controllers --> Diff["codediff.lua<br/>Diff buffers and card alignment"]
 ```
 
-| Owner | Responsibility |
+| Path | Responsibility |
 | --- | --- |
-| `init.lua`, `keymaps.lua` | Commands, mappings, tab hooks, and theme refresh. |
-| `context.lua`, `review.lua`, `notes.lua` | Active view state, capabilities, review actions, and saved-file scopes. |
-| `threads.lua`, `files.lua` | Comment permissions, source placement, file selection, and reviewed marks. |
-| `sessions.lua` | Candidate loading and conversion to display IDs/labels. |
+| `review.lua`, `notes.lua`, `sessions.lua` | Commands, prompts, composer callbacks, and opening editor views. |
+| `threads.lua`, `files.lua` | Source annotations, selection, key bindings, and pane lifecycle. |
+| `services/reviews.lua` | Start/resume, version-bound conversation reads, refresh, draft synchronization, and completion. |
+| `services/feedback.lua` | Create guarded drafts, save comments, mutate threads, promote notes, and check ownership. |
+| `services/submissions.lua` | Retain submission intent, send, reconcile, and interpret durable outcomes. |
+| `services/diffs.lua`, `services/files.lua` | Load paginated diffs and selected content, persist reviewed marks, and invalidate changed marks. |
+| `services/sessions.lua` | Load review/PR candidates and consume review pagination. |
+| `services/sources.lua` | Read exact source bytes and reconcile source observations. |
+| `services/state.lua` | Shared record shapes, active review/tab state, saved-file state, and submission drafts. |
+| `services/client.lua` | Backend capabilities, identity bootstrap, cancellation, and request routing. |
 | `ui/` | [Search](ui/search.md), [composer](ui/composer.md), [conversation](ui/conversation.md), [directory files](ui/files.md), and [cards](ui/cards.md). |
-| `ui/theme.lua` | Semantic highlight links, configured borders, and dependency diagnostics. |
-| `codediff.lua`, `sources.lua`, `anchors.lua` | Diff lifecycle, saved source evidence, placement, and virtual-line alignment. |
-| `notifications.lua`, `picker.lua` | nvim-notify messages and the user's simple `vim.ui` prompts. |
+| `codediff.lua`, `anchors.lua`, `locations.lua` | Diff lifecycle, source-side placement, and observed filesystem moves. |
 
 ### Data and Control Flow
 
 ```mermaid
 sequenceDiagram
   actor User
-  participant Feature as Feature controller
   participant View as UI component
-  participant RPC as Backend RPC
-  User->>Feature: Command or key
-  Feature->>View: Display records and callbacks
-  User->>View: Select, edit, or save
-  View->>Feature: Stable item ID or body
-  Feature->>RPC: Validated request and retry identity
-  RPC-->>Feature: Result or error
-  Feature-->>View: Updated records or save callback
+  participant Controller as Editor controller
+  participant Service as Grouped service operation
+  participant Store as Shared ReviewState
+  participant Backend
+  User->>View: Select, edit, save, or resolve
+  View->>Controller: Stable ID or draft body
+  Controller->>Service: Operation with shared state
+  Service->>Backend: Guarded request / subsequent reads
+  Backend-->>Service: Domain records or error
+  Service->>Store: Apply accepted version and records
+  Service-->>Controller: Complete result or recoverable error
+  Controller->>View: Updated display records or save acknowledgement
 ```
 
-A controller is a feature module that runs application actions. A view is a mounted UI component. Controllers retain review IDs, permissions, and source evidence. Components retain display selection and temporary text. The backend keeps comments, replies, sessions, and receipts.
+### Source structure
+
+```text
+lua/lgtm/
+├── services/
+│   ├── state.lua          ReviewState, Conversation, Draft + shared stores
+│   ├── reviews.lua        start → apply review → read conversation
+│   ├── feedback.lua       guard → write once → update state → refresh
+│   ├── submissions.lua    retain intent → submit/reconcile → apply outcome
+│   ├── diffs.lua          diff → all file pages → selected file bytes
+│   ├── files.lua          reviewed marks → serialized writes → invalidation
+│   ├── sessions.lua       review/PR candidates
+│   ├── sources.lua        exact source reads and observations
+│   └── client.lua         identity + cancellable transport
+└── ui/
+    ├── search.lua         query input + results list
+    ├── composer.lua       Markdown input + retained draft
+    ├── conversation.lua   thread header + comment rows, in modal/split hosts
+    ├── files.lua          file rows + left split
+    ├── cards.lua          highlighted lines for source annotations
+    └── theme.lua          semantic highlights and borders
+```
+
+UI view files use `State`, `Render`, `Lifecycle`, `Methods`, and `Private` separators. Search composes `render_query` and `render_results`. Conversation composes `render_header` and `render_comment` for both hosts. Module-private helpers sit after public operations.
 
 ### Interfaces and Contracts
 
@@ -112,18 +144,29 @@ Global keyboard API uses the configured prefix, which defaults to `<leader>r`. T
 | s / y | Submit the review / sync GitHub drafts. | Normal |
 | q | Close the review view. | Normal |
 
-
 The user API remains `require("lgtm").setup(opts)` and `:Lgtm` commands. See the [plugin guide](../../../apps/lgtm.nvim/README.md) for configuration and commands.
 
-| Boundary | Contract |
+| Shared shape | Use |
 | --- | --- |
-| UI to controller | Opaque item IDs, file paths, thread/comment IDs, or draft text. |
-| Composer to controller | `submit(body, done)`. A nil error acknowledges success. An error retains text for retry. |
-| Controller to conversation | Display records, allowed actions, mapping overrides, and readiness callback. |
-| Plugin to backend | Identity and capabilities bootstrap, then asynchronous Connect requests through curl. |
-| CodeDiff adapter | Preserve source-side locations and align annotations without changing source content. |
+| `ReviewState` | The same active review/notes object passes through controllers, diff loading, reviewed marks, and feedback operations. |
+| `Review`, `ReviewFile` | Backend review metadata and file records. The diff service fills content on the selected file. |
+| `Conversation`, `Thread`, `Comment` | Backend records with stable IDs, versions, ownership, and source evidence. |
+| `Draft` | A body, anchor, guarded version, and stable request key retained for retries. Created by the feedback service. |
+| `OperationResult` | Submission message and optional warning after applying its durable result. |
 
-UI modules do not call RPCs or decide ownership. The [backend review architecture](../backend/reviews.md) defines persistence, draft synchronization, and submission contracts.
+Shapes are declared beside the shared store in `services/state.lua`. `OperationResult` is declared in `services/submissions.lua`. Services retain backend records rather than creating a second domain model for each view. UI components receive the small display records that their layout needs.
+
+| Service operation | Work grouped behind the boundary |
+| --- | --- |
+| `reviews.start` | Start/resume, recover comparison conflicts, apply review metadata, and return a `ReviewState`. The caller supplies a conflict-choice callback. |
+| `reviews.get_conversation` | Read every page at one server version and coalesce concurrent readers into a fresh `Conversation`. |
+| `diffs.get_files` / `get_file` | Read diff metadata and all file pages, then fill the selected `ReviewFile` on demand. |
+| `feedback.save` | Ensure a writable review, keep the write identity, save once, and refresh accepted state. |
+| `feedback.mutate` | Find the guarded object version, suppress duplicate writes, apply deletion/resolution, and refresh the conversation. |
+| `submissions.submit` / `reconcile` / `recover` | Retain the final draft and request identity, reconcile uncertainty, and apply the durable outcome. |
+| `files.save_reviewed` | Serialize writes per path, keep optimistic marks, and reconcile an overlapping read. |
+
+See the [backend review architecture](../backend/reviews.md) for persistence and forge contracts.
 
 ## Implementation
 
@@ -148,13 +191,13 @@ Other managers and disabled package metadata need explicit dependencies and runt
 
 ```mermaid
 flowchart LR
-  Backend["Backend<br/>Sessions, comments, receipts"] --> Controller["Feature controllers<br/>Active review and source locations"]
-  Controller -->|"Display records"| Views["UI components<br/>Selection and mounted windows"]
-  Controller -->|"draft_id + initial body"| Drafts["Composer draft cache<br/>Cancelled or failed text"]
-  Drafts -->|"Reopen the same draft"| Views
-  Views -->|"Stable IDs and user actions"| Controller
-  Controller -->|"Explicit mutations"| Backend
-  Controller -->|"Card rows and source-side mapping"| Adapter["Extmark adapter<br/>CodeDiff alignment"]
+  Backend["Backend<br/>Durable reviews and feedback"] --> Service["Grouped service operations"]
+  Service --> Store["services/state.lua<br/>Ordinary Lua tables"]
+  Store --> Controller["Editor controllers"]
+  Controller --> View["UI component<br/>Selection + mounted windows"]
+  View --> Signal["NuiComponents signals<br/>Query, draft text, display rows"]
+  View -->|"User intent"| Controller
+  Controller -->|"Same shared state"| Service
 ```
 
 ## References

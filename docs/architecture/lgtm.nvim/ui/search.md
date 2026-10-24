@@ -100,7 +100,7 @@ require("lgtm.ui.search").open({
 
 ```mermaid
 flowchart LR
-  Controller["sessions.lua<br/>Candidates and opaque IDs"] -->|"items: id + label"| Query["Query text"]
+  Controller["sessions.lua<br/>Candidates from services/sessions.lua"] -->|"items: id + label"| Query["Query text"]
   Query -->|"Filter labels"| Matches["Matching items<br/>Original IDs retained"]
   Matches --> Highlight["Focused result"]
   Highlight -->|"Enter: selected ID"| Controller

@@ -1,5 +1,9 @@
+-- State -----------------------------------------------------------------------
+
 local M = {}
 -- vim.ui.select/input are replaceable by the user's preferred fuzzy picker.
+-- Public ----------------------------------------------------------------------
+
 function M.select(title, entries, format, callback)
   if #entries == 0 then
     require("lgtm.notifications").show(title .. ": no results")

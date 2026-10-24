@@ -59,7 +59,7 @@ for (const profile of profiles) {
 
         // Assert
         const note = await e.value(
-          'require("lgtm.notes").states[vim.api.nvim_get_current_buf()].conversation',
+          'require("lgtm.services.state").notes[vim.api.nvim_get_current_buf()].conversation',
         )
         expect(note.comments).toHaveLength(1)
         expect(note.threads[0].anchor).toMatchObject({ start: '1', end: '2' })
@@ -117,7 +117,7 @@ for (const profile of profiles) {
 
       // Assert
       const notes = await e.value(
-        'require("lgtm.notes").states[vim.api.nvim_get_current_buf()].conversation',
+        'require("lgtm.services.state").notes[vim.api.nvim_get_current_buf()].conversation',
       )
       expect(notes.comments.map((c: Json) => c.body)).toEqual([
         'Original standalone note',
@@ -136,7 +136,7 @@ for (const profile of profiles) {
 
       // Assert
       await e.wait(
-        'require("lgtm.notes").states[vim.api.nvim_get_current_buf()].conversation.threads[1].state == "resolved"',
+        'require("lgtm.services.state").notes[vim.api.nvim_get_current_buf()].conversation.threads[1].state == "resolved"',
         'note resolved',
       )
       const cards = await waitFor(
@@ -170,7 +170,7 @@ for (const profile of profiles) {
 
       // Assert
       await e.wait(
-        'require("lgtm.notes").states[vim.api.nvim_get_current_buf()].conversation.threads[1].state ~= "resolved"',
+        'require("lgtm.services.state").notes[vim.api.nvim_get_current_buf()].conversation.threads[1].state ~= "resolved"',
         'note reopened',
       )
     })
@@ -185,11 +185,11 @@ for (const profile of profiles) {
 
       // Assert
       await e.wait(
-        '#require("lgtm.notes").states[vim.api.nvim_get_current_buf()].conversation.comments == 1',
+        '#require("lgtm.services.state").notes[vim.api.nvim_get_current_buf()].conversation.comments == 1',
         'selected reply deleted',
       )
       const notes = await e.value(
-        'require("lgtm.notes").states[vim.api.nvim_get_current_buf()].conversation',
+        'require("lgtm.services.state").notes[vim.api.nvim_get_current_buf()].conversation',
       )
       expect(notes.comments[0].body).toBe('Edited standalone note')
     })
@@ -238,14 +238,14 @@ for (const profile of profiles) {
       await e.command('Lgtm layout')
 
       // Assert
-      await e.wait('require("lgtm.context").current.layout == "inline"', 'inline layout')
+      await e.wait('require("lgtm.services.state").current.layout == "inline"', 'inline layout')
 
       // Act
       await e.command('Lgtm layout')
 
       // Assert
       await e.wait(
-        'require("lgtm.context").current.layout == "side-by-side"',
+        'require("lgtm.services.state").current.layout == "side-by-side"',
         'side by side layout',
       )
 
@@ -318,7 +318,7 @@ for (const profile of profiles) {
 
       // Assert
       await e.wait(
-        'require("lgtm.notes").states[vim.api.nvim_get_current_buf()] and require("lgtm.notes").states[vim.api.nvim_get_current_buf()].conversation ~= nil',
+        'require("lgtm.services.state").notes[vim.api.nvim_get_current_buf()] and require("lgtm.services.state").notes[vim.api.nvim_get_current_buf()].conversation ~= nil',
         'persisted notes loaded',
       )
       expect(
@@ -351,18 +351,18 @@ for (const profile of profiles) {
       await e.command('Lgtm note')
       await e.compose('Note before moving')
       const noteId = await e.value(
-        'require("lgtm.notes").states[vim.api.nvim_get_current_buf()].conversation.comments[1].id',
+        'require("lgtm.services.state").notes[vim.api.nvim_get_current_buf()].conversation.comments[1].id',
       )
       await rename(notePath, destination)
       await e.lua('vim.cmd.file(vim.fn.fnameescape(...))', destination)
 
       // Assert
       await e.wait(
-        'not require("lgtm.notes").states[vim.api.nvim_get_current_buf()].moving',
+        'not require("lgtm.services.state").notes[vim.api.nvim_get_current_buf()].moving',
         'note rename settled',
       )
       const movedState = await e.value(
-        'require("lgtm.notes").states[vim.api.nvim_get_current_buf()].conversation',
+        'require("lgtm.services.state").notes[vim.api.nvim_get_current_buf()].conversation',
       )
       expect(movedState.comments[0].id).toBe(noteId)
       expect(movedState.threads[0]).toMatchObject({
@@ -376,7 +376,7 @@ for (const profile of profiles) {
 
       // Assert
       const movedNotes = await e.value(
-        'require("lgtm.notes").states[vim.api.nvim_get_current_buf()].conversation',
+        'require("lgtm.services.state").notes[vim.api.nvim_get_current_buf()].conversation',
       )
       expect(movedNotes.comments).toHaveLength(2)
       expect(movedNotes.threads.some((t: Json) => t.sourcePath === destination)).toBe(true)
@@ -395,7 +395,7 @@ for (const profile of profiles) {
       )
       expect(
         await e.value(
-          'require("lgtm.notes").states[vim.api.nvim_get_current_buf()].scope.notes.path',
+          'require("lgtm.services.state").notes[vim.api.nvim_get_current_buf()].scope.notes.path',
         ),
       ).toBe(destination)
       expect(

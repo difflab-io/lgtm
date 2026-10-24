@@ -133,8 +133,8 @@ flowchart TD
   Models["Threads, comments, ownership<br/>Source locations and anchor evidence"] --> Controller["threads.lua"]
   Controller -->|"Display records + allowed actions"| View["Modal or persistent pane<br/>Selected comment ID"]
   View -->|"action + thread ID + comment ID"| Controller
-  Controller -->|"Recheck permission; mutate"| Backend["Backend RPC"]
-  Backend -->|"Refreshed records"| Controller
+  Controller -->|"Selected IDs + action"| Service["services/feedback.lua<br/>Permissions, guarded write, refresh"]
+  Service -->|"Updated shared state"| Controller
   Controller -->|"Refresh or split resolution<br/>update(records); retain selected ID"| View
   View -->|"Enter: thread ID"| Location["Controller resolves source location"]
   Location -->|"Exact line or stale card"| Source["CodeDiff source buffer"]

@@ -1,7 +1,11 @@
+-- State -----------------------------------------------------------------------
+
 local M = {}
+-- Public ----------------------------------------------------------------------
+
 function M.run(scope)
   local function export(state)
-    require("lgtm.rpc").call("Export", { scope = state.scope }, function(err, result)
+    require("lgtm.services.reviews").get_export(state, function(err, markdown)
       if err then
         require("lgtm.notifications").error(err)
         return
@@ -15,7 +19,7 @@ function M.run(scope)
             require("lgtm.picker").input("Export file: ", "review.md", function(path)
               local function write()
                 local ok, error =
-                  pcall(vim.fn.writefile, vim.split(result.markdown, "\n", { plain = true }), path)
+                  pcall(vim.fn.writefile, vim.split(markdown, "\n", { plain = true }), path)
                 if ok then
                   require("lgtm.notifications").show("Export saved: " .. path)
                 else
@@ -37,7 +41,7 @@ function M.run(scope)
               end
             end)
           elseif action == "Copy to clipboard" then
-            local ok, error = pcall(vim.fn.setreg, "+", result.markdown)
+            local ok, error = pcall(vim.fn.setreg, "+", markdown)
             if ok then
               require("lgtm.notifications").show("Export copied")
             else
@@ -50,7 +54,7 @@ function M.run(scope)
               0,
               -1,
               false,
-              vim.split(result.markdown, "\n", { plain = true })
+              vim.split(markdown, "\n", { plain = true })
             )
             vim.bo[buf].filetype = "lgtm"
             vim.bo[buf].syntax = "markdown"
@@ -72,7 +76,7 @@ function M.run(scope)
       end
     end)
   else
-    local state = require("lgtm.context").current
+    local state = require("lgtm.services.state").current
     if state then
       export(state)
     else

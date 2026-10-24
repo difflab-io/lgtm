@@ -109,7 +109,8 @@ export class Editor {
     await this.lua('vim.cmd.edit(vim.fn.fnameescape(...))', path)
   }
   async state(): Promise<Json | null> {
-    return this.lua(`local s = require("lgtm.context").current; if not s then return vim.NIL end
+    return this
+      .lua(`local s = require("lgtm.services.state").current; if not s then return vim.NIL end
       return {review=s.review, scope=s.scope, target=s.target, comparison=s.comparison, conversation=s.conversation,
         version=s.version, file=s.file, files=s.files, panes=s.panes, root=s.root, git_root=s.git_root,
         base=s.base, head=s.head, tab=s.tab, kind=s.kind, layout=s.layout, initializing=s.initializing,
@@ -119,7 +120,7 @@ export class Editor {
 
   async ready() {
     await this.wait(
-      'require("lgtm.context").current and require("lgtm.context").current.render_ready',
+      'require("lgtm.services.state").current and require("lgtm.services.state").current.render_ready',
       'review render',
     )
     return (await this.state())!
@@ -127,7 +128,7 @@ export class Editor {
 
   async loaded() {
     await this.wait(
-      'require("lgtm.context").current and require("lgtm.context").current.render_ready and not require("lgtm.context").current.initializing and require("lgtm.context").current.conversation ~= nil',
+      'require("lgtm.services.state").current and require("lgtm.services.state").current.render_ready and not require("lgtm.services.state").current.initializing and require("lgtm.services.state").current.conversation ~= nil',
       'review and conversation ready',
     )
     return (await this.state())!
@@ -135,7 +136,7 @@ export class Editor {
 
   async pane(side = 'new', line = 1) {
     await this.lua(
-      `local side, line = ...; local p = require("lgtm.context").current.panes[side]
+      `local side, line = ...; local p = require("lgtm.services.state").current.panes[side]
       vim.api.nvim_set_current_win(p.win); vim.api.nvim_win_set_cursor(p.win, {line,0})`,
       side,
       line,
@@ -143,7 +144,7 @@ export class Editor {
   }
 
   async show(path: string) {
-    await this.lua('require("lgtm.context").current.show_file(...)', path)
+    await this.lua('require("lgtm.services.state").current.show_file(...)', path)
     await waitFor(
       `selected ${path}`,
       () => this.state(),
@@ -182,7 +183,7 @@ export class Editor {
 
   async marks(side = 'new'): Promise<Json[]> {
     return this.lua(
-      `local side = ...; local s=require("lgtm.context").current
+      `local side = ...; local s=require("lgtm.services.state").current
       return vim.api.nvim_buf_get_extmarks(s.panes[side].buf,require("lgtm.threads").namespace,0,-1,{details=true})`,
       side,
     )

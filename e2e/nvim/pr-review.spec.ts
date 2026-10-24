@@ -77,7 +77,7 @@ for (const profile of profiles) {
       expect(await editor.text(state.panes.new.buf)).toContain('changed')
       expect(
         await editor.value(
-          'require("codediff.ui.lifecycle").get_panel_view(require("lgtm.context").current.tab) ~= nil',
+          'require("codediff.ui.lifecycle").get_panel_view(require("lgtm.services.state").current.tab) ~= nil',
         ),
       ).toBe(true)
     })
@@ -492,7 +492,7 @@ for (const profile of profiles) {
       // Act
       await editor.command('Lgtm refresh')
       await editor.wait(
-        `require("lgtm.context").current.head == "${github.head}" and require("lgtm.context").current.render_ready and not require("lgtm.context").current.initializing`,
+        `require("lgtm.services.state").current.head == "${github.head}" and require("lgtm.services.state").current.render_ready and not require("lgtm.services.state").current.initializing`,
         'new PR commit ready',
       )
       const refreshed = (await editor.state())!
@@ -528,7 +528,7 @@ for (const profile of profiles) {
       // Act
       await editor.keys('<CR>')
       await editor.wait(
-        'require("lgtm.context").current and require("lgtm.context").current.load_error ~= nil',
+        'require("lgtm.services.state").current and require("lgtm.services.state").current.load_error ~= nil',
         'failed initial PR load reported',
       )
       runtime.env.GH_TOKEN = token
@@ -568,7 +568,7 @@ for (const profile of profiles) {
       // Act
       await editor.command('Lgtm refresh')
       await editor.wait(
-        `require("lgtm.context").current.head == "${github.head}" and not require("lgtm.context").current.initializing`,
+        `require("lgtm.services.state").current.head == "${github.head}" and not require("lgtm.services.state").current.initializing`,
         'outdated PR refreshed',
       )
       const state = await editor.loaded()
@@ -858,7 +858,7 @@ for (const profile of profiles) {
       await github.fetch(runtime, github.head)
       await editor.command('Lgtm refresh')
       await editor.wait(
-        `require("lgtm.context").current.head == "${github.head}" and require("lgtm.context").current.render_ready`,
+        `require("lgtm.services.state").current.head == "${github.head}" and require("lgtm.services.state").current.render_ready`,
         'updated review comparison',
       )
       await waitFor(
@@ -897,7 +897,7 @@ for (const profile of profiles) {
       await editor.keys('c')
       await editor.compose('I have addressed this concern')
       await editor.wait(
-        'vim.iter(require("lgtm.context").current.conversation.comments):any(function(c) return c.body == "I have addressed this concern" and c.visibility == "draft" end)',
+        'vim.iter(require("lgtm.services.state").current.conversation.comments):any(function(c) return c.body == "I have addressed this concern" and c.visibility == "draft" end)',
         'draft response displayed',
       )
       const draft = (await editor.state())!

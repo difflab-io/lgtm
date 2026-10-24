@@ -1,9 +1,13 @@
 -- Adapter to pinned CodeDiff views. Git reviews use native revision buffers and explorer.
+-- State -----------------------------------------------------------------------
+
 local M = {}
 local api = vim.api
 
 -- Translate an annotation boundary through CodeDiff's actual edit ranges. A comment
 -- inside an insertion/deletion pads the other pane at that edit's adjacent real line.
+-- Public ----------------------------------------------------------------------
+
 function M.other_line(line, source, changes, target_count)
   if line == 0 then
     return 0
@@ -29,6 +33,7 @@ function M.other_line(line, source, changes, target_count)
 end
 
 -- Mirror CodeDiff's metadata after native refreshes. Reuse loaded identities until a selected-source read replaces them.
+---@param state lgtm.ReviewState
 function M.sync_files(state, status)
   local previous = {}
   for _, file in ipairs(state.files or {}) do
@@ -53,6 +58,7 @@ function M.sync_files(state, status)
   state.files = files
 end
 
+---@param state lgtm.ReviewState
 function M.open(state, file, native_config)
   state.render_generation = (state.render_generation or 0) + 1
   local generation = state.render_generation
@@ -157,7 +163,7 @@ function M.open(state, file, native_config)
       return
     end
     state.tab = api.nvim_win_get_tabpage(visible_win)
-    require("lgtm.context").tabs[state.tab] = state
+    require("lgtm.services.state").tabs[state.tab] = state
     state.bind_panes = ready
     if state.native_explorer and session.panel.view and not state.panel_observer then
       local panel = session.panel.view
@@ -265,14 +271,14 @@ function M.open(state, file, native_config)
       end
     end
     state.observe_sources = function(done)
-      require("lgtm.sources").observe(state, file, state.views, done)
+      require("lgtm.services.sources").observe(state, file, state.views, done)
     end
     local remaining = 2
     for _, side in ipairs({ "old", "new" }) do
       local pane = state.panes[side]
-      require("lgtm.sources").read(state, file, side, function(err, selected)
+      require("lgtm.services.sources").read(state, file, side, function(err, selected)
         if
-          require("lgtm.context").current ~= state
+          require("lgtm.services.state").current ~= state
           or state.tab ~= api.nvim_get_current_tabpage()
           or state.source_generation ~= source_generation
         then
@@ -288,7 +294,8 @@ function M.open(state, file, native_config)
           unavailable = err and err.message,
         })
         if view_source.source and not err and pane.buf and api.nvim_buf_is_valid(pane.buf) then
-          local _, mismatch = require("lgtm.sources").capture(view_source, pane.buf, "file")
+          local _, mismatch =
+            require("lgtm.services.sources").capture(view_source, pane.buf, "file")
           if mismatch then
             view_source.unavailable = mismatch.message
           end
@@ -304,7 +311,7 @@ function M.open(state, file, native_config)
           file.contentHash = vim.json.encode({ old = old or false, new = new or false })
           state.render()
           state.render_ready = true
-          require("lgtm.files").validate_reviewed(state)
+          require("lgtm.services.files").validate_reviewed(state)
           state.observe_sources(function(observe_error)
             if observe_error then
               require("lgtm.notifications").error(observe_error)
@@ -354,7 +361,7 @@ function M.open(state, file, native_config)
       pattern = "CodeDiffFileSelect",
       callback = function(event)
         if
-          require("lgtm.context").current ~= state
+          require("lgtm.services.state").current ~= state
           or (state.tab and event.data.tabpage ~= state.tab)
         then
           return
@@ -392,6 +399,7 @@ function M.open(state, file, native_config)
   end
 end
 
+---@param state lgtm.ReviewState
 function M.open_native(state)
   local comparison = vim.deepcopy(state.comparison)
   require("lgtm.git_metadata").install()
@@ -404,7 +412,7 @@ function M.open_native(state)
     vim.schedule(function()
       if
         state.closed
-        or require("lgtm.context").current ~= state
+        or require("lgtm.services.state").current ~= state
         or not vim.deep_equal(comparison, state.comparison)
       then
         return
@@ -447,6 +455,7 @@ function M.open_native(state)
   end
 end
 
+---@param state lgtm.ReviewState
 function M.toggle(state)
   if not state or not state.tab then
     return
@@ -460,6 +469,7 @@ function M.toggle(state)
   end
 end
 
+---@param state lgtm.ReviewState
 function M.suspend(state)
   state.source_generation = (state.source_generation or 0) + 1
   state.render_ready = false
@@ -476,6 +486,7 @@ function M.suspend(state)
   end
 end
 
+---@param state lgtm.ReviewState
 function M.release(state)
   local observer = state.panel_observer
   if observer and observer.panel.on_data == observer.changed then
@@ -486,7 +497,7 @@ function M.release(state)
   state.closed = true
   state.render_generation = (state.render_generation or 0) + 1
   if state.tab then
-    require("lgtm.context").tabs[state.tab] = nil
+    require("lgtm.services.state").tabs[state.tab] = nil
   end
   if state.explorer_group then
     pcall(api.nvim_del_augroup_by_id, state.explorer_group)
@@ -494,6 +505,7 @@ function M.release(state)
   end
 end
 
+---@param state lgtm.ReviewState
 function M.close(state)
   M.release(state)
   if state.tab and api.nvim_tabpage_is_valid(state.tab) then

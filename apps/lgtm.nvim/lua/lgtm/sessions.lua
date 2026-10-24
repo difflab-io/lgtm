@@ -1,61 +1,39 @@
+-- State -----------------------------------------------------------------------
+
 local M = {}
-local rpc, picker = require("lgtm.rpc"), require("lgtm.picker")
-local function search(title, entries, format, select)
-  local items = {}
-  for index, entry in ipairs(entries) do
-    items[index] = { id = tostring(index), label = format(entry) }
-  end
-  require("lgtm.ui.search").open({
-    title = title,
-    items = items,
-    on_select = function(id)
-      select(entries[tonumber(id)])
-    end,
-  })
-end
+local Private = {}
+local picker = require("lgtm.picker")
+
+-- Public ----------------------------------------------------------------------
 
 function M.select(completed)
-  local reviews = {}
-  local function page(token)
-    rpc.latest(
-      "review-picker",
-      "ListReviews",
-      { state = completed and "completed" or "active", pageToken = token, pageSize = 100 },
-      function(err, result)
-        if err then
-          require("lgtm.notifications").error(err)
-          return
-        end
-        vim.list_extend(reviews, result.reviews or {})
-        if result.nextPageToken and result.nextPageToken ~= "" then
-          page(result.nextPageToken)
-          return
-        end
-        search("Local / GitHub reviews", reviews, function(review)
-          local target = review.target
-          local label = target.pullRequest
-              and ("PR #" .. target.pullRequest.number .. " · " .. target.pullRequest.repositoryUrl:gsub(
-                "^https://github.com/",
-                ""
-              ))
-            or target.localGit and ((target.localGit.branch or ""):gsub("^refs/heads/", "") .. " · " .. vim.fn.fnamemodify(
-              target.localGit.path,
-              ":~"
-            ))
-            or vim.fn.fnamemodify(target.directory.path, ":~")
-          return string.format(
-            "%s [%s] %s",
-            label,
-            review.state,
-            (review.createdAt or ""):gsub("T", " "):sub(1, 16)
-          )
-        end, function(review)
-          require("lgtm.review").open(require("lgtm.context").apply({}, review))
-        end)
-      end
-    )
-  end
-  page(nil)
+  require("lgtm.services.sessions").get_reviews(completed, function(err, reviews)
+    if err then
+      require("lgtm.notifications").error(err)
+      return
+    end
+    Private.search("Local / GitHub reviews", reviews, function(review)
+      local target = review.target
+      local label = target.pullRequest
+          and ("PR #" .. target.pullRequest.number .. " · " .. target.pullRequest.repositoryUrl:gsub(
+            "^https://github.com/",
+            ""
+          ))
+        or target.localGit and ((target.localGit.branch or ""):gsub("^refs/heads/", "") .. " · " .. vim.fn.fnamemodify(
+          target.localGit.path,
+          ":~"
+        ))
+        or vim.fn.fnamemodify(target.directory.path, ":~")
+      return string.format(
+        "%s [%s] %s",
+        label,
+        review.state,
+        (review.createdAt or ""):gsub("T", " "):sub(1, 16)
+      )
+    end, function(review)
+      require("lgtm.review").open(require("lgtm.services.state").apply({}, review))
+    end)
+  end)
 end
 
 -- Git remotes may use HTTPS, SCP-style SSH, or ssh:// addresses.
@@ -107,7 +85,7 @@ function M.prs(repository_url)
         local remotes = result.code == 0
             and vim.split(vim.trim(result.stdout), "\n", { trimempty = true })
           or {}
-        local function select(name)
+        local function select_remote(name)
           remote(name, function(found)
             if found then
               open(found)
@@ -117,9 +95,9 @@ function M.prs(repository_url)
           end)
         end
         if #remotes == 1 then
-          select(remotes[1])
+          select_remote(remotes[1])
         elseif #remotes > 1 then
-          picker.select("Select Git remote", remotes, tostring, select)
+          picker.select("Select Git remote", remotes, tostring, select_remote)
         else
           fallback()
         end
@@ -130,46 +108,42 @@ end
 
 function M.pr_page(url, query, page)
   local pr_notice = require("lgtm.notifications").show("Loading pull requests…")
-  rpc.latest(
-    "pr-picker",
-    "ListPullRequests",
-    { repositoryUrl = url, query = query, page = page },
-    function(err, result)
-      if err then
-        require("lgtm.notifications").error(err, pr_notice)
+  require("lgtm.services.sessions").get_pull_requests(url, query, page, function(err, entries)
+    if err then
+      require("lgtm.notifications").error(err, pr_notice)
+      return
+    end
+    pr_notice = require("lgtm.notifications").show("Pull requests ready", nil, pr_notice)
+    Private.search("Pull requests", entries, function(pr)
+      return pr.nextPage and "Next page…" or ("#" .. pr.number .. " " .. pr.title)
+    end, function(pr)
+      if pr.nextPage then
+        M.pr_page(url, query, pr.nextPage)
         return
       end
-      pr_notice = require("lgtm.notifications").show("Pull requests ready", nil, pr_notice)
-      local entries = result.pullRequests or {}
-      if (result.nextPage or 0) > 0 then
-        entries[#entries + 1] = { nextPage = result.nextPage }
-      end
-      search("Pull requests", entries, function(pr)
-        return pr.nextPage and "Next page…" or ("#" .. pr.number .. " " .. pr.title)
-      end, function(pr)
-        if pr.nextPage then
-          M.pr_page(url, query, pr.nextPage)
-          return
-        end
-        local contexts = require("lgtm.context")
-        local state = {
-          target = { pullRequest = { repositoryUrl = url, number = pr.number } },
-          comparison = { pullRequest = { baseCommit = pr.base, headCommit = pr.head } },
-          base = pr.base,
-          head = pr.head,
-          mode = "pr",
-          kind = "pr",
-          initializing = true,
-        }
-        local notice = require("lgtm.notifications")
-        local pending = notice.show("Loading PR comments…", nil, pr_notice)
-        -- The native tree opens from the picker metadata while the backend loads comments.
-        require("lgtm.review").open(state)
-        local checkout
-        local request_key = contexts.request_key()
-        local function start()
-          state.initializing, state.load_error = true, nil
-          contexts.start(state.target, state.comparison, nil, function(error, loaded)
+      local contexts = require("lgtm.services.state")
+      local state = {
+        target = { pullRequest = { repositoryUrl = url, number = pr.number } },
+        comparison = { pullRequest = { baseCommit = pr.base, headCommit = pr.head } },
+        base = pr.base,
+        head = pr.head,
+        mode = "pr",
+        kind = "pr",
+        initializing = true,
+      }
+      local notice = require("lgtm.notifications")
+      local pending = notice.show("Loading PR comments…", nil, pr_notice)
+      -- The native tree opens from the picker metadata while the backend loads comments.
+      require("lgtm.review").open(state)
+      local checkout
+      local request_key = contexts.request_key()
+      local function start()
+        state.initializing, state.load_error = true, nil
+        require("lgtm.services.reviews").start(
+          state.target,
+          state.comparison,
+          nil,
+          function(error, loaded)
             if state.closed then
               return
             end
@@ -204,30 +178,47 @@ function M.pr_page(url, query, page)
             else
               state.refresh(ready)
             end
-          end, { localGitPath = checkout, requestKey = request_key })
-        end
-        state.retry_load = function()
-          if state.initializing then
-            return
-          end
-          pending = notice.show("Loading PR comments…", nil, pending)
-          start()
-        end
-        vim.system(
-          { "git", "-C", vim.fn.getcwd(), "rev-parse", "--show-toplevel" },
-          { text = true },
-          function(result)
-            vim.schedule(function()
-              if state.closed then
-                return
-              end
-              checkout = result.code == 0 and vim.trim(result.stdout) or nil
-              start()
-            end)
-          end
+          end,
+          { localGitPath = checkout, requestKey = request_key }
         )
-      end)
-    end
-  )
+      end
+      state.retry_load = function()
+        if state.initializing then
+          return
+        end
+        pending = notice.show("Loading PR comments…", nil, pending)
+        start()
+      end
+      vim.system(
+        { "git", "-C", vim.fn.getcwd(), "rev-parse", "--show-toplevel" },
+        { text = true },
+        function(result)
+          vim.schedule(function()
+            if state.closed then
+              return
+            end
+            checkout = result.code == 0 and vim.trim(result.stdout) or nil
+            start()
+          end)
+        end
+      )
+    end)
+  end)
 end
+-- Private ---------------------------------------------------------------------
+
+function Private.search(title, entries, format, on_select)
+  local items = {}
+  for index, entry in ipairs(entries) do
+    items[index] = { id = tostring(index), label = format(entry) }
+  end
+  require("lgtm.ui.search").open({
+    title = title,
+    items = items,
+    on_select = function(id)
+      on_select(entries[tonumber(id)])
+    end,
+  })
+end
+
 return M

@@ -1,4 +1,8 @@
+-- State -----------------------------------------------------------------------
+
 local M = {}
+-- Public ----------------------------------------------------------------------
+
 function M.setup(opts)
   require("lgtm.config").setup(opts)
   require("lgtm.ui.theme").highlights()
@@ -12,7 +16,7 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd("TabEnter", {
     group = group,
     callback = function()
-      local contexts = require("lgtm.context")
+      local contexts = require("lgtm.services.state")
       local state = contexts.tabs[vim.api.nvim_get_current_tabpage()]
       if state then
         contexts.set(state)
@@ -42,7 +46,7 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd("TabLeave", {
     group = group,
     callback = function()
-      local state = require("lgtm.context").tabs[vim.api.nvim_get_current_tabpage()]
+      local state = require("lgtm.services.state").tabs[vim.api.nvim_get_current_tabpage()]
       if state then
         require("lgtm.codediff").suspend(state)
       end
@@ -52,7 +56,7 @@ function M.setup(opts)
     group = group,
     pattern = "CodeDiffClose",
     callback = function(event)
-      local state = require("lgtm.context").tabs[event.data.tabpage]
+      local state = require("lgtm.services.state").tabs[event.data.tabpage]
       if state then
         require("lgtm.codediff").release(state)
       end
@@ -61,10 +65,10 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd("TabClosed", {
     group = group,
     callback = function()
-      for tab, state in pairs(require("lgtm.context").tabs) do
+      for tab, state in pairs(require("lgtm.services.state").tabs) do
         if not vim.api.nvim_tabpage_is_valid(tab) then
           require("lgtm.codediff").release(state)
-          local contexts = require("lgtm.context")
+          local contexts = require("lgtm.services.state")
           if contexts.current == state then
             contexts.set(contexts.tabs[vim.api.nvim_get_current_tabpage()])
           end
@@ -107,7 +111,7 @@ function M.setup(opts)
     group = group,
     callback = function(event)
       local notes = require("lgtm.notes")
-      local state = notes.states[event.buf]
+      local state = require("lgtm.services.state").notes[event.buf]
       if not state or notes.owns_review_buffer(event.buf) then
         return
       end
@@ -125,11 +129,11 @@ function M.setup(opts)
     callback = function()
       require("lgtm.ui.theme").highlights()
       vim.schedule(function()
-        local state = require("lgtm.context").current
+        local state = require("lgtm.services.state").current
         if state and state.render_ready and state.render then
           state.render()
         end
-        for buf, notes in pairs(require("lgtm.notes").states) do
+        for buf, notes in pairs(require("lgtm.services.state").notes) do
           if
             vim.api.nvim_buf_is_valid(buf)
             and #vim.fn.win_findbuf(buf) > 0
@@ -146,7 +150,7 @@ function M.setup(opts)
     group = group,
     callback = function()
       require("lgtm.transport.connect").cancel_all()
-      local state = require("lgtm.context").current
+      local state = require("lgtm.services.state").current
       if state and state.temp_dir then
         vim.fn.delete(state.temp_dir, "rf")
       end
@@ -187,7 +191,7 @@ function M.command(args, range)
     close = review.close,
     complete = review.complete,
     layout = function()
-      require("lgtm.codediff").toggle(require("lgtm.context").current)
+      require("lgtm.codediff").toggle(require("lgtm.services.state").current)
     end,
     submit = review.submit,
     reconcile = review.reconcile,

@@ -1,45 +1,20 @@
+-- State -----------------------------------------------------------------------
+
 local M = {
   namespace = vim.api.nvim_create_namespace("lgtm.comments"),
   padding_namespace = vim.api.nvim_create_namespace("lgtm.comment-padding"),
   expanded = {},
   visible = true,
 }
+local Private = {}
 local api = vim.api
-local function comments(state, thread)
-  local result = {}
-  for _, c in ipairs(state.conversation.comments or {}) do
-    if c.threadId == thread.id then
-      result[#result + 1] = c
-    end
-  end
-  table.sort(result, function(a, b)
-    return tonumber(a.position or 0) < tonumber(b.position or 0)
-  end)
-  return result
-end
 
 -- Membership in a comparison is independent of whether a discussion is resolved or stale.
-local function outside_diff(state, thread)
-  local anchor = thread.anchor or {}
-  if state.note or not state.files or state.initializing or anchor.kind == "general" then
-    return false
-  end
-  local path = thread.currentPath and thread.currentPath ~= "" and thread.currentPath or anchor.path
-  if state.kind == "directory" and path and state.root then
-    local prefix = state.root .. "/"
-    if path:sub(1, #prefix) == prefix then
-      path = path:sub(#prefix + 1)
-    end
-  end
-  for _, file in ipairs(state.files) do
-    if file.path == path or file.confirmedRename and file.previousPath == path then
-      return false
-    end
-  end
-  return path ~= nil and path ~= ""
-end
 
 -- Resolve against the selected source every time; raw stored ranges are never cursor targets.
+-- Public ----------------------------------------------------------------------
+
+---@param state lgtm.ReviewState
 function M.placement(state, thread, path, side)
   local view = state.views and state.views[side]
   if not view or (not state.note and view.logical_path ~= path) then
@@ -89,11 +64,12 @@ function M.placement(state, thread, path, side)
   return placement
 end
 
+---@param state lgtm.ReviewState
 function M.at(state, path, side, line)
   local result = {}
   for _, thread in ipairs((state.conversation or {}).threads or {}) do
     local placement = M.placement(state, thread, path, side)
-    if placement and #comments(state, thread) > 0 and placement.status ~= "orphaned" then
+    if placement and #Private.comments(state, thread) > 0 and placement.status ~= "orphaned" then
       local location = placement.location
       if
         (not location or location.kind == "file") and line == 1
@@ -109,101 +85,7 @@ function M.at(state, path, side, line)
   return result
 end
 
-local function can_resolve(state, thread)
-  if state.kind ~= "pr" then
-    return true
-  end
-  for _, comment in ipairs(comments(state, thread)) do
-    if comment.visibility ~= "draft" then
-      return true
-    end
-  end
-  return false
-end
-
-local function comment_status(comment)
-  if comment.visibility ~= "draft" then
-    return comment.visibility or ""
-  end
-  if comment.postingStatus == "uncertain" or comment.postingStatus == "sending" then
-    return "Sync uncertain"
-  end
-  return comment.forgeCommentId and comment.forgeCommentId ~= "" and "GitHub draft" or "Local draft"
-end
-
-local function blocks(state, buf, path, side, width)
-  local groups = {}
-  for _, thread in ipairs((state.conversation or {}).threads or {}) do
-    local placement = M.placement(state, thread, path, side)
-    local cs = comments(state, thread)
-    if placement and #cs > 0 and placement.status ~= "orphaned" then
-      local line = placement.location
-          and placement.location.kind == "line"
-          and placement.location.start
-        or 0
-      if line > api.nvim_buf_line_count(buf) then
-        error("Anchor resolver returned an out-of-range line")
-      end
-      groups[line] = groups[line] or { line = line, rows = {} }
-      local status
-      for _, c in ipairs(cs) do
-        if c.visibility == "draft" then
-          local next_status = comment_status(c)
-          if
-            not status
-            or next_status == "Sync uncertain"
-            or (status ~= "Sync uncertain" and next_status == "Local draft")
-          then
-            status = next_status
-          end
-        end
-      end
-      if not status and state.kind == "pr" then
-        status = "Published"
-      end
-      vim.list_extend(
-        groups[line].rows,
-        require("lgtm.ui.cards").render({
-          resolved = thread.state == "resolved",
-          file = thread.anchor.kind == "file",
-          status = status,
-          location_status = placement and not placement.location and placement.status or nil,
-          comments = vim.tbl_map(function(comment)
-            return {
-              body = comment.body,
-              author = comment.author and comment.author.name or "Unknown",
-              is_reply = tonumber(comment.position or 0) > 0,
-            }
-          end, cs),
-        }, width, M.expanded[thread.id])
-      )
-    end
-  end
-  local result = vim.tbl_values(groups)
-  table.sort(result, function(a, b)
-    return a.line < b.line
-  end)
-  return result
-end
-
-local function put(buf, line, rows, padding)
-  if #rows == 0 then
-    return
-  end
-  api.nvim_buf_set_extmark(
-    buf,
-    padding and M.padding_namespace or M.namespace,
-    math.max(0, line - 1),
-    0,
-    {
-      virt_lines = rows,
-      virt_lines_above = line == 0,
-      virt_lines_leftcol = true,
-      priority = 1100,
-    }
-  )
-end
-
+---@param state lgtm.ReviewState
 function M.render(state, buf, path, side)
   if not api.nvim_buf_is_valid(buf) then
     return
@@ -216,11 +98,12 @@ function M.render(state, buf, path, side)
   require("lgtm.ui.cards").highlights()
   local windows = vim.fn.win_findbuf(buf)
   local width = windows[1] and api.nvim_win_get_width(windows[1]) or 80
-  for _, block in ipairs(blocks(state, buf, path, side, width)) do
-    put(buf, block.line, block.rows)
+  for _, block in ipairs(Private.blocks(state, buf, path, side, width)) do
+    Private.put(buf, block.line, block.rows)
   end
 end
 
+---@param state lgtm.ReviewState
 function M.render_review(state, panes, path)
   local visible = {}
   for side, pane in pairs(panes) do
@@ -248,7 +131,9 @@ function M.render_review(state, panes, path)
   local events = {}
   for _, side in ipairs({ "old", "new" }) do
     local pane, other = visible[side], visible[side == "old" and "new" or "old"]
-    for _, block in ipairs(blocks(state, pane.buf, path, side, api.nvim_win_get_width(pane.win))) do
+    for _, block in
+      ipairs(Private.blocks(state, pane.buf, path, side, api.nvim_win_get_width(pane.win)))
+    do
       local mapped = require("lgtm.codediff").other_line(
         block.line,
         side,
@@ -274,7 +159,7 @@ function M.render_review(state, panes, path)
       for _ = #rows + 1, height do
         rows[#rows + 1] = { { "", "Normal" } }
       end
-      put(visible[side].buf, event[side .. "_line"], rows, not own)
+      Private.put(visible[side].buf, event[side .. "_line"], rows, not own)
     end
   end
   for _, pane in pairs(visible) do
@@ -296,108 +181,25 @@ function M.render_review(state, panes, path)
   end
 end
 
+---@param state lgtm.ReviewState
 function M.mutate(state, method, input, done)
-  local err = require("lgtm.context").readiness_error(state)
-  if err then
-    if done then
-      done(err)
-    else
-      require("lgtm.notifications").error(err)
-    end
-    return
-  end
-  if method == "Reply" and state.kind == "pr" and state.review.state == "completed" then
-    require("lgtm.context").ensure_writable(state, function(write_error)
-      if write_error then
-        if done then
-          done(write_error)
-        else
-          require("lgtm.notifications").error(write_error)
-        end
-      else
-        M.mutate(state, method, input, done)
-      end
-    end)
-    return
-  end
-  input.scope = state.scope
-  local object
-  for _, comment in ipairs((state.conversation or {}).comments or {}) do
-    if comment.id == input.commentId then
-      object = comment
-    end
-  end
-  for _, thread in ipairs((state.conversation or {}).threads or {}) do
-    if thread.id == input.threadId then
-      object = thread
-    end
-  end
-  input.expectedVersion = object and object.version or state.version
-  state.pending_mutations = state.pending_mutations or {}
-  local fingerprint = method
-    .. ":"
-    .. vim.json.encode({
-      scope = input.scope,
-      commentId = input.commentId,
-      threadId = input.threadId,
-      body = input.body,
-      resolved = input.resolved,
-    })
-  local saved = state.pending_mutations[fingerprint]
-  if saved then
-    input = saved
-  else
-    input.requestKey = require("lgtm.context").request_key()
-    state.pending_mutations[fingerprint] = input
-  end
-  state.mutation_in_flight = state.mutation_in_flight or {}
-  if state.mutation_in_flight[fingerprint] then
-    return
-  end
-  state.mutation_in_flight[fingerprint] = true
   local notice = require("lgtm.notifications")
   local action = method == "DeleteComment" and "Deleting comment…"
     or method == "ResolveThread"
       and (input.resolved and "Resolving thread…" or "Reopening thread…")
   local pending = action and notice.show(action)
-  require("lgtm.rpc").call(method, input, function(err, result)
-    state.mutation_in_flight[fingerprint] = nil
+  require("lgtm.services.feedback").mutate(state, method, input, function(err, result)
     if err then
-      if err.message and err.message:find("Request rejected:", 1, true) then
-        state.pending_mutations[fingerprint] = nil
-      end
-      if pending then
+      if pending or not done then
         notice.error(err, pending)
       end
       if done then
         done(err, pending ~= nil)
-      elseif not pending then
-        require("lgtm.notifications").error(err)
       end
       return
     end
-    state.pending_mutations[fingerprint] = nil
     local applied = method == "DeleteComment" or method == "ResolveThread"
     if applied then
-      if method == "DeleteComment" then
-        state.conversation.comments = vim.tbl_filter(function(c)
-          return c.id ~= input.commentId
-        end, state.conversation.comments)
-        state.conversation.threads = vim.tbl_filter(function(thread)
-          return vim.iter(state.conversation.comments):any(function(c)
-            return c.threadId == thread.id
-          end)
-        end, state.conversation.threads)
-      elseif result.thread then
-        for i, thread in ipairs(state.conversation.threads) do
-          if thread.id == result.thread.id then
-            state.conversation.threads[i] = result.thread
-          end
-        end
-      end
-      if state.render then
-        state.render()
-      end
       notice.show(
         method == "DeleteComment" and "Comment deleted"
           or input.resolved and "Thread resolved"
@@ -405,39 +207,28 @@ function M.mutate(state, method, input, done)
         nil,
         pending
       )
-      if done then
-        done()
-      end
+    elseif result and result.syncError and result.syncError ~= "" then
+      notice.error(
+        "Reply saved locally; GitHub sync failed: "
+          .. result.syncError
+          .. ". Use :Lgtm sync to recover."
+      )
+    else
+      notice.show("Comment updated")
     end
-    state.refresh(function(refresh_err)
-      if not refresh_err then
-        if result and result.syncError and result.syncError ~= "" then
-          require("lgtm.notifications").error(
-            "Reply saved locally; GitHub sync failed: "
-              .. result.syncError
-              .. ". Use :Lgtm sync to recover."
-          )
-        elseif not applied then
-          require("lgtm.notifications").show("Comment updated")
-        end
-      end
-      if applied then
-        if refresh_err then
-          notice.error(refresh_err)
-        end
-      elseif done then
-        done(refresh_err)
-      end
-    end)
+    if done then
+      done()
+    end
   end)
 end
 
 -- Hidden files are not orphans. Only confirmed source or provider evidence gives that status.
+---@param state lgtm.ReviewState
 function M.description(state, thread)
   if thread.orphanReason == "file_deleted" then
     return "Orphaned", "File was deleted; the discussion is retained"
   end
-  if outside_diff(state, thread) then
+  if Private.outside_diff(state, thread) then
     return "Outside diff", "File is outside the current diff; the discussion is retained"
   end
   if thread.orphanReason == "working_source_changed" then
@@ -456,6 +247,7 @@ function M.description(state, thread)
   end
 end
 
+---@param state lgtm.ReviewState
 function M.open(state, threads, pane, on_ready)
   local ids = vim.tbl_map(function(thread)
     return thread.id
@@ -466,7 +258,7 @@ function M.open(state, threads, pane, on_ready)
     for _, thread in ipairs((state.conversation or {}).threads or {}) do
       if thread.id == thread_id then
         local row = { thread = thread }
-        for _, comment in ipairs(comments(state, thread)) do
+        for _, comment in ipairs(Private.comments(state, thread)) do
           if comment.id == comment_id then
             row.comment = comment
             local position = tonumber(comment.position or 0)
@@ -486,7 +278,7 @@ function M.open(state, threads, pane, on_ready)
     for _, id in ipairs(ids) do
       local row = find(id)
       local thread = row and row.thread
-      local cs = thread and comments(state, thread) or {}
+      local cs = thread and Private.comments(state, thread) or {}
       if thread and #cs > 0 then
         local location_status, reason = M.description(state, thread)
         local a = thread.anchor or {}
@@ -499,7 +291,7 @@ function M.open(state, threads, pane, on_ready)
           location = (a.path or "Review") .. (a.start and ":" .. a.start or ""),
           details = {},
           comments = {},
-          can_resolve = can_resolve(state, thread),
+          can_resolve = require("lgtm.services.feedback").can_resolve(state, thread),
         }
         if reason then
           record.details[#record.details + 1] = reason
@@ -524,7 +316,7 @@ function M.open(state, threads, pane, on_ready)
             root = position == 0,
             role = position == 0 and "top-level comment" or "reply " .. position,
             author = comment.author and comment.author.name or "Unknown",
-            status = comment_status(comment),
+            status = Private.comment_status(comment),
             body = comment.body,
           }
         end
@@ -570,11 +362,7 @@ function M.open(state, threads, pane, on_ready)
       require("lgtm.notifications").show("Select a comment first")
       return false
     end
-    local owner = row.comment.ownerId
-    if not owner or owner == "" then
-      owner = row.comment.author and row.comment.author.id
-    end
-    if owner ~= require("lgtm.rpc").identity then
+    if not require("lgtm.services.feedback").can_edit(row.comment) then
       require("lgtm.notifications").error("Only your own comments can be changed")
       return false
     end
@@ -635,7 +423,7 @@ function M.open(state, threads, pane, on_ready)
     if not row then
       return
     end
-    if not can_resolve(state, row.thread) then
+    if not require("lgtm.services.feedback").can_resolve(state, row.thread) then
       require("lgtm.notifications").show("Publish draft comments before resolving their thread")
       return
     end
@@ -663,7 +451,7 @@ function M.open(state, threads, pane, on_ready)
       if not row then
         return
       end
-      if outside_diff(state, row.thread) then
+      if Private.outside_diff(state, row.thread) then
         require("lgtm.notifications").show(
           "File is outside the current diff; the discussion is retained"
         )
@@ -685,13 +473,13 @@ function M.open(state, threads, pane, on_ready)
           -- Stale and file-level feedback can select a file without asserting a line.
           for _, side in ipairs({ "new", "old" }) do
             local target = state.panes[side]
-            local view = state.views and state.views[side]
+            local source_view = state.views and state.views[side]
             if
               target
               and target.win
               and api.nvim_win_is_valid(target.win)
-              and view
-              and view.source
+              and source_view
+              and source_view.source
             then
               api.nvim_set_current_win(target.win)
               api.nvim_win_set_cursor(target.win, { 1, 0 })
@@ -741,6 +529,7 @@ function M.open(state, threads, pane, on_ready)
   return M.last
 end
 
+---@param state lgtm.ReviewState
 function M.attach(state, buf, path, side)
   local function at()
     return M.at(state, path, side, api.nvim_win_get_cursor(0)[1])
@@ -866,4 +655,125 @@ function M.attach(state, buf, path, side)
   end
   M.render(state, buf, path, side)
 end
+-- Private ---------------------------------------------------------------------
+
+---@param state lgtm.ReviewState
+function Private.comments(state, thread)
+  local result = {}
+  for _, c in ipairs(state.conversation.comments or {}) do
+    if c.threadId == thread.id then
+      result[#result + 1] = c
+    end
+  end
+  table.sort(result, function(a, b)
+    return tonumber(a.position or 0) < tonumber(b.position or 0)
+  end)
+  return result
+end
+
+---@param state lgtm.ReviewState
+function Private.outside_diff(state, thread)
+  local anchor = thread.anchor or {}
+  if state.note or not state.files or state.initializing or anchor.kind == "general" then
+    return false
+  end
+  local path = thread.currentPath and thread.currentPath ~= "" and thread.currentPath or anchor.path
+  if state.kind == "directory" and path and state.root then
+    local prefix = state.root .. "/"
+    if path:sub(1, #prefix) == prefix then
+      path = path:sub(#prefix + 1)
+    end
+  end
+  for _, file in ipairs(state.files) do
+    if file.path == path or file.confirmedRename and file.previousPath == path then
+      return false
+    end
+  end
+  return path ~= nil and path ~= ""
+end
+
+function Private.comment_status(comment)
+  if comment.visibility ~= "draft" then
+    return comment.visibility or ""
+  end
+  if comment.postingStatus == "uncertain" or comment.postingStatus == "sending" then
+    return "Sync uncertain"
+  end
+  return comment.forgeCommentId and comment.forgeCommentId ~= "" and "GitHub draft" or "Local draft"
+end
+
+---@param state lgtm.ReviewState
+function Private.blocks(state, buf, path, side, width)
+  local groups = {}
+  for _, thread in ipairs((state.conversation or {}).threads or {}) do
+    local placement = M.placement(state, thread, path, side)
+    local cs = Private.comments(state, thread)
+    if placement and #cs > 0 and placement.status ~= "orphaned" then
+      local line = placement.location
+          and placement.location.kind == "line"
+          and placement.location.start
+        or 0
+      if line > api.nvim_buf_line_count(buf) then
+        error("Anchor resolver returned an out-of-range line")
+      end
+      groups[line] = groups[line] or { line = line, rows = {} }
+      local status
+      for _, c in ipairs(cs) do
+        if c.visibility == "draft" then
+          local next_status = Private.comment_status(c)
+          if
+            not status
+            or next_status == "Sync uncertain"
+            or (status ~= "Sync uncertain" and next_status == "Local draft")
+          then
+            status = next_status
+          end
+        end
+      end
+      if not status and state.kind == "pr" then
+        status = "Published"
+      end
+      vim.list_extend(
+        groups[line].rows,
+        require("lgtm.ui.cards").render({
+          resolved = thread.state == "resolved",
+          file = thread.anchor.kind == "file",
+          status = status,
+          location_status = placement and not placement.location and placement.status or nil,
+          comments = vim.tbl_map(function(comment)
+            return {
+              body = comment.body,
+              author = comment.author and comment.author.name or "Unknown",
+              is_reply = tonumber(comment.position or 0) > 0,
+            }
+          end, cs),
+        }, width, M.expanded[thread.id])
+      )
+    end
+  end
+  local result = vim.tbl_values(groups)
+  table.sort(result, function(a, b)
+    return a.line < b.line
+  end)
+  return result
+end
+
+function Private.put(buf, line, rows, padding)
+  if #rows == 0 then
+    return
+  end
+  api.nvim_buf_set_extmark(
+    buf,
+    padding and M.padding_namespace or M.namespace,
+    math.max(0, line - 1),
+    0,
+    {
+      virt_lines = rows,
+      virt_lines_above = line == 0,
+      virt_lines_leftcol = true,
+      priority = 1100,
+    }
+  )
+end
+
 return M

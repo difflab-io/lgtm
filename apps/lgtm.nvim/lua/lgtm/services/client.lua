@@ -1,3 +1,5 @@
+-- State -----------------------------------------------------------------------
+
 local M = {
   identity = nil,
   capabilities = nil,
@@ -9,7 +11,9 @@ local M = {
     "file_reviews",
   },
 }
-local initializing, waiting = false, {}
+local initializing, waiting, pending = false, {}, {}
+-- Public ----------------------------------------------------------------------
+
 function M.bootstrap(callback)
   if M.identity then
     callback()
@@ -86,7 +90,6 @@ function M.call(method, input, callback)
     end
   end
 end
-local pending = {}
 function M.latest(key, method, input, callback)
   if pending[key] then
     pending[key].cancel()

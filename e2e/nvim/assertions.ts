@@ -5,19 +5,19 @@ import { waitFor } from '../common/test-utils.js'
 export async function expectFileSeen(e: Editor, path: string, expected: boolean) {
   // Assert
   await e.wait(
-    '(function() local s=require("lgtm.context").current; return not s.reviewed_loading and not next(s.reviewed_pending or {}) end)()',
+    '(function() local s=require("lgtm.services.state").current; return not s.reviewed_loading and not next(s.reviewed_pending or {}) end)()',
     'reviewed-file progress loaded and persisted',
   )
   expect(Boolean((await e.state())!.reviewed?.[path])).toBe(expected)
   await e.wait(
-    '(function() local s=require("lgtm.context").current; local p=s and require("codediff.ui.lifecycle").get_panel_view(s.tab); return p and p.tree and vim.api.nvim_buf_is_valid(p.bufnr) end)()',
+    '(function() local s=require("lgtm.services.state").current; local p=s and require("codediff.ui.lifecycle").get_panel_view(s.tab); return p and p.tree and vim.api.nvim_buf_is_valid(p.bufnr) end)()',
     'native CodeDiff file tree',
   )
   const visible = await waitFor(
     `visible checkmark for ${path}`,
     () =>
       e.lua<boolean>(
-        `local path=...; local s=require("lgtm.context").current
+        `local path=...; local s=require("lgtm.services.state").current
     local p=require("codediff.ui.lifecycle").get_panel_view(s.tab)
     for _,mark in ipairs(vim.api.nvim_buf_get_extmarks(p.bufnr,vim.api.nvim_create_namespace("lgtm.reviewed"),0,-1,{details=true})) do
       local node=p.tree:get_node(mark[2]+1)

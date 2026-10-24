@@ -114,7 +114,7 @@ flowchart LR
   Tree -->|"Enter: path"| Open["Controller loads file"]
   Tree -->|"m: path"| Mark["Controller changes reviewed mark"]
   Tree -->|"Direction + unreviewed flag"| Next["Controller chooses next path"]
-  Mark --> Store["Backend persistence"]
+  Mark --> Store["services/files.lua<br/>Serialized writes + shared reviewed state"]
   Store --> Controller
   Open --> Controller
   Next --> Controller

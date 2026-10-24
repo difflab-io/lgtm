@@ -1,5 +1,9 @@
+-- State -----------------------------------------------------------------------
+
 local M = { history = {} }
 local theme_namespace = vim.api.nvim_create_namespace("lgtm.notification-theme")
+-- Public ----------------------------------------------------------------------
+
 function M.show(message, level, previous)
   local notice = require("notify")(message, level or vim.log.levels.INFO, {
     title = "LGTM",

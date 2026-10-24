@@ -46,7 +46,7 @@ for (const profile of profiles) {
         await expectFileSeen(editor, state.file.path, false)
         await editor.command('Lgtm complete')
         await editor.wait(
-          'require("lgtm.context").current.review.state == "completed"',
+          'require("lgtm.services.state").current.review.state == "completed"',
           'branch completed',
         )
 
@@ -74,7 +74,7 @@ for (const profile of profiles) {
         const notices = await editor.notices()
         await editor.command('Lgtm complete')
         await editor.wait(
-          'require("lgtm.context").current.review.state == "completed"',
+          'require("lgtm.services.state").current.review.state == "completed"',
           'empty review completed',
         )
 
@@ -113,12 +113,12 @@ for (const profile of profiles) {
       await editor.comments(2)
       await editor.command('Lgtm layout')
       await editor.wait(
-        'require("lgtm.context").current.layout == "inline"',
+        'require("lgtm.services.state").current.layout == "inline"',
         'inline CodeDiff layout',
       )
       await editor.command('Lgtm layout')
       await editor.wait(
-        'require("lgtm.context").current.layout == "side-by-side"',
+        'require("lgtm.services.state").current.layout == "side-by-side"',
         'side-by-side CodeDiff layout',
       )
       const state = await editor.loaded()
@@ -147,7 +147,7 @@ for (const profile of profiles) {
       await editor.keys(' rm')
 
       await editor.wait(
-        'next(require("lgtm.context").current.reviewed_pending or {}) == nil',
+        'next(require("lgtm.services.state").current.reviewed_pending or {}) == nil',
         'file mark saved by backend',
       )
 
@@ -158,7 +158,7 @@ for (const profile of profiles) {
       const state = await editor.openLocal('working')
       await editor.show('review.txt')
       await editor.wait(
-        'require("lgtm.context").current.reviewed["review.txt"] ~= nil',
+        'require("lgtm.services.state").current.reviewed["review.txt"] ~= nil',
         'persisted local file mark',
       )
 
@@ -172,7 +172,7 @@ for (const profile of profiles) {
       await runtime.write('review.txt', 'working content changed after marking seen\n')
       await editor.command('Lgtm refresh')
       await editor.wait(
-        'require("lgtm.context").current.render_ready and not require("lgtm.context").current.reviewed["review.txt"]',
+        'require("lgtm.services.state").current.render_ready and not require("lgtm.services.state").current.reviewed["review.txt"]',
         'working checkmark invalidated',
       )
 
@@ -204,7 +204,7 @@ for (const profile of profiles) {
         if (mode === 'staged') await runtime.git('add', 'src/lib.rs')
         await editor.command('Lgtm refresh')
         await editor.wait(
-          'require("lgtm.context").current.render_ready and not require("lgtm.context").current.reviewed["src/lib.rs"]',
+          'require("lgtm.services.state").current.render_ready and not require("lgtm.services.state").current.reviewed["src/lib.rs"]',
           'hidden file checkmark invalidated',
         )
 
@@ -308,7 +308,7 @@ for (const profile of profiles) {
       const replaced = await editor.openLocal('branch', true)
       await editor.command('Lgtm complete')
       await editor.wait(
-        'require("lgtm.context").current.review.state == "completed"',
+        'require("lgtm.services.state").current.review.state == "completed"',
         'replacement completed',
       )
 
@@ -334,20 +334,20 @@ for (const profile of profiles) {
       await runtime.git('restore', 'review.txt')
       await editor.command('Lgtm refresh')
       await editor.wait(
-        'require("lgtm.context").current.empty and #require("lgtm.context").current.files == 0 and require("lgtm.context").current.file == nil',
+        'require("lgtm.services.state").current.empty and #require("lgtm.services.state").current.files == 0 and require("lgtm.services.state").current.file == nil',
         'last change restored',
       )
 
       // Assert
-      expect(await editor.value('vim.tbl_isempty(require("lgtm.context").current.views)')).toBe(
-        true,
-      )
-      expect(await editor.value('require("lgtm.context").current.observe_sources ~= nil')).toBe(
-        false,
-      )
+      expect(
+        await editor.value('vim.tbl_isempty(require("lgtm.services.state").current.views)'),
+      ).toBe(true)
+      expect(
+        await editor.value('require("lgtm.services.state").current.observe_sources ~= nil'),
+      ).toBe(false)
       expect(
         await editor.value(
-          'require("codediff.ui.lifecycle").get_session(require("lgtm.context").current.tab) ~= nil',
+          'require("codediff.ui.lifecycle").get_session(require("lgtm.services.state").current.tab) ~= nil',
         ),
       ).toBe(true)
     })

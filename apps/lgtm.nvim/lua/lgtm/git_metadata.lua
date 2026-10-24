@@ -1,36 +1,12 @@
 -- Compatibility for CodeDiff's pinned C-quoted filename decoder. Content stays in CodeDiff.
 -- Normalize only suspicious metadata in an active LGTM checkout, using literal NUL-separated paths.
+-- State -----------------------------------------------------------------------
+
 local M = {}
+local Private = {}
 local installed = false
 
-local function run(root, arguments, callback)
-  local command = { "git", "--no-optional-locks", "--literal-pathspecs", "-C", root }
-  vim.list_extend(command, arguments)
-  vim.system(command, { text = false, timeout = 5000 }, function(result)
-    vim.schedule(function()
-      if result.code ~= 0 then
-        callback(result.stderr or "Git metadata is unavailable")
-      else
-        callback(nil, result.stdout or "")
-      end
-    end)
-  end)
-end
-
-local function suspicious(result)
-  for _, group in pairs(result or {}) do
-    if type(group) == "table" then
-      for _, entry in ipairs(group) do
-        for _, path in ipairs({ entry.path or "", entry.old_path or "" }) do
-          if path:match("[23][0-7][0-7]") or path:sub(1, 1) == '"' then
-            return true
-          end
-        end
-      end
-    end
-  end
-  return false
-end
+-- Public ----------------------------------------------------------------------
 
 function M.get_status(root, base, head, staged, pathspec, callback)
   local comparison = staged and { "--cached", base } or head and { base, head } or { base }
@@ -38,7 +14,7 @@ function M.get_status(root, base, head, staged, pathspec, callback)
   vim.list_extend(args, comparison)
   args[#args + 1] = "--"
   vim.list_extend(args, pathspec or {})
-  run(root, args, function(err, output)
+  Private.run(root, args, function(err, output)
     if err then
       callback(err)
       return
@@ -64,7 +40,7 @@ function M.get_status(root, base, head, staged, pathspec, callback)
       vim.list_extend(arguments, comparison)
       arguments[#arguments + 1] = "--"
       vim.list_extend(arguments, pathspec or {})
-      run(root, arguments, function(stats_error, data)
+      Private.run(root, arguments, function(stats_error, data)
         if stats_error then
           callback(stats_error)
           return
@@ -103,7 +79,7 @@ function M.get_status(root, base, head, staged, pathspec, callback)
     end
     untracked[#untracked + 1] = "--"
     vim.list_extend(untracked, pathspec or {})
-    run(root, untracked, function(untracked_error, data)
+    Private.run(root, untracked, function(untracked_error, data)
       if untracked_error then
         callback(untracked_error)
         return
@@ -131,13 +107,13 @@ function M.install()
     git[spec.name] = function(...)
       local args, count = { ... }, select("#", ...)
       local root_index, callback_index = spec.refs + 1, spec.refs + 2
-      local state = require("lgtm.context").current
+      local state = require("lgtm.services.state").current
       if not state or state.git_root ~= args[root_index] then
         return original(unpack(args, 1, count))
       end
       local callback = args[callback_index]
       args[callback_index] = function(err, result)
-        if err or not suspicious(result) then
+        if err or not Private.suspicious(result) then
           callback(err, result)
           return
         end
@@ -153,6 +129,37 @@ function M.install()
       return original(unpack(args, 1, count))
     end
   end
+end
+
+-- Private ---------------------------------------------------------------------
+
+function Private.run(root, arguments, callback)
+  local command = { "git", "--no-optional-locks", "--literal-pathspecs", "-C", root }
+  vim.list_extend(command, arguments)
+  vim.system(command, { text = false, timeout = 5000 }, function(result)
+    vim.schedule(function()
+      if result.code ~= 0 then
+        callback(result.stderr or "Git metadata is unavailable")
+      else
+        callback(nil, result.stdout or "")
+      end
+    end)
+  end)
+end
+
+function Private.suspicious(result)
+  for _, group in pairs(result or {}) do
+    if type(group) == "table" then
+      for _, entry in ipairs(group) do
+        for _, path in ipairs({ entry.path or "", entry.old_path or "" }) do
+          if path:match("[23][0-7][0-7]") or path:sub(1, 1) == '"' then
+            return true
+          end
+        end
+      end
+    end
+  end
+  return false
 end
 
 return M

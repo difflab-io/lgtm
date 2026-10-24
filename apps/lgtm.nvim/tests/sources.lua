@@ -1,5 +1,5 @@
 return function(root)
-  local sources = require("lgtm.sources")
+  local sources = require("lgtm.services.sources")
   local directory = vim.fn.tempname()
   vim.fn.mkdir(directory, "p")
   local function command(args)
