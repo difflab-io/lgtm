@@ -255,7 +255,7 @@ To install the latest version from `origin/main` or switch back to it, run:
 premise run nvim:install-released-plugin
 ```
 
-Both commands preserve LGTM options and use repository-root package metadata. The released revision must include `lazy.lua`. Restart Neovim after switching.
+Both commands preserve LGTM options and write explicit dependencies and runtime setup from this checkout. They also work when lazy.nvim has an existing package cache or the released revision has no `lazy.lua`. Restart Neovim after switching.
 
 ### Architecture
 

@@ -13,6 +13,7 @@ nvim --headless -u NONE -l /dev/stdin <<'LUA'
 local released = vim.env.LGTM_PLUGIN_SOURCE == "main"
 assert(released or vim.env.LGTM_PLUGIN_SOURCE == "worktree", "Expected worktree or main")
 local plugin_dir = vim.fs.abspath(vim.env.LGTM_DEV_PLUGIN_DIR)
+local package_spec = assert(loadfile(plugin_dir .. "/lazy.lua"))()[1]
 local config_dir = vim.fn.stdpath("config") .. "/lua/plugins"
 local target = config_dir .. "/lgtm.lua"
 local previous = config_dir .. "/lgtm-dev.lua"
@@ -42,11 +43,19 @@ return {
   {
 %s
     name = "lgtm",
+    lazy = false,
+    dependencies = %s,
     opts = %s,
+    config = function(plugin, options)
+      vim.opt.runtimepath:append(plugin.dir .. "/apps/lgtm.nvim")
+      require("lgtm").setup(options)
+      vim.cmd("runtime plugin/lgtm.lua")
+    end,
   },
 }
 ]],
   origin,
+  vim.inspect(package_spec.dependencies),
   vim.inspect(opts)
 )
 -- Reject options that cannot be serialized before changing either spec.
@@ -65,6 +74,6 @@ if [[ "$LGTM_PLUGIN_SOURCE" == "main" ]]; then
   nvim --headless \
     '+Lazy! install lgtm' \
     '+Lazy! update lgtm' \
-    '+lua local p = require("lazy.core.config").plugins.lgtm; if not p or not p._.installed then vim.cmd("cquit 1") end; for _, task in ipairs(p._.tasks or {}) do if task:has_errors() then vim.cmd("cquit 1") end end' \
+    '+lua local p = require("lazy.core.config").plugins.lgtm; if not p or not p._.installed or not package.loaded.lgtm or vim.fn.exists(":Lgtm") ~= 2 then vim.cmd("cquit 1") end; for _, task in ipairs(p._.tasks or {}) do if task:has_errors() then vim.cmd("cquit 1") end end' \
     '+qa'
 fi
