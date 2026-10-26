@@ -3,11 +3,9 @@ name: On Commit
 'on':
   pull_request:
     branches: [main]
-  push:
-    branches-ignore: [main]
 
 concurrency:
-  group: on-commit-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: on-commit-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 permissions:
@@ -112,10 +110,9 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  e2e-budget:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+  # TODO: Move E2E into the Premise flow when it supports test suites.
+  e2e-linux:
     runs-on: ubuntu-22.04
-    timeout-minutes: 65
     permissions:
       contents: read
     steps:
@@ -126,23 +123,14 @@ jobs:
         with:
           setup-only: true
           install-premise: build
-      - name: Wait for GitHub fixture API budget
+      - name: Run E2E suites
         env:
-          LGTM_E2E_GITHUB_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_TOKEN }}
-          LGTM_E2E_GITHUB_REPOSITORY: ${{ vars.LGTM_E2E_GITHUB_REPOSITORY || 'skapoor8/lgtm-e2e' }}
-        run: premise run e2e-budget
+          LGTM_E2E_GITHUB_MODE: replay
+        run: premise run e2e
 
-  # TODO: Remove this standalone job once Premise supports E2E suites.
-  e2e:
-    needs: e2e-budget
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    strategy:
-      fail-fast: false
-      max-parallel: 2
-      matrix:
-        suite: [backend, cli, nvim]
-        runner: [ubuntu-22.04, macos-latest]
-    runs-on: ${{ matrix.runner }}
+  # TODO: Move E2E into the Premise flow when it supports test suites.
+  e2e-macos:
+    runs-on: macos-latest
     permissions:
       contents: read
     steps:
@@ -153,19 +141,18 @@ jobs:
         with:
           setup-only: true
           install-premise: build
-      - name: Run real E2E suite
+      - name: Run E2E suites
         env:
-          LGTM_E2E_GITHUB_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_TOKEN }}
-          LGTM_E2E_GITHUB_SECONDARY_TOKEN: ${{ secrets.LGTM_E2E_GITHUB_SECONDARY_TOKEN }}
-          LGTM_E2E_GITHUB_REPOSITORY: ${{ vars.LGTM_E2E_GITHUB_REPOSITORY || 'skapoor8/lgtm-e2e' }}
-        run: premise run e2e:${{ matrix.suite }}
+          LGTM_E2E_GITHUB_MODE: replay
+        run: premise run e2e
 
   publish-release:
-    needs: [plan, single, matrix, e2e]
+    needs: [plan, single, matrix, e2e-linux, e2e-macos]
     outputs:
       version: ${{ needs.plan.outputs.version }}
     if: >-
-      always() && needs.e2e.result == 'success' && needs.plan.outputs.version != '' &&
+      always() && needs.e2e-linux.result == 'success' && needs.e2e-macos.result == 'success' &&
+      needs.plan.outputs.version != '' &&
       needs.plan.result == 'success' &&
       ((needs.plan.outputs.mode == 'single' &&
         needs.single.result == 'success') ||

@@ -150,8 +150,13 @@ for (const profile of profiles) {
         'require("lgtm.notes").states[vim.api.nvim_get_current_buf()].conversation.threads[1].state == "resolved"',
         'note resolved',
       )
-      const cards = await e.value(
-        'vim.api.nvim_buf_get_extmarks(0,require("lgtm.threads").namespace,0,-1,{details=true})',
+      const cards = await waitFor(
+        'resolved note card rendered',
+        () =>
+          e.value(
+            'vim.api.nvim_buf_get_extmarks(0,require("lgtm.threads").namespace,0,-1,{details=true})',
+          ),
+        (marks) => JSON.stringify(marks).includes('Resolved'),
       )
       expect(JSON.stringify(cards)).toContain('Resolved')
       expect(JSON.stringify(cards)).not.toContain('Edited standalone note')

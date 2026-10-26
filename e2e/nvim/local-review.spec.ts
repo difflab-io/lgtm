@@ -124,7 +124,7 @@ for (const profile of profiles) {
       expect(state.conversation.comments).toHaveLength(2)
     })
 
-    it('Losing the selected text floats an outdated card above the file with original line evidence', async () => {
+    it('Losing the selected text shows a compact outdated card and keeps evidence in the thread view', async () => {
       // Arrange
       const { editor: e, runtime: r } = fixture()
       const { moved, shifted, rootId } = await prepareRenamedFeedback(e, r)
@@ -146,8 +146,10 @@ for (const profile of profiles) {
       expect(marks).toHaveLength(1)
       expect(marks[0][1]).toBe(0)
       expect(marks[0][3].virt_lines_above).toBe(true)
-      for (const text of ['Outdated', 'Original lines', 'selected'])
+      for (const text of ['Outdated', 'anchor lost', 'Preserve this staged selection'])
         expect(JSON.stringify(marks)).toContain(text)
+      expect(JSON.stringify(marks)).not.toContain('Original lines')
+      expect(JSON.stringify(marks)).not.toContain('> selected')
       for (const text of ['OUTDATED', 'Original lines 2', 'selected'])
         expect(await e.text()).toContain(text)
       expect(bounds.row).toBe(Math.floor((40 - bounds.height - 2) / 2))
@@ -222,35 +224,62 @@ for (const profile of profiles) {
       expect(marks).toHaveLength(0)
       expect(await e.text()).toContain('Preserve this staged selection')
       expect(await e.text()).not.toContain('ORPHANED')
+      expect(await e.text()).toContain('OUTSIDE DIFF')
     })
   })
 
   describe(`When unstaged source changes [${profile}]`, { tags: [profile] }, () => {
     const fixture = useEditor(profile)
 
-    it('Changing the working file orphans its unstaged comment instead of moving it without proof', async () => {
-      // Arrange
-      const { editor: e, runtime: r } = fixture()
-      const { working, workingId } = await prepareWorkingFeedback(e, r)
+    it.each([
+      { change: 'the selected line', content: 'changed working selection\n' },
+      { change: 'another line', content: 'working selection\nanother line\n' },
+    ])(
+      'Changing $change marks unstaged feedback stale and shows its card above the file',
+      async ({ content }) => {
+        // Arrange
+        const { editor: e, runtime: r } = fixture()
+        const { working, workingId } = await prepareWorkingFeedback(e, r)
 
-      // Act
-      await r.write('other.txt', 'changed working selection\n')
-      await e.command('Lgtm refresh')
-      await waitFor(
-        'working source orphaned',
-        () => e.state(),
-        (state) =>
-          Boolean(
-            state?.render_ready &&
-            state.conversation.threads.find((thread: Json) => thread.id === workingId)
-              ?.orphanReason === 'working_source_changed',
-          ),
-      )
+        // Act
+        await r.write('other.txt', content)
+        await e.command('Lgtm refresh')
+        await waitFor(
+          'working source orphaned',
+          () => e.state(),
+          (state) =>
+            Boolean(
+              state?.render_ready &&
+              state.conversation.threads.find((thread: Json) => thread.id === workingId)
+                ?.orphanReason === 'working_source_changed',
+            ),
+        )
 
-      // Assert
-      expect(working.anchor.source.workingFile).toBeDefined()
-      expect((await placement(e, workingId)).status).toBe('orphaned')
-    })
+        // Assert
+        expect(working.anchor.source.workingFile).toBeDefined()
+        const stale = await placement(e, workingId)
+        expect(stale.status).toBe('stale')
+        expect(stale.location).toBeUndefined()
+        await e.pane('new', 1)
+        expect(await e.value('vim.api.nvim_get_current_buf()')).toBe(
+          (await e.state())!.panes.new.buf,
+        )
+        expect(await e.value('vim.bo.filetype')).not.toBe('lgtm')
+        const marks = await e.marks()
+        expect(marks).toHaveLength(1)
+        expect(marks[0][1]).toBe(0)
+        expect(marks[0][3].virt_lines_above).toBe(true)
+        for (const text of ['Stale', 'anchor lost', 'Retain this unstaged feedback'])
+          expect(JSON.stringify(marks)).toContain(text)
+        for (const text of ['Original lines', 'Unstaged source changed', '> working selection'])
+          expect(JSON.stringify(marks)).not.toContain(text)
+        expect(marks[0][3].virt_lines).toHaveLength(3)
+        expect(
+          (await e.state())!.conversation.threads.find((thread: Json) => thread.id === workingId)
+            .anchor,
+        ).toEqual(working.anchor)
+      },
+    )
 
     it('Export contains preserved replies and orphaned feedback without internal IDs or source hashes', async () => {
       // Arrange
@@ -292,7 +321,7 @@ for (const profile of profiles) {
       expect(restored).toBe(beforeMapping)
     })
 
-    it('Resuming after restart preserves renamed anchors, replies and unstaged orphan states', async () => {
+    it('Resuming after restart preserves renamed anchors, replies and stale working-tree discussions', async () => {
       // Arrange
       const { editor: e, runtime: r } = fixture()
       const { moved, rootId, original, workingId, replyId } = await prepareOrphanedWorkingFeedback(
@@ -330,7 +359,7 @@ for (const profile of profiles) {
       for (const text of [
         'Preserve this staged selection',
         'Retain this unstaged feedback',
-        'ORPHANED',
+        'STALE',
       ])
         expect(await e.text()).toContain(text)
     })

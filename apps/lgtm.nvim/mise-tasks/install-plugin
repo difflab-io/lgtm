@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+#MISE description="Switch the active LGTM plugin between this worktree and origin/main via lazy.nvim"
+#MISE hide=true
+#USAGE flag "--source <source>" required=#true help="Plugin source to install" {
+#USAGE   choices "worktree" "main"
+#USAGE }
+set -euo pipefail
+
+export LGTM_PLUGIN_SOURCE="${usage_source:?Pass --source worktree or --source main}"
+export LGTM_DEV_PLUGIN_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+
+nvim --headless -u NONE -l /dev/stdin <<'LUA'
+local released = vim.env.LGTM_PLUGIN_SOURCE == "main"
+assert(released or vim.env.LGTM_PLUGIN_SOURCE == "worktree", "Expected worktree or main")
+local plugin_dir = vim.fs.abspath(vim.env.LGTM_DEV_PLUGIN_DIR)
+local config_dir = vim.fn.stdpath("config") .. "/lua/plugins"
+local target = config_dir .. "/lgtm.lua"
+local previous = config_dir .. "/lgtm-dev.lua"
+local opts = {}
+
+-- Preserve options from the active spec before replacing its plugin source.
+local source = vim.fn.filereadable(target) == 1 and target or previous
+if vim.fn.filereadable(source) == 1 then
+  local specs = assert(loadfile(source))()
+  assert(type(specs) == "table", "Expected a Lazy spec table in " .. source)
+  local spec = type(specs[1]) == "table" and specs[1] or specs
+  opts = spec.opts or {}
+  assert(type(opts) == "table", "Expected an opts table in " .. source)
+end
+
+local origin
+if released then
+  origin = [[    "difflab-io/lgtm",
+    branch = "main",
+    version = false,]]
+else
+  origin = "    dir = " .. string.format("%q", plugin_dir) .. ","
+end
+local config = released and [[
+    config = function(plugin, options)
+      vim.opt.runtimepath:append(plugin.dir .. "/apps/lgtm.nvim")
+      require("lgtm").setup(options)
+      vim.cmd("runtime plugin/lgtm.lua")
+    end,]] or ""
+local contents = string.format(
+  [[-- Managed by LGTM's nvim:install-dev-plugin and nvim:install-released-plugin tasks.
+return {
+  {
+%s
+    name = "lgtm",
+    main = "lgtm",
+    lazy = false,
+    dependencies = {
+      { "esmuellert/codediff.nvim", commit = "09d9ebef2cc5a5c04db7a349cd6c61bdf84ecc8e", opts = {} },
+      { "folke/which-key.nvim", commit = "3aab2147e74890957785941f0c1ad87d0a44c15a", opts = {} },
+      { "rcarriga/nvim-notify", commit = "8701bece920b38ea289b457f902e2ad184131a5d", opts = {} },
+    },
+    opts = %s,
+%s
+  },
+}
+]],
+  origin,
+  vim.inspect(opts),
+  config
+)
+-- Reject options that cannot be serialized before changing either spec.
+assert(loadstring(contents, "@" .. target))
+vim.fn.mkdir(config_dir, "p")
+assert(vim.fn.writefile(vim.split(contents, "\n", { plain = true }), target, "b") == 0)
+if vim.uv.fs_lstat(previous) then
+  assert(vim.uv.fs_unlink(previous))
+end
+print("LGTM plugin: " .. target .. " -> " .. (released and "difflab-io/lgtm (main)" or plugin_dir))
+print("Restart Neovim to use the selected plugin. Configure opts.identity if needed.")
+LUA
+
+# Fetch main even when Lazy already has an older checkout or lockfile entry.
+if [[ "$LGTM_PLUGIN_SOURCE" == "main" ]]; then
+  nvim --headless \
+    '+Lazy! install lgtm' \
+    '+Lazy! update lgtm' \
+    '+lua local p = require("lazy.core.config").plugins.lgtm; if not p or not p._.installed then vim.cmd("cquit 1") end; for _, task in ipairs(p._.tasks or {}) do if task:has_errors() then vim.cmd("cquit 1") end end' \
+    '+qa'
+fi

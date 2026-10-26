@@ -8,7 +8,6 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { profiles } from './fixtures.js'
 import { usePrEditor, selectBranchPr } from './pr-review.fixtures.js'
 import type { GithubFixture } from '../common/github.js'
-import { githubCredentials } from '../common/github.js'
 import { waitFor, type Json } from '../common/test-utils.js'
 import { expectFileSeen } from './assertions.js'
 
@@ -30,7 +29,7 @@ async function publishConcerns(
         body,
       })),
     },
-    await githubCredentials(account),
+    await github.credentials(account),
   )
   return account
 }
@@ -811,14 +810,7 @@ for (const profile of profiles) {
       const { editor, github, runtime } = fixture()
       const unchanged = `${github.run}-unchanged.txt`
       await github.changeFiles({ [unchanged]: 'unchanged reviewed file\n' })
-      await runtime.git(
-        '-c',
-        'credential.helper=!gh auth git-credential',
-        'fetch',
-        '--quiet',
-        'origin',
-        github.head,
-      )
+      await github.fetch(runtime, github.head)
       const initial = await selectBranchPr(editor, github)
       for (const path of [github.path, unchanged]) {
         await editor.show(path)
@@ -866,14 +858,7 @@ for (const profile of profiles) {
       await github.changeFiles({
         [github.path]: github.headContent + 'changed after marking viewed\n',
       })
-      await runtime.git(
-        '-c',
-        'credential.helper=!gh auth git-credential',
-        'fetch',
-        '--quiet',
-        'origin',
-        github.head,
-      )
+      await github.fetch(runtime, github.head)
       await editor.command('Lgtm refresh')
       await editor.wait(
         `require("lgtm.context").current.head == "${github.head}" and require("lgtm.context").current.render_ready`,

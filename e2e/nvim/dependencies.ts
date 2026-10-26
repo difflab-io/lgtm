@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { isolatedEnv } from '../common/test-utils.js'
+import { profiles } from './profiles.js'
 
 /** Fail before creating GitHub fixtures if either real editor profile cannot start. */
 export default async function verifyDependencies() {
@@ -15,7 +16,7 @@ export default async function verifyDependencies() {
     assert(require('codediff.core.diff').compute_diff({'before'}, {'after'}), 'Native diff failed')
   end); if not ok then vim.api.nvim_err_writeln(tostring(err)); vim.cmd('cquit 1') end`
   try {
-    for (const kak of ['0', '1']) {
+    for (const profile of profiles) {
       try {
         await exec(
           'nvim',
@@ -35,7 +36,7 @@ export default async function verifyDependencies() {
             env: {
               ...isolatedEnv(home),
               LGTM_REPO_ROOT: resolve(import.meta.dirname, '../..'),
-              LGTM_E2E_KAK: kak,
+              LGTM_E2E_KAK: profile === 'kak' ? '1' : '0',
             },
             timeout: 60_000,
           },
@@ -43,7 +44,7 @@ export default async function verifyDependencies() {
       } catch (error) {
         const output = error as Error & { stdout?: string; stderr?: string }
         throw new Error(
-          `Editor preflight failed (${kak === '1' ? 'Kak' : 'required'} profile). Run premise run //e2e/nvim:install.\n${output.stdout ?? ''}\n${output.stderr ?? ''}`,
+          `Editor preflight failed (${profile} profile). Run premise run //e2e/nvim:install.\n${output.stdout ?? ''}\n${output.stderr ?? ''}`,
           { cause: error },
         )
       }

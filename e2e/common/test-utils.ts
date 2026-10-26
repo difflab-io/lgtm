@@ -50,6 +50,7 @@ export function isolatedEnv(home: string): NodeJS.ProcessEnv {
     'LGTM_DATABASE_URL',
     'LGTM_BACKEND_ADDR',
     'LGTM_GITHUB_TEST_MODE',
+    'LGTM_GITHUB_TEST_ACTOR',
     'LGTM_GITHUB_TEST_API_URL',
     'LGTM_IDENTITY',
   ])

@@ -1,16 +1,25 @@
 import { setTimeout as delay } from 'node:timers/promises'
 import { randomUUID } from 'node:crypto'
-import { command, type TestHarness } from './test-harness.js'
-import { type Json } from './test-utils.js'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { command, ROOT, type TestHarness } from './test-harness.js'
+import { type GithubDriver, type GithubFixtureState, LiveGithubDriver } from './github-driver.js'
+import { RecordedGithubDriver } from './github-recording.js'
+import { isolatedEnv, type Json } from './test-utils.js'
 
 const githubRepository = process.env.LGTM_E2E_GITHUB_REPOSITORY ?? 'skapoor8/lgtm-e2e'
 
 /** Only run-owned refs, content and PRs can be mutated. No repository provisioning API exists here. */
 export class GithubFixture {
-  readonly run = `lgtm-e2e-${randomUUID()}`
-  private readonly baseBranch = `${this.run}-base`
-  private readonly headBranch = `${this.run}-head`
-  readonly path = `${this.run}.txt`
+  private get baseBranch() {
+    return `${this.run}-base`
+  }
+  private get headBranch() {
+    return `${this.run}-head`
+  }
+  get path() {
+    return `${this.run}.txt`
+  }
   private readonly sourceTail =
     Array.from({ length: 40 }, (_, index) => `stable context ${index + 1}`).join('\n') + '\n'
   private readonly baseContent = 'first\nsecond\n' + this.sourceTail
@@ -23,15 +32,67 @@ export class GithubFixture {
   private refs: string[] = []
   private additionalPullRequests: number[] = []
   private initialHead = ''
-  private credentials: NodeJS.ProcessEnv[] = []
+  private credentialEnvironments: NodeJS.ProcessEnv[] = []
   private constructor(
     readonly repository: string,
-    readonly env: NodeJS.ProcessEnv,
+    private driver: GithubDriver,
+    readonly run = `lgtm-e2e-${randomUUID()}`,
   ) {}
+  private liveDriver?: LiveGithubDriver
+  private workspace?: string
+
+  get env() {
+    return this.driver.env
+  }
+
+  credentials(account?: string) {
+    return this.driver.credentials(account)
+  }
+
+  async record(file: string, journey: string) {
+    this.liveDriver = this.driver as LiveGithubDriver
+    const fixture: GithubFixtureState = {
+      repository: this.repository,
+      repositoryUrl: this.repositoryUrl,
+      run: this.run,
+      nodeId: this.nodeId,
+      base: this.base,
+      head: this.head,
+      initialHead: this.initialHead,
+      number: this.number!,
+    }
+    this.driver = await RecordedGithubDriver.start(file, journey, fixture, this.liveDriver)
+    this.credentialEnvironments = []
+  }
+
+  async finish(passed: boolean) {
+    if (!(this.driver instanceof RecordedGithubDriver)) return
+    const driver = this.driver
+    if (this.liveDriver) {
+      this.driver = this.liveDriver
+      this.liveDriver = undefined
+    }
+    await driver.finish(passed)
+  }
+
+  static async replay(file: string, journey: string) {
+    const driver = await RecordedGithubDriver.start(file, journey)
+    const state = driver.cassette.fixture
+    const fixture = new GithubFixture(state.repository, driver, state.run)
+    Object.assign(fixture, {
+      repositoryUrl: state.repositoryUrl,
+      nodeId: state.nodeId,
+      base: state.base,
+      head: state.head,
+      initialHead: state.initialHead,
+      number: state.number,
+    })
+    return fixture
+  }
 
   /** Restore only this run's PR and refs, so cases do not inherit previous feedback. */
-  async reset() {
-    for (const env of [this.env, ...this.credentials]) {
+  async reset(pull: Json) {
+    for (const env of [this.env, ...this.credentialEnvironments]) {
       const reviews = await this.api<Json[]>(
         `repos/${this.repository}/pulls/${this.number}/reviews?per_page=100`,
         'GET',
@@ -57,13 +118,16 @@ export class GithubFixture {
     )
     for (const comment of discussion)
       await this.api(`repos/${this.repository}/issues/comments/${comment.id}`, 'DELETE')
-    await this.api(`repos/${this.repository}/git/refs/heads/${this.headBranch}`, 'PATCH', {
-      sha: this.initialHead,
-      force: true,
-    })
-    await this.api(`repos/${this.repository}/pulls/${this.number}`, 'PATCH', { state: 'open' })
+    const changedHead = pull.head.sha !== this.initialHead
+    if (changedHead)
+      await this.api(`repos/${this.repository}/git/refs/heads/${this.headBranch}`, 'PATCH', {
+        sha: this.initialHead,
+        force: true,
+      })
+    if (pull.state !== 'open')
+      await this.api(`repos/${this.repository}/pulls/${this.number}`, 'PATCH', { state: 'open' })
     this.head = this.initialHead
-    await this.waitForHead(this.head)
+    if (changedHead) await this.waitForHead(this.head)
   }
 
   /** A second PR for the same branch exercises real picker navigation. */
@@ -121,24 +185,33 @@ export class GithubFixture {
   async checkout(runtime: TestHarness) {
     await runtime.git('init', '-q', '-b', this.headBranch)
     await runtime.git('remote', 'add', 'origin', `${this.repositoryUrl}.git`)
-    await runtime.git(
-      '-c',
-      'credential.helper=!gh auth git-credential',
-      'fetch',
-      '--quiet',
-      'origin',
+    await this.fetch(
+      runtime,
       `+refs/heads/${this.baseBranch}:refs/remotes/origin/${this.baseBranch}`,
       `+refs/heads/${this.headBranch}:refs/remotes/origin/${this.headBranch}`,
     )
     await runtime.git('checkout', '-q', '-B', this.headBranch, `origin/${this.headBranch}`)
   }
 
+  /** Fetch real Git objects while leaving origin usable for forge detection. */
+  async fetch(runtime: TestHarness, ...refs: string[]) {
+    await this.driver.prepareGit?.(refs)
+    await runtime.git(
+      '-c',
+      'credential.helper=!gh auth git-credential',
+      'fetch',
+      '--quiet',
+      this.driver.gitSource ?? 'origin',
+      ...refs,
+    )
+  }
+
   async api<T = Json>(route: string, method = 'GET', body?: Json, env = this.env): Promise<T> {
     if (
       env.GH_TOKEN !== this.env.GH_TOKEN &&
-      !this.credentials.some((known) => known.GH_TOKEN === env.GH_TOKEN)
+      !this.credentialEnvironments.some((known) => known.GH_TOKEN === env.GH_TOKEN)
     )
-      this.credentials.push(env)
+      this.credentialEnvironments.push(env)
     if (method !== 'GET') {
       const readQuery = route === 'graphql' && /^\s*query\b/.test(body?.query ?? '')
       const fixtureResource =
@@ -157,25 +230,7 @@ export class GithubFixture {
           'Tests can mutate fixture resources only; repository provisioning or changes are forbidden',
         )
     }
-    const result = await command(
-      'gh',
-      [
-        'api',
-        '--hostname',
-        'github.com',
-        '--method',
-        method,
-        route,
-        ...(body ? ['--input', '-'] : []),
-      ],
-      {
-        input: body ? JSON.stringify(body) : undefined,
-        timeout: 20_000,
-        env: { ...process.env, ...env },
-      },
-    )
-    if (result.code) throw new Error(`GitHub ${method} ${route}: ${result.stderr}`)
-    return (result.stdout ? JSON.parse(result.stdout) : {}) as T
+    return this.driver.api<T>(route, method, body, env)
   }
 
   async dispose() {
@@ -188,12 +243,19 @@ export class GithubFixture {
       } catch (error) {
         errors.push(error)
       }
-    for (const branch of [...this.refs].reverse())
+    if (this.refs.length)
       try {
-        await this.api(`repos/${this.repository}/git/refs/heads/${branch}`, 'DELETE')
+        await this.git(
+          'push',
+          '--quiet',
+          'origin',
+          ...this.refs.map((branch) => `:refs/heads/${branch}`),
+        )
       } catch (error) {
         errors.push(error)
       }
+    if (this.workspace) await rm(this.workspace, { recursive: true, force: true })
+    await this.driver.dispose()
     if (errors.length)
       throw new AggregateError(
         errors,
@@ -201,42 +263,63 @@ export class GithubFixture {
       )
   }
 
+  private async git(...args: string[]) {
+    const result = await command(
+      'git',
+      ['-c', 'credential.helper=!gh auth git-credential', ...args],
+      {
+        cwd: this.workspace,
+        env: {
+          ...isolatedEnv(this.workspace!),
+          ...this.env,
+        },
+        timeout: 30_000,
+      },
+    )
+    if (result.code) throw new Error(`Fixture git ${args[0]}: ${result.stderr}`)
+    return result.stdout.trim()
+  }
+
   static async start(repository = githubRepository, env?: NodeJS.ProcessEnv) {
     if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository))
       throw new Error('LGTM_E2E_GITHUB_REPOSITORY must be owner/repository')
-    const fixture = new GithubFixture(repository, env ?? (await githubCredentials()))
-    // Missing, public or archived repositories fail before any writes. Never provision a replacement.
-    const metadata = await fixture.api(`repos/${repository}`)
-    if (metadata.private !== true || metadata.visibility !== 'private' || metadata.archived)
-      throw new Error(`Configure an existing, active PRIVATE fixture repository: ${repository}`)
-    fixture.repositoryUrl = metadata.html_url
-    const defaultRef = await fixture.api(
-      `repos/${repository}/git/ref/heads/${encodeURIComponent(metadata.default_branch)}`,
-    )
+    const driver = await LiveGithubDriver.start(env)
+    const fixture = new GithubFixture(repository, driver)
     try {
-      await fixture.api(`repos/${repository}/git/refs`, 'POST', {
-        ref: `refs/heads/${fixture.baseBranch}`,
-        sha: defaultRef.object.sha,
-      })
-      fixture.refs.push(fixture.baseBranch)
-      const initial = await fixture.api(`repos/${repository}/contents/${fixture.path}`, 'PUT', {
-        branch: fixture.baseBranch,
-        message: 'E2E: establish isolated review base',
-        content: Buffer.from(fixture.baseContent).toString('base64'),
-      })
-      fixture.base = initial.commit.sha
-      await fixture.api(`repos/${repository}/git/refs`, 'POST', {
-        ref: `refs/heads/${fixture.headBranch}`,
-        sha: fixture.base,
-      })
-      fixture.refs.push(fixture.headBranch)
-      const updated = await fixture.api(`repos/${repository}/contents/${fixture.path}`, 'PUT', {
-        branch: fixture.headBranch,
-        message: 'E2E: establish isolated review head',
-        sha: initial.content.sha,
-        content: Buffer.from(fixture.headContent).toString('base64'),
-      })
-      fixture.head = updated.commit.sha
+      // Missing, public or archived repositories fail before any writes. Never provision a replacement.
+      const metadata = await fixture.api(`repos/${repository}`)
+      if (metadata.private !== true || metadata.visibility !== 'private' || metadata.archived)
+        throw new Error(`Configure an existing, active PRIVATE fixture repository: ${repository}`)
+      fixture.repositoryUrl = metadata.html_url
+      const parent = join(ROOT, 'target/e2e/github')
+      await mkdir(parent, { recursive: true })
+      fixture.workspace = await mkdtemp(join(parent, 'source-'))
+      await fixture.git('init', '-q', '-b', fixture.baseBranch)
+      await fixture.git('remote', 'add', 'origin', `${fixture.repositoryUrl}.git`)
+      await fixture.git('fetch', '--quiet', 'origin', `refs/heads/${metadata.default_branch}`)
+      await fixture.git('checkout', '-q', '-B', fixture.baseBranch, 'FETCH_HEAD')
+      for (const [branch, content] of [
+        [fixture.baseBranch, fixture.baseContent],
+        [fixture.headBranch, fixture.headContent],
+      ]) {
+        await fixture.git('checkout', '-q', '-B', branch)
+        await writeFile(join(fixture.workspace, fixture.path), content)
+        await fixture.git('add', '--', fixture.path)
+        await fixture.git(
+          '-c',
+          'user.name=E2E',
+          '-c',
+          'user.email=e2e@example.test',
+          'commit',
+          '-qm',
+          'E2E: isolated review comparison',
+        )
+        const sha = await fixture.git('rev-parse', 'HEAD')
+        if (branch === fixture.baseBranch) fixture.base = sha
+        else fixture.head = sha
+        await fixture.git('push', '--quiet', 'origin', `refs/heads/${branch}`)
+        fixture.refs.push(branch)
+      }
       fixture.initialHead = fixture.head
       const pr = await fixture.api(`repos/${repository}/pulls`, 'POST', {
         title: `LGTM E2E · ${fixture.run}`,
@@ -246,7 +329,7 @@ export class GithubFixture {
       })
       fixture.number = pr.number
       fixture.nodeId = pr.node_id
-      console.info(`Persistent private fixture: ${pr.html_url}`)
+      console.info(`Live GitHub fixture: ${pr.html_url}`)
       return fixture
     } catch (error) {
       try {
@@ -259,27 +342,4 @@ export class GithubFixture {
       throw error
     }
   }
-}
-
-/** Read an existing login or CI token without logging or writing it to disk. */
-export async function githubCredentials(account?: string) {
-  if (account && process.env.LGTM_E2E_GITHUB_SECONDARY_TOKEN)
-    return { GH_TOKEN: process.env.LGTM_E2E_GITHUB_SECONDARY_TOKEN }
-  const primary =
-    process.env.LGTM_E2E_GITHUB_TOKEN ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN
-  if (!account && primary) return { GH_TOKEN: primary }
-  const selected = account ?? process.env.LGTM_E2E_GITHUB_PRIMARY_USER ?? 'skapoor8'
-  const env = { ...process.env }
-  delete env.GH_TOKEN
-  delete env.GITHUB_TOKEN
-  const result = await command(
-    'gh',
-    ['auth', 'token', '--hostname', 'github.com', '--user', selected],
-    { env },
-  )
-  if (result.code || !result.stdout.trim())
-    throw new Error(
-      `GitHub credentials unavailable for ${selected}. Run gh auth login or set the matching E2E token.`,
-    )
-  return { GH_TOKEN: result.stdout.trim() }
 }

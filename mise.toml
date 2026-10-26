@@ -78,23 +78,47 @@ description = "Run database and backend contracts on SQLite and PostgreSQL"
 run = "mise run //:with-postgres -- cargo test --locked -p lgtm-db -p lgtm-backend --all-features"
 
 [tasks."e2e:backend"]
-description = "Run backend E2E suite via its own Mise configuration"
-depends = ["//e2e/backend:test"]
+description = "Run backend E2E tests"
+usage = 'flag "--extended" help="Include extended tests"'
+run = 'LGTM_E2E_EXTENDED="${usage_extended:-false}" mise run //e2e/backend:test'
 
 [tasks."e2e:cli"]
-description = "Run cli E2E suite via its own Mise configuration"
-depends = ["//e2e/cli:test"]
+description = "Run cli E2E tests"
+usage = 'flag "--extended" help="Include extended tests"'
+run = 'LGTM_E2E_EXTENDED="${usage_extended:-false}" mise run //e2e/cli:test'
 
 [tasks."e2e:nvim"]
-description = "Run nvim E2E suite via its own Mise configuration"
-depends = ["//e2e/nvim:test"]
+description = "Run nvim E2E tests"
+usage = 'flag "--extended" help="Include extended tests"'
+run = '''
+export LGTM_E2E_EXTENDED="${usage_extended:-false}"
+if [ "$LGTM_E2E_EXTENDED" = true ]; then
+  export LGTM_E2E_NVIM_PROFILES="${LGTM_E2E_NVIM_PROFILES:-required,kak}"
+fi
+mise run //e2e/nvim:test
+'''
 
 [tasks.e2e]
-description = "Run every E2E suite and complete cleanup even if a suite fails"
-run = "mise run --continue-on-error //e2e/backend:test ::: //e2e/cli:test ::: //e2e/nvim:test"
+description = "Run E2E suites in parallel"
+usage = 'flag "--extended" help="Include extended tests"'
+run = '''
+export LGTM_E2E_EXTENDED="${usage_extended:-false}"
+if [ "$LGTM_E2E_EXTENDED" = true ]; then
+  export LGTM_E2E_NVIM_PROFILES="${LGTM_E2E_NVIM_PROFILES:-required,kak}"
+fi
+mise run --continue-on-error //:e2e:fixtures:test ::: //e2e/backend:test ::: //e2e/cli:test ::: //e2e/nvim:test
+'''
 
 [tasks."nvim:lint"]
 depends = ["//apps/lgtm.nvim:lint"]
+
+[tasks."nvim:install-dev-plugin"]
+description = "Point Neovim's local LGTM plugin at this checkout"
+run = "mise run //apps/lgtm.nvim:install-plugin --source worktree"
+
+[tasks."nvim:install-released-plugin"]
+description = "Install the latest LGTM plugin from main"
+run = "mise run //apps/lgtm.nvim:install-plugin --source main"
 
 [tasks."nvim:format"]
 depends = ["//apps/lgtm.nvim:format"]
@@ -136,3 +160,28 @@ run = "bun x vitest run --config e2e/cli/vitest.config.ts"
 [tasks."e2e:smoke"]
 description = "Run representative E2E flows across backend, CLI and Neovim"
 run = "mise run --continue-on-error //e2e/backend:smoke ::: //e2e/cli:smoke ::: //e2e/nvim:smoke"
+
+[tasks."e2e:fixtures:test"]
+description = "Verify strict HTTP replay, UUID binding and mutation barriers without GitHub"
+run = "bun x vitest run e2e/common/github-cassette.test.ts"
+
+[tasks."e2e:record"]
+description = "Refresh genuine GitHub recordings for a suite and optional Vitest filter"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+suite=${1:?Use e2e:record -- backend|cli|nvim|all [Vitest filters]}
+shift
+export LGTM_E2E_GITHUB_MODE=record
+export LGTM_E2E_EXTENDED=true
+export LGTM_E2E_NVIM_PROFILES="${LGTM_E2E_NVIM_PROFILES:-required}"
+case "$suite" in
+  backend|cli|nvim) exec mise run "//e2e/$suite:test" -- "$@" ;;
+  all)
+    if [ "$#" -ne 0 ]; then echo "Select a suite to apply Vitest filters" >&2; exit 2; fi
+    # Record suites serially, with shared build dependencies, to avoid API bursts.
+    exec mise run --jobs 1 --continue-on-error //e2e/backend:test ::: //e2e/cli:test ::: //e2e/nvim:test
+    ;;
+  *) echo 'Suite must be backend, cli, nvim, or all' >&2; exit 2 ;;
+esac
+'''
