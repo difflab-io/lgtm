@@ -70,6 +70,13 @@ export class TestHarness {
   }
 
   async launch() {
+    if (this.env.LGTM_GITHUB_TEST_MODE === '1')
+      this.env.LGTM_GITHUB_TEST_ACTOR =
+        this.env.GH_TOKEN === 'lgtm-fixture-primary'
+          ? 'primary'
+          : this.env.GH_TOKEN === 'lgtm-fixture-secondary'
+            ? 'secondary'
+            : 'invalid'
     await rm(join(this.home, 'server.port'), { force: true })
     this.log = ''
     const args = this.kind === 'cli' ? ['up', '--foreground', '--no-open', '--port', '0'] : []

@@ -127,3 +127,6 @@ RELEASE_NOTES.md export-ignore
 .claude/commands/validate-template.md export-ignore
 .mise.local.toml export-ignore
 node_modules/ export-ignore
+
+# Recorded GitHub responses are generated test data.
+e2e/recordings/** linguist-generated=true

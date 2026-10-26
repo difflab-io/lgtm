@@ -3,6 +3,7 @@ import { promisify } from 'node:util'
 import { existsSync } from 'node:fs'
 import { readFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import { profiles } from './profiles.js'
 
 const exec = promisify(execFile),
   suite = import.meta.dirname
@@ -12,6 +13,7 @@ const pins = JSON.parse(await readFile(join(suite, 'dependencies.lock.json'), 'u
 >
 await mkdir(join(suite, '.cache'), { recursive: true })
 for (const [name, pin] of Object.entries(pins)) {
+  if (name === 'kak.nvim' && !profiles.some((profile) => profile === 'kak')) continue
   const directory = join(suite, '.cache', name)
   if (!existsSync(directory))
     await exec('git', ['clone', '--no-checkout', pin.repository, directory])

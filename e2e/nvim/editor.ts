@@ -246,6 +246,20 @@ export class Editor {
     try {
       return {
         stderr: this.errors,
+        screen: await this.lua(`vim.cmd("redraw")
+          local rows = {}
+          for row = 1, vim.o.lines do
+            local cells = {}
+            for col = 1, vim.o.columns do
+              cells[#cells + 1] = vim.fn.screenstring(row, col)
+            end
+            rows[#rows + 1] = table.concat(cells)
+          end
+          return table.concat(rows, "\\n")`),
+        windows: await this.lua(`return vim.tbl_map(function(win)
+          return {win=win, buf=vim.api.nvim_win_get_buf(win),
+            view=vim.api.nvim_win_call(win, vim.fn.winsaveview)}
+          end, vim.api.nvim_tabpage_list_wins(0))`),
         messages: await this.lua('return vim.api.nvim_exec2("messages",{output=true}).output'),
         notices: await this.notices(),
         state: await this.state(),

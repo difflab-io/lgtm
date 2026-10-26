@@ -6,7 +6,6 @@
  */
 import { describe, it, expect } from 'vitest'
 import { usePrFixture } from '../common/pr.fixtures.js'
-import { githubCredentials } from '../common/github.js'
 
 const secondaryUser = process.env.LGTM_E2E_GITHUB_SECONDARY_USER ?? 'skapoor81'
 
@@ -52,7 +51,7 @@ describe('When starting a fresh draft review', () => {
     },
   )
 
-  it('User can reply to a draft comment', async () => {
+  it('User can reply to a draft comment', { tags: ['extended'] }, async () => {
     // Arrange
     const { runtime, github } = fixture()
     const pr = `${github.repositoryUrl}/pull/${github.number}`
@@ -98,7 +97,7 @@ describe('When starting a fresh draft review', () => {
     )
   })
 
-  it('User cannot resolve an unpublished draft thread', async () => {
+  it('User cannot resolve an unpublished draft thread', { tags: ['extended'] }, async () => {
     // Arrange
     const { runtime, github } = fixture()
     const pr = `${github.repositoryUrl}/pull/${github.number}`
@@ -162,12 +161,33 @@ describe('When starting a fresh draft review', () => {
 describe('When resuming an existing draft review', () => {
   const fixture = usePrFixture('cli')
 
-  it('User sees existing drafts and can continue the same pending review after restart', async () => {
-    // Arrange
-    const { runtime, github } = fixture()
-    const pr = `${github.repositoryUrl}/pull/${github.number}`
-    const started = (await runtime.json(['session', 'start', '--pr', pr])).review
-    const saved = (
+  it(
+    'User sees existing drafts and can continue the same pending review after restart',
+    { tags: ['extended'] },
+    async () => {
+      // Arrange
+      const { runtime, github } = fixture()
+      const pr = `${github.repositoryUrl}/pull/${github.number}`
+      const started = (await runtime.json(['session', 'start', '--pr', pr])).review
+      const saved = (
+        await runtime.json([
+          'comments',
+          'add',
+          '--pr',
+          pr,
+          '--file',
+          github.path,
+          '--line',
+          '2',
+          '--body',
+          'Saved before restart',
+        ])
+      ).comment
+      const pending = (await runtime.json(['session', 'show', '--pr', pr])).review.forgeReviewId
+      await runtime.restart()
+
+      // Act
+      const resumed = (await runtime.json(['session', 'start', '--pr', pr])).review
       await runtime.json([
         'comments',
         'add',
@@ -175,38 +195,21 @@ describe('When resuming an existing draft review', () => {
         pr,
         '--file',
         github.path,
-        '--line',
-        '2',
         '--body',
-        'Saved before restart',
+        'Added after restart',
       ])
-    ).comment
-    const pending = (await runtime.json(['session', 'show', '--pr', pr])).review.forgeReviewId
-    await runtime.restart()
+      const current = await runtime.json(['comments', 'list', '--pr', pr])
 
-    // Act
-    const resumed = (await runtime.json(['session', 'start', '--pr', pr])).review
-    await runtime.json([
-      'comments',
-      'add',
-      '--pr',
-      pr,
-      '--file',
-      github.path,
-      '--body',
-      'Added after restart',
-    ])
-    const current = await runtime.json(['comments', 'list', '--pr', pr])
-
-    // Assert
-    expect(resumed).toMatchObject({ id: started.id, forgeReviewId: pending })
-    expect(current.comments).toHaveLength(2)
-    expect(current.comments).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: saved.id, body: 'Saved before restart' }),
-      ]),
-    )
-  })
+      // Assert
+      expect(resumed).toMatchObject({ id: started.id, forgeReviewId: pending })
+      expect(current.comments).toHaveLength(2)
+      expect(current.comments).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: saved.id, body: 'Saved before restart' }),
+        ]),
+      )
+    },
+  )
 })
 
 describe('When there are changes during a PR review', () => {
@@ -406,7 +409,7 @@ describe('When submitting a draft review', () => {
     async (outcome) => {
       // Arrange
       const { runtime, github } = fixture()
-      const secondary = await githubCredentials(secondaryUser)
+      const secondary = await github.credentials(secondaryUser)
       Object.assign(runtime.env, secondary)
       await runtime.restart()
       const pr = `${github.repositoryUrl}/pull/${github.number}`
@@ -500,7 +503,7 @@ describe('When addressing published comments or change requests', () => {
   it('User can reply to another reviewer with a draft and submit a comment response', async () => {
     // Arrange
     const { runtime, github } = fixture()
-    const secondary = await githubCredentials(secondaryUser)
+    const secondary = await github.credentials(secondaryUser)
     await github.api(
       `repos/${github.repository}/pulls/${github.number}/reviews`,
       'POST',

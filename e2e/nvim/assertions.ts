@@ -5,8 +5,8 @@ import { waitFor } from '../common/test-utils.js'
 export async function expectFileSeen(e: Editor, path: string, expected: boolean) {
   // Assert
   await e.wait(
-    'not require("lgtm.context").current.reviewed_loading',
-    'reviewed-file progress loaded',
+    '(function() local s=require("lgtm.context").current; return not s.reviewed_loading and not next(s.reviewed_pending or {}) end)()',
+    'reviewed-file progress loaded and persisted',
   )
   expect(Boolean((await e.state())!.reviewed?.[path])).toBe(expected)
   await e.wait(

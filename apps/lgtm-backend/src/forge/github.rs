@@ -25,7 +25,10 @@ impl GithubClient {
             if std::env::var("LGTM_GITHUB_TEST_MODE").as_deref() != Ok("1") {
                 return Err(invalid("Test GitHub endpoint requires explicit test mode"));
             }
-            return Self::for_test(&endpoint);
+            return Self::for_test_actor(
+                &endpoint,
+                &std::env::var("LGTM_GITHUB_TEST_ACTOR").unwrap_or_default(),
+            );
         }
         let account = std::env::var("LGTM_GITHUB_ACCOUNT").ok();
         let token = gh::get_token(account.as_deref()).await?;
@@ -38,6 +41,17 @@ impl GithubClient {
 
     /// Explicit HTTP fixture boundary; refuses remote hosts and never reads real credentials.
     pub fn for_test(endpoint: &str) -> Result<Self> {
+        Self::for_test_actor(endpoint, "")
+    }
+
+    fn for_test_actor(endpoint: &str, actor: &str) -> Result<Self> {
+        let token = match actor {
+            "" => "lgtm-test-fixture-only",
+            "primary" => "lgtm-fixture-primary",
+            "secondary" => "lgtm-fixture-secondary",
+            "invalid" => "lgtm-fixture-invalid",
+            _ => return Err(invalid("Unknown GitHub fixture actor")),
+        };
         let url = url::Url::parse(endpoint).map_err(|_| invalid("Invalid GitHub test endpoint"))?;
         if url.scheme() != "http"
             || !matches!(url.host_str(), Some("127.0.0.1" | "[::1]" | "localhost"))
@@ -53,7 +67,7 @@ impl GithubClient {
         let client = Octocrab::builder()
             .base_uri(endpoint)
             .map_err(|_| invalid("Invalid test endpoint"))?
-            .personal_token("lgtm-test-fixture-only".to_owned())
+            .personal_token(token.to_owned())
             .build()
             .map_err(|_| invalid("Could not initialize test GitHub client"))?;
         Ok(Self { client })

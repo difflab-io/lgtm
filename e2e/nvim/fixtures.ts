@@ -1,9 +1,10 @@
 import { beforeEach, afterEach } from 'vitest'
 import { Editor } from './editor.js'
+import { profiles } from './profiles.js'
 import type { TestHarness } from '../common/test-harness.js'
 import { useTestHarness } from '../common/fixtures.js'
 
-export const profiles = ['required', 'kak'] as const
+export { profiles }
 
 /** Add an editor to an existing runtime fixture, preserving its context and cleanup order. */
 export function useEditorProcess<T extends { runtime: TestHarness }>(

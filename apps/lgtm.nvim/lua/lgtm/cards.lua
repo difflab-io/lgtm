@@ -49,7 +49,11 @@ function M.render(thread, comments, status, width, expanded, placement)
   end
   local fallback = placement and not placement.location
   if fallback then
-    heading = placement.status:sub(1, 1):upper() .. placement.status:sub(2) .. " · " .. heading
+    local label = placement.status:sub(1, 1):upper() .. placement.status:sub(2)
+    if placement.status == "stale" or placement.status == "outdated" then
+      label = label .. " · anchor lost"
+    end
+    heading = label .. " · " .. heading
   end
   local replies = 0
   for _, comment in ipairs(comments) do
@@ -72,22 +76,6 @@ function M.render(thread, comments, status, width, expanded, placement)
       { fit(text, width - 4), "LgtmCommentBody" },
       { " " .. border[4], { "LgtmNormal", "LgtmCommentBorder" } },
     }
-  end
-  if fallback then
-    local original = thread.anchor
-    if original.start then
-      content(
-        "Original lines " .. original.start .. "–" .. original["end"] .. " · location lost"
-      )
-    end
-    content(placement.reason or "Original location unavailable")
-    if
-      original.evidence
-      and original.evidence.selectedText
-      and original.evidence.selectedText ~= ""
-    then
-      content("> " .. (original.evidence.selectedText:match("[^\n]+") or ""))
-    end
   end
   if expanded then
     for _, comment in ipairs(comments) do
