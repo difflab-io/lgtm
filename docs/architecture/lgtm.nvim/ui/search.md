@@ -66,8 +66,6 @@ stateDiagram-v2
   Cancelled --> [*]: Restore source focus
 ```
 
-## Implementation
-
 ### Public API
 
 Keyboard API:
@@ -107,8 +105,7 @@ flowchart LR
   Query -->|"Esc: no selection"| Close["Close picker"]
 ```
 
-### Maintainer Notes
+## Implementation
 
-Schedule filtering outside the text-change callback. Updating the tree during that callback can hit Neovim's text lock.
-
-See the [implementation](../../../../apps/lgtm.nvim/lua/lgtm/ui/search.lua) and [plugin architecture](../index.md).
+- Schedule filtering outside the text-change callback to avoid Neovim text-lock errors.
+- [Source](../../../../apps/lgtm.nvim/lua/lgtm/ui/search.lua).

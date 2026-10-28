@@ -55,7 +55,8 @@ Git reviews also include CodeDiff's diff buffers and native explorer. Explicit d
 flowchart TD
   Entry["Commands and keymaps"] --> Controllers["review / notes / sessions / threads / files<br/>Editor actions and view lifecycle"]
   Controllers -->|"Shared state + user intent"| Services["services/<br/>Load, save, synchronize, recover"]
-  Services --> Store["services/state.lua<br/>ReviewState, Conversation, Draft"]
+  Services -.->|"Shared shapes"| Models["models/<br/>ReviewState, Conversation, Draft"]
+  Services --> Store["services/state.lua<br/>Active reviews, notes and drafts"]
   Services --> Client["services/client.lua<br/>Identity, cancellation, Connect calls"]
   Client --> Transport["transport/connect.lua"]
   Transport --> Backend["LGTM backend"]
@@ -75,7 +76,8 @@ flowchart TD
 | `services/diffs.lua`, `services/files.lua` | Load paginated diffs and selected content, persist reviewed marks, and invalidate changed marks. |
 | `services/sessions.lua` | Load review/PR candidates and consume review pagination. |
 | `services/sources.lua` | Read exact source bytes and reconcile source observations. |
-| `services/state.lua` | Shared record shapes, active review/tab state, saved-file state, and submission drafts. |
+| `models/` | Shared LuaLS declarations for reviews, files, conversations, comments, threads, drafts and service results. |
+| `services/state.lua` | Active review/tab state, saved-file state, and submission drafts. |
 | `services/client.lua` | Backend capabilities, identity bootstrap, cancellation, and request routing. |
 | `ui/` | [Search](ui/search.md), [composer](ui/composer.md), [conversation](ui/conversation.md), [directory files](ui/files.md), and [cards](ui/cards.md). |
 | `codediff.lua`, `anchors.lua`, `locations.lua` | Diff lifecycle, source-side placement, and observed filesystem moves. |
@@ -154,7 +156,7 @@ The user API remains `require("lgtm").setup(opts)` and `:Lgtm` commands. See the
 | `Draft` | A body, anchor, guarded version, and stable request key retained for retries. Created by the feedback service. |
 | `OperationResult` | Submission message and optional warning after applying its durable result. |
 
-Shapes are declared beside the shared store in `services/state.lua`. `OperationResult` is declared in `services/submissions.lua`. Services retain backend records rather than creating a second domain model for each view. UI components receive the small display records that their layout needs.
+Shapes are declared in separate files under `models/`, including `review_state.lua`, `conversation.lua` and `operation_result.lua`. Services retain backend records rather than creating a second domain model for each view. UI components receive the small display records that their layout needs.
 
 | Service operation | Work grouped behind the boundary |
 | --- | --- |

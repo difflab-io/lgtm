@@ -89,8 +89,6 @@ stateDiagram-v2
   Pane --> [*]: q or Esc
 ```
 
-## Implementation
-
 ### Public API
 
 Keyboard API:
@@ -141,8 +139,7 @@ flowchart TD
   Location -->|"Outside diff"| Notice["Explain limit; keep pane focus"]
 ```
 
-### Maintainer Notes
+## Implementation
 
-Global edit/delete shortcuts must wait for `on_ready`. NuiComponents mounts asynchronously. Sending the key earlier can edit the source buffer.
-
-See the [implementation](../../../../apps/lgtm.nvim/lua/lgtm/ui/conversation.lua) and [plugin architecture](../index.md).
+- Wait for `on_ready` before sending edit/delete keys; mounting is asynchronous and earlier input can edit the source buffer.
+- [Source](../../../../apps/lgtm.nvim/lua/lgtm/ui/conversation.lua).

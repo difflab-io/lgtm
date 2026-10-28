@@ -4,8 +4,10 @@ neovim = "0.12.5"
 "cargo:selene" = "0.31.0"
 
 [tasks.test]
-description = "Plugin syntax and public contract checks"
-run = "nvim --headless -u NONE -l {{config_root}}/tests/contracts.lua"
+description = "Nested Lua unit and Neovim integration tests"
+depends = ["//e2e/nvim:install"]
+dir = "{{config_root}}"
+run = "nvim --headless -u tests/init.lua -c \"PlenaryBustedDirectory tests { minimal_init = 'tests/init.lua', sequential = true }\""
 
 [tasks.lint]
 description = "Lua lint, UI complexity gate, and controller/service complexity report"

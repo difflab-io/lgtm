@@ -54,8 +54,6 @@ stateDiagram-v2
   Conversation --> [*]: Return to source / retain card state
 ```
 
-## Implementation
-
 ### Public API
 
 Keyboard API:
@@ -112,9 +110,8 @@ flowchart TD
   Adapter --> Placement["threads.lua + codediff.other_line<br/>Source placement and opposite-side padding"]
 ```
 
+## Implementation
 
-### Maintainer Notes
-
-NuiComponents paragraphs write into their own buffers. Cards decorate existing CodeDiff buffers, so they compose NUI text fragments and convert them at one virtual-line boundary. Text fitting and wrapping stay in the annotation helpers. Source-side translation stays in `codediff.other_line`.
-
-See the [implementation](../../../../apps/lgtm.nvim/lua/lgtm/ui/cards.lua) and [plugin architecture](../index.md).
+- Cards decorate existing CodeDiff buffers. Keep the NUI-text-to-virtual-line conversion at one boundary.
+- Translate opposite-pane padding through `codediff.other_line`; do not duplicate edit-range mapping here.
+- [Source](../../../../apps/lgtm.nvim/lua/lgtm/ui/cards.lua).

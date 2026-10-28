@@ -1,0 +1,14 @@
+---@class lgtm.ReviewState
+---@field review lgtm.Review?
+---@field scope table Backend review or saved-file scope.
+---@field version string?
+---@field files lgtm.ReviewFile[]?
+---@field file lgtm.ReviewFile?
+---@field conversation lgtm.Conversation?
+---@field reviewed table<string, string>?
+---@field kind 'git'|'directory'|'pr'|'notes'
+---@field closed boolean?
+---@field initializing boolean?
+---@field on_error fun(err: lgtm.ServiceError)?
+---@field on_files_changed fun()?
+---@field refresh fun(done: function?) Refresh the owning editor view.

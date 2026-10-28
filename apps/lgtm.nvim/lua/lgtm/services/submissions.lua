@@ -1,10 +1,5 @@
 -- State -----------------------------------------------------------------------
 
----@class lgtm.OperationResult
----@field message string
----@field warning string?
----@field editable boolean? Recovery returned the review to an editable state.
-
 local M = {}
 local Private = {}
 local rpc = require("lgtm.services.client")

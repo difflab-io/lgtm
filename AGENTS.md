@@ -11,6 +11,8 @@
 - Use soft wraps for documentation prose. Keep each paragraph on one source line and let the editor wrap it for display. Do not add manual line breaks between sentences or at a fixed column width. Preserve structural line breaks in lists, tables, code, and Mermaid diagrams.
 - Embed architecture diagrams as inline Mermaid fences so MmdToImg can preview the source in Neovim. Keep diagram source in the Markdown page, without separate diagram directories or tracked preview images.
 
+- [Proposed] Put component public APIs and state/data flow under Design. Keep Implementation to brief, non-obvious maintainer notes; do not repeat parent architecture docs.
+
 ## Code Style
 
 - During alpha, update branch-introduced contracts directly. Do not retain duplicate fields or add compatibility code for earlier versions of this branch.
@@ -36,7 +38,9 @@ These rules apply to every app and library in the workspace.
 
 - Colocate private unit tests in the source file under `#[cfg(test)] mod tests`. Shared unit fixtures belong under `src/tests/`.
 - Use separate integration test files directly under `tests/` for each service or repository area (for example, `tests/review_service.rs`). Group cases with inline `mod name { ... }` blocks inside those files. Do not consolidate all integration tests into one file or add a nested `tests/integration/` directory or `#[path]` declarations. Shared integration fixtures belong under `tests/common/`; do not use `tests/support/` or `tests/test_support/`.
-- Name tests `should_<behavior>` and keep fixture helpers separate from test cases with the standard separators.
+- Name Rust test functions `should_<behavior>` and keep fixture helpers separate from test cases with the standard separators.
+- [Proposed] Use human-readable BDD titles in Vitest and Lua tests. Group cases under nested `When ...` contexts, and separate fixtures, unit tests and integration tests with file section dividers.
+- [Proposed] Test plugin source switching through the root Mise tasks. Limit installation fixtures to isolated Neovim profiles and cleanup; do not recreate the installer or construct substitute plugin repositories.
 - Test multi-operation transactions and full review lifecycles against real SQLite and PostgreSQL. Use dummy external services.
 - Run checks through project Mise tasks invoked by Premise. Keep their source scripts tracked; generated output stays ignored.
 - Use `e2e/README.md` for PR E2E replay, recording refresh and live parity commands. Keep TypeScript E2E tests under e2e/, outside Rust app test directories.
@@ -48,6 +52,8 @@ These rules apply to every app and library in the workspace.
 - Keep shared process and GitHub lifecycle fixtures in `e2e/common/`. Compose editor lifecycle hooks once under `e2e/nvim/`. Keep feature setup in adjacent `*.fixtures.ts` files, and keep small single-file helpers private in their spec. Export only helpers that another module uses.
 
 ## Lua and Neovim UI
+
+- [Proposed] Keep shared Lua model declarations under `lua/lgtm/models/`, grouped by model where useful. Keep state management and service operations outside model files.
 
 - Organize view modules as State, Render, Lifecycle, Methods, then Private. Use only sections that contain code. Pad `-- Section` separators with hyphens to column 80. Keep public entry points above module-private helpers.
 - Put private helper definitions at the bottom. Use a module-local namespace or explicit local forward declarations when earlier functions need them. Do not export helpers only to avoid Lua's declaration order.

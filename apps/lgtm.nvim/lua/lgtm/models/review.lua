@@ -1,0 +1,8 @@
+---@class lgtm.Review
+---@field id string
+---@field version string
+---@field state 'active'|'completed'
+---@field target table Backend target union, retained without remapping.
+---@field comparison table Backend comparison union, retained without remapping.
+---@field submissionStatus string
+---@field body string?

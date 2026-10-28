@@ -69,8 +69,6 @@ stateDiagram-v2
   Reviewed --> [*]: f or q
 ```
 
-## Implementation
-
 ### Public API
 
 Keyboard API:
@@ -120,4 +118,7 @@ flowchart LR
   Next --> Controller
 ```
 
-See the [implementation](../../../../apps/lgtm.nvim/lua/lgtm/ui/files.lua) and [plugin architecture](../index.md).
+## Implementation
+
+- Use the path as the tree node ID so updates can retain the selected file.
+- [Source](../../../../apps/lgtm.nvim/lua/lgtm/ui/files.lua).

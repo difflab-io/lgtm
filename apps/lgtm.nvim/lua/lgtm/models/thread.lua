@@ -1,0 +1,7 @@
+---@class lgtm.Thread
+---@field id string
+---@field version string
+---@field state string
+---@field anchor table Persisted source and location evidence.
+---@field currentPath string?
+---@field orphanReason string?

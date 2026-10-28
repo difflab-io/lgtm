@@ -1,0 +1,7 @@
+---@class lgtm.ReviewFile
+---@field path string
+---@field identity string?
+---@field content string?
+---@field baseContent string?
+---@field contentHash string?
+---@field loaded boolean?

@@ -1,0 +1,4 @@
+---@class lgtm.ServiceError
+---@field message string
+---@field code string?
+---@field uncertain boolean?

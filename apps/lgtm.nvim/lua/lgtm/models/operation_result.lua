@@ -1,0 +1,4 @@
+---@class lgtm.OperationResult
+---@field message string
+---@field warning string?
+---@field editable boolean? Recovery returned the review to an editable state.

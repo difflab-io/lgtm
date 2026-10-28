@@ -27,5 +27,9 @@
   "lazy.nvim": {
     "repository": "https://github.com/folke/lazy.nvim.git",
     "commit": "306a05526ada86a7b30af95c5cc81ffba93fef97"
+  },
+  "plenary.nvim": {
+    "repository": "https://github.com/nvim-lua/plenary.nvim.git",
+    "commit": "74b06c6c75e4eeb3108ec01852001636d85a932b"
   }
 }

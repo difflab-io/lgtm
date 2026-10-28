@@ -22,23 +22,19 @@ export class Editor {
     readonly profile: 'required' | 'kak',
   ) {}
 
-  async start() {
+  async start(init = join(ROOT, 'e2e/nvim/init.lua')) {
     this.errors = ''
-    this.child = spawn(
-      'nvim',
-      ['--embed', '--headless', '-u', join(ROOT, 'e2e/nvim/init.lua'), '-i', 'NONE', '-n'],
-      {
-        cwd: this.runtime.workspace,
-        env: {
-          ...this.runtime.env,
-          LGTM_REPO_ROOT: ROOT,
-          LGTM_E2E_KAK: this.profile === 'kak' ? '1' : '0',
-          LGTM_RPC_URL: this.runtime.endpoint,
-          PATH: join(ROOT, 'target/debug') + ':' + process.env.PATH,
-        },
-        stdio: ['pipe', 'pipe', 'pipe'],
+    this.child = spawn('nvim', ['--embed', '--headless', '-u', init, '-i', 'NONE', '-n'], {
+      cwd: this.runtime.workspace,
+      env: {
+        ...this.runtime.env,
+        LGTM_REPO_ROOT: ROOT,
+        LGTM_E2E_KAK: this.profile === 'kak' ? '1' : '0',
+        LGTM_RPC_URL: this.runtime.endpoint,
+        PATH: join(ROOT, 'target/debug') + ':' + process.env.PATH,
       },
-    )
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
     this.child.stderr?.on('data', (chunk) => {
       this.errors += chunk
       appendFileSync(join(this.runtime.directory, 'editor.log'), chunk)

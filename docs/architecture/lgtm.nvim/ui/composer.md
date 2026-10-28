@@ -89,8 +89,6 @@ stateDiagram-v2
   Retained --> [*]: Close view
 ```
 
-## Implementation
-
 ### Public API
 
 Keyboard API:
@@ -141,8 +139,8 @@ sequenceDiagram
   end
 ```
 
-### Maintainer Notes
+## Implementation
 
-The pinned TextInput rejects a `linebreak` prop. Set `win_options.linebreak` on its popup instead. NUI hide/show recreates the window, so callers must reacquire its window ID after a failed save.
-
-See the [implementation](../../../../apps/lgtm.nvim/lua/lgtm/ui/composer.lua) and [plugin architecture](../index.md).
+- The pinned TextInput rejects a `linebreak` prop; set `win_options.linebreak` on its popup.
+- Reacquire the window ID after a failed save because NUI hide/show recreates it.
+- [Source](../../../../apps/lgtm.nvim/lua/lgtm/ui/composer.lua).

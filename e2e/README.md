@@ -172,3 +172,7 @@ Premise removes generic publication credentials such as `GH_TOKEN` from task env
 Private Rust unit tests, database integration tests and the plugin's Lua unit contracts remain in their existing app and library locations.
 
 Neovim runs a global preflight before test hooks create any PRs. It starts each selected editor profile and computes a native CodeDiff diff. Missing modules or native binaries fail the suite once, with the startup error. The installer always checks out each pinned revision, including on a fresh clone whose default HEAD already matches the pin.
+
+## Lua plugin checks
+
+Run `premise run //apps/lgtm.nvim:test` for nested Plenary cases under `apps/lgtm.nvim/tests/unit/` and `tests/integration/`. The shared pinned dependency cache includes Plenary for tests only. Installation E2E cases run `nvim:install-dev-plugin` and `nvim:install-released-plugin` in temporary user profiles, then start Neovim and check the installed plugin.

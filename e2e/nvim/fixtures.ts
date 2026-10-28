@@ -10,7 +10,7 @@ export { profiles }
 export function useEditorProcess<T extends { runtime: TestHarness }>(
   fixture: () => T,
   profile: (typeof profiles)[number],
-  options: { prepare?: (context: T) => Promise<void>; timeoutMs?: number } = {},
+  options: { prepare?: (context: T) => Promise<void>; timeoutMs?: number; start?: boolean } = {},
 ) {
   let editor: Editor | undefined
   beforeEach(async () => {
@@ -18,7 +18,7 @@ export function useEditorProcess<T extends { runtime: TestHarness }>(
     await options.prepare?.(context)
     editor = new Editor(context.runtime, profile)
     if (options.timeoutMs) editor.timeoutMs = options.timeoutMs
-    await editor.start()
+    if (options.start !== false) await editor.start()
   })
   afterEach(async ({ task }) => {
     const current = editor
