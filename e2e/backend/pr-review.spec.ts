@@ -313,6 +313,103 @@ describe('When starting a fresh draft review', () => {
   )
 })
 
+describe('When a pending review already exists on GitHub', () => {
+  const fixture = usePrFixture('backend')
+
+  it.each([
+    { origin: 'GitHub before opening LGTM', beforeOpening: true, earlierSession: false },
+    { origin: 'GitHub while LGTM is open', beforeOpening: false, earlierSession: false },
+    { origin: 'an earlier LGTM session', beforeOpening: true, earlierSession: true },
+  ])(
+    'Preserves the pending review created directly on GitHub from $origin',
+    async ({ beforeOpening, earlierSession }) => {
+      // Arrange
+      const { runtime, github } = fixture()
+      const route = `repos/${github.repository}/pulls/${github.number}/reviews`
+      const body = earlierSession
+        ? `<!-- lgtm-review:${randomUUID()} -->`
+        : 'Native GitHub draft summary'
+      const opened = beforeOpening ? undefined : await prepareReview(runtime, github)
+      const native = await github.api(route, 'POST', {
+        commit_id: github.head,
+        body,
+        comments: [{ path: github.path, line: 2, side: 'RIGHT', body: 'Native GitHub feedback' }],
+      })
+      const original = await github.api<Json[]>(`${route}/${native.id}/comments`)
+      const { scope, anchor, review } = opened ?? (await prepareReview(runtime, github))
+      // A pending review can have been created on an older PR commit.
+      await github.changeFiles({ [github.path]: github.headContent + 'new tail context\n' })
+      await refreshReview(runtime, scope)
+      const latest = (await runtime.rpc('GetReview', { reviewId: review.id })).review
+
+      // Act
+      const saved = await saveDraft(runtime, scope, 'Additional LGTM feedback', {
+        ...anchor,
+        snapshotId: latest.snapshot.id,
+      })
+      await runtime.restart()
+      await refreshReview(runtime, scope)
+      const current = (await runtime.rpc('GetReview', { reviewId: review.id })).review
+      const conversation = await runtime.rpc('GetConversation', { scope })
+      const pending = await github.api(`${route}/${native.id}`)
+      const comments = await github.api<Json[]>(`${route}/${native.id}/comments`)
+
+      // Assert
+      expect(saved.syncError).toBeFalsy()
+      expect(current.forgeReviewId).toBe(String(native.id))
+      expect(pending).toMatchObject({ id: native.id, state: 'PENDING', body })
+      expect(comments).toHaveLength(2)
+      expect(comments.find((comment) => comment.id === original[0].id)).toMatchObject({
+        body: original[0].body,
+      })
+      expect(comments.some((comment) => String(comment.id) === saved.comment.forgeCommentId)).toBe(
+        true,
+      )
+      expect(conversation.comments.map((comment: Json) => comment.body)).toEqual(
+        expect.arrayContaining(['Native GitHub feedback', 'Additional LGTM feedback']),
+      )
+    },
+  )
+})
+
+describe('When submitting general feedback with an existing GitHub pending review', () => {
+  const fixture = usePrFixture('backend')
+
+  it('Submits the existing review and keeps its native comment when LGTM adds only general feedback', async () => {
+    // Arrange
+    const { runtime, github } = fixture()
+    const route = `repos/${github.repository}/pulls/${github.number}/reviews`
+    const native = await github.api(route, 'POST', {
+      commit_id: github.head,
+      body: 'Native draft summary',
+      comments: [{ path: github.path, line: 2, side: 'RIGHT', body: 'Keep this native comment' }],
+    })
+    const original = await github.api<Json[]>(`${route}/${native.id}/comments`)
+    const { scope, review } = await prepareReview(runtime, github)
+    await saveDraft(runtime, scope, 'General LGTM feedback', { kind: 'general' })
+
+    // Act
+    const { response } = await submitReview(
+      runtime,
+      review.id,
+      'comment',
+      `${native.body}\n\nFinal LGTM message`,
+    )
+    const submitted = await github.api(`${route}/${native.id}`)
+    const comments = await github.api<Json[]>(`${route}/${native.id}/comments`)
+
+    // Assert
+    expect(response.status).toBe(200)
+    expect(response.body.review.forgeReviewId).toBe(String(native.id))
+    expect(submitted).toMatchObject({ id: native.id, state: 'COMMENTED' })
+    expect(submitted.body).toContain('Native draft summary')
+    expect(submitted.body).toContain('Final LGTM message')
+    expect(comments.find((comment) => comment.id === original[0].id)).toMatchObject({
+      body: original[0].body,
+    })
+  })
+})
+
 describe('When resuming an existing draft review', () => {
   const fixture = usePrFixture('backend')
 

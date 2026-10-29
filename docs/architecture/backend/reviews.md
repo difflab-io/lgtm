@@ -437,6 +437,8 @@ Clients invalidate local reviewed-file marks when their compared content changes
 
 The context key is the repository URL and PR number. Commits describe the current comparison, not the context identity. Active reviews with no frozen final submission follow complete provider observations on refresh, reopen, and draft synchronization. Keep the review ID, authorship, comments, replies, and bound pending-review ID. Never submit, discard, or recreate a pending review merely because its creation commit is old.
 
+The authenticated GitHub account's existing pending review is reused when a new local session has no review receipt, including reviews started on GitHub or by an earlier LGTM session. Adding feedback preserves the pending review's ID, summary and existing comments. A bound receipt cannot switch to another review; uncertain creation still requires its exact recovery evidence. Never discard a pending review to make a local session writable.
+
 ```mermaid
 flowchart TD
     A["Refresh, reopen, or save PR draft"] --> B["Observe PR state, base, head, and comments"]

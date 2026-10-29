@@ -682,6 +682,135 @@ mod pending_drafts {
 
     // tests -------------------------------------------------------------------
     #[tokio::test]
+    async fn should_reuse_native_pending_review_without_replacing_feedback_or_weakening_receipts() {
+        for status in ["unsubmitted", "draft_uncertain", "bound_elsewhere"] {
+            for (reviews, _, _temp) in common::databases().await {
+                let pending = json!({"id":5,"node_id":"PRR_fixture","state":"PENDING","body":"Native GitHub draft summary","commit_id":"earlier-head","user":{"id":1,"login":"fixture"}});
+                let original = json!({"id":"T_9","path":"file.txt","subjectType":"FILE","diffSide":"RIGHT","line":null,"isResolved":false,"comments":{"nodes":[{"id":"C_9","databaseId":9,"body":"Native feedback","updatedAt":"2026-10-18T00:00:00Z","author":{"databaseId":1,"login":"fixture"},"pullRequestReview":{"databaseId":5,"state":"PENDING"}}],"pageInfo":{"hasNextPage":false}}});
+                let state = Arc::new(Mutex::new(Remote {
+                    review: Some(pending.clone()),
+                    threads: vec![original.clone()],
+                    ..Default::default()
+                }));
+                let fixture = fixture(state.clone());
+                let forge = ForgeService::with_provider(
+                    reviews.clone(),
+                    GithubClient::for_test(&fixture.endpoint).unwrap(),
+                );
+                let actor = reviews
+                    .auth()
+                    .ensure_human("Reviewer", "reviewer@example.test")
+                    .await
+                    .unwrap();
+                let context = reviews
+                    .ensure_context(
+                        ContextKey::ForgeBacked {
+                            repository_url: ForgeRepositoryUrl::parse(
+                                "https://github.com/acme/repo",
+                            )
+                            .unwrap(),
+                            number: 1,
+                        },
+                        None,
+                    )
+                    .await
+                    .unwrap();
+                let context = forge.refresh(&context.id).await.unwrap();
+                let session = reviews
+                    .start_session(
+                        &context,
+                        &actor,
+                        CommitContext {
+                            base: Some("base".into()),
+                            head: Some("head".into()),
+                        },
+                        ComparisonKind::PullRequest,
+                        None,
+                    )
+                    .await
+                    .unwrap();
+                let comment = reviews
+                    .add_comment(
+                        &session.id,
+                        &actor,
+                        "Additional LGTM feedback",
+                        Anchor::File {
+                            path: "file.txt".into(),
+                        },
+                        None,
+                        None,
+                    )
+                    .await
+                    .unwrap();
+                if status != "unsubmitted" {
+                    reviews
+                        .database()
+                        .sessions
+                        .update_submission(
+                            &session.id,
+                            "unsubmitted",
+                            if status == "bound_elsewhere" {
+                                "unsubmitted"
+                            } else {
+                                status
+                            },
+                            None,
+                            (status == "bound_elsewhere").then_some("6"),
+                        )
+                        .await
+                        .unwrap();
+                }
+
+                let result = forge.sync_draft(&session.id, &comment.id, &actor).await;
+                if status == "unsubmitted" {
+                    assert_eq!(result.unwrap().forge_comment_id.as_deref(), Some("10"));
+                    assert_eq!(
+                        reviews
+                            .get_session(&session.id)
+                            .await
+                            .unwrap()
+                            .forge_review_id
+                            .as_deref(),
+                        Some("5")
+                    );
+                    forge.refresh(&context.id).await.unwrap();
+                    let conversation = reviews.get_conversation(&context.id, true).await.unwrap();
+                    assert_eq!(conversation.comments.len(), 2);
+                    assert!(
+                        conversation
+                            .comments
+                            .iter()
+                            .any(|comment| comment.body == "Native feedback")
+                    );
+                } else {
+                    assert!(
+                        result.is_err(),
+                        "uncertain or bound receipts cannot be reassigned"
+                    );
+                    assert!(
+                        reviews
+                            .get_comment(&context.id, &comment.id)
+                            .await
+                            .unwrap()
+                            .forge_comment_id
+                            .is_none()
+                    );
+                }
+                let remote = state.lock().unwrap();
+                assert_eq!(remote.review.as_ref(), Some(&pending));
+                assert_eq!(remote.threads[0], original);
+                assert_eq!(remote.writes, usize::from(status == "unsubmitted"));
+                assert!(
+                    !remote
+                        .requests
+                        .iter()
+                        .any(|request| request.starts_with("DELETE "))
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn should_sync_edit_refresh_and_submit_the_same_pending_review_after_restart() {
         for lose_draft_response in [false, true] {
             for (reviews, _, _temp) in common::databases().await {

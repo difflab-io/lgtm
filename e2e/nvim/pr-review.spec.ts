@@ -480,6 +480,53 @@ for (const profile of profiles) {
     })
   })
 
+  describe(
+    `When GitHub creates a pending review in the background [${profile}]`,
+    { tags: [profile] },
+    () => {
+      const fixture = usePrEditor(profile)
+
+      it('Adds feedback to the existing pending review without changing its original comment', async () => {
+        // Arrange
+        const { editor, github } = fixture()
+        await selectBranchPr(editor, github)
+        const route = `repos/${github.repository}/pulls/${github.number}/reviews`
+        const native = await github.api(route, 'POST', {
+          commit_id: github.head,
+          body: 'Native pending review summary',
+          comments: [
+            { path: github.path, line: 2, side: 'RIGHT', body: 'Feedback written on GitHub' },
+          ],
+        })
+        const original = await github.api<Json[]>(`${route}/${native.id}/comments`)
+        await editor.command('Lgtm refresh')
+        await editor.comments(1)
+
+        // Act
+        await editor.pane('new', 3)
+        await editor.keys('c')
+        await editor.compose('Feedback added from Neovim')
+        const state = (await editor.comments(2))!
+        const pending = await github.api(`${route}/${native.id}`)
+        const comments = await github.api<Json[]>(`${route}/${native.id}/comments`)
+
+        // Assert
+        expect(state.review.forgeReviewId).toBe(String(native.id))
+        expect(pending).toMatchObject({
+          id: native.id,
+          state: 'PENDING',
+          body: 'Native pending review summary',
+        })
+        expect(comments).toHaveLength(2)
+        expect(comments.find((comment) => comment.id === original[0].id)).toMatchObject({
+          body: original[0].body,
+        })
+        expect(JSON.stringify(await editor.marks())).toContain('Feedback written on GitHub')
+        expect(JSON.stringify(await editor.marks())).toContain('Feedback added from Neovim')
+      })
+    },
+  )
+
   describe(`When the PR changes during review [${profile}]`, { tags: [profile] }, () => {
     const fixture = usePrEditor(profile)
 

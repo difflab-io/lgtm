@@ -600,7 +600,16 @@ impl ReviewService for Api {
         let evidence = if matches!(anchor, m::Anchor::General) {
             None
         } else {
-            let revision = id(&supplied_anchor.snapshot_id)?;
+            if supplied_anchor.snapshot_id.is_empty() {
+                return Err(ConnectError::invalid_argument(
+                    "File and line comments require anchor.snapshotId. Update/restart your client and reopen the review.",
+                ));
+            }
+            let revision = uuid::Uuid::parse_str(&supplied_anchor.snapshot_id).map_err(|_| {
+                ConnectError::invalid_argument(
+                    "anchor.snapshotId must be a UUID for a saved review revision",
+                )
+            })?;
             Some(
                 self.reviews
                     .get_snapshot_location(&selected.id, &revision, &anchor)

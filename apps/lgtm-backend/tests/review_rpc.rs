@@ -148,6 +148,53 @@ async fn should_validate_requests_and_preserve_local_conversation_through_rpc() 
         include_drafts: Some(true),
         ..Default::default()
     };
+    // Old clients must receive an actionable error without saving a partial comment.
+    for kind in ["file", "line"] {
+        for snapshot_id in ["", "not-a-uuid"] {
+            let error = reviews
+                .add_comment_with_options(
+                    AddCommentRequest {
+                        scope: Some(scope.clone()).into(),
+                        anchor: Some(Anchor {
+                            kind: kind.into(),
+                            snapshot_id: snapshot_id.into(),
+                            path: "review.txt".into(),
+                            side: if kind == "line" {
+                                "new".into()
+                            } else {
+                                String::new()
+                            },
+                            start: if kind == "line" { 1 } else { 0 },
+                            end: if kind == "line" { 1 } else { 0 },
+                            ..Default::default()
+                        })
+                        .into(),
+                        body: "Keep my unsent feedback".into(),
+                        expected_version: review.version.clone(),
+                        request_key: format!("invalid-snapshot-{kind}-{snapshot_id}"),
+                        ..Default::default()
+                    },
+                    options(),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, ErrorCode::InvalidArgument);
+            assert!(error.to_string().contains("anchor.snapshotId"), "{error}");
+            if snapshot_id.is_empty() {
+                assert!(error.to_string().contains("restart your client"), "{error}");
+            }
+        }
+    }
+    assert!(
+        reviews
+            .get_conversation(read())
+            .await
+            .unwrap()
+            .into_owned()
+            .comments
+            .is_empty()
+    );
+
     let first = reviews
         .add_comment_with_options(
             AddCommentRequest {

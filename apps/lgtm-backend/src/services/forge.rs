@@ -104,8 +104,7 @@ impl ForgeService {
         let (repo, pr) = Repository::from_context_key(&context.key)?;
         let github = self.get_provider().await?;
         let account = github.get_account_id().await?;
-        // The same owned pending review survives a push. An unrelated provider draft
-        // must still be reconciled rather than adopted implicitly.
+        // Reuse the authenticated account's pending review, including drafts started on GitHub.
         self.get_pending(&github, &repo, pr, &session, &account)
             .await?;
         self.refresh_context(context_id, Some(expected_version))
@@ -1561,11 +1560,20 @@ impl ForgeService {
             return Ok(None);
         };
         let id = gh::opaque(&pending, "id")?;
-        if session.forge_review_id.as_ref() != Some(&id)
+        if let Some(bound) = &session.forge_review_id {
+            if bound != &id {
+                return Err(Error::Conflict(
+                    "The bound GitHub pending review changed; refresh before continuing".into(),
+                ));
+            }
+        } else if !["unsubmitted", "draft_failed", "sending"]
+            .contains(&session.submission_status.as_str())
             && (pending["commit_id"].as_str() != session.commits.head.as_deref()
                 || pending["body"].as_str() != Some(&review_marker(session.id)))
         {
-            return Err(Error::Conflict("A different pending review already exists on GitHub; submit or discard it before starting this review".into()));
+            return Err(Error::Conflict(
+                "Pending review creation cannot be recovered uniquely; existing GitHub feedback is unchanged".into(),
+            ));
         }
         Ok(Some(pending))
     }
@@ -1746,6 +1754,8 @@ impl ForgeService {
                         "Pending review changed or disappeared; refresh before submitting".into(),
                     )
                 })?
+        } else if let Some(pending) = self.get_pending(github, repo, pr, session, account).await? {
+            pending
         } else {
             github
                 .post(
