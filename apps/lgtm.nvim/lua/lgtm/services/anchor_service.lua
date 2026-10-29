@@ -67,14 +67,14 @@ end
 
 ---@param state lgtm.ReviewState
 function M.get_placements(state, callback, conversation)
-  if state.placement_read then
-    local reader = state.placement_read
+  local reader = state.placement_read
+  if reader then
     reader.callbacks[#reader.callbacks + 1] = callback
     reader.conversation = conversation or reader.conversation
     reader.again = true
     return
   end
-  local reader = { callbacks = { callback }, conversation = conversation or state.conversation }
+  reader = { callbacks = { callback }, conversation = conversation or state.conversation }
   state.placement_read = reader
   local refresh
   refresh = function()

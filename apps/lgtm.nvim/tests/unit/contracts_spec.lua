@@ -78,7 +78,7 @@ describe("When using plugin contracts", function()
         "https://github.com/acme/repo/",
       }) do
         it("Normalizes " .. remote, function()
-          assert.equals("https://github.com/acme/repo", get_remote_context(remote).repository_url)
+          assert.equal("https://github.com/acme/repo", get_remote_context(remote).repository_url)
         end)
       end
     end)
@@ -96,7 +96,7 @@ describe("When using plugin contracts", function()
   describe("When configuring a Connect endpoint", function()
     it("Removes a trailing slash", function()
       config.setup({ endpoint_url = "http://127.0.0.1:1/rpc/" })
-      assert.equals("http://127.0.0.1:1/rpc", transport.endpoint())
+      assert.equal("http://127.0.0.1:1/rpc", transport.endpoint())
     end)
   end)
 
@@ -138,11 +138,11 @@ describe("When using plugin contracts", function()
       }
 
       -- Act / Assert
-      assert.equals(
+      assert.equal(
         "old",
         require("lgtm.features.annotation_overlay").at(state, "a", "old", 3)[1].id
       )
-      assert.equals(0, #require("lgtm.features.annotation_overlay").at(state, "a", "new", 5))
+      assert.equal(0, #require("lgtm.features.annotation_overlay").at(state, "a", "new", 5))
     end)
   end)
 
@@ -150,16 +150,18 @@ describe("When using plugin contracts", function()
     it("Rejects identity setup and allows a later supported backend", function()
       -- Arrange
       config.options.identity = { name = "Reviewer", email = "reviewer@example.test" }
-      local identity_calls, result = 0, nil
+      local identity_calls = 0
+      ---@type lgtm.ServiceError?
+      local result
       local capabilities = { "notes" }
-      transport.call = function(_, method, _, _, done)
+      rawset(transport, "call", function(_, method, _, _, done)
         if method == "GetCapabilities" then
           done(nil, { apiVersion = "1", capabilities = capabilities })
         else
           identity_calls = identity_calls + 1
           done(nil, { actor = { id = "supported-backend-actor" } })
         end
-      end
+      end)
 
       -- Act
       rpc.bootstrap(function(err)
@@ -167,8 +169,8 @@ describe("When using plugin contracts", function()
       end)
 
       -- Assert
-      assert.matches("update the LGTM CLI/backend", result.message, 1, true)
-      assert.equals(0, identity_calls)
+      assert.matches("update the LGTM CLI/backend", result and result.message or "", 1, true)
+      assert.equal(0, identity_calls)
       assert.is_nil(rpc.identity)
 
       -- Act
@@ -179,8 +181,8 @@ describe("When using plugin contracts", function()
 
       -- Assert
       assert.is_nil(result)
-      assert.equals(1, identity_calls)
-      assert.equals("supported-backend-actor", rpc.identity)
+      assert.equal(1, identity_calls)
+      assert.equal("supported-backend-actor", rpc.identity)
     end)
   end)
 
@@ -194,10 +196,10 @@ describe("When using plugin contracts", function()
         target = { localGit = { path = "/missing/legacy", branch = "refs/heads/old" } },
       }
       local message
-      notice.error = function(value)
+      rawset(notice, "error", function(value)
         message = value
-      end
-      rpc.call = function(method, _, done)
+      end)
+      rawset(rpc, "call", function(method, _, done)
         if method == "GetReview" then
           done(nil, { review = legacy })
         elseif method == "GetConversation" then
@@ -205,7 +207,7 @@ describe("When using plugin contracts", function()
         else
           error("Unavailable source evidence must not invoke content operations: " .. method)
         end
-      end
+      end)
       local state = store.apply({}, legacy)
 
       -- Act
@@ -223,14 +225,24 @@ describe("When using plugin contracts", function()
       it("Blocks " .. operation .. " before invoking an operation that may publish", function()
         -- Arrange
         local message
-        notice.error = function(value)
+        rawset(notice, "error", function(value)
           message = value
-        end
+        end)
         rpc.capabilities = {}
-        store.set({ kind = "pr", review = { id = "rejected-upgrade", submissionStatus = "failed" } })
-        rpc.call = function()
+        store.set({
+          kind = "pr",
+          review = {
+            id = "rejected-upgrade",
+            version = "0",
+            state = "completed",
+            target = {},
+            comparison = {},
+            submissionStatus = "failed",
+          },
+        })
+        rawset(rpc, "call", function()
           error("An older backend recovery method may publish")
-        end
+        end)
 
         -- Act
         require("lgtm.app")[operation]()

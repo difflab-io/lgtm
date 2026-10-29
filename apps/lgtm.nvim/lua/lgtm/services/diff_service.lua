@@ -9,6 +9,7 @@ local records = setmetatable({}, { __mode = "k" })
 
 -- Methods ---------------------------------------------------------------------
 
+---@return NuiSignalValue
 function M.get_data(state)
   if not records[state] then
     require("lgtm.services.threads_service").get_data(state)
@@ -99,8 +100,13 @@ function M.get_selected_source(state, file, side, callback)
     or state.mode == "working" and "working_file"
     or state.mode == "staged" and "index_file"
     or "commit"
+  local root = state.git_root or state.root
+  if not root then
+    selected({ message = "Selected source root is unavailable" }, {})
+    return
+  end
   M.get_source({
-    root = state.git_root or state.root,
+    root = root,
     path = side == "old" and (file.previousPath or file.old_path or file.path) or file.path,
     kind = kind,
     commit = kind == "commit" and (side == "old" and state.base or state.head) or nil,

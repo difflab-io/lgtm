@@ -6,6 +6,7 @@ local Private = {}
 
 local records = setmetatable({}, { __mode = "k" })
 
+---@return NuiSignalValue
 function M.get_data(state)
   if not records[state] then
     require("lgtm.services.threads_service").get_data(state)

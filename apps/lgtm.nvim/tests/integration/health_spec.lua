@@ -10,9 +10,9 @@ describe("When inspecting an installation", function()
     require("lgtm.config").setup({ endpoint_url = "http://127.0.0.1:1/rpc/" })
     errors = {}
     vim.health = {
-      start = function() end,
-      ok = function() end,
-      info = function() end,
+      start = function(_) end,
+      ok = function(_) end,
+      info = function(_) end,
       error = function(message)
         table.insert(errors, message)
       end,

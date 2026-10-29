@@ -26,15 +26,15 @@ describe("When services own reactive review data", function()
 
     threads.publish(context, conversation, placements, {})
 
-    assert.equals(conversation, context.conversation)
-    assert.equals(placements, snapshots[#snapshots].placements)
+    assert.equal(conversation, context.conversation)
+    assert.equal(placements, snapshots[#snapshots].placements)
     assert.has_error(function()
       context.conversation = {}
     end, "Conversation data is owned by threads_service")
     observer:unsubscribe()
     local count = #snapshots
     threads.publish(context, { threads = {}, comments = {} }, {}, {})
-    assert.equals(count, #snapshots)
+    assert.equal(count, #snapshots)
   end)
 
   it("Keeps review contexts independent and exposes separate derived subscriptions", function()
@@ -62,8 +62,8 @@ describe("When services own reactive review data", function()
 
     threads.publish(first, { threads = { {} }, comments = { {}, {} } }, {}, {})
 
-    assert.equals(2, comments)
-    assert.equals(1, thread_count)
+    assert.equal(2, comments)
+    assert.equal(1, thread_count)
     assert.is_nil(second.conversation)
     one:unsubscribe()
     two:unsubscribe()
@@ -72,16 +72,19 @@ describe("When services own reactive review data", function()
   it("Publishes an optimistic reviewed mark and rolls it back after a rejected write", function()
     local context = { review = { id = "review" } }
     local accepted, observed = nil, {}
-    rpc.call = function(method, _, callback)
-      assert.equals("SetFileReviewed", method)
+    rawset(rpc, "call", function(method, _, callback)
+      assert.equal("SetFileReviewed", method)
       accepted = callback
-    end
+    end)
     local subscription = files.get_data(context):get_observable():subscribe(function(data)
       observed[#observed + 1] = data.reviewed["file.md"] or false
     end)
 
     files.toggle_reviewed(context, { path = "file.md", contentHash = "source-identity" })
-    assert.equals("source-identity", context.reviewed["file.md"])
+    assert.equal("source-identity", context.reviewed["file.md"])
+    if not accepted then
+      error("Reviewed-mark mutation was not sent")
+    end
     accepted({ message = "Rejected" })
 
     assert.is_nil(context.reviewed["file.md"])

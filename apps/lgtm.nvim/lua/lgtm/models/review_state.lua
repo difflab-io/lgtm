@@ -1,18 +1,78 @@
+---Service records and editor bindings for one review or saved-file context.
+---Fields are populated during initialization; a context can exist before its review or windows load.
 ---@class lgtm.ReviewState
 ---@field review lgtm.Review? Read-only projection of session_service data.
----@field scope table Backend review or saved-file scope.
+---@field scope table? Backend review or saved-file scope.
+---@field scope_key string?
 ---@field version string?
+---@field target table?
+---@field comparison table?
+---@field kind 'git'|'directory'|'pr'|'notes'|nil
+---@field mode 'working'|'staged'|'branch'|'pr'|'directory'|'notes'|nil
+---@field base string?
+---@field head string?
+---@field root string? Canonical local source directory.
+---@field path string? Selected notes filename relative to root.
+---@field note boolean?
 ---@field files lgtm.ReviewFile[]? Read-only projection of files_service data.
 ---@field file lgtm.ReviewFile?
+---@field diff table? Read-only projection of diff_service data.
 ---@field conversation lgtm.Conversation? Read-only projection of threads_service data.
 ---@field placements table<string, table<string, lgtm.AnchorPlacement>>? Backend results by thread and displayed side.
 ---@field placement_views table? Source snapshot associated with the placement results.
 ---@field placement_conversation lgtm.Conversation? Conversation snapshot associated with the placement results.
+---@field placement_read table? Coalesced placement request owned by anchor_service.
+---@field views table<string, table>?
 ---@field reviewed table<string, string>?
----@field kind 'git'|'directory'|'pr'|'notes'
+---@field reviewed_read integer?
+---@field reviewed_generation integer?
+---@field reviewed_loading boolean?
+---@field reviewed_review string?
+---@field reviewed_pending table<string, table>?
+---@field reviewed_buffers table?
+---@field reviewed_panel_buf integer?
+---@field continuing_review function[]?
+---@field continuation_key string?
 ---@field closed boolean?
 ---@field initializing boolean?
+---@field empty boolean?
 ---@field retry_load fun()?
 ---@field load_error lgtm.ServiceError?
+---@field git_root string?
+---@field git_checked boolean?
+---@field git_pending boolean?
+---@field browsing boolean?
+---@field native_explorer boolean?
+---@field tab integer?
+---@field buf integer?
+---@field panes table<string, {buf: integer?, win: integer?}>?
+---@field layout 'inline'|'side-by-side'|nil
+---@field temp_dir string?
+---@field owned_buffers table<integer, boolean>?
+---@field view_id string?
+---@field focus_side 'old'|'new'|nil
+---@field bindings table?
+---@field panel_observer table?
+---@field explorer table?
+---@field explorer_visible boolean?
+---@field explorer_group integer?
+---@field snapshot_group integer?
+---@field file_selection table? NuiComponents signal proxy for the selected path.
+---@field render_ready boolean?
+---@field render_generation integer?
+---@field source_generation integer?
+---@field source_refresh integer?
+---@field read_generation integer?
+---@field read_callbacks function[]?
+---@field session_subscription NuiSubscription?
+---@field annotation_subscription NuiSubscription?
+---@field file_subscription NuiSubscription?
 ---@field on_error fun(err: lgtm.ServiceError)?
----@field refresh fun(done: function?) Refresh the owning editor view.
+---@field on_ready fun()?
+---@field show_file fun(path: string, anchor?: table, done?: function)?
+---@field wait_ready fun()?
+---@field bind_panes fun()?
+---@field render fun(done?: function)?
+---@field redraw fun()?
+---@field observe_sources fun(done?: function)?
+---@field refresh fun(done?: function)? Refresh service records and the owning editor view.

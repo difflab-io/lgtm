@@ -111,12 +111,8 @@ function M.render_review(state, panes, path)
   end
 end
 
----@param state lgtm.ReviewState
--- Hidden files are not orphans. Only confirmed source or provider evidence gives that status.
-
 -- Lifecycle -------------------------------------------------------------------
 
----@param state lgtm.ReviewState
 ---@param state lgtm.ReviewState
 function M.attach(state, buf, path, side)
   local function at()
@@ -326,7 +322,6 @@ end
 
 -- Private ---------------------------------------------------------------------
 
----@param state lgtm.ReviewState
 ---@param state lgtm.ReviewState
 function Private.blocks(state, buf, path, side, width)
   local groups = {}

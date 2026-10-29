@@ -10,6 +10,7 @@ local catalog
 
 -- Methods ---------------------------------------------------------------------
 
+---@return NuiSignalValue
 function M.get_data(state)
   if not records[state] then
     require("lgtm.services.threads_service").get_data(state)
@@ -60,6 +61,7 @@ function M.set_status(state, loading, err)
     vim.tbl_extend("force", current, { loading = loading, error = err or false })
 end
 
+---@return NuiSignalValue
 function M.get_catalog()
   if not catalog then
     catalog = require("nui-components.signal").create({
@@ -157,7 +159,7 @@ function M.ensure_writable(state, callback)
       err = { message = "The next PR review is not writable" }
     end
     local function finish(failure)
-      local waiting = state.continuing_review
+      local waiting = state.continuing_review or {}
       state.continuing_review = nil
       for _, done in ipairs(waiting) do
         done(failure)

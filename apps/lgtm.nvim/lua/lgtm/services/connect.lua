@@ -60,7 +60,9 @@ function M.call(service, method, input, identity, callback)
     stdin = vim.json.encode((not input or vim.tbl_isempty(input)) and vim.empty_dict() or input),
   }, function(response)
     vim.schedule(function()
-      jobs[job] = nil
+      if job then
+        jobs[job] = nil
+      end
       if cancelled then
         return
       end

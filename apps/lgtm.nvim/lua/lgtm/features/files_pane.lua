@@ -98,7 +98,7 @@ function M.toggle_reviewed(state, file)
     and pane.win == api.nvim_get_current_win()
     and api.nvim_win_get_cursor(pane.win)
   require("lgtm.services.files_service").toggle_reviewed(state, file)
-  if cursor then
+  if pane and cursor then
     api.nvim_win_set_cursor(pane.win, cursor)
   end
 end

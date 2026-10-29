@@ -5,3 +5,11 @@
 ---@field baseContent string?
 ---@field contentHash string?
 ---@field loaded boolean?
+---@field status string?
+---@field previousPath string?
+---@field confirmedRename boolean?
+---@field group 'staged'|'unstaged'|nil
+---@field native_entry table?
+---@field sides table?
+---@field saved_stamp table|false|nil
+---@field index_oid string|false|nil
