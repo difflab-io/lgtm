@@ -7,7 +7,6 @@ use crate::{
     error::{Error, Result, invalid},
     forge::models::{ForgeSnapshot, PostReceipt, PullRequest},
     forge::{GithubClient, Repository},
-    models::WorkspaceFile,
     models::{
         Actor, Anchor, Comment, Completion, Context, ForgeChange, ForgeChangeInput,
         ForgeChangeObject, MutationGuard, Session, Thread,
@@ -110,27 +109,6 @@ impl ForgeService {
         self.get_pending(&github, &repo, pr, &session, &account)
             .await?;
         self.refresh_context(context_id, Some(expected_version))
-            .await
-    }
-
-    /// Compatibility adapter for the existing wire method during consumer migration.
-    pub async fn get_workspace(
-        &self,
-        context_id: &Uuid,
-        selected: &str,
-        metadata_only: bool,
-    ) -> Result<(String, Vec<(WorkspaceFile, String)>)> {
-        let context = self.reviews.get_context_by_id(context_id).await?;
-        let (repo, pr) = Repository::from_context_key(&context.key)?;
-        super::diff::DiffService::with_provider(self.get_provider().await?)
-            .get_remote_workspace(
-                &repo,
-                pr,
-                context.refreshed_base.as_deref(),
-                context.refreshed_head.as_deref().unwrap_or(""),
-                selected,
-                metadata_only,
-            )
             .await
     }
 
@@ -530,7 +508,7 @@ impl ForgeService {
         }
         // Receipt recovery during refresh can have confirmed this draft already.
         let comment = self.reviews.get_comment(&context.id, comment_id).await?;
-        let mut conversation = self.reviews.get_conversation(&context.id, true).await?;
+        let conversation = self.reviews.get_conversation(&context.id, true).await?;
         let thread = conversation
             .threads
             .iter()
@@ -543,7 +521,7 @@ impl ForgeService {
             && !["sending", "uncertain"].contains(&comment.posting.state().as_str())
         {
             Some(
-                self.get_posting_payload(&session, &comment, &mut conversation.threads)
+                self.get_posting_payload(&session, &comment, &conversation.threads)
                     .await?,
             )
         } else {
@@ -789,7 +767,7 @@ impl ForgeService {
                 "GitHub does not allow approving or requesting changes on your own PR. Submit a comment review instead; your drafts are unchanged.",
             ));
         }
-        let mut conversation = self.reviews.get_conversation(&context.id, true).await?;
+        let conversation = self.reviews.get_conversation(&context.id, true).await?;
         let mut comments: Vec<_> = conversation
             .comments
             .into_iter()
@@ -799,7 +777,7 @@ impl ForgeService {
         let mut prepared = Vec::new();
         for c in comments.iter().filter(|c| c.forge_comment_id.is_none()) {
             let payload = self
-                .get_posting_payload(&session, c, &mut conversation.threads)
+                .get_posting_payload(&session, c, &conversation.threads)
                 .await?;
             prepared.push((c.clone(), payload, comment_key(session_id, &c.id)));
         }
@@ -1597,28 +1575,25 @@ impl ForgeService {
         &self,
         session: &Session,
         comment: &Comment,
-        threads: &mut [Thread],
+        threads: &[Thread],
     ) -> Result<String> {
-        let mut body = render(comment);
+        let body = render(comment);
         if comment.position == 0 {
             let thread = threads
-                .iter_mut()
+                .iter()
                 .find(|t| t.id == comment.thread_id)
                 .ok_or_else(|| invalid("Draft thread missing"))?;
-            let placement = self.reviews.get_posting_anchor(session, thread).await?;
-            if let (
-                Anchor::Line {
-                    path, start, end, ..
-                },
-                Anchor::File { .. },
-            ) = (&thread.anchor, &placement)
+            if let Some(evidence) = &thread.evidence
+                && let crate::models::AnchorSource::Commit { sha, .. } = &evidence.source
             {
-                body.push_str(&format!("\n\n> Original inline location: `{path}`, lines {start}-{end}. The selection was lost or ambiguous, so this feedback is retained at file level."));
-                if let Some(evidence) = &thread.evidence {
-                    body.push_str(&format!("\n\n```\n{}\n```", evidence.selected_text));
+                let selected = match &thread.anchor {
+                    Anchor::Line { side, .. } if side == "old" => session.commits.base.as_ref(),
+                    _ => session.commits.head.as_ref(),
+                };
+                if selected != Some(sha) {
+                    return Err(Error::Conflict("Draft belongs to an earlier saved revision and remains local; GitHub cannot attach its original coordinates to this pending review".into()));
                 }
             }
-            thread.anchor = placement;
         }
         Ok(format!(
             "{}\n\n{}",

@@ -3,7 +3,9 @@ pub use super::database::types::{ComparisonKind, OrphanReason};
 pub use super::database::types::{ContextKind, PostingState, SessionState};
 
 pub mod actor;
+pub mod snapshot;
 pub use actor::{Actor, ActorKind};
+pub use snapshot::Snapshot;
 
 pub mod anchor;
 pub use anchor::Anchor;
@@ -11,14 +13,8 @@ pub use anchor::Anchor;
 pub mod anchor_evidence;
 pub use anchor_evidence::AnchorEvidence;
 
-pub mod anchor_placement;
-pub use anchor_placement::AnchorPlacement;
-
 pub mod anchor_source;
 pub use anchor_source::AnchorSource;
-
-pub mod anchor_view;
-pub use anchor_view::AnchorView;
 
 pub mod comment;
 pub use comment::Comment;
@@ -68,9 +64,6 @@ pub use local_location::LocalLocation;
 pub mod mutation_guard;
 pub use mutation_guard::MutationGuard;
 
-pub mod note_promotion;
-pub use note_promotion::NotePromotion;
-
 pub mod object_kind;
 pub use object_kind::ObjectKind;
 
@@ -98,14 +91,8 @@ pub use session::{CompletedSession, Session, SessionStatus};
 pub mod session_filter;
 pub use session_filter::SessionFilter;
 
-pub mod source_change;
-pub use source_change::SourceChange;
-
 pub mod start_options;
 pub use start_options::StartOptions;
-
-pub mod supplied_anchor;
-pub use supplied_anchor::SuppliedAnchor;
 
 pub mod thread;
 pub use thread::Thread;

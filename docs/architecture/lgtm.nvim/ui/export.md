@@ -2,14 +2,14 @@
 
 ## Overview
 
-Present Markdown already produced by a service. This widget does not load reviews or notes.
+Present Markdown already produced by a service. This widget does not load review records.
 
 ## Design
 
 ### Layout
 
 ```text
-Export notes
+Export review
   Preview
   Save file
   Copy to clipboard
@@ -35,7 +35,7 @@ stateDiagram-v2
 ```lua
 require("lgtm.ui.export").open(
   markdown,
-  "notes"
+  "review"
 )
 ```
 

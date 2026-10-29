@@ -2,7 +2,7 @@
 
 ## Overview
 
-`session_service.get_export` obtains backend-generated Markdown for a notes or review scope. The application selects the scope and opens the reusable export widget.
+`session_service.get_export` obtains backend-generated Markdown for the selected review scope. The application selects the scope and opens the reusable export widget.
 
 ## Design
 
@@ -17,7 +17,7 @@ require("lgtm.services.session_service").get_export(
 )
 ```
 
-Use `:Lgtm export notes` for the current file’s notes or `:Lgtm export review` for the selected review. The backend controls feedback selection and formatting; the UI offers Preview, Save file and Copy to clipboard.
+Use `:Lgtm export` for the selected review. The backend controls feedback selection and formatting; the UI offers Preview, Save file and Copy to clipboard.
 
 ### State and Data Flow
 

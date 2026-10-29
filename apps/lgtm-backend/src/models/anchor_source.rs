@@ -1,6 +1,5 @@
 use crate::error::{Result, invalid};
 use crate::{models as m, proto::lgtm::v1 as p};
-use connectrpc::ConnectError;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -64,35 +63,6 @@ impl AnchorSource {
     }
 
     // RPC conversion ----------------------------------------------------------
-
-    /// Validate and convert the RPC input to the domain model.
-    pub(crate) fn from_proto(
-        v: &p::AnchorSource,
-    ) -> std::result::Result<m::AnchorSource, ConnectError> {
-        let source = match &v.kind {
-            Some(p::anchor_source::Kind::Commit(v)) => m::AnchorSource::Commit {
-                sha: v.sha.clone(),
-                content_hash: v.content_hash.clone(),
-            },
-            Some(p::anchor_source::Kind::IndexFile(v)) => m::AnchorSource::IndexFile {
-                blob_oid: v.blob_oid.clone(),
-                content_hash: v.content_hash.clone(),
-            },
-            Some(p::anchor_source::Kind::WorkingFile(v)) => m::AnchorSource::WorkingFile {
-                content_hash: v.content_hash.clone(),
-            },
-            Some(p::anchor_source::Kind::LocalFile(v)) => m::AnchorSource::LocalFile {
-                content_hash: v.content_hash.clone(),
-            },
-            None => {
-                return Err(ConnectError::invalid_argument(
-                    "p::Anchor source requires a typed identity",
-                ));
-            }
-        };
-        source.validate().map_err(ConnectError::from)?;
-        Ok(source)
-    }
 
     /// Convert the domain value to its RPC representation.
     pub(crate) fn into_proto(self) -> p::AnchorSource {

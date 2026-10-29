@@ -58,12 +58,6 @@ function M.setup()
       desc = "Review directory",
     },
     {
-      prefix .. "n",
-      ":Lgtm note<CR>",
-      desc = "Add note",
-      mode = { "n", "x" },
-    },
-    {
       prefix .. "c",
       function()
         require("lgtm.app").comment("line")
@@ -107,16 +101,9 @@ function M.setup()
       desc = "Toggle file reviewed",
     },
     {
-      prefix .. "P",
-      function()
-        require("lgtm.app").promote_note()
-      end,
-      desc = "Promote note",
-    },
-    {
       prefix .. "x",
       function()
-        require("lgtm.app").export(require("lgtm.services.state").current and "review" or "notes")
+        require("lgtm.app").export("review")
       end,
       desc = "Export review",
     },

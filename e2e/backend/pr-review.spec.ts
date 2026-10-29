@@ -176,59 +176,6 @@ describe('When starting a fresh draft review', () => {
       expect(remote.body).toContain(text)
   })
 
-  it('Agent notes can be promoted as remote drafts without changing the original note', async () => {
-    // Arrange
-    const { runtime, github } = fixture()
-    const { scope, review, anchor } = await prepareReview(runtime, github)
-    const promoter = runtime.actor
-    await runtime.identify({
-      name: 'Planning agent',
-      model: 'test-model',
-      provider: 'test-provider',
-    })
-    const path = await runtime.write('agent-note.md', 'agent source\n')
-    const source = { notes: { path } }
-    const note = (
-      await runtime.rpc('AddComment', {
-        scope: source,
-        body: 'Promote agent concern',
-        expectedVersion: '0',
-        requestKey: randomUUID(),
-      })
-    ).comment
-    await runtime.identify({ name: 'E2E user', email: 'e2e@example.test' })
-    const before = await runtime.rpc('GetConversation', { scope: source })
-    const current = await runtime.rpc('GetConversation', { scope })
-
-    // Act
-    const promoted = await runtime.rpc('PromoteNotes', {
-      source,
-      targetReviewId: review.id,
-      commentIds: [note.id],
-      anchors: [anchor],
-      expectedSourceVersion: before.version,
-      expectedReviewVersion: current.version,
-      requestKey: randomUUID(),
-    })
-    const remote = await readPendingComment(
-      runtime,
-      github,
-      review.id,
-      promoted.comments[0].forgeCommentId,
-    )
-
-    // Assert
-    expect(promoted.comments[0].author).toEqual(note.author)
-    expect(promoted.comments[0].ownerId).toBe(promoter)
-    expect(promoted.comments[0].author.id).not.toBe(promoter)
-    for (const text of ['Promote agent concern', 'Planning agent', 'test-model', 'test-provider'])
-      expect(remote.body).toContain(text)
-    expect((await runtime.rpc('GetConversation', { scope: source })).comments[0]).toMatchObject({
-      id: note.id,
-      body: note.body,
-    })
-  })
-
   it('Retrying an accepted draft after a push and restart does not create another remote comment', async () => {
     // Arrange
     const { runtime, github } = fixture()
@@ -489,7 +436,7 @@ describe('When there are changes during a PR review', () => {
     expect(thread.forgeObservation.current.start).toBe(change === 'shifted' ? '3' : '2')
   })
 
-  it('Saving a selection after an unseen push automatically updates the PR without replacing the review', async () => {
+  it('Saving an old selection after an unseen push retains it locally without relocating it', async () => {
     // Arrange
     const { runtime, github } = fixture()
     const { scope, anchor, review } = await prepareReview(runtime, github)
@@ -497,25 +444,22 @@ describe('When there are changes during a PR review', () => {
 
     // Act
     const saved = await saveDraft(runtime, scope, 'Continue without a manual refresh', anchor)
-    expect(saved.syncError).toBeFalsy()
-    const remote = await readPendingComment(
-      runtime,
-      github,
-      review.id,
-      saved.comment.forgeCommentId,
-    )
     const current = (await runtime.rpc('GetReview', { reviewId: review.id })).review
+    const conversation = await runtime.rpc('GetConversation', { scope })
 
     // Assert
-    expect(saved.syncError).toBeFalsy()
-    expect(remote.thread.line).toBe(3)
+    expect(saved.syncError).toMatch(/historical|revision|snapshot/i)
+    expect(saved.comment.body).toBe('Continue without a manual refresh')
+    expect(saved.comment.forgeCommentId).toBeFalsy()
     expect(current.id).toBe(review.id)
     expect(current.comparison.pullRequest.headCommit).toBe(github.head)
-    const conversation = await runtime.rpc('GetConversation', { scope })
     expect(
-      conversation.threads.find((thread: Json) => thread.id === saved.comment.threadId).anchor
-        .evidence.selectedText,
-    ).toBe('changed')
+      conversation.threads.find((thread: Json) => thread.id === saved.comment.threadId).anchor,
+    ).toMatchObject({
+      start: '2',
+      snapshotId: review.snapshot.id,
+      evidence: { selectedText: 'changed' },
+    })
   })
 
   it('User comment follows a renamed file', async () => {

@@ -186,7 +186,7 @@ impl ReviewService for Api {
                 return Response::ok(StartReviewResponse {
                     review: Some(m::Review::into_proto(
                         self.reviews
-                            .get_review(&saved.id)
+                            .prepare_review(&saved.id)
                             .await
                             .map_err(ConnectError::from)?,
                     ))
@@ -289,7 +289,7 @@ impl ReviewService for Api {
         Response::ok(StartReviewResponse {
             review: Some(m::Review::into_proto(
                 self.reviews
-                    .get_review(&saved.id)
+                    .prepare_review(&saved.id)
                     .await
                     .map_err(ConnectError::from)?,
             ))
@@ -380,58 +380,55 @@ impl ReviewService for Api {
             &request.request_key,
             true,
         )?;
-        let changes = request
-            .source_changes
-            .iter()
-            .map(m::SourceChange::from_proto)
-            .collect::<Result<Vec<_>, _>>()?;
-        let version = if let Some(path) = &request.observe_path {
-            if !changes.is_empty() {
-                return Err(ConnectError::invalid_argument(
-                    "Select automatic observation or explicit source changes",
-                ));
-            }
-            self.reviews
-                .observe_sources(&scope, &who, path, &guard)
-                .await
-        } else {
-            self.reviews
-                .refresh_locations(&scope, &who, &changes, &guard)
-                .await
+        let m::ReviewScope::Review { review_id } = scope else {
+            return Err(ConnectError::invalid_argument(
+                "Live-buffer notes are no longer supported",
+            ));
+        };
+        let selected = self
+            .reviews
+            .get_session(&review_id)
+            .await
+            .map_err(ConnectError::from)?;
+        let context = self
+            .reviews
+            .get_context_by_id(&selected.context_id)
+            .await
+            .map_err(ConnectError::from)?;
+        if selected.creator.id != who.id {
+            return Err(ConnectError::permission_denied(
+                "Only the session creator can refresh its revision",
+            ));
         }
-        .map_err(ConnectError::from)?;
-        let refreshed = if let m::ReviewScope::Review { review_id } = scope {
-            let selected = self
-                .reviews
-                .get_session(&review_id)
+        if guard.expected_version != Some(context.revision) {
+            return Err(ConnectError::failed_precondition(
+                "Review changed; read it before refreshing",
+            ));
+        }
+        if context.key.is_forge_backed() {
+            self.forge
+                .refresh(&selected.context_id)
                 .await
                 .map_err(ConnectError::from)?;
-            if self
-                .reviews
-                .get_context_by_id(&selected.context_id)
+        }
+        let mut review = self
+            .reviews
+            .get_review(&review_id)
+            .await
+            .map_err(ConnectError::from)?;
+        if selected.state() == "active" {
+            self.reviews
+                .capture_snapshot(&review, true)
                 .await
-                .map_err(ConnectError::from)?
-                .key
-                .is_forge_backed()
-            {
-                self.forge
-                    .refresh(&selected.context_id)
-                    .await
-                    .map_err(ConnectError::from)?;
-            }
-            Some(m::Review::into_proto(
-                self.reviews
-                    .get_review(&review_id)
-                    .await
-                    .map_err(ConnectError::from)?,
-            ))
-        } else {
-            None
-        };
-        let version = refreshed
-            .as_ref()
-            .map(|r| r.version.clone())
-            .unwrap_or_else(|| version.to_string());
+                .map_err(ConnectError::from)?;
+        }
+        review = self
+            .reviews
+            .get_review(&review_id)
+            .await
+            .map_err(ConnectError::from)?;
+        let version = review.version.to_string();
+        let refreshed = Some(review.into_proto());
         Response::ok(RefreshReviewResponse {
             review: refreshed.into(),
             version,
@@ -510,6 +507,21 @@ impl ReviewService for Api {
         let request = request.to_owned_message();
         let _ = &ctx;
         let scope = m::ReviewScope::from_proto(&request.scope)?;
+        let snapshot = if request.snapshot_id.is_empty() {
+            None
+        } else {
+            let m::ReviewScope::Review { review_id } = &scope else {
+                return Err(ConnectError::invalid_argument(
+                    "Saved revision requires a review",
+                ));
+            };
+            Some(
+                self.reviews
+                    .get_snapshot(review_id, Some(&id(&request.snapshot_id)?))
+                    .await
+                    .map_err(ConnectError::from)?,
+            )
+        };
         let paths = (!request.file_paths.is_empty()).then_some(request.file_paths.as_slice());
         let (page, next) = self
             .reviews
@@ -532,7 +544,19 @@ impl ReviewService for Api {
                 threads: page
                     .threads
                     .into_iter()
-                    .map(|value| m::Thread::into_versioned_proto(value, page.context.revision))
+                    .map(|value| {
+                        let location = snapshot
+                            .as_ref()
+                            .and_then(|snapshot| value.get_display_location(snapshot));
+                        let status = snapshot
+                            .as_ref()
+                            .map(|snapshot| value.get_display_status(snapshot))
+                            .unwrap_or_default();
+                        let mut wire = value.into_versioned_proto(page.context.revision)?;
+                        wire.display_location = location.map(m::Anchor::into_proto).into();
+                        wire.display_status = status.into();
+                        Ok::<_, ConnectError>(wire)
+                    })
                     .collect::<Result<Vec<_>, _>>()?,
                 comments: page
                     .comments
@@ -571,64 +595,26 @@ impl ReviewService for Api {
             .resolve_write_scope(&scope, &who)
             .await
             .map_err(ConnectError::from)?;
-        let mut supplied_anchor = request.anchor.as_option().cloned().unwrap_or_default();
-        if let m::ReviewScope::Notes { path } = &scope {
-            let context = self
-                .reviews
-                .get_context_by_id(&selected.context_id)
-                .await
-                .map_err(ConnectError::from)?;
-            let m::ContextKey::Local {
-                location: m::LocalLocation::Notes { path: original },
-            } = &context.key
-            else {
-                return Err(ConnectError::invalid_argument("Expected notes context"));
-            };
-            let original_path =
-                std::path::Path::new(context.current_notes_path.as_ref().unwrap_or(original));
-            let root = if original_path.is_dir() {
-                original_path
-            } else {
-                original_path
-                    .parent()
-                    .ok_or_else(|| ConnectError::invalid_argument("Notes file has no parent"))?
-            };
-            let selected_path = std::path::Path::new(path)
-                .canonicalize()
-                .unwrap_or_else(|_| std::path::PathBuf::from(path));
-            let relative = selected_path
-                .strip_prefix(root)
-                .or_else(|_| {
-                    selected_path
-                        .file_name()
-                        .map(std::path::Path::new)
-                        .ok_or(())
-                })
-                .map_err(|_| ConnectError::invalid_argument("Notes file has no name"))?
-                .to_string_lossy()
-                .into_owned();
-            if ["file", "line"].contains(&supplied_anchor.kind.as_str()) {
-                if !supplied_anchor.path.is_empty() && supplied_anchor.path != relative {
-                    return Err(ConnectError::invalid_argument(
-                        "Notes anchor differs from its file scope",
-                    ));
-                }
-                supplied_anchor.path = relative;
-            }
-        }
-        let evidence = m::AnchorEvidence::from_proto_anchor(&supplied_anchor)?;
-        if supplied_anchor.kind == "line" && evidence.is_none() {
-            return Err(ConnectError::invalid_argument(
-                "Capture the actual displayed source before adding a line comment",
-            ));
-        }
+        let supplied_anchor = request.anchor.as_option().cloned().unwrap_or_default();
+        let anchor = m::Anchor::from_proto(&supplied_anchor)?;
+        let evidence = if matches!(anchor, m::Anchor::General) {
+            None
+        } else {
+            let revision = id(&supplied_anchor.snapshot_id)?;
+            Some(
+                self.reviews
+                    .get_snapshot_location(&selected.id, &revision, &anchor)
+                    .await
+                    .map_err(ConnectError::from)?,
+            )
+        };
         let v = self
             .reviews
             .add_comment(
                 &selected.id,
                 &who,
                 &request.body,
-                m::Anchor::from_proto(&supplied_anchor)?,
+                anchor,
                 evidence,
                 Some(&guard),
             )
@@ -951,137 +937,6 @@ impl ReviewService for Api {
                 .get_export(&scope, &ids)
                 .await
                 .map_err(ConnectError::from)?,
-            ..Default::default()
-        })
-    }
-
-    #[tracing::instrument(name = "rpc_request", skip_all, fields(rpc.method = "lgtm.v1/promote_notes"))]
-    async fn promote_notes<'a>(
-        &'a self,
-        ctx: RequestContext,
-        request: ServiceRequest<'_, PromoteNotesRequest>,
-    ) -> ServiceResult<impl Encodable<PromoteNotesResponse> + Send + use<'a>> {
-        let request = request.to_owned_message();
-        let _ = &ctx;
-        let who = self
-            .reviews
-            .auth()
-            .requester(&ctx)
-            .await
-            .map_err(ConnectError::from)?;
-        let ids = request
-            .comment_ids
-            .iter()
-            .map(|v| id(v))
-            .collect::<Result<Vec<_>, _>>()?;
-        let anchors = request
-            .anchors
-            .iter()
-            .map(m::Anchor::from_proto)
-            .collect::<Result<Vec<_>, _>>()?;
-        let source = m::ReviewScope::from_proto(&request.source)?;
-        if !matches!(source, m::ReviewScope::Notes { .. }) {
-            return Err(ConnectError::invalid_argument(
-                "Promotion source must be a notes location",
-            ));
-        }
-        let context = self
-            .reviews
-            .get_scope_context(&source)
-            .await
-            .map_err(ConnectError::from)?
-            .ok_or_else(|| ConnectError::not_found("Source notes"))?;
-        let guard = m::MutationGuard::from_proto_fields(
-            &request.expected_review_version,
-            &request.request_key,
-            true,
-        )?;
-        let source_version = m::MutationGuard::from_proto_fields(
-            &request.expected_source_version,
-            &request.request_key,
-            true,
-        )?
-        .expected_version;
-        let evidence = request
-            .anchors
-            .iter()
-            .map(m::AnchorEvidence::from_proto_anchor)
-            .collect::<Result<Vec<_>, _>>()?;
-        if anchors.iter().zip(&evidence).any(|(anchor, evidence)| {
-            matches!(anchor, m::Anchor::Line { .. }) && evidence.is_none()
-        }) {
-            return Err(ConnectError::invalid_argument(
-                "Promoted line feedback requires confirmed target source evidence",
-            ));
-        }
-        let mut rows = self
-            .reviews
-            .promote_notes(
-                &context.id,
-                &id(&request.target_review_id)?,
-                &who,
-                m::NotePromotion {
-                    comment_ids: ids,
-                    anchors,
-                    evidence,
-                    expected_source_version: source_version,
-                    guard,
-                },
-            )
-            .await
-            .map_err(ConnectError::from)?;
-        let target = self
-            .reviews
-            .get_session(&id(&request.target_review_id)?)
-            .await
-            .map_err(ConnectError::from)?;
-        let accepted = self
-            .reviews
-            .get_accepted_version(&target.context_id, &who.id, &request.request_key)
-            .await
-            .map_err(ConnectError::from)?;
-        let mut sync_errors = Vec::new();
-        if self
-            .reviews
-            .get_context_by_id(&target.context_id)
-            .await
-            .map_err(ConnectError::from)?
-            .key
-            .is_forge_backed()
-        {
-            for row in &mut rows {
-                if let Ok(saved) = self.reviews.get_comment(&target.context_id, &row.id).await {
-                    *row = saved;
-                }
-                if row.forge_comment_id.is_some()
-                    && row.posting.state() == crate::database::types::PostingState::Confirmed
-                {
-                    continue;
-                }
-                match self.forge.sync_draft(&target.id, &row.id, &who).await {
-                    Ok(saved) => *row = saved,
-                    Err(error) => {
-                        sync_errors.push(CommentSyncFailure {
-                            comment_id: row.id.to_string(),
-                            message: error.to_string(),
-                            ..Default::default()
-                        });
-                        if let Ok(saved) =
-                            self.reviews.get_comment(&target.context_id, &row.id).await
-                        {
-                            *row = saved;
-                        }
-                    }
-                }
-            }
-        }
-        Response::ok(PromoteNotesResponse {
-            comments: rows
-                .into_iter()
-                .map(|value| m::Comment::into_versioned_proto(value, accepted))
-                .collect::<Result<Vec<_>, _>>()?,
-            accepted_version: accepted.to_string(),
-            sync_errors,
             ..Default::default()
         })
     }

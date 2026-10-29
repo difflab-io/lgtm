@@ -2,29 +2,48 @@
 
 ## Overview
 
-Adapt native CodeDiff buffers and lifecycle events to LGTM review features.
+Show a saved review revision using CodeDiff layouts and read-only source panes. Git reviews use native revision buffers; directory and remote views use the existing file adapter with backend snapshot content.
 
 ## Design
 
 ### Layout
 
-```text
-CodeDiff explorer     │ original                    │ modified
-──────────────────────│─────────────────────────────│─────────────────────────────
-  M file.lua          │ return old                  │ return new
-                      │                             │ LGTM comment card
+```mermaid
+flowchart LR
+  subgraph Review["LGTM review · saved revision"]
+    direction LR
+    subgraph Explorer[Files]
+      File["✓ file.lua<br/>  other.lua"]
+    end
+    subgraph Old["old · file.lua"]
+      Before["return old"]
+    end
+    subgraph New["new · file.lua"]
+      After["return new"]
+      Card["Local draft · Open<br/>Check this result<br/>Enter open · za expand"]
+      After ~~~ Card
+    end
+    Explorer ~~~ Old
+    Old ~~~ New
+  end
 ```
 
 ### Behavior
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Mounting
-  Mounting --> Ready: CodeDiff settles and anchors load
-  Ready --> Switching: Select file or toggle layout
-  Switching --> Ready: New native buffers settle
-  Ready --> Released: Close or replace view
+  [*] --> Loading
+  Loading --> Ready: CodeDiff and conversation ready
+  Ready --> Switching: Select file or layout
+  Switching --> Ready: Native panes settle
+  Ready --> Historical: Navigate older feedback
+  Historical --> Ready: Refresh selects latest revision
+  Ready --> Empty: Refreshed comparison has no changes
+  Empty --> Ready: Capture a changed revision
+  Ready --> Closed: Close review view
 ```
+
+## Implementation
 
 ### Public API
 
@@ -32,31 +51,21 @@ stateDiagram-v2
 require("lgtm.features.diff_view").open_native(state)
 ```
 
-CodeDiff retains native navigation, editable working buffers, and refresh behavior. `:Lgtm layout` toggles the supported layout; LGTM’s card and file keys are layered onto the mounted buffers.
+`:Lgtm layout` toggles the supported CodeDiff layout. `c` in normal or visual mode opens a comment composer. `:Lgtm refresh` captures saved source again; changing an ordinary editing buffer does not change an open snapshot. The source panes remain read-only. Closing the view keeps the session and feedback.
 
 ### State and Data Flow
 
-| Owner | State |
-| --- | --- |
-| Component | Mounted tab, source windows, layout, selected file, buffer checks, and readiness generation. |
-| Service | CodeDiff loads native diff content. diff_service owns backend comparison/source records; files_service receives native file metadata; threads_service supplies annotations. |
-| Backend | Saved feedback, original anchor evidence, and authoritative location/lifecycle decisions. |
-
 ```mermaid
-flowchart TD
-  Component["CodeDiff view<br/>props / UI interaction"]
-  Component --> S0["diff_service<br/>service-owned data and operations"]
-  Component --> S1["files_service<br/>service-owned data and operations"]
-  Component --> S2["threads_service<br/>service-owned data and operations"]
-  Backend["LGTM backend APIs"]
-  S0 --> Backend
-  S1 --> Backend
-  S2 --> Backend
-  Backend -->|"accepted records / errors"| Signals["Service signals"]
-  Signals -->|"declarative inputs"| Component
+flowchart LR
+  Backend[ReviewService and SnapshotService] --> Session[session_service: current revision and history]
+  Session --> View[diff_view: tab, panes, layout and selected revision]
+  View --> CodeDiff[CodeDiff: two saved commits]
+  Backend --> Files[files_service: file metadata and marks]
+  Files --> Explorer[Native explorer]
+  Backend --> Threads[threads_service: conversation and visible coordinates]
+  Threads --> Cards[annotation_overlay]
+  View -->|Comment intent| Threads
 ```
 
-## Implementation
-
 - [Source](../../../apps/lgtm.nvim/lua/lgtm/features/diff_view.lua).
-- [Overall service and backend wiring](../../architecture/lgtm.nvim/index.md).
+- [Overall architecture](../../architecture/lgtm.nvim/index.md).

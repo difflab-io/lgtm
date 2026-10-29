@@ -1,7 +1,7 @@
 //! Session command arguments and RPC callbacks.
 use super::{
-    client_for_actor, get_conversation, get_review, get_reviews, get_scope, key, location,
-    print_result, start,
+    client_for_actor, get_conversation, get_review, get_reviews, get_scope, key, print_result,
+    start,
 };
 use crate::{
     models::{ActorArgs, ContextArgs, MutationArgs},
@@ -62,13 +62,10 @@ pub enum SessionCommand {
         #[arg(long)]
         output: Option<PathBuf>,
     },
-    /// Refresh review data or record a confirmed saved-file/directory move.
+    /// Capture the latest saved source as another revision in this review.
     Refresh {
         #[command(flatten)]
         context: ContextArgs,
-        /// Original absolute path after moving --notes to its current location.
-        #[arg(long, requires = "notes")]
-        moved_from: Option<PathBuf>,
         #[command(flatten)]
         mutation: MutationArgs,
     },
@@ -191,41 +188,14 @@ pub async fn run(args: SessionArgs, store: &Store, json_output: bool) -> Result<
             }
             Ok(())
         }
-        SessionCommand::Refresh {
-            context,
-            moved_from,
-            mutation,
-        } => {
+        SessionCommand::Refresh { context, mutation } => {
             let client = client_for_actor(store, &ActorArgs::default()).await?;
-            let (scope, changes) = if let Some(previous) = moved_from {
-                let current = location(&context)?;
-                if !current.exists() {
-                    bail!("The current notes location must exist");
-                }
-                let previous = if previous.is_absolute() {
-                    previous
-                } else {
-                    std::env::current_dir()?.join(previous)
-                };
-                let scope = if current.is_dir() {
-                    let mut prior = context.clone();
-                    prior.notes = Some(previous.clone());
-                    json!({"reviewId":get_review(&client, &prior).await?["id"]})
-                } else {
-                    json!({"notes":{"path":previous}})
-                };
-                (
-                    scope,
-                    json!([{"locationMoved":{"previousPath":previous,"currentPath":current}}]),
-                )
-            } else {
-                (get_scope(&client, &context, None, false).await?, json!([]))
-            };
+            let scope = get_scope(&client, &context, None, false).await?;
             let version = match mutation.expected_version {
                 Some(version) => json!(version),
                 None => get_conversation(&client, &scope).await?["version"].clone(),
             };
-            print_result(&client.call("RefreshReview",json!({"scope":scope,"sourceChanges":changes,"expectedVersion":version,"requestKey":key(mutation.request_key)})).await?,json_output)
+            print_result(&client.call("RefreshReview",json!({"scope":scope,"expectedVersion":version,"requestKey":key(mutation.request_key)})).await?,json_output)
         }
         SessionCommand::Reconcile {
             context,

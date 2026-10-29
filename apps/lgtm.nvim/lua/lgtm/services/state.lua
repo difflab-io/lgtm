@@ -1,10 +1,11 @@
 -- State -----------------------------------------------------------------------
 
+local Private = {}
+
 local M = {
   current = nil,
   generation = 0,
   tabs = {},
-  notes = {},
   submissions = {},
 }
 
@@ -52,10 +53,18 @@ function M.apply(state, review)
   then
     return state
   end
+  local snapshot = Private.selected_snapshot(state, review)
+  local snapshot_changed = state.snapshot
+    and snapshot
+    and (
+      state.snapshot.root ~= snapshot.root
+      or state.snapshot.baseCommit ~= snapshot.baseCommit
+      or state.snapshot.headCommit ~= snapshot.headCommit
+    )
   local comparison_changed = not vim.deep_equal(state.comparison, review.comparison)
-  local load_progress = state.reviewed_review ~= review.id or comparison_changed
-  if state.kind == "pr" and state.comparison and comparison_changed then
-    state.views, state.observe_sources = {}, nil
+  local load_progress = state.reviewed_review ~= review.id or comparison_changed or snapshot_changed
+  if snapshot_changed or state.kind == "pr" and state.comparison and comparison_changed then
+    state.views = {}
     require("lgtm.services.files_service").set_reviewed(state, {})
     state.source_generation = (state.source_generation or 0) + 1
     state.render_ready = false
@@ -79,6 +88,13 @@ function M.apply(state, review)
   state.root = review.target.directory and review.target.directory.path
     or state.root
     or (review.target.localGit or {}).path
+  if snapshot then
+    state.snapshot = snapshot
+    state.git_root = vim.uv.fs_stat(snapshot.root) and snapshot.root or nil
+    state.base = snapshot.baseCommit
+    state.head = snapshot.headCommit
+    state.git_checked = true
+  end
   state.scope_key = review.id
   require("lgtm.services.session_service").set_review(state, review)
   if load_progress then
@@ -87,19 +103,14 @@ function M.apply(state, review)
   return state
 end
 
-function M.create_notes(path)
-  local absolute = vim.fn.fnamemodify(path, ":p"):gsub("/$", "")
-  absolute = vim.uv.fs_realpath(absolute) or absolute
-  local state = {
-    note = true,
-    kind = "notes",
-    mode = "notes",
-    root = vim.fs.dirname(absolute),
-    path = vim.fs.basename(absolute),
-    scope = { notes = { path = absolute } },
-    scope_key = "notes:" .. absolute,
-  }
-  require("lgtm.services.threads_service").get_data(state)
-  return state
+-- Private ---------------------------------------------------------------------
+
+function Private.selected_snapshot(state, review)
+  for _, revision in ipairs(review.revisions or {}) do
+    if revision.id == state.selected_revision_id then
+      return revision
+    end
+  end
+  return review.snapshot
 end
 return M

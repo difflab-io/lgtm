@@ -2,187 +2,102 @@
 
 ## Overview
 
-DiffService supplies comparisons, file lists, and file content to clients that need backend content access. The future web UI uses this service. Neovim uses CodeDiff for analogous functionality for now. Each UI owns file selection, navigation, layout, and comment presentation.
-
-This page defines the service contract. [ReviewService](reviews.md) owns review contexts, comments, and state transitions. A diff request does not create or mutate review data.
+DiffService returns comparison metadata, file lists and selected file bodies. SnapshotService retains review source. ReviewService owns the session and its revisions. Clients choose files and render diffs.
 
 ## Requirement
 
-### Functional
-
-- FR1: Describe working, staged, branch, directory, and PR comparisons without requiring a review.
-- FR2: List changed files separately from reading file bodies. Include ignored files under an explicitly selected directory.
-- FR3: Read only the requested file and return the relevant comparison sides.
-- FR4: Return source identities that clients can use in review comparisons and comment anchors.
-- FR5: Detect changed content rather than return a file as part of an outdated comparison.
-- FR6: Expose data only. Leave selection, diff rendering, navigation, and UI progress to clients.
-- FR7: Resolve supplied anchors against a named displayed source without changing their originals or loading review records.
-
-### Non-Functional
-
-- NFR1: Open the first file without fetching all file bodies. Use bounded requests and paging.
-- NFR2: Read without changing checkouts. Respect selected roots and skip nested symlinks.
-- NFR3: Keep forge credentials in the backend and share the existing credential and provider infrastructure.
-- NFR4: Report binary, oversized, missing, and unsupported content explicitly.
-- NFR5: Avoid review persistence, duplicate repository clones, and full content snapshots.
+- Browse working, staged, branch, directory and PR comparisons before starting a review.
+- Read a saved review after its source repository changes or disappears.
+- Fetch file metadata separately from bodies. Include ignored files in explicit directory reviews.
+- Keep source capture and comment validation in the backend for every client.
+- Preserve CodeDiff's explorer and navigation using two saved commits.
 
 ## Design
-
-### Usage
-
-#### Web client
-
-```mermaid
-sequenceDiagram
-    actor Web as Web UI
-    participant Diff as DiffService
-    participant Review as ReviewService
-    Web->>Diff: GetDiff(target, selection)
-    Diff-->>Web: Comparison descriptor and source identities
-    Web->>Diff: GetFiles(comparison, pageToken)
-    Diff-->>Web: Paths and statuses
-    Web->>Web: Select a file
-    Web->>Diff: GetFile(comparison, path)
-    Diff-->>Web: Selected sides and source evidence
-    Web->>Review: StartReview(target, comparison)
-    Review-->>Web: Review ID and version
-    Web->>Review: GetConversation(reviewId)
-    Review-->>Web: Original anchors, forge observations, and states
-    Web->>Diff: GetFile(comparison, path, anchors)
-    Diff-->>Web: Source-bound placement results
-    Web->>Web: Render confirmed placements and labeled fallbacks
-```
-
-Diff browsing works without starting a review. Clients can read conversation and content independently after selecting a saved review.
-
-#### Neovim client
-
-```mermaid
-sequenceDiagram
-    participant CodeDiff
-    participant Nvim as LGTM Lua
-    participant Diff as DiffService
-    participant Review as ReviewService
-    CodeDiff->>CodeDiff: Load native buffers and render diff
-    Nvim->>Diff: GetAnchorPlacements(anchors, displayed sources)
-    Diff-->>Nvim: Locations or labeled fallbacks
-    Nvim->>Nvim: Render source annotations
-    Nvim->>Diff: CaptureAnchor(selection, backend source reference)
-    Diff-->>Nvim: Original anchor and bounded evidence
-    Nvim->>Review: AddComment(scope, anchor, body)
-    Review->>Review: Verify source and persist or synchronize
-```
-
-Neovim keeps CodeDiff's native Git explorer, buffers, editing, and refresh. CodeDiff loads the native diff directly. LGTM requests saved-source identities and bytes from the backend for anchor checks, then verifies that its native buffers still match. It sends those sources to the shared backend anchor operations. Directory and remote fallback views can also load their content through DiffService.
 
 ### Components and Responsibilities
 
 ```mermaid
-flowchart TB
-    Web["Future web UI"] --> Diff["DiffService"]
-    Nvim["Neovim UI"] --> CodeDiff["CodeDiff"]
-    Nvim -->|"Anchor capture and placement"| Diff
-    Diff --> Local["Local Git and directory adapter"]
-    Diff --> Forge["Forge content adapter"]
-    CodeDiff --> Git["Local Git and working files"]
-    Local --> Git
-    Forge --> GH["GitHub content API"]
-    Web -->|"Comparison identities and anchors"| Review["ReviewService"]
-    Nvim -->|"Comparison identities and anchors"| Review
-    Review --> Data["Contexts, reviews, comments, and states"]
+flowchart LR
+  Files[Saved files / index / commits] --> Snapshots[SnapshotService]
+  PR[PR base and head commits] --> Snapshots
+  Snapshots --> Store[Owned Git objects and refs]
+  Reviews[ReviewService] --> Snapshots
+  Reviews --> DB[Sessions and revisions]
+  Diff[DiffService] --> Store
+  Web[Web client] --> Diff
+  Nvim[Neovim services] --> Diff
+  Nvim --> CodeDiff
+  CodeDiff --> Store
 ```
-
-- UI: Choose the target and files. Render diffs and discussions.
-- DiffService: Resolve a content comparison, return selected diff data, and map supplied anchors to that content.
-- Local adapter: Read Git objects, index content, working files, and explicit directories.
-- Forge adapter: Read PR file metadata and selected content using backend credentials.
-- ReviewService: Validate and persist review actions independently of the content source.
-
-DiffService and ReviewService can run in the same backend process. They share source identity types and provider infrastructure, without calling each other to perform their core operations.
 
 ### Data and Control Flow
 
 ```mermaid
-flowchart TD
-    A["Read content for a comparison"] --> B{"Sources still match?"}
-    B -->|"Yes"| C["Return content and source identities"]
-    B -->|"No"| D["Return stale comparison conflict"]
-    B -->|"Unavailable"| E["Return explicit content status"]
-    D --> F["UI chooses whether to refresh"]
+sequenceDiagram
+  participant UI
+  participant Review as ReviewService
+  participant Snapshot as SnapshotService
+  participant Git as Owned Git store
+  participant Diff as DiffService
+  UI->>Review: StartReview(target, comparison)
+  Review->>Snapshot: Capture saved source
+  Snapshot->>Git: Import commits or capture tree
+  Snapshot-->>Review: Fixed base/head and repository identity
+  Review-->>UI: Session and snapshot
+  UI->>Diff: GetDiff(reviewId, revisionId?)
+  Diff-->>UI: Comparison of retained commits
+  UI->>Diff: GetFiles(comparison)
+  UI->>Diff: GetFile(comparison, path)
+  UI->>Review: GetConversation(scope, snapshotId)
+  Review-->>UI: Fixed locations and provider statuses
 ```
 
-An observation token detects stale source metadata. It does not promise a stored snapshot of all working files. If working or index content changes, return fresh identities or a conflict before treating it as the previously observed content. Review versions guard review data separately from content identities.
+Neovim lets CodeDiff read the saved Git objects directly when the backend store is available locally. Directory views and remote-backend fallbacks use selected file bodies from DiffService. Both paths show the same retained bytes. Review panes are read-only; ordinary source buffers remain independent.
 
 ### Interfaces and Contracts
 
-A comparison descriptor identifies the sources that form a diff. It is content metadata, not a review session or a durable database entity.
+| Method | Request | Result |
+| --- | --- | --- |
+| `GetDiff` | Target and optional comparison, or review ID and optional revision ID | Metadata descriptor. A review request selects retained commits. |
+| `GetFiles` | Descriptor and page token | Paths, statuses, rename metadata and next page token. |
+| `GetFile` | Descriptor and relative path | Selected content sides and content identities. |
+| `GetConversation` | Review scope and optional snapshot ID | Discussions; fixed display locations for that revision. |
+| `AddComment` | Review scope, snapshot ID, side, path, range and body | Backend-validated comment and local/remote save state. |
+
+Transient browsing requests do not create a session or snapshot. An observation token detects stale mutable comparisons. Once a review starts, its descriptor names retained commits and no longer depends on the original workspace. Refresh belongs to ReviewService and captures another revision.
+
+### Source storage
 
 ```text
-DiffTarget = LocalGit { path }
-           | Directory { path }
-           | PullRequest { repositoryUrl, number }
-
-Selection  = Working { base? }
-           | Staged { base? }
-           | Branch { baseBranch }
-
-Comparison = {
-  target,
-  sourceKinds,
-  resolvedCommitIdentities?,
-  observationToken
-}
+$LGTM_HOME/snapshots/<repository-id>/.git/
+├── objects/
+└── refs/lgtm/revisions/<revision-id>/
+    ├── base
+    └── head
 ```
 
-| Method | Request → response | Contract |
-| --- | --- | --- |
-| `GetDiff` | Target and optional local selection → comparison | Resolve metadata without creating a review or downloading all content. |
-| `GetFiles` | Comparison and page token → file metadata | Return paths, statuses, rename information, and the next page token. |
-| `GetFile` | Comparison, relative path, optional anchors → content sides, source identities, and placements | Read the selected file only. Resolve supplied anchors without querying review records. |
-| `GetAnchorPlacements` | Original anchors, provider observations and up to two displayed source views → indexed placements | Share placement rules with native editors without taking over their content loading. Each batch accepts up to 500 anchors. |
-| `GetSource` | Absolute root, relative path, saved-source kind and optional commit → selected content side or confirmed absence | Read exact saved bytes for native-client anchor checks, including files outside the current diff. Matching working/index bytes retain index identity. |
-| `CaptureAnchor` | File/line selection and saved-source or comparison-file reference → anchor with source identity and bounded evidence | Read the selected Git commit, index, working file, saved file or remote comparison on the backend; capture the hash and bounded evidence there. Clients send no source bytes or evidence. Review writes independently verify the saved bytes. |
+Imported commits keep their hashes. Clean working and staged captures reuse HEAD when their trees match it. Changed saved files and index content use synthetic commits. Capture uses a separate index and does not change the user's branch, index or files. Retained refs keep historical objects available.
 
-Local selection applies only to Git targets. PR and directory targets determine their own content sources. Branch references resolve to commit identities. File responses distinguish commit, working, index, and non-Git sources. Index responses retain the actual blob object ID so staged anchors can survive a commit. Clients supply those identities to ReviewService with the selected anchor. ReviewService still enforces its own scope and lifecycle rules.
-
-#### Anchor mapping contract
-
-The backend owns the [source and placement rules](reviews.md#mapping-and-stale-content) for all clients. Return `Exact`, `Relocated`, `Stale`, `Outdated`, `Orphaned`, or `Unverified` for each associated anchor. Bind each result to the requested comparison and actual content identity. Hash exact source bytes and return bounded selected-text evidence.
-
-```mermaid
-flowchart LR
-    A["Client supplies original anchors"] --> D["DiffService reads selected source"]
-    D --> M["Resolve paths and ranges using source and text evidence"]
-    M --> R["Return source-bound placements with reasons"]
-    R --> UI["UI renders confirmed locations or labeled fallbacks"]
-```
-
-DiffService does not decide whether a discussion is resolved or published. It does not change original anchors or forge outdated state. If original content is unavailable, use preserved excerpts only when they support one unambiguous mapping. For preserved sources, confirmed moves return the new path automatically. Lost lines return a file-header fallback, and confirmed file deletion returns an orphaned result. Changed unstaged Git sources return a stale fallback without coordinates. Otherwise, return a reason without guessing a line. No full-file snapshot store is required by this contract.
+The same normalized origin produces the same repository ID for local and forge reviews. A matching commit hash identifies shared source; it does not automatically merge their conversations.
 
 ## Implementation
 
-### Module boundaries
-
-Keep RPC handlers and content orchestration separate from review workflows. Reuse Git readers, path rules, and forge adapters where their contracts match. Do not add review database tables for diff browsing.
-
-The router mounts `rpc/diff.rs` beside the review service. `services/diff.rs` owns metadata descriptors and selected-file reads. It reuses filesystem, Git, and forge adapters without a review database handle. A bounded in-memory cache retains verified remote blobs by repository, path, and commit; it is not review storage.
+`services/snapshot.rs` owns capture and refs. `services/diff.rs` owns descriptors and selected-file reads. `services/review.rs` persists revision metadata and validates comment ranges. RPC handlers select these workflows and convert transport data.
 
 ### Acceptance flows
 
-| Flow | Required evidence |
+| Flow | Evidence |
 | --- | --- |
-| Browse without a review | Diff requests create no context, session, comment, or submission. |
-| Open the first PR file | Fetch metadata and the selected sides without fetching unrelated file bodies. |
-| Read mutable local content | Detect changes between observation and file access. Return the actual source identity. |
-| Use an ignored directory | Read only the explicitly selected root, including ignored files. |
-| Use CodeDiff in Neovim | Keep native Git content loading; use backend anchor operations for comments and annotations. |
-| Preserve review independence | Rendering failures do not change review state. Review persistence does not require a file-body request. |
-| Resolve supplied anchors | Return shared placement decisions for identical evidence, including deletion, duplicate text, rename, and source changes. |
-| Preserve exact bytes | Distinguish working and index content, line endings, and final newlines in returned hashes. |
+| Browse without a review | No context, session or comment is created. |
+| Saved-source capture | Working and staged bytes remain distinct; user Git state is unchanged. |
+| Resume after source deletion | Saved file bodies remain readable. |
+| Refresh | Same session, next revision, original comment coordinates retained. |
+| Historical navigation | Open the original saved revision and line. |
+| PR update | Same pending review; new feedback uses the current revision. |
 
 ## References
 
-- [Review API architecture](reviews.md).
-- [System architecture](../index.md).
-- [Backend architecture](index.md).
-- [Neovim CodeDiff integration](../../../apps/lgtm.nvim/lua/lgtm/features/diff_view.lua).
+- [Review lifecycle and fixed locations](reviews.md).
+- [Neovim architecture](../lgtm.nvim/index.md).
+- [SnapshotService](../../../apps/lgtm-backend/src/services/snapshot.rs).
+- [Snapshot service tests](../../../apps/lgtm-backend/tests/snapshot_service.rs).

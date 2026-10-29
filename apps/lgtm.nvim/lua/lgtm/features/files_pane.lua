@@ -103,53 +103,6 @@ function M.toggle_reviewed(state, file)
   end
 end
 
--- CodeDiff updates working/index buffers independently of file selection.
-
----@param state lgtm.ReviewState
-function M.observe(state, buf)
-  state.reviewed_buffers = state.reviewed_buffers or {}
-  if state.reviewed_buffers[buf] then
-    return
-  end
-  state.reviewed_buffers[buf] = true
-  api.nvim_buf_attach(buf, false, {
-    on_lines = function()
-      vim.schedule(function()
-        if
-          require("lgtm.services.state").current ~= state
-          or not api.nvim_buf_is_valid(buf)
-          or not state.file
-          or not state.panes
-          or state.panes.new.buf ~= buf
-        then
-          return
-        end
-        -- Invalidate immediately. A bounded selected-source read runs after CodeDiff settles.
-        require("lgtm.services.files_service").invalidate_reviewed(state, state.file.path)
-        state.views = {}
-        state.source_generation = (state.source_generation or 0) + 1
-        if state.render then
-          state.render()
-        end
-        state.source_refresh = (state.source_refresh or 0) + 1
-        local generation = state.source_refresh
-        vim.defer_fn(function()
-          if
-            require("lgtm.services.state").current == state
-            and state.source_refresh == generation
-            and state.bind_panes
-          then
-            state.bind_panes()
-          end
-        end, 80)
-      end)
-    end,
-    on_detach = function()
-      state.reviewed_buffers[buf] = nil
-    end,
-  })
-end
-
 ---@param state lgtm.ReviewState
 function M.navigate(state, direction, unreviewed)
   if not state or #(state.files or {}) == 0 then

@@ -1018,14 +1018,6 @@ mod review_service {
                 git(&["add", "file.rs"]);
                 git(&["commit", "-qm", "initial source"]);
                 let first = git(&["rev-parse", "HEAD"]);
-                let (source, bytes) = lgtm_backend::services::workspace::get_source(
-                    temp.path(),
-                    "file.rs",
-                    lgtm_backend::database::types::SourceKind::Commit,
-                    Some(&first),
-                )
-                .unwrap();
-                let evidence = AnchorEvidence::capture(source, &bytes, 1, 3).unwrap();
                 let c = db
                     .ensure_context(
                         ContextKey::Local {
@@ -1051,12 +1043,24 @@ mod review_service {
                     )
                     .await
                     .unwrap();
+                let review = db
+                    .clone()
+                    .with_snapshots(lgtm_backend::services::SnapshotService::new(
+                        temp.path().join("snapshots"),
+                    ))
+                    .prepare_review(&s.id)
+                    .await
+                    .unwrap();
                 let anchor = Anchor::Line {
                     path: "file.rs".into(),
                     start: 1,
                     end: 3,
                     side: "new".into(),
                 };
+                let evidence = db
+                    .get_snapshot_location(&s.id, &review.snapshot.unwrap().id, &anchor)
+                    .await
+                    .unwrap();
                 assert!(
                     db.add_comment(&s.id, &a, "Missing evidence", anchor.clone(), None, None)
                         .await
@@ -1877,22 +1881,24 @@ mod mutation_guards {
             let file = temp.path().join("notes.md");
             std::fs::write(&file, b"before\r\nselected\r\nafter").unwrap();
             let (context, actor, session) = notes(&service, temp.path()).await;
-            let bytes = std::fs::read(&file).unwrap();
-            let evidence = AnchorEvidence::capture(
-                AnchorSource::LocalFile {
-                    content_hash: AnchorSource::hash(&bytes),
-                },
-                &bytes,
-                2,
-                2,
-            )
-            .unwrap();
+            let review = service
+                .clone()
+                .with_snapshots(lgtm_backend::services::SnapshotService::new(
+                    temp.path().join("snapshots"),
+                ))
+                .prepare_review(&session.id)
+                .await
+                .unwrap();
             let anchor = Anchor::Line {
                 path: "notes.md".into(),
                 side: "new".into(),
                 start: 2,
                 end: 2,
             };
+            let evidence = service
+                .get_snapshot_location(&session.id, &review.snapshot.unwrap().id, &anchor)
+                .await
+                .unwrap();
             let guard = MutationGuard::new(
                 Some(version(&service, &context).await),
                 "source-comment".into(),

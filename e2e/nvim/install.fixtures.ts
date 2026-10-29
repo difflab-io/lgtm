@@ -27,7 +27,6 @@ export function usePluginInstallation() {
         `return {{opts={identity={name="Installation reviewer",email="installer@example.test"},
 endpoint_url=${JSON.stringify(runtime.endpoint)},ui={border="double"}}}}`,
       )
-      await runtime.write('note.txt', 'A saved file for the installation journey.\n')
     },
   })
 }

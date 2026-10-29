@@ -4,6 +4,7 @@ pub mod file_reviews;
 pub mod identities;
 pub mod mutation_receipts;
 pub mod review_contexts;
+pub mod review_revisions;
 pub mod sessions;
 pub mod threads;
 pub mod workspace_paths;

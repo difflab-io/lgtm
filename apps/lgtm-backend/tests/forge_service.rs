@@ -286,19 +286,32 @@ async fn should_submit_final_body_and_comments_once_and_reconcile_lost_response(
                 )
                 .await
                 .unwrap();
-            let (_, metadata) = forge.get_workspace(&context.id, "", true).await.unwrap();
+            let diffs = lgtm_backend::services::diff::DiffService::with_provider(
+                GithubClient::for_test(&fixture.endpoint).unwrap(),
+            );
+            let (repository, number) =
+                lgtm_backend::forge::Repository::from_context_key(&context.key).unwrap();
+            let base = context.refreshed_base.as_deref();
+            let head = context.refreshed_head.as_deref().unwrap();
+            let (_, metadata) = diffs
+                .get_remote_workspace(&repository, number, base, head, "", true)
+                .await
+                .unwrap();
             assert_eq!(metadata.len(), 1);
             assert_eq!(metadata[0].0.previous_path, "file.txt");
             assert!(metadata[0].0.content.is_empty());
             assert!(metadata[0].1.is_empty());
             assert_eq!(state.lock().unwrap().content_reads, 0);
-            let (_, missing) = forge
-                .get_workspace(&context.id, "other.txt", false)
+            let (_, missing) = diffs
+                .get_remote_workspace(&repository, number, base, head, "other.txt", false)
                 .await
                 .unwrap();
             assert!(missing.is_empty());
             assert_eq!(state.lock().unwrap().content_reads, 0);
-            let (root, files) = forge.get_workspace(&context.id, "", false).await.unwrap();
+            let (root, files) = diffs
+                .get_remote_workspace(&repository, number, base, head, "", false)
+                .await
+                .unwrap();
             assert_eq!(root, "https://github.com/acme/repo");
             assert_eq!(files[0].0.content, "new\n");
             assert_eq!(files[0].1, "old\n");

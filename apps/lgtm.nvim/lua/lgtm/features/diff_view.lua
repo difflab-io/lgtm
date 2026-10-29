@@ -24,16 +24,14 @@ function M.open(state, file, native_config)
   local config
   if native_config then
     config = native_config
-  elseif state.git_root then
+  elseif state.git_root and state.kind ~= "directory" then
     config = {
       git_root = state.git_root,
-      original = file.status == "added" and paths.empty()
-        or paths.make_ref(
-          (file.previousPath and file.previousPath ~= "" and file.previousPath or file.path),
-          state.git_root
-        ),
-      modified = file.status == "removed" and paths.empty()
-        or paths.make_ref(file.path, state.git_root),
+      original = paths.make_ref(
+        (file.previousPath and file.previousPath ~= "" and file.previousPath or file.path),
+        state.git_root
+      ),
+      modified = paths.make_ref(file.path, state.git_root),
       original_revision = state.base,
       modified_revision = state.head,
       layout = "side-by-side",
@@ -90,7 +88,7 @@ function M.open(state, file, native_config)
         M.suspend(state)
         state.file, state.empty = nil, true
         state.render_ready = true
-        state.views, state.observe_sources = {}, nil
+        state.views = {}
         state.render = function()
           require("lgtm.features.files_pane").render(state)
         end
@@ -146,10 +144,6 @@ function M.open(state, file, native_config)
     state.file = file
     state.views = {}
     state.source_generation = (state.source_generation or 0) + 1
-    local source_generation = state.source_generation
-    if state.native_explorer and session.modified_bufnr then
-      require("lgtm.features.files_pane").observe(state, session.modified_bufnr)
-    end
     state.render = function()
       if state.closed or state.tab ~= api.nvim_get_current_tabpage() then
         return
@@ -228,7 +222,6 @@ function M.open(state, file, native_config)
     if not state.native_explorer and state.explorer_visible ~= false then
       require("lgtm.features.files_pane").show(state, false)
     end
-    state.render()
     if state.focus_side then
       local pane = state.panes[state.focus_side]
       if not pane.win then
@@ -239,69 +232,16 @@ function M.open(state, file, native_config)
         api.nvim_set_current_win(pane.win)
       end
     end
-    state.observe_sources = function(done)
-      require("lgtm.services.threads_service").observe_sources(state, file, done)
-    end
-    local remaining = 2
-    for _, side in ipairs({ "old", "new" }) do
-      local pane = state.panes[side]
-      require("lgtm.services.diff_service").get_selected_source(
-        state,
-        file,
-        side,
-        function(err, selected)
-          if
-            require("lgtm.services.state").current ~= state
-            or state.tab ~= api.nvim_get_current_tabpage()
-            or state.source_generation ~= source_generation
-          then
-            return
-          end
-          local view_source = vim.tbl_extend("force", selected or {}, {
-            path = side == "old" and (file.previousPath or file.path) or file.path,
-            logical_path = file.path,
-            previous_path = file.previousPath,
-            side = side,
-            confirmed_rename = file.confirmedRename,
-            comparison = state.comparison,
-            unavailable = err and err.message,
-          })
-          if view_source.source and not err and pane.buf and api.nvim_buf_is_valid(pane.buf) then
-            local mismatch =
-              require("lgtm.services.anchor_service").check_buffer(view_source, pane.buf)
-            if mismatch then
-              view_source.unavailable = mismatch.message
-            end
-          end
-          state.views[side] = view_source
-          remaining = remaining - 1
-          if remaining == 0 then
-            file = require("lgtm.services.files_service").record_sources(state, file, state.views)
-            state.file = file
-            require("lgtm.services.anchor_service").get_placements(state, function(placement_error)
-              if state.views[side] ~= view_source then
-                return
-              end
-              if placement_error then
-                require("lgtm.ui.notifications").error(placement_error)
-              end
-              require("lgtm.services.files_service").validate_reviewed(state)
-              state.observe_sources(function(observe_error)
-                if state.views[side] ~= view_source then
-                  return
-                end
-                if observe_error then
-                  require("lgtm.ui.notifications").error(observe_error)
-                end
-                state.render_ready = true
-                if state.on_ready then
-                  state.on_ready()
-                end
-              end)
-            end)
-          end
-        end
-      )
+    state.views = {
+      old = { path = file.previousPath or file.path, logical_path = file.path, side = "old" },
+      new = { path = file.path, logical_path = file.path, side = "new" },
+    }
+    require("lgtm.services.threads_service").update_annotations(state)
+    state.render()
+    require("lgtm.services.files_service").validate_reviewed(state)
+    state.render_ready = true
+    if state.on_ready then
+      state.on_ready()
     end
   end
   local deadline = vim.uv.hrtime() + 5e9
@@ -388,9 +328,7 @@ function M.open_native(state)
   require("lgtm.services.forge_service").install()
   local git = require("codediff.core.git")
   local base = state.base
-  local head = state.mode == "working" and "WORKING"
-    or state.mode == "staged" and ":0"
-    or state.head
+  local head = state.head
   local function loaded(err, status)
     vim.schedule(function()
       if
@@ -429,13 +367,13 @@ function M.open_native(state)
       })
     end)
   end
-  if state.mode == "working" then
-    git.get_diff_revision_with_line_stats(base, state.git_root, loaded)
-  elseif state.mode == "staged" then
-    git.get_diff_staged(base, state.git_root, loaded)
-  else
+  require("lgtm.services.files_service").get_files(state, function(err)
+    if err then
+      require("lgtm.ui.notifications").error(err)
+      return
+    end
     git.get_diff_revisions_with_line_stats(base, head, state.git_root, loaded)
-  end
+  end)
 end
 
 ---@param state lgtm.ReviewState

@@ -11,7 +11,14 @@ use std::time::Duration;
 async fn should_validate_requests_and_preserve_local_conversation_through_rpc() {
     let temp = tempfile::tempdir().unwrap();
     let database = Database::connect("sqlite::memory:").await.unwrap();
-    let (router, _) = lgtm_backend::router_with_database(database.clone());
+    let api = std::sync::Arc::new(lgtm_backend::rpc::Api::with_snapshots(
+        database.clone(),
+        lgtm_backend::services::SnapshotService::new(temp.path().join("snapshots")),
+    ));
+    let router = connectrpc::Router::new()
+        .add_service::<lgtm_backend::rpc::Api, IdentityServiceRegisterMarker>(api.clone())
+        .add_service::<lgtm_backend::rpc::Api, ReviewServiceRegisterMarker>(api.clone())
+        .add_service::<lgtm_backend::rpc::Api, DiffServiceRegisterMarker>(api);
     let bound = Server::bind("127.0.0.1:0").await.unwrap();
     let address = bound.local_addr().unwrap();
     let (stop, stopped) = tokio::sync::oneshot::channel();
@@ -33,12 +40,11 @@ async fn should_validate_requests_and_preserve_local_conversation_through_rpc() 
         .into_owned();
     assert_eq!(capabilities.api_version, "1");
     for capability in [
-        "notes",
         "local_review",
         "export",
         "review_targets",
         "feedback_scopes",
-        "anchor_evidence",
+        "review_snapshots",
         "diff_service",
     ] {
         assert!(

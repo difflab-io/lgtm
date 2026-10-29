@@ -114,7 +114,7 @@ describe("When using plugin contracts", function()
           logical_path = "a",
           side = side,
           content = content,
-          source = require("lgtm.models.source").source_from_wire(source),
+          source = source,
         }
         table.insert(state.conversation.comments, { threadId = side })
         table.insert(state.conversation.threads, {
@@ -186,7 +186,7 @@ describe("When using plugin contracts", function()
     end)
   end)
 
-  describe("When a saved review has no recorded comparison", function()
+  describe("When a saved review has no retained source", function()
     it("Keeps discussion access without guessing source content", function()
       -- Arrange
       local legacy = {
@@ -216,7 +216,7 @@ describe("When using plugin contracts", function()
       -- Assert
       assert.is_truthy(state.conversation)
       assert.is_nil(state.panes)
-      assert.matches("no recorded comparison", message, 1, true)
+      assert.matches("no retained source", message, 1, true)
     end)
   end)
 

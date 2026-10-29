@@ -32,23 +32,6 @@ pub struct ReviewContextRepository<C = sea_orm::DatabaseConnection> {
 }
 
 impl<C: ConnectionTrait + TransactionTrait> ReviewContextRepository<C> {
-    /// Update only the current notes location. The caller owns the versioned move transaction.
-    pub async fn set_notes_location(&self, id: &uuid::Uuid, path: &str) -> Result<()> {
-        let changed = review_contexts::Entity::update_many()
-            .col_expr(
-                review_contexts::Column::CurrentNotesPath,
-                Expr::value(path.to_owned()),
-            )
-            .filter(review_contexts::Column::Id.eq(*id))
-            .filter(review_contexts::Column::NotesPath.is_not_null())
-            .exec(self.connection.as_ref())
-            .await?;
-        if changed.rows_affected != 1 {
-            return Err(super::super::error::invalid("Notes context does not exist"));
-        }
-        Ok(())
-    }
-
     /// Find file notes at their original path or a confirmed moved-path association.
     pub async fn get_notes_for_path(&self, path: &str) -> Result<Option<review_contexts::Model>> {
         if let Some(original) = review_contexts::Entity::find()

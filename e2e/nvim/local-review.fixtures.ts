@@ -1,6 +1,6 @@
 import type { Editor } from './editor.js'
 import { type TestHarness } from '../common/test-harness.js'
-import { waitFor, type Json } from '../common/test-utils.js'
+import { type Json } from '../common/test-utils.js'
 import { join } from 'node:path'
 import { mkdir, symlink } from 'node:fs/promises'
 
@@ -61,107 +61,21 @@ export async function prepareCommittedFeedback(editor: Editor, runtime: TestHarn
   return feedback
 }
 
-export async function prepareShiftedFeedback(editor: Editor, runtime: TestHarness) {
-  const feedback = await prepareCommittedFeedback(editor, runtime)
-  await runtime.commit('insert leading line')
-  await editor.openLocal('branch', true)
-  await editor.show(feedback.path)
-  return feedback
-}
-
-export async function prepareRenamedFeedback(editor: Editor, runtime: TestHarness) {
-  const feedback = await prepareShiftedFeedback(editor, runtime)
-  await runtime.git('mv', 'src', 'moved')
-  await runtime.commit('move reviewed directory')
-  await editor.openLocal('branch', true)
-  await editor.show(feedback.moved)
-  await waitFor(
-    'confirmed rename persisted',
-    () => editor.state(),
-    (state) =>
-      state?.conversation.threads.find((thread: Json) => thread.id === feedback.rootId)
-        ?.currentPath === feedback.moved,
-  )
-  return feedback
-}
-
-export async function prepareLostSelection(editor: Editor, runtime: TestHarness) {
-  const feedback = await prepareRenamedFeedback(editor, runtime)
-  await runtime.write(feedback.moved, feedback.shifted.replace('selected', 'replacement'))
-  await runtime.commit('replace reviewed selection')
-  await editor.openLocal('branch', true)
-  await editor.show(feedback.moved)
-  return feedback
-}
-
-export async function prepareDeletedFile(editor: Editor, runtime: TestHarness) {
-  const feedback = await prepareRenamedFeedback(editor, runtime)
-  await runtime.git('rm', '--', feedback.moved)
-  await runtime.commit('delete reviewed file')
-  await editor.openLocal('branch', true)
-  await waitFor(
-    'file deletion persisted',
-    () => editor.state(),
-    (state) =>
-      state?.conversation.threads.find((thread: Json) => thread.id === feedback.rootId)
-        ?.orphanReason === 'file_deleted',
-  )
-  return feedback
-}
-
-export async function prepareRestoredFile(editor: Editor, runtime: TestHarness) {
-  const feedback = await prepareDeletedFile(editor, runtime)
-  await runtime.write(feedback.moved, feedback.shifted)
-  await runtime.commit('restore matching source')
-  await editor.openLocal('branch', true)
-  await editor.show(feedback.moved)
-  return feedback
-}
-
 export async function prepareWorkingFeedback(editor: Editor, runtime: TestHarness) {
-  const feedback = await prepareRenamedFeedback(editor, runtime)
-  await editor.command('Lgtm complete')
-  await editor.wait(
-    'require("lgtm.services.state").current.review.state == "completed"',
-    'branch review completed before starting a working review',
-  )
+  await runtime.git('init', '-q', '-b', 'main')
+  await runtime.write('other.txt', 'original\n')
+  await runtime.commit('base')
   await runtime.write('other.txt', 'working selection\n')
-  await editor.command('Lgtm close')
   await editor.edit(join(runtime.workspace, 'other.txt'))
+  const originalBuffer = await editor.value<number>('vim.api.nvim_get_current_buf()')
   const beforeMapping = await editor.value('vim.fn.maparg("c","n",false,true).desc')
   await editor.openLocal('working')
   await editor.show('other.txt')
   await editor.pane()
   await editor.keys('c')
   await editor.compose('Retain this unstaged feedback')
-  const state = (await editor.state())!
-  const working = state.conversation.threads.find(
-    (thread: Json) => thread.anchor.path === 'other.txt',
-  )
-  return {
-    ...feedback,
-    workingId: working.id,
-    working,
-    beforeMapping,
-    workingBuffer: state.panes.new.buf,
-  }
-}
-
-export async function prepareOrphanedWorkingFeedback(editor: Editor, runtime: TestHarness) {
-  const feedback = await prepareWorkingFeedback(editor, runtime)
-  await runtime.write('other.txt', 'changed working selection\n')
-  await editor.command('Lgtm refresh')
-  await waitFor(
-    'working source orphaned',
-    () => editor.state(),
-    (state) =>
-      Boolean(
-        state?.render_ready &&
-        state?.conversation.threads.find((thread: Json) => thread.id === feedback.workingId)
-          ?.orphanReason === 'working_source_changed',
-      ),
-  )
-  return feedback
+  const state = (await editor.comments(1))!
+  return { workingId: state.conversation.threads[0].id, beforeMapping, originalBuffer }
 }
 
 export async function prepareIgnoredWorkspace(runtime: TestHarness) {

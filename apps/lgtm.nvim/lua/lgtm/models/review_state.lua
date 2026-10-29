@@ -1,27 +1,27 @@
 ---Service records and editor bindings for one review or saved-file context.
 ---Fields are populated during initialization; a context can exist before its review or windows load.
 ---@class lgtm.ReviewState
+---@field snapshot lgtm.Snapshot?
+---@field selected_revision_id string? Historical revision selected in this view.
 ---@field review lgtm.Review? Read-only projection of session_service data.
 ---@field scope table? Backend review or saved-file scope.
 ---@field scope_key string?
 ---@field version string?
 ---@field target table?
 ---@field comparison table?
----@field kind 'git'|'directory'|'pr'|'notes'|nil
----@field mode 'working'|'staged'|'branch'|'pr'|'directory'|'notes'|nil
+---@field kind 'git'|'directory'|'pr'|nil
+---@field mode 'working'|'staged'|'branch'|'pr'|'directory'|nil
 ---@field base string?
 ---@field head string?
 ---@field root string? Canonical local source directory.
----@field path string? Selected notes filename relative to root.
 ---@field note boolean?
 ---@field files lgtm.ReviewFile[]? Read-only projection of files_service data.
 ---@field file lgtm.ReviewFile?
 ---@field diff table? Read-only projection of diff_service data.
 ---@field conversation lgtm.Conversation? Read-only projection of threads_service data.
----@field placements table<string, table<string, lgtm.AnchorPlacement>>? Backend results by thread and displayed side.
+---@field placements table<string, table<string, lgtm.Annotation>>? Backend results by thread and displayed side.
 ---@field placement_views table? Source snapshot associated with the placement results.
 ---@field placement_conversation lgtm.Conversation? Conversation snapshot associated with the placement results.
----@field placement_read table? Coalesced placement request owned by anchor_service.
 ---@field views table<string, table>?
 ---@field reviewed table<string, string>?
 ---@field reviewed_read integer?
@@ -61,7 +61,6 @@
 ---@field render_ready boolean?
 ---@field render_generation integer?
 ---@field source_generation integer?
----@field source_refresh integer?
 ---@field read_generation integer?
 ---@field read_callbacks function[]?
 ---@field session_subscription NuiSubscription?
@@ -74,5 +73,4 @@
 ---@field bind_panes fun()?
 ---@field render fun(done?: function)?
 ---@field redraw fun()?
----@field observe_sources fun(done?: function)?
 ---@field refresh fun(done?: function)? Refresh service records and the owning editor view.

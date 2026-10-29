@@ -60,16 +60,6 @@ for (const source of sources) {
       )
       if (source.name === 'development') expect(plugin.dir).toBe(ROOT)
       else expect(plugin.branch).toBe('main')
-
-      // Act
-      await editor.command(`edit ${join(runtime.workspace, 'note.txt')}`)
-      await editor.command('Lgtm note')
-
-      // Assert
-      await editor.wait(
-        '(function() for _,win in ipairs(vim.api.nvim_list_wins()) do if vim.bo[vim.api.nvim_win_get_buf(win)].filetype == "lgtm" and vim.api.nvim_win_get_config(win).relative ~= "" then return true end end return false end)()',
-        'installed plugin opens the note composer',
-      )
     })
   })
 }

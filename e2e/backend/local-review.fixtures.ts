@@ -22,7 +22,7 @@ export async function prepareDirectoryDiscussion(runtime: TestHarness) {
   const root = (
     await runtime.rpc('AddComment', {
       scope: current.scope,
-      anchor: line(current.bytes, 'PLAN.md'),
+      anchor: line(current.review.snapshot.id, 'PLAN.md'),
       body: 'Handle this case',
       expectedVersion: current.review.version,
       requestKey: randomUUID(),
@@ -39,7 +39,7 @@ export async function prepareDirectoryDiscussion(runtime: TestHarness) {
   snapshot = await runtime.rpc('GetConversation', { scope: current.scope })
   await runtime.rpc('AddComment', {
     scope: current.scope,
-    anchor: { kind: 'file', path: 'two.md' },
+    anchor: { kind: 'file', path: 'two.md', snapshotId: current.review.snapshot.id },
     body: 'Explain this file',
     expectedVersion: snapshot.version,
     requestKey: randomUUID(),
@@ -74,6 +74,7 @@ export async function prepareStagedReview(runtime: TestHarness) {
       body: 'Handle this failure before returning.\n\n```rust\nreturn recover(error);\n```',
       anchor: {
         kind: 'line',
+        snapshotId: review.snapshot.id,
         path,
         side: 'old',
         start: '2',
@@ -117,6 +118,7 @@ export async function prepareBranchDiscussion(runtime: TestHarness) {
       body: 'Keep this explanation in the replacement.',
       anchor: {
         kind: 'file',
+        snapshotId: branch.snapshot.id,
         path: 'other.md',
         source: { commit: { sha: head, contentHash: hash('file feedback target\n') } },
         evidence: {},

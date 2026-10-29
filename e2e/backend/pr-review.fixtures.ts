@@ -19,6 +19,7 @@ export async function prepareReview(
   const file = await runtime.rpc('GetFile', { diff, path: github.path })
   const anchor = {
     kind: 'line',
+    snapshotId: review.snapshot.id,
     path: github.path,
     side: 'new',
     start: '2',
@@ -36,10 +37,11 @@ export async function prepareReview(
 /** Capture the current guard while preserving the caller's explicit comment content and anchor. */
 export async function saveDraft(runtime: TestHarness, scope: Json, body: string, anchor: Json) {
   const current = await runtime.rpc('GetConversation', { scope })
+  const review = (await runtime.rpc('GetReview', { reviewId: scope.reviewId })).review
   return runtime.rpc('AddComment', {
     scope,
     body,
-    anchor,
+    anchor: { ...anchor, snapshotId: anchor.snapshotId ?? review.snapshot.id },
     expectedVersion: current.version,
     requestKey: randomUUID(),
   })

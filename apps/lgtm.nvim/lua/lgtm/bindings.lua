@@ -1,4 +1,4 @@
--- Buffer mappings belong to a review or notes view. Preserve prior CodeDiff/Kak/user mappings.
+-- Buffer mappings belong to a review view. Preserve prior CodeDiff/Kak/user mappings.
 -- State -----------------------------------------------------------------------
 
 local M = {}

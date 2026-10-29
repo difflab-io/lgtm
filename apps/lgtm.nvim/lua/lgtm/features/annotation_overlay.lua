@@ -11,7 +11,7 @@ local api = vim.api
 
 -- Membership in a comparison is independent of whether a discussion is resolved or stale.
 
--- Resolve against the selected source every time; raw stored ranges are never cursor targets.
+-- Render fixed source coordinates supplied by the backend for the selected revision.
 
 -- Render ----------------------------------------------------------------------
 
@@ -217,7 +217,7 @@ function M.attach(state, buf, path, side)
       local line, candidates = api.nvim_win_get_cursor(0)[1], {}
       for _, t in ipairs((state.conversation or {}).threads or {}) do
         local placement = M.placement(state, t, path, side)
-        if placement and placement.status ~= "orphaned" then
+        if placement then
           candidates[#candidates + 1] = placement.location and placement.location.start or 1
         end
       end
@@ -241,7 +241,7 @@ end
 ---@param state lgtm.ReviewState
 function M.placement(state, thread, path, side)
   local view = state.views and state.views[side]
-  if not view or (not state.note and view.logical_path ~= path) then
+  if not view or view.logical_path ~= path then
     return nil
   end
   if state.placement_views ~= state.views or state.placement_conversation ~= state.conversation then
@@ -255,11 +255,7 @@ function M.at(state, path, side, line)
   local result = {}
   for _, thread in ipairs((state.conversation or {}).threads or {}) do
     local placement = M.placement(state, thread, path, side)
-    if
-      placement
-      and #require("lgtm.services.threads_service").get_comments(state, thread) > 0
-      and placement.status ~= "orphaned"
-    then
+    if placement and #require("lgtm.services.threads_service").get_comments(state, thread) > 0 then
       local location = placement.location
       if
         (not location or location.kind == "file") and line == 1
@@ -277,14 +273,11 @@ end
 
 ---@param state lgtm.ReviewState
 function M.description(state, thread)
-  if thread.orphanReason == "file_deleted" then
-    return "Orphaned", "File was deleted; the discussion is retained"
+  if thread.displayStatus == "historical" then
+    return "Saved revision", "Open this thread to view its original source"
   end
   if M.is_outside_diff(state, thread) then
     return "Outside diff", "File is outside the current diff; the discussion is retained"
-  end
-  if thread.orphanReason == "working_source_changed" then
-    return "Stale", "Unstaged source changed; original evidence is retained"
   end
   if thread.forgeObservation and thread.forgeObservation.outdated then
     return "Outdated", "Original PR selection is no longer current"
@@ -302,7 +295,7 @@ end
 ---@param state lgtm.ReviewState
 function M.is_outside_diff(state, thread)
   local anchor = thread.anchor or {}
-  if state.note or not state.files or state.initializing or anchor.kind == "general" then
+  if not state.files or state.initializing or anchor.kind == "general" then
     return false
   end
   local path = thread.currentPath and thread.currentPath ~= "" and thread.currentPath or anchor.path
@@ -328,7 +321,7 @@ function Private.blocks(state, buf, path, side, width)
   for _, thread in ipairs((state.conversation or {}).threads or {}) do
     local placement = M.placement(state, thread, path, side)
     local cs = require("lgtm.services.threads_service").get_comments(state, thread)
-    if placement and #cs > 0 and placement.status ~= "orphaned" then
+    if placement and #cs > 0 then
       local line = placement.location
           and placement.location.kind == "line"
           and placement.location.start

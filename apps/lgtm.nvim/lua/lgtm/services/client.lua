@@ -6,9 +6,8 @@ local M = {
   required_capabilities = {
     "review_targets",
     "feedback_scopes",
-    "anchor_evidence",
+    "review_snapshots",
     "diff_service",
-    "anchor_service",
     "file_reviews",
   },
 }
@@ -85,9 +84,6 @@ function M.call(method, input, callback)
       GetDiff = true,
       GetFiles = true,
       GetFile = true,
-      GetSource = true,
-      GetAnchorPlacements = true,
-      CaptureAnchor = true,
     })[method] and "DiffService" or "ReviewService"
     cancel = require("lgtm.services.connect").call(service, method, input, M.identity, callback)
   end)

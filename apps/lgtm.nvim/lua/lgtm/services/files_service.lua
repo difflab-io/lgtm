@@ -50,37 +50,30 @@ function M.apply_native_files(state, status)
   for _, file in ipairs(state.files or {}) do
     if file.group then
       previous[file.group .. ":" .. file.path] = file
+    else
+      previous[file.path] = file
     end
   end
   local files = {}
   for _, group in ipairs({ "unstaged", "staged" }) do
     for _, entry in ipairs(status[group] or {}) do
-      local file = vim.tbl_extend("force", {}, previous[group .. ":" .. entry.path] or {})
+      local file = vim.tbl_extend(
+        "force",
+        {},
+        previous[group .. ":" .. entry.path] or previous[entry.path] or {}
+      )
       if file.previousPath ~= entry.old_path and state.reviewed then
         M.invalidate_reviewed(state, entry.path)
       end
       file.path, file.status, file.previousPath = entry.path, entry.status, entry.old_path
       file.confirmedRename = entry.old_path ~= nil and entry.status:match("^R") ~= nil
+      file.contentHash = file.identity
       file.group = group
       file.native_entry = vim.tbl_extend("force", entry, { group = group })
       files[#files + 1] = file
     end
   end
   M.set_files(state, files)
-end
-
-function M.record_sources(state, file, views)
-  local selected = views.new
-  local next_file = vim.tbl_extend("force", {}, file, {
-    contentHash = vim.json.encode({
-      old = views.old.source or false,
-      new = views.new.source or false,
-    }),
-    saved_stamp = selected and selected.saved_stamp or false,
-    index_oid = selected and selected.source and selected.source.blob_oid or false,
-  })
-  Private.replace_file(state, next_file)
-  return next_file
 end
 
 function M.record_content(state, file, result)
@@ -146,6 +139,7 @@ function M.get_reviewed(state)
         reviewed[path] = queue[#queue].identity
       end
       M.set_reviewed(state, reviewed)
+      M.validate_reviewed(state)
     end
   )
 end
@@ -221,92 +215,6 @@ function M.validate_reviewed(state)
       M.invalidate_reviewed(state, file.path)
     end
   end
-  if not state.git_root or not state.reviewed then
-    return
-  end
-  local selected = {}
-  for _, file in ipairs(state.files or {}) do
-    if state.reviewed[file.path] then
-      selected[#selected + 1] = file
-    end
-  end
-  if #selected == 0 then
-    return
-  end
-  state.reviewed_generation = (state.reviewed_generation or 0) + 1
-  local generation = state.reviewed_generation
-  local function invalidate(file, changed)
-    if state.closed or state.reviewed_generation ~= generation then
-      return
-    end
-    if changed then
-      M.invalidate_reviewed(state, file.path)
-    end
-  end
-  if state.mode == "working" then
-    for _, file in ipairs(selected) do
-      local expected = file.saved_stamp
-      if expected == nil then
-        local valid, identity = pcall(vim.json.decode, state.reviewed[file.path])
-        require("lgtm.services.diff_service").get_source(
-          { root = state.git_root, path = file.path, kind = "working_file" },
-          function(err, source)
-            invalidate(
-              file,
-              err ~= nil
-                or not valid
-                or type(identity) ~= "table"
-                or not source.source
-                or not identity.new
-                or source.source.content_hash ~= identity.new.content_hash
-            )
-            if not err and source then
-              file.saved_stamp = source.saved_stamp
-            end
-          end
-        )
-      else
-        vim.uv.fs_stat(vim.fs.joinpath(state.git_root, file.path), function(err, stat)
-          vim.schedule(function()
-            local absent = expected == false and err and err:match("ENOENT")
-            invalidate(
-              file,
-              not absent
-                and (
-                  err ~= nil
-                  or not vim.deep_equal(
-                    expected,
-                    require("lgtm.services.diff_service").get_saved_stamp(stat)
-                  )
-                )
-            )
-          end)
-        end)
-      end
-    end
-  elseif state.mode == "staged" then
-    -- Bound each command even when a large review has many viewed files.
-    for offset = 1, #selected, 500 do
-      local batch = vim.list_slice(selected, offset, math.min(offset + 499, #selected))
-      local paths = vim.tbl_map(function(file)
-        return file.path
-      end, batch)
-      require("lgtm.services.forge_service").get_index_entries(
-        state.git_root,
-        paths,
-        function(failed, entries)
-          for _, file in ipairs(batch) do
-            local valid, identity = pcall(vim.json.decode, state.reviewed[file.path] or "")
-            local expected = file.index_oid
-            if expected == nil and valid then
-              expected = identity.new and identity.new.blob_oid or false
-            end
-            invalidate(file, failed or (entries[file.path] or false) ~= expected)
-          end
-        end
-      )
-    end
-  end
 end
 
 ---@param state lgtm.ReviewState
@@ -320,7 +228,9 @@ function M.get_files(state, callback)
       callback(err)
       return
     end
-    state.root = diff.root
+    if not state.snapshot then
+      state.root = diff.root
+    end
     local files = {}
     local function page(token)
       rpc.call(

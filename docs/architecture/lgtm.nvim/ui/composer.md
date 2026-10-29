@@ -2,7 +2,7 @@
 
 ## Overview
 
-The composer edits notes, comments, replies, and final review bodies. Its caller supplies persistence. The component manages text and pending-save state.
+The composer edits comments, replies, and final review bodies. Its caller supplies persistence. The component manages text and pending-save state.
 
 ## Design
 

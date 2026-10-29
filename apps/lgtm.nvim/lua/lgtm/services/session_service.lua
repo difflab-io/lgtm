@@ -90,17 +90,7 @@ function M.refresh(state, callback)
         end
         return
       end
-      if not err and state.observe_sources then
-        state.observe_sources(function(observe_error)
-          if callback then
-            callback(observe_error)
-          elseif observe_error then
-            if state.on_error then
-              state.on_error(observe_error)
-            end
-          end
-        end)
-      elseif callback then
+      if callback then
         callback(err)
       elseif err then
         if state.on_error then
@@ -243,7 +233,29 @@ function M.create(target, comparison, root, callback, options)
 end
 
 ---@param state lgtm.ReviewState
+function M.select_revision(state, revision_id, callback)
+  state.selected_revision_id = revision_id
+  M.refresh(state, function(err)
+    if err then
+      if state.on_error then
+        state.on_error(err)
+      end
+      return
+    end
+    require("lgtm.app").refresh_view(state)
+    local previous = state.on_ready
+    state.on_ready = function()
+      state.on_ready = previous
+      if previous then
+        previous()
+      end
+      callback()
+    end
+  end)
+end
+
 function M.refresh_comparison(state, callback)
+  state.selected_revision_id = nil
   rpc.call("RefreshReview", {
     scope = state.scope,
     expectedVersion = state.version,
@@ -366,6 +378,9 @@ function M.get_submission_error(state)
   local unavailable = store.get_readiness_error(state)
   if unavailable then
     return unavailable
+  end
+  if state.selected_revision_id and state.snapshot.id ~= state.review.snapshot.id then
+    return { message = "Return to the latest revision with :Lgtm refresh before submitting" }
   end
   local status = state.review.submissionStatus
   local draft = store.submissions[state.review.id]

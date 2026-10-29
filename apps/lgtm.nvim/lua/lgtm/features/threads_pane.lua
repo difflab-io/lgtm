@@ -120,58 +120,38 @@ function M.resolve(state, thread, done)
 end
 
 function M.navigate(state, thread)
-  if require("lgtm.features.annotation_overlay").is_outside_diff(state, thread) then
+  local anchor = thread.displayLocation or thread.anchor
+  if not anchor or not anchor.path then
+    return
+  end
+  if
+    not thread.displayLocation and (not thread.anchor.snapshotId or thread.anchor.snapshotId == "")
+  then
     require("lgtm.ui.notifications").show(
-      "File is outside the current diff; the discussion is retained"
+      "Original source is not retained; the discussion remains available"
     )
     return
   end
-  if state.show_file and thread.anchor.path then
-    local path = thread.currentPath ~= "" and thread.currentPath or thread.anchor.path
-    -- Navigation selects a file; only a confirmed derived placement may choose a line.
-    state.show_file(path, nil, function()
-      for _, side in ipairs({ "new", "old" }) do
-        local placement =
-          require("lgtm.features.annotation_overlay").placement(state, thread, path, side)
-        if placement and placement.location and placement.location.kind == "line" then
-          api.nvim_set_current_win(state.panes[side].win)
-          api.nvim_win_set_cursor(0, { placement.location.start, 0 })
-          return
-        end
-      end
-      -- Stale and file-level feedback can select a file without asserting a line.
-      for _, side in ipairs({ "new", "old" }) do
-        local target = state.panes[side]
-        local source_view = state.views and state.views[side]
-        if
-          target
-          and target.win
-          and api.nvim_win_is_valid(target.win)
-          and source_view
-          and source_view.source
-        then
-          api.nvim_set_current_win(target.win)
-          api.nvim_win_set_cursor(target.win, { 1, 0 })
-          local padding = 0
-          for _, namespace in ipairs({
-            require("lgtm.features.annotation_overlay").namespace,
-            require("lgtm.features.annotation_overlay").padding_namespace,
-          }) do
-            for _, mark in
-              ipairs(api.nvim_buf_get_extmarks(target.buf, namespace, 0, -1, { details = true }))
-            do
-              if mark[2] == 0 and mark[4].virt_lines_above then
-                padding = padding + #(mark[4].virt_lines or {})
-              end
-            end
-          end
-          api.nvim_win_call(target.win, function()
-            vim.fn.winrestview({ topline = 1, topfill = padding })
-          end)
-          return
-        end
+  local function show()
+    state.show_file(anchor.path, nil, function()
+      local side = anchor.side == "old" and "old" or "new"
+      local pane = state.panes and state.panes[side]
+      if pane and pane.win and api.nvim_win_is_valid(pane.win) then
+        api.nvim_set_current_win(pane.win)
+        api.nvim_win_set_cursor(pane.win, { tonumber(anchor.start) or 1, 0 })
       end
     end)
+  end
+  local revision = thread.anchor and thread.anchor.snapshotId
+  if
+    not thread.displayLocation
+    and revision
+    and revision ~= ""
+    and revision ~= state.snapshot.id
+  then
+    require("lgtm.services.session_service").select_revision(state, revision, show)
+  else
+    show()
   end
 end
 

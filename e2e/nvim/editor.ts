@@ -107,7 +107,7 @@ export class Editor {
   async state(): Promise<Json | null> {
     return this
       .lua(`local s = require("lgtm.services.state").current; if not s then return vim.NIL end
-      return {review=s.review, scope=s.scope, target=s.target, comparison=s.comparison, conversation=s.conversation,
+      return {review=s.review, snapshot=s.snapshot, scope=s.scope, target=s.target, comparison=s.comparison, conversation=s.conversation,
         version=s.version, file=s.file, files=s.files, panes=s.panes, root=s.root, git_root=s.git_root,
         base=s.base, head=s.head, tab=s.tab, kind=s.kind, layout=s.layout, initializing=s.initializing,
         load_error=s.load_error, empty=s.empty, native_explorer=s.native_explorer, temp_dir=s.temp_dir,

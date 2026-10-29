@@ -2,7 +2,7 @@
 
 ## Overview
 
-Coordinate review tabs, notes actions, export presentation and the UI components that display service data.
+Coordinate review tabs, saved revisions, export presentation and the UI components that display service data.
 
 ## Design
 

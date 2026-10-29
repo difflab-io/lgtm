@@ -48,7 +48,7 @@ Keys are delegated by the [threads pane](threads-pane.md), using the stable comm
 
 ```mermaid
 flowchart TD
-  Backend["LGTM backend APIs"] -->|"conversation / placements"| Service["threads_service signals"]
+  Backend["LGTM backend APIs"] -->|"conversation / saved source coordinates"| Service["threads_service signals"]
   Service --> Pane["threads_pane"]
   Pane -->|"Thread / Comment props"| Thread["UI.thread"]
   Thread -->|"Comment props"| Comment["UI.comment"]

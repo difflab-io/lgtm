@@ -26,7 +26,7 @@ function M.open(state, on_loaded)
       if not err and state.kind == "pr" and not vim.deep_equal(comparison, state.comparison) then
         vim.schedule(function()
           if contexts.current == state and not state.closed then
-            M.reopen_pr(state)
+            M.refresh_view(state)
           end
         end)
       end
@@ -99,9 +99,9 @@ function M.open(state, on_loaded)
     end
     notice.error("File is outside this diff. Its discussion is retained in :Lgtm threads.")
   end
-  if (state.kind == "git" or state.kind == "pr") and not state.comparison then
+  if not state.snapshot then
     notice.error(
-      "Saved review has no recorded comparison. Use :Lgtm threads or export; select an explicit comparison for a new review."
+      "Saved review has no retained source. Use :Lgtm threads or export, or start a new review."
     )
     if not state.initializing and not state.load_error then
       state.refresh(on_loaded)
@@ -113,7 +113,7 @@ function M.open(state, on_loaded)
       return
     end
     state.browsing = true
-    if state.git_root then
+    if state.git_root and state.kind ~= "directory" then
       require("lgtm.features.diff_view").open_native(state)
     elseif not state.initializing and not state.load_error then
       require("lgtm.services.files_service").get_files(state, function(err)
@@ -130,36 +130,7 @@ function M.open(state, on_loaded)
       state.browsing = false
     end
   end
-  if state.kind == "git" then
-    state.git_root = state.root
-  end
-  if state.kind == "pr" and not state.git_checked then
-    local comparison = vim.deepcopy(state.comparison)
-    state.git_checked, state.git_pending = true, true
-    require("lgtm.services.forge_service").get_revision_root(
-      vim.fn.getcwd(),
-      state.base,
-      state.head,
-      function(err, git_root)
-        vim.schedule(function()
-          if
-            state.closed
-            or contexts.current ~= state
-            or not vim.deep_equal(comparison, state.comparison)
-          then
-            return
-          end
-          state.git_pending = false
-          if not err then
-            state.git_root = git_root
-          end
-          browse()
-        end)
-      end
-    )
-  else
-    browse()
-  end
+  browse()
   if not state.initializing and not state.load_error then
     state.refresh(on_loaded)
   end
@@ -168,7 +139,7 @@ end
 -- Reuse the tab so an open composer keeps its buffer when a push changes the diff.
 
 ---@param state lgtm.ReviewState
-function M.reopen_pr(state)
+function M.refresh_view(state)
   local comparison = vim.deepcopy(state.comparison)
   local function current()
     return contexts.current == state
@@ -192,8 +163,7 @@ function M.reopen_pr(state)
       return
     end
     require("lgtm.features.diff_view").close(state)
-    state.tab, state.browsing, state.native_explorer, state.git_checked, state.git_pending, state.git_root =
-      nil, nil, nil, nil, nil, nil
+    state.tab, state.browsing, state.native_explorer = nil, nil, nil
     state.file, state.empty = nil, nil
     require("lgtm.services.diff_service").clear(state)
     require("lgtm.services.files_service").set_files(state, {})
@@ -202,36 +172,28 @@ function M.reopen_pr(state)
   local session = state.tab and require("codediff.ui.lifecycle").get_session(state.tab)
   if state.native_explorer and session and session.panel then
     state.render_ready = false
-    require("lgtm.services.forge_service").get_revision_root(
-      state.git_root,
-      state.base,
-      state.head,
-      function(err)
-        vim.schedule(function()
-          if not current() then
-            return
-          end
-          if err then
-            open_current()
-            return
-          end
-          local refresh = require("codediff.ui.refresh")
-          session.panel.data.source_revisions = { original = state.base, modified = state.head }
-          refresh.request(state.tab, { full = true }, function()
-            if not current() then
-              return
-            end
-            -- CodeDiff selects its current regular, added, removed, or empty layout.
-            refresh.select(
-              state.tab,
-              session.panel.data.current_selection,
-              { force = true, no_jump = true }
-            )
-            state.wait_ready()
-          end)
-        end)
+    require("lgtm.services.files_service").get_files(state, function(err)
+      if not current() then
+        return
       end
-    )
+      if err then
+        notice.error(err)
+        return
+      end
+      local refresh = require("codediff.ui.refresh")
+      session.panel.data.source_revisions = { original = state.base, modified = state.head }
+      refresh.request(state.tab, { full = true }, function()
+        if not current() then
+          return
+        end
+        refresh.select(
+          state.tab,
+          session.panel.data.current_selection,
+          { force = true, no_jump = true }
+        )
+        state.wait_ready()
+      end)
+    end)
   else
     open_current()
   end
@@ -244,24 +206,6 @@ function M.close()
     require("lgtm.features.diff_view").close(state)
     contexts.set(contexts.tabs[vim.api.nvim_get_current_tabpage()])
   end
-end
-
-function M.restore_notes(buf)
-  if M.owns_review_buffer(buf) then
-    return
-  end
-  if not vim.api.nvim_buf_is_valid(buf) or vim.bo[buf].buftype ~= "" then
-    return
-  end
-  local path = vim.api.nvim_buf_get_name(buf)
-  if path == "" then
-    return
-  end
-  local review = contexts.current
-  if review and review.temp_dir and path:sub(1, #review.temp_dir) == review.temp_dir then
-    return
-  end
-  Private.get_notes(buf, function() end)
 end
 
 -- Methods ---------------------------------------------------------------------
@@ -327,7 +271,7 @@ end
 function M.comment(kind, range)
   local state = contexts.current
   if not state then
-    notice.show("Select a review first, or use :Lgtm note")
+    notice.show("Select a review first")
     return
   end
   local unavailable = contexts.get_readiness_error(state)
@@ -341,7 +285,6 @@ function M.comment(kind, range)
     notice.error("Open a review file first")
     return
   end
-  local buf = vim.api.nvim_get_current_buf()
   local first, last = vim.api.nvim_win_get_cursor(0)[1], vim.api.nvim_win_get_cursor(0)[1]
   if vim.fn.mode():match("[vV\22]") then
     first, last = vim.fn.line("v"), vim.fn.line(".")
@@ -387,32 +330,16 @@ function M.comment(kind, range)
       end)
     end)
   end
-  local function compose(err, selected)
-    if contexts.current ~= state or generation ~= state.render_generation then
-      return
-    end
-    if err then
-      notice.error(err)
-      return
-    end
-    local view = selected
-      and vim.tbl_extend("force", selected, {
-        path = location.side == "old" and (state.file.previousPath or state.file.path)
-          or state.file.path,
-        side = location.side,
-      })
-    require("lgtm.services.anchor_service").capture(view, buf, kind, first, last, open_composer)
-  end
-  if kind == "general" then
-    compose()
-  else
-    require("lgtm.services.diff_service").get_selected_source(
-      state,
-      state.file,
-      location.side,
-      compose
-    )
-  end
+  open_composer(nil, {
+    kind = kind,
+    snapshotId = state.snapshot.id,
+    path = kind ~= "general"
+        and (location.side == "old" and (state.file.previousPath or state.file.path) or state.file.path)
+      or nil,
+    side = kind == "line" and location.side or nil,
+    start = kind == "line" and first or nil,
+    ["end"] = kind == "line" and last or nil,
+  })
 end
 
 function M.comment_action(action)
@@ -441,13 +368,7 @@ function M.comment_action(action)
   if location and state then
     perform(state, location.path, location.side)
   else
-    Private.get_notes(buf, function(err, notes)
-      if err then
-        notice.error(err)
-      else
-        perform(notes, notes.path, "new")
-      end
-    end)
+    notice.error("Open a review source pane first")
   end
 end
 
@@ -460,7 +381,7 @@ function M.refresh()
   if not state or state.initializing or state.load_error then
     return
   end
-  local comparison = vim.deepcopy(state.comparison)
+  local revision = state.snapshot.id
   local pending = notice.show("Refreshing review…")
   require("lgtm.services.session_service").refresh_comparison(state, function(err)
     if contexts.current ~= state then
@@ -470,7 +391,7 @@ function M.refresh()
       notice.error(err, pending)
       return
     end
-    if vim.deep_equal(comparison, state.comparison) then
+    if revision == state.snapshot.id then
       require("lgtm.services.files_service").get_reviewed(state)
     end
     local function content()
@@ -498,13 +419,13 @@ function M.refresh()
         notice.show("Review refreshed", nil, pending)
       end)
     end
-    if state.kind == "pr" and not vim.deep_equal(comparison, state.comparison) then
+    if revision ~= state.snapshot.id then
       state.refresh(function(refresh_error)
         if refresh_error then
           notice.error(refresh_error, pending)
           return
         end
-        M.reopen_pr(state)
+        M.refresh_view(state)
         notice.show("PR updated; pending comments retained", nil, pending)
       end)
     else
@@ -649,177 +570,6 @@ function M.reviewed(path)
   end
 end
 
-function M.owns_review_buffer(buf)
-  if not vim.api.nvim_buf_is_valid(buf) then
-    return false
-  end
-  if vim.b[buf].lgtm then
-    return true
-  end
-  local lifecycle = package.loaded["codediff.ui.lifecycle"]
-  local session = lifecycle and lifecycle.get_session(vim.api.nvim_get_current_tabpage())
-  return session and (session.original_bufnr == buf or session.modified_bufnr == buf) or false
-end
-
-function M.add_note(range)
-  local buf, first = vim.api.nvim_get_current_buf(), vim.api.nvim_win_get_cursor(0)[1]
-  local last = first
-  if range then
-    first, last = range[1], range[2]
-  end
-  if vim.fn.mode():match("[vV\22]") then
-    first, last = vim.fn.line("v"), vim.fn.line(".")
-    first, last = math.min(first, last), math.max(first, last)
-  end
-  Private.get_notes(buf, function(err, state)
-    if err then
-      notice.error(err)
-      return
-    end
-    require("lgtm.services.anchor_service").capture(
-      state.views.new,
-      buf,
-      "line",
-      first,
-      last,
-      function(capture_error, anchor)
-        if capture_error then
-          notice.error(capture_error)
-          return
-        end
-        -- The backend supplies the relative path, including moved-file associations.
-        anchor.path = nil
-        local input = require("lgtm.services.threads_service").create_draft(state, anchor)
-        require("lgtm.ui.composer").open("Note", "", function(body, done)
-          require("lgtm.services.threads_service").save(state, input, body, function(save_error)
-            if not save_error then
-              notice.show("Note saved")
-            end
-            done(save_error)
-          end)
-        end)
-      end
-    )
-  end)
-end
-
-function M.show_notes()
-  Private.get_notes(vim.api.nvim_get_current_buf(), function(err, state)
-    if err then
-      notice.error(err)
-    else
-      require("lgtm.features.threads_pane").open_selected(
-        state,
-        state.conversation.threads or {},
-        true
-      )
-    end
-  end)
-end
-
-function M.promote_note()
-  local target = contexts.current
-  if
-    not target
-    or target.initializing
-    or target.load_error
-    or not target.file
-    or not target.panes
-  then
-    notice.error(
-      "Open the target review file first, then open the source note and use :Lgtm promote"
-    )
-    return
-  end
-  Private.get_notes(vim.api.nvim_get_current_buf(), function(err, source)
-    if err then
-      notice.error(err)
-      return
-    end
-    local roots = vim.tbl_filter(function(comment)
-      return tonumber(comment.position or 0) == 0
-    end, source.conversation.comments or {})
-    require("lgtm.ui.picker").select("Promote note (original retained)", roots, function(comment)
-      return comment.body:gsub("\n", " ")
-    end, function(comment)
-      local original
-      for _, thread in ipairs(source.conversation.threads or {}) do
-        if thread.id == comment.threadId then
-          original = thread.anchor
-        end
-      end
-      if not original then
-        notice.error("Note anchor unavailable")
-        return
-      end
-      local function confirm()
-        require("lgtm.services.diff_service").get_selected_source(
-          target,
-          target.file,
-          "new",
-          function(read_error, selected)
-            if read_error then
-              notice.error(read_error)
-              return
-            end
-            local view =
-              vim.tbl_extend("force", selected, { path = target.file.path, side = "new" })
-            require("lgtm.services.anchor_service").capture(
-              view,
-              target.panes.new.buf,
-              original.kind,
-              tonumber(original.start),
-              tonumber(original["end"]),
-              function(capture_error, anchor)
-                if capture_error then
-                  notice.error(capture_error)
-                  return
-                end
-                require("lgtm.ui.picker").select(
-                  "Promote to " .. target.file.path .. ":" .. tostring(anchor.start or "file"),
-                  { "Cancel", "Promote" },
-                  tostring,
-                  function(choice)
-                    if choice ~= "Promote" then
-                      return
-                    end
-                    require("lgtm.services.threads_service").promote(
-                      source,
-                      target,
-                      comment,
-                      anchor,
-                      function(error, result)
-                        if error then
-                          notice.error(error)
-                          return
-                        end
-                        if #(result.syncErrors or {}) > 0 then
-                          notice.error(
-                            "Note promoted locally; GitHub sync needs recovery. Use :Lgtm sync."
-                          )
-                        else
-                          notice.show("Note promoted; original retained")
-                        end
-                      end
-                    )
-                  end
-                )
-              end
-            )
-          end
-        )
-      end
-      require("lgtm.ui.picker").input(
-        "Target relative file path: ",
-        target.file.path,
-        function(path)
-          target.show_file(path, nil, confirm)
-        end
-      )
-    end)
-  end)
-end
-
 function M.export(scope)
   local function show(state)
     require("lgtm.services.session_service").get_export(state, function(err, markdown)
@@ -830,15 +580,7 @@ function M.export(scope)
       end
     end)
   end
-  if scope == "notes" then
-    Private.get_notes(vim.api.nvim_get_current_buf(), function(err, state)
-      if err then
-        notice.error(err)
-      else
-        show(state)
-      end
-    end)
-  elseif contexts.current then
+  if contexts.current then
     show(contexts.current)
   else
     notice.error("Select a review first")
@@ -857,43 +599,6 @@ function Private.present_submission(err, result, pending, done)
   if result.warning then
     notice.error(result.warning)
   end
-end
-
-function Private.get_notes(buf, callback)
-  local previous = contexts.notes[buf]
-  local service = require("lgtm.services.notes_service")
-  local state, err = service.get_context(buf)
-  if not state then
-    callback(err)
-    return
-  end
-  if previous and previous ~= state and previous.annotation_subscription then
-    previous.annotation_subscription:unsubscribe()
-  end
-  if not state.annotation_subscription then
-    state.buf = buf
-    state.on_error = notice.error
-    state.redraw = function()
-      if vim.api.nvim_buf_is_valid(buf) and not M.owns_review_buffer(buf) then
-        require("lgtm.features.annotation_overlay").attach(state, buf, state.path, "new")
-      end
-    end
-    state.annotation_subscription = require("lgtm.services.threads_service")
-      .get_data(state)
-      :get_observable()
-      :subscribe(state.redraw)
-    vim.api.nvim_create_autocmd("BufWipeout", {
-      buffer = buf,
-      once = true,
-      callback = function()
-        state.annotation_subscription:unsubscribe()
-        if contexts.notes[buf] == state then
-          contexts.notes[buf] = nil
-        end
-      end,
-    })
-  end
-  service.get_notes(buf, callback)
 end
 
 return M

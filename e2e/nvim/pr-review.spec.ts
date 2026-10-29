@@ -491,6 +491,9 @@ for (const profile of profiles) {
       await editor.keys('c')
       await editor.compose('Keep this concern through pushes')
       const original = await editor.comments(1)
+      await editor.keys('c')
+      const composer = await editor.composer()
+      await editor.body('Unsent concern while the PR advances')
       await github.changeFiles({ [github.path]: github.headContent + 'new committed context\n' })
 
       // Act
@@ -508,6 +511,33 @@ for (const profile of profiles) {
       })
       expect(await editor.text(refreshed.panes.new.buf)).toContain('new committed context')
       expect(JSON.stringify(await editor.marks())).toContain('Keep this concern through pushes')
+      expect(await editor.composer()).toEqual(composer)
+      expect(await editor.text(composer.buf)).toBe('Unsent concern while the PR advances')
+
+      // Act
+      await editor.keys('<Esc>')
+      await editor.pane('new', 2)
+      await editor.keys('c')
+      await editor.compose('Feedback on the refreshed revision')
+      const continued = (await editor.comments(2))!
+      const remote = await github.api(
+        `repos/${github.repository}/pulls/${github.number}/reviews/${continued.review.forgeReviewId}/comments`,
+      )
+
+      // Assert
+      expect(continued.review.id).toBe(original!.review.id)
+      expect(continued.review.forgeReviewId).toBe(original!.review.forgeReviewId)
+      expect(
+        continued.conversation.threads.map((thread: Json) => thread.anchor.snapshotId),
+      ).toEqual(expect.arrayContaining([original!.snapshot.id, refreshed.snapshot.id]))
+      expect(remote).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            body: expect.stringContaining('Feedback on the refreshed revision'),
+            original_commit_id: github.head,
+          }),
+        ]),
+      )
     })
   })
 

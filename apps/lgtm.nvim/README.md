@@ -135,7 +135,6 @@ Run `:checkhealth lgtm` for missing executables, plugins, native library, endpoi
 
 | Command | Action |
 | --- | --- |
-| `:Lgtm note`, `:Lgtm notes` | Add a note to the current line/range; inspect notes for the current file |
 | `:Lgtm review` | Choose Working, Staged, Branch, or PR |
 | `:Lgtm directory [path]` | Review all supported files, including ignored/untracked files |
 | `:Lgtm prs [repository URL]` | List open PRs for the current branch and inferred Git repository; optional URL overrides it |
@@ -145,8 +144,7 @@ Run `:checkhealth lgtm` for missing executables, plugins, native library, endpoi
 | `:Lgtm layout` | Toggle CodeDiff side-by-side / inline layout |
 | `:Lgtm files`, `:Lgtm threads` | Focus the persistent file pane or open cross-file threads |
 | `:Lgtm comment [line/file/general]` | Compose a draft with the appropriate anchor |
-| `:Lgtm promote` | Pick source note, preview target path/anchor, promote into selected review |
-| `:Lgtm export notes`, `:Lgtm export review` | Preview Markdown, save a file, or copy to clipboard |
+| `:Lgtm export` | Preview Markdown, save a file, or copy to clipboard |
 | `:Lgtm save` | Confirm durable session state; mutations persist immediately |
 | `:Lgtm complete` | Complete a local review |
 | `:Lgtm submit` | Choose comment/approve/request-changes and an optional final body |
@@ -159,33 +157,23 @@ For an ignored or symlinked plan directory:
 :Lgtm directory .difflab/plans/specific-plan
 ```
 
-The backend resolves the selected root and enumerates its content. Nested symlink escapes, binary/oversized files and stale anchors are reported conservatively. Save files before adding notes so the backend can verify their content. Notes use the saved file location and remain separate from a selected review. Existing directory-stored notes remain accessible by that file. Promotion retains original notes and attribution. Cross-scope promotion requires confirming the target relative path; invalid anchors fail without removing source notes.
+The backend captures saved source into its own Git store under `$LGTM_HOME/snapshots/<repository-id>`. CodeDiff shows two read-only commits. Working reviews capture saved working files, staged reviews capture the index, and branch/PR reviews retain existing commit hashes. Directory reviews compare saved files against an empty baseline. Unsaved editor changes are not included.
 
-### Saved-file moves
+`:Lgtm refresh` captures another revision in the same session. Changes to the workspace do not alter an open snapshot. Historical comments retain their original source; select them in `:Lgtm threads` to open that revision. PR pushes preserve the session, pending review and draft bodies. GitHub supplies current locations and outdated status. Unsupported historical drafts stay local with a sync error.
 
-Saved-file notes and explicit directory reviews follow confirmed moves, including moves between parent directories. LGTM keeps the original source, thread IDs, replies, author, and resolution. A new note records the file's current location. Copies do not move the original discussion.
-
-The backend verifies moves using filesystem identity while it serves an opened notes file or directory review. `BufFilePost` and MiniFiles rename events only trigger a refresh. Other file managers can request the same refresh:
-
-```lua
-vim.api.nvim_exec_autocmds("User", {
-  pattern = "LgtmPathRenamed",
-})
-```
-
-The old path must be absent and the destination must exist. A failed read alone does not prove deletion. LGTM does not scan for renamed files. The backend persists confirmed locations, so discussions remain attached after restart. Lua does not track old/new paths or retain move requests. Cards with a lost anchor show a status and comment preview. The full thread view retains the original range and excerpt. When a working-tree file changes, its comments appear as stale cards above the file. Deleted-file discussions remain in `:Lgtm threads` and exports. The threads pane labels files outside the selected comparison as `OUTSIDE DIFF`.
+Standalone live-buffer notes and promotion are removed. Existing saved notes remain in the database; the archived notes scope still supports reads and export.
 
 ### Keys and selection
 
-`<leader>r` shows WhichKey actions with review.nvim's global defaults: `rr` working tree, `rc` comment, `rb` branch, `rn` note, `re` edit, `rd` delete, and `rx` export. New actions use `rD` directory, `rf` file comment, `rg` general comment, `rt` threads, `rF` files, `rp` PRs, `rS` sessions, `rP` promote, `rs` submits the active review and `rq` closes its view. No mapping is installed on the prefix itself. Visual selection works for note/comment ranges.
+`<leader>r` shows WhichKey actions with review.nvim's global defaults: `rr` working tree, `rc` comment, `rb` branch, `re` edit, `rd` delete, and `rx` export. New actions use `rD` directory, `rf` file comment, `rg` general comment, `rt` threads, `rF` files, `rp` PRs, `rS` sessions, `rs` submits the active review and `rq` closes its view. No mapping is installed on the prefix itself. Visual selection works for comment ranges.
 
 PR and local-session selection use a built-in searchable picker. Type to filter, use Up/Down (or Ctrl-N/Ctrl-P) to move, Enter to select and Esc to cancel. No additional fuzzy-picker plugin is needed; an empty result keeps the search open.
 
-Git reviews use CodeDiff's native file tree and Git revision buffers. The first local diff opens while PR comments load. If base/head commits exist in the checkout, the backend loads only metadata and comments. Otherwise, it loads only the selected remote file. Snapshot buffers do not start language servers.
+Git reviews use CodeDiff's native file tree and read-only Git revision buffers from the backend-managed snapshot store. Directory reviews keep the LGTM file pane and read-only display buffers loaded from the saved revision. Snapshot buffers do not start language servers.
 
 If PR loading fails, LGTM shows the cause and keeps the diff open. After you fix the cause, run `:Lgtm refresh` to retry. Commenting, submission and reconciliation stay blocked until the review loads.
 
-The PR identifies your review. Reopening, refreshing, or saving a PR draft detects new base or head commits and updates the current comparison. While an attempt is active, LGTM keeps the same review ID and pending GitHub review. Unsent selections follow a unique text match; lost or ambiguous selections become file-level feedback with the original location and excerpt. Existing remote comments use GitHub’s current locations. No refresh submits or discards a review. Review the displayed comparison before explicit submission; a push that races submission requires another refresh.
+The PR identifies your review. Reopening, refreshing, or saving a PR draft detects new base or head commits and updates the current comparison. While an attempt is active, LGTM keeps the same review ID and pending GitHub review. Unsent comments retain their original saved revision and coordinates. A historical draft that GitHub cannot attach stays local with a synchronization error. Existing remote comments use GitHub’s current locations. No refresh submits or discards a review. Review the displayed comparison before explicit submission; a push that races submission requires another refresh.
 
 Branch review compares the common ancestor of a base branch with the current HEAD. Working compares HEAD with saved working files. Staged compares HEAD with the Git index. A clean comparison reports that it has no changes.
 

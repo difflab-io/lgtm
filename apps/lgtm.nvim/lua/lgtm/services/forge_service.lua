@@ -92,21 +92,6 @@ function M.get_comparison(root, mode, base_branch, callback)
   end)
 end
 
-function M.get_revision_root(root, base, head, callback)
-  Private.run_git(
-    root,
-    { "rev-parse", "--show-toplevel", base .. "^{commit}", head .. "^{commit}" },
-    { text = true },
-    function(result)
-      if result.code ~= 0 then
-        callback({ message = result.stderr })
-      else
-        callback(nil, vim.split(vim.trim(result.stdout), "\n", { plain = true })[1])
-      end
-    end
-  )
-end
-
 function M.get_pr_context(root, options, callback)
   Private.run_git(root, { "branch", "--show-current" }, { text = true }, function(result)
     local context =
@@ -141,24 +126,6 @@ function M.get_pr_context(root, options, callback)
         end
       end)
     end)
-  end)
-end
-
-function M.get_index_entries(root, paths, callback)
-  local args = { "ls-files", "--stage", "-z", "--" }
-  vim.list_extend(args, paths)
-  Private.run_git(root, args, { text = false, timeout = 5000 }, function(result)
-    local entries = {}
-    for _, record in
-      ipairs(vim.split(result.stdout or "", "\0", { plain = true, trimempty = true }))
-    do
-      local mode, oid, stage, path = record:match("^(%d+) (%x+) (%d)\t(.*)$")
-      if path then
-        entries[path] = stage == "0" and (mode == "100644" or mode == "100755") and oid
-          or "unavailable"
-      end
-    end
-    callback(result.code ~= 0, entries)
   end)
 end
 

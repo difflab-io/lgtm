@@ -1,7 +1,6 @@
 -- State -----------------------------------------------------------------------
 
 local M = {}
-local Private = {}
 
 -- Methods ---------------------------------------------------------------------
 
@@ -31,9 +30,6 @@ function M.setup(opts)
               and state.wait_ready
             then
               state.wait_ready()
-              if state.kind == "directory" then
-                require("lgtm.app").refresh()
-              end
             end
           end)
         end)
@@ -73,51 +69,6 @@ function M.setup(opts)
       end
     end,
   })
-  vim.api.nvim_create_autocmd("BufEnter", {
-    group = group,
-    callback = function(event)
-      require("lgtm.app").restore_notes(event.buf)
-    end,
-  })
-  vim.api.nvim_create_autocmd("BufFilePost", {
-    group = group,
-    callback = function(event)
-      if
-        require("lgtm.services.state").notes[event.buf]
-        and not require("lgtm.app").owns_review_buffer(event.buf)
-      then
-        vim.schedule(Private.refresh_sources)
-      end
-    end,
-  })
-  vim.api.nvim_create_autocmd("User", {
-    group = group,
-    pattern = { "MiniFilesActionRename", "LgtmPathRenamed" },
-    callback = function()
-      vim.schedule(Private.refresh_sources)
-    end,
-  })
-  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "BufWritePost" }, {
-    group = group,
-    callback = function(event)
-      local notes = require("lgtm.app")
-      local state = require("lgtm.services.state").notes[event.buf]
-      if not state or notes.owns_review_buffer(event.buf) then
-        return
-      end
-      if event.event == "BufWritePost" then
-        state.refresh()
-      else
-        require("lgtm.services.notes_service").invalidate(state)
-        vim.api.nvim_buf_clear_namespace(
-          event.buf,
-          require("lgtm.features.annotation_overlay").namespace,
-          0,
-          -1
-        )
-      end
-    end,
-  })
   vim.api.nvim_create_autocmd({ "WinResized", "ColorScheme" }, {
     group = group,
     callback = function()
@@ -126,16 +77,6 @@ function M.setup(opts)
         local state = require("lgtm.services.state").current
         if state and state.render_ready and state.render then
           state.render()
-        end
-        for buf, notes in pairs(require("lgtm.services.state").notes) do
-          if
-            vim.api.nvim_buf_is_valid(buf)
-            and #vim.fn.win_findbuf(buf) > 0
-            and notes.conversation
-            and not require("lgtm.app").owns_review_buffer(buf)
-          then
-            require("lgtm.features.annotation_overlay").render(notes, buf, notes.path, "new")
-          end
         end
       end)
     end,
@@ -166,15 +107,6 @@ function M.command(args, range)
     sessions = function()
       require("lgtm.features.session_selector").select(rest == "completed")
     end,
-    note = function()
-      require("lgtm.app").add_note(range)
-    end,
-    notes = function()
-      require("lgtm.app").show_notes()
-    end,
-    promote = function()
-      require("lgtm.app").promote_note()
-    end,
     comment = function()
       review.comment(rest ~= "" and rest or "line", range)
     end,
@@ -198,21 +130,9 @@ function M.command(args, range)
     commands[action]()
   else
     require("lgtm.ui.notifications").show(
-      "Lgtm: review | directory [path] | prs [URL] | sessions [completed] | note | notes | promote | comment [line/file/general] | threads | files | save | close | complete | submit | reconcile | sync | export [notes/review]"
+      "Lgtm: review | directory [path] | prs [URL] | sessions [completed] | comment [line/file/general] | threads | files | save | close | complete | submit | reconcile | sync | export"
     )
   end
 end
 
--- Private ---------------------------------------------------------------------
-
-function Private.refresh_sources()
-  local contexts = require("lgtm.services.state")
-  local buffers = vim.tbl_keys(contexts.notes)
-  for _, buf in ipairs(buffers) do
-    require("lgtm.app").restore_notes(buf)
-  end
-  if contexts.current then
-    require("lgtm.app").refresh()
-  end
-end
 return M

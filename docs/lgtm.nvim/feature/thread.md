@@ -24,7 +24,7 @@ TOP-LEVEL COMMENT · Alex · Published
 ```mermaid
 stateDiagram-v2
   [*] --> Current
-  Current --> Outdated: Backend placement loses its line
+  Current --> Outdated: GitHub marks a selection outdated
   Current --> Resolved: Service publishes resolution
   Resolved --> Current: Service publishes reopening
 ```
@@ -55,7 +55,7 @@ The [threads pane](threads-pane.md) owns keys and dispatches actions. This compo
 
 ```mermaid
 flowchart TD
-  Backend["LGTM backend APIs"] -->|"conversation / placements"| Service["threads_service signals"]
+  Backend["LGTM backend APIs"] -->|"conversation / saved source coordinates"| Service["threads_service signals"]
   Service --> Pane["threads_pane"]
   Pane -->|"Thread / Comment props"| Thread["UI.thread"]
   Thread -->|"Comment props"| Comment["UI.comment"]

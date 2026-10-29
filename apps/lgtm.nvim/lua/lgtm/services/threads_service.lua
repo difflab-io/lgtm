@@ -71,6 +71,29 @@ function M.publish(state, conversation, placements, views)
   })
 end
 
+-- Match backend-supplied coordinates to visible panes. No source matching occurs here.
+function M.update_annotations(state, conversation)
+  local placements = {}
+  for _, thread in ipairs((conversation or state.conversation or {}).threads or {}) do
+    local location = thread.displayLocation
+    if location then
+      location.start, location["end"] = tonumber(location.start), tonumber(location["end"])
+      placements[thread.id] = {}
+      for side, view in pairs(state.views or {}) do
+        if view.path == location.path and (location.kind == "file" or location.side == side) then
+          placements[thread.id][side] = { status = "exact", location = location }
+        end
+      end
+    elseif thread.displayStatus == "outdated" and state.views and state.views.new then
+      if state.views.new.path == thread.anchor.path then
+        placements[thread.id] =
+          { new = { status = "outdated", reason = "GitHub marked this selection outdated" } }
+      end
+    end
+  end
+  M.publish(state, conversation or state.conversation, placements, state.views)
+end
+
 ---@param state lgtm.ReviewState
 function M.get_conversation(state, callback)
   M.get_data(state)
@@ -102,7 +125,8 @@ function M.get_conversation(state, callback)
     if err then
       notify(err)
     else
-      require("lgtm.services.anchor_service").get_placements(state, notify, result)
+      M.update_annotations(state, result)
+      notify()
     end
   end
   restart = function()
@@ -111,95 +135,46 @@ function M.get_conversation(state, callback)
     page(nil)
   end
   page = function(token)
-    rpc.call(
-      "GetConversation",
-      { scope = state.scope, includeDrafts = true, pageSize = 100, pageToken = token },
-      function(err, response)
-        -- A caller arrived after this read began (for example, after saving a note).
-        -- Complete all waiters with one fresh snapshot; never leave a composer waiting on a discarded read.
-        if reader.again then
-          restart()
-          return
-        end
-        if err then
-          finish(err)
-          return
-        end
-        if result.version and result.version ~= response.version then
-          finish({ message = "Conversation changed while loading. Refresh to try again." })
-          return
-        end
-        result.version = response.version
-        for _, thread in ipairs(response.threads or {}) do
-          if
-            not vim.iter(result.threads):any(function(saved)
-              return saved.id == thread.id
-            end)
-          then
-            result.threads[#result.threads + 1] = thread
-          end
-        end
-        vim.list_extend(result.comments, response.comments or {})
-        if response.nextPageToken and response.nextPageToken ~= "" then
-          page(response.nextPageToken)
-        else
-          finish()
+    rpc.call("GetConversation", {
+      scope = state.scope,
+      snapshotId = state.snapshot and state.snapshot.id,
+      includeDrafts = true,
+      pageSize = 100,
+      pageToken = token,
+    }, function(err, response)
+      -- A caller arrived after this read began (for example, after saving a comment).
+      -- Complete all waiters with one fresh snapshot; never leave a composer waiting on a discarded read.
+      if reader.again then
+        restart()
+        return
+      end
+      if err then
+        finish(err)
+        return
+      end
+      if result.version and result.version ~= response.version then
+        finish({ message = "Conversation changed while loading. Refresh to try again." })
+        return
+      end
+      result.version = response.version
+      for _, thread in ipairs(response.threads or {}) do
+        if
+          not vim.iter(result.threads):any(function(saved)
+            return saved.id == thread.id
+          end)
+        then
+          result.threads[#result.threads + 1] = thread
         end
       end
-    )
-  end
-  restart()
-end
-
----@param state lgtm.ReviewState
-function M.observe_sources(state, file, callback)
-  M.get_data(state)
-  callback = callback or function() end
-  if records[state].observing then
-    records[state].observe_pending = true
-    callback()
-    return
-  end
-  if
-    state.kind == "pr"
-    or state.initializing
-    or state.load_error
-    or not state.conversation
-    or #(state.conversation.comments or {}) == 0
-  then
-    callback()
-    return
-  end
-  local selected = state.views and state.views.new
-  if not selected or selected.unavailable then
-    callback()
-    return
-  end
-  records[state].observing = true
-  rpc.call("RefreshReview", {
-    scope = state.scope,
-    expectedVersion = state.version,
-    observePath = file.path,
-    requestKey = store.request_key(),
-  }, function(err, result)
-    if not err then
-      if result.review then
-        store.apply(state, result.review)
+      vim.list_extend(result.comments, response.comments or {})
+      if response.nextPageToken and response.nextPageToken ~= "" then
+        page(response.nextPageToken)
       else
-        state.version = result.version
-      end
-    end
-    -- Read accepted state before another observation can use its version.
-    M.get_conversation(state, function(read_error)
-      records[state].observing = false
-      callback(err or read_error)
-      local pending = records[state].observe_pending
-      records[state].observe_pending = nil
-      if pending and not err and not read_error and state.observe_sources then
-        vim.schedule(state.observe_sources)
+        finish()
       end
     end)
-  end)
+  end
+  restart()
 end
 
 ---@param state lgtm.ReviewState
@@ -236,26 +211,6 @@ function M.save(state, draft, body, callback)
       reviews.refresh(state, function(refresh_error)
         callback(refresh_error, result)
       end)
-    end)
-  end)
-end
-
-function M.promote(source, target, comment, anchor, callback)
-  rpc.call("PromoteNotes", {
-    source = source.scope,
-    targetReviewId = target.review.id,
-    expectedSourceVersion = source.version,
-    expectedReviewVersion = target.version,
-    commentIds = { comment.id },
-    anchors = { anchor },
-    requestKey = store.request_key(),
-  }, function(err, result)
-    if err then
-      callback(err)
-      return
-    end
-    reviews.refresh(target, function(refresh_error)
-      callback(refresh_error, result)
     end)
   end)
 end

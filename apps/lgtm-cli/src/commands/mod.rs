@@ -16,7 +16,7 @@ use std::{path::PathBuf, process::Command};
 
 fn location(args: &ContextArgs) -> Result<PathBuf> {
     let supplied = args
-        .notes
+        .directory
         .as_ref()
         .or(args.path.as_ref())
         .cloned()
@@ -55,7 +55,7 @@ fn target_input(args: &ContextArgs) -> Result<Value> {
         );
     }
     let path = location(args)?;
-    if args.notes.is_some() {
+    if args.directory.is_some() {
         return Ok(json!({"directory":{"path":path}}));
     }
     if let Some(root) = git_value(&["rev-parse", "--show-toplevel"], Some(&path)) {
@@ -97,7 +97,7 @@ fn repository_url(input: &str, host: &str) -> Result<String> {
 async fn start(client: &Client, args: &ContextArgs) -> Result<Value> {
     let target = target_input(args)?;
     if target["directory"].is_object() && !location(args)?.is_dir() {
-        bail!("File notes need no review; use comments add --notes FILE");
+        bail!("Start a directory review with --directory PATH");
     }
     let comparison = if target["localGit"].is_object() {
         let root = std::path::Path::new(
@@ -176,13 +176,13 @@ async fn get_review(client: &Client, args: &ContextArgs) -> Result<Value> {
 async fn get_scope(
     client: &Client,
     args: &ContextArgs,
-    file: Option<&str>,
+    _file: Option<&str>,
     write: bool,
 ) -> Result<Value> {
-    if args.notes.is_some() {
+    if args.directory.is_some() {
         let path = location(args)?;
         if !path.is_dir() {
-            return Ok(json!({"notes":{"path":path}}));
+            bail!("--directory requires a directory; live-buffer notes are no longer supported");
         }
         let target = target_input(args)?;
         if let Some(review) = get_reviews(client, Some(&target), None)
@@ -197,10 +197,7 @@ async fn get_scope(
         {
             return Ok(json!({"reviewId":review["id"]}));
         }
-        if let Some(file) = file {
-            return Ok(json!({"notes":{"path":path.join(file)}}));
-        }
-        bail!("Use --notes FILE for ordinary notes, or start a directory review first");
+        bail!("Start a directory review before adding feedback");
     }
     match get_review(client, args).await {
         Ok(review)

@@ -19,9 +19,17 @@ pub struct Api {
 }
 impl Api {
     pub fn new(database: Database) -> Self {
+        Self::with_snapshots(
+            database,
+            crate::services::SnapshotService::from_environment(),
+        )
+    }
+
+    pub fn with_snapshots(database: Database, snapshots: crate::services::SnapshotService) -> Self {
         let diffs = crate::services::diff::DiffService::new();
-        let reviews =
-            Reviews::new(database.clone(), AuthService::new(database)).with_sources(diffs.clone());
+        let reviews = Reviews::new(database.clone(), AuthService::new(database))
+            .with_sources(diffs.clone())
+            .with_snapshots(snapshots);
         Self {
             forge: crate::services::forge::ForgeService::new(reviews.clone()),
             diffs,
@@ -82,15 +90,13 @@ impl IdentityService for Api {
         Response::ok(GetCapabilitiesResponse {
             api_version: "1".into(),
             capabilities: vec![
-                "notes".into(),
                 "local_review".into(),
                 "export".into(),
                 "github_pending_drafts".into(),
                 "review_targets".into(),
                 "feedback_scopes".into(),
-                "anchor_evidence".into(),
+                "review_snapshots".into(),
                 "diff_service".into(),
-                "anchor_service".into(),
                 "file_reviews".into(),
                 "rejected_submission_recovery".into(),
             ],

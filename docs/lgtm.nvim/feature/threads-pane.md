@@ -44,7 +44,7 @@ Tab / Shift-Tab select comments. `c` replies, `e` edits, `dd` requests deletion,
 | Owner | State |
 | --- | --- |
 | Component | Host mode, selected comment ID, scroll/focus position, and open/closed window. Selected thread IDs restrict a modal; the pane follows the full conversation. |
-| Service | threads_service owns conversations, placements, request status, and guarded mutations. The pane does not retain its own comment list. |
+| Service | threads_service owns conversations, visible coordinates, request status, and guarded mutations. The pane does not retain its own comment list. |
 | Backend | Saved feedback, original anchor evidence, and authoritative location/lifecycle decisions. |
 
 ```mermaid

@@ -3,11 +3,9 @@
  * @module-tag nvim
  * @module-tag diffs
  */
-import { join } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { profiles, useEditor } from './fixtures.js'
 import { type TestHarness } from '../common/test-harness.js'
-import { waitFor } from '../common/test-utils.js'
 import { expectFileSeen } from './assertions.js'
 
 async function prepareNativeCheckout(runtime: TestHarness) {
@@ -155,7 +153,7 @@ for (const profile of profiles) {
       await editor.close()
       await runtime.restart()
       await editor.start()
-      const state = await editor.openLocal('working')
+      await editor.openLocal('working')
       await editor.show('review.txt')
       await editor.wait(
         'require("lgtm.services.state").current.reviewed["review.txt"] ~= nil',
@@ -177,7 +175,9 @@ for (const profile of profiles) {
       )
 
       // Assert
-      expect(await editor.text(state.panes.new.buf)).toContain('working content changed')
+      expect(await editor.text((await editor.state())!.panes.new.buf)).toContain(
+        'working content changed',
+      )
       await expectFileSeen(editor, 'review.txt', false)
     })
 
@@ -223,59 +223,6 @@ for (const profile of profiles) {
       },
     )
   })
-
-  describe(
-    `When a working buffer is shared with ordinary editing [${profile}]`,
-    { tags: [profile] },
-    () => {
-      const fixture = useEditor(profile)
-
-      it('Ordinary tabs keep note cards and original keys while review tabs keep review comments and keys', async () => {
-        // Arrange
-        const { editor, runtime } = fixture()
-        await prepareNativeCheckout(runtime)
-        await runtime.write('review.txt', 'working edit\n')
-        await editor.edit(join(runtime.workspace, 'review.txt'))
-        await editor.command('Lgtm note')
-        await editor.compose('Standalone note outside the review')
-        const mapping = await editor.value('vim.fn.maparg("c","n",false,true).desc')
-        const state = await editor.openLocal('working')
-        await editor.show('review.txt')
-        const reviewTab = state.tab
-        const buffer = state.panes.new.buf
-
-        // Act
-        await editor.command(`tabnew ${join(runtime.workspace, 'review.txt')}`)
-        const ordinary = {
-          buffer: await editor.value('vim.api.nvim_get_current_buf()'),
-          mapping: await editor.value('vim.fn.maparg("c","n",false,true).desc'),
-          review: await editor.value('vim.b.lgtm'),
-        }
-        await editor.wait(
-          'vim.inspect(vim.api.nvim_buf_get_extmarks(0,require("lgtm.features.annotation_overlay").namespace,0,-1,{details=true})):find("Standalone note outside",1,true) ~= nil',
-          'ordinary note card displayed',
-        )
-        await editor.lua('vim.api.nvim_exec_autocmds("ColorScheme",{modeline=false})')
-        await editor.command('tabclose')
-        await waitFor(
-          'review keys restored',
-          () =>
-            editor.lua<string>(
-              'return vim.api.nvim_buf_call(...,function() return vim.fn.maparg("c","n",false,true).desc end)',
-              buffer,
-            ),
-          (value) => value === 'Add review comment',
-        )
-
-        // Assert
-        expect(ordinary.buffer).toBe(buffer)
-        expect(ordinary.mapping).toBe(mapping)
-        expect(ordinary.review).toBeFalsy()
-        expect(await editor.value('vim.api.nvim_get_current_tabpage()')).toBe(reviewTab)
-        expect(JSON.stringify(await editor.marks())).not.toContain('Standalone note outside')
-      })
-    },
-  )
 
   describe(`When changing the saved comparison [${profile}]`, { tags: [profile] }, () => {
     const fixture = useEditor(profile)

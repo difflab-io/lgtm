@@ -5,3 +5,5 @@
 ---@field anchor table Persisted source and location evidence.
 ---@field currentPath string?
 ---@field orphanReason string?
+---@field displayLocation table? Fixed coordinates for the selected saved revision.
+---@field displayStatus "exact"|"outdated"|"historical"

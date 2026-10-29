@@ -40,7 +40,7 @@ Enter / K open feedback. `c` adds a comment; `dd` opens the discussion; `x` togg
 | Owner | State |
 | --- | --- |
 | Component | Expanded thread IDs, card visibility, buffer key bindings, and opposite-pane padding. |
-| Service | threads_service supplies placement results and comments. This adapter does not match text, relocate anchors, or infer stale status. |
+| Service | threads_service supplies fixed source coordinates and comments. This adapter does not match text, relocate anchors, or infer stale status. |
 | Backend | Saved feedback, original anchor evidence, and authoritative location/lifecycle decisions. |
 
 ```mermaid

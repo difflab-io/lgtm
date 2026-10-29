@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 /// One session-backed public attempt plus its current conversation version.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Review {
+    pub snapshot: Option<super::Snapshot>,
+    pub revisions: Vec<super::Snapshot>,
     pub target: ReviewTarget,
     pub comparison: Option<ReviewComparison>,
     /// Latest complete provider comparison; active PR reviews follow it before further draft writes.
@@ -82,6 +84,8 @@ impl Review {
             ComparisonKind::Notes => None,
         };
         Review {
+            snapshot: None,
+            revisions: vec![],
             target,
             comparison,
             observed_comparison: if context.key.is_forge_backed() {
@@ -111,6 +115,12 @@ impl Review {
         let comparison = v.comparison.map(m::ReviewComparison::into_proto);
         let completion = v.session.completion().cloned();
         p::Review {
+            snapshot: v.snapshot.map(super::Snapshot::into_proto).into(),
+            revisions: v
+                .revisions
+                .into_iter()
+                .map(super::Snapshot::into_proto)
+                .collect(),
             id: v.session.id.to_string(),
             target: Some(target).into(),
             comparison: comparison.into(),
