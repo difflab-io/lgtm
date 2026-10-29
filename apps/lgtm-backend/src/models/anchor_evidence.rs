@@ -120,6 +120,20 @@ impl AnchorEvidence {
 
     // RPC conversion ----------------------------------------------------------
 
+    /// Attach captured evidence to the original location for a client or persisted thread.
+    pub(crate) fn into_proto_anchor(self, anchor: super::Anchor) -> p::Anchor {
+        let mut anchor = anchor.into_proto();
+        anchor.source = Some(self.source.into_proto()).into();
+        anchor.evidence = Some(p::AnchorEvidence {
+            selected_text: self.selected_text,
+            context_before: self.context_before,
+            context_after: self.context_after,
+            ..Default::default()
+        })
+        .into();
+        anchor
+    }
+
     /// Validate and convert the RPC input to the domain model.
     pub(crate) fn from_proto_anchor(
         v: &p::Anchor,

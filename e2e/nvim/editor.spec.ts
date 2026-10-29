@@ -36,7 +36,7 @@ for (const profile of profiles) {
       // Arrange
       const { editor: e } = fixture()
       // Act
-      await e.lua(`local t=require("lgtm.transport.connect"); _G.e2e.callbacks=0
+      await e.lua(`local t=require("lgtm.services.connect"); _G.e2e.callbacks=0
           local function done() _G.e2e.callbacks=_G.e2e.callbacks+1 end
           local cancel=t.call("IdentityService","GetCapabilities",{},nil,done); cancel()
           t.call("IdentityService","GetCapabilities",{},nil,done)
@@ -48,7 +48,7 @@ for (const profile of profiles) {
       expect(await e.value('_G.e2e.callbacks')).toBe(0)
 
       // Act
-      await e.lua(`require("lgtm.transport.connect").call("IdentityService","GetCapabilities",{},nil,function(err,result)
+      await e.lua(`require("lgtm.services.connect").call("IdentityService","GetCapabilities",{},nil,function(err,result)
           _G.e2e.transport_result={error=err,result=result} end)`)
 
       // Assert
@@ -66,7 +66,7 @@ for (const profile of profiles) {
 
       // Act
       await e.lua(
-        'require("lgtm.notifications").show("Saved UI evidence"); require("lgtm.ui.theme").highlights()',
+        'require("lgtm.ui.notifications").show("Saved UI evidence"); require("lgtm.ui.theme").highlights()',
       )
 
       // Assert

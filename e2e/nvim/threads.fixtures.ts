@@ -108,7 +108,7 @@ export async function getThreadPlacement(discussion: ThreadDiscussion): Promise<
     `local notes, buf, id, path = ...
     local s = notes and require("lgtm.services.state").notes[buf] or require("lgtm.services.state").current
     for _, thread in ipairs(s.conversation.threads) do
-      if thread.id == id then return require("lgtm.threads").placement(s, thread, path, "new") end
+      if thread.id == id then return require("lgtm.features.annotation_overlay").placement(s, thread, path, "new") end
     end
     error("Thread not found")`,
     discussion.flow === 'notes',
@@ -121,11 +121,11 @@ export async function getThreadPlacement(discussion: ThreadDiscussion): Promise<
 export async function openThreadsPane(discussion: ThreadDiscussion): Promise<Json> {
   await discussion.editor.command(discussion.flow === 'notes' ? 'Lgtm notes' : 'Lgtm threads')
   await discussion.editor.wait(
-    'require("lgtm.threads").last and vim.api.nvim_win_is_valid(require("lgtm.threads").last.win) and vim.api.nvim_get_current_win() == require("lgtm.threads").last.win',
+    'require("lgtm.features.threads_pane").last and vim.api.nvim_win_is_valid(require("lgtm.features.threads_pane").last.win) and vim.api.nvim_get_current_win() == require("lgtm.features.threads_pane").last.win',
     'threads pane open',
   )
   return discussion.editor.lua(
-    `local id = ...; local panel = require("lgtm.threads").last
+    `local id = ...; local panel = require("lgtm.features.threads_pane").last
     for _, entry in ipairs(panel.entries) do
       if entry.thread.id == id then
         vim.api.nvim_win_set_cursor(panel.win, {entry.line, 0})

@@ -3,7 +3,7 @@
 
 local M = {}
 
--- Public ----------------------------------------------------------------------
+-- Methods ---------------------------------------------------------------------
 
 ---@param state lgtm.ReviewState
 function M.set(state, modes, key, callback, options)
@@ -46,5 +46,4 @@ function M.restore(state)
   end
   state.bindings = nil
 end
-
 return M

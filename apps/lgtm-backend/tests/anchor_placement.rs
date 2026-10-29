@@ -1,4 +1,4 @@
-//! The same source and placement cases run in the Neovim implementation.
+//! Authoritative source and placement contracts shared by editor and web clients.
 use lgtm_backend::models::{Anchor, AnchorEvidence, AnchorSource};
 use serde::Deserialize;
 use serde_json::Value;

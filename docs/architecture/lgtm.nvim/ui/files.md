@@ -2,7 +2,7 @@
 
 ## Overview
 
-This pane lists files for explicit directory reviews. Git-backed reviews keep CodeDiff's native explorer. The component receives paths and display flags from `files.lua`.
+This pane lists files for explicit directory reviews. Git-backed reviews keep CodeDiff's native explorer. The component consumes service-derived file rows from `features/files_pane.lua`.
 
 ## Design
 
@@ -60,9 +60,9 @@ After the file changes, its reviewed mark clears. Selection stays on the same pa
 stateDiagram-v2
   [*] --> Unreviewed: Open an unreviewed path
   [*] --> Reviewed: Open a reviewed path
-  Unreviewed --> Reviewed: m / controller persists mark
-  Reviewed --> Unreviewed: m / controller clears mark
-  Reviewed --> Unreviewed: Content changes / controller invalidates mark
+  Unreviewed --> Reviewed: m / service persists mark
+  Reviewed --> Unreviewed: m / service clears mark
+  Reviewed --> Unreviewed: Content changes / service invalidates mark
   Unreviewed --> Unreviewed: Enter selects a path
   Reviewed --> Reviewed: Enter selects a path
   Unreviewed --> [*]: f or q
@@ -85,6 +85,7 @@ Lua API:
 
 ```lua
 require("lgtm.ui.files").open({
+  data = file_rows, -- files_service signal combined with UI selection
   anchor_win = source_win,
   focus = true,
   on_select = function(path)
@@ -96,7 +97,7 @@ require("lgtm.ui.files").open({
   on_close = function()
   end,
 })
--- Handle: update(items, selected_path), close().
+-- Handle: close().
 -- Each item has these fields:
 -- path
 -- selected
@@ -108,14 +109,13 @@ require("lgtm.ui.files").open({
 
 ```mermaid
 flowchart LR
-  Controller["files.lua<br/>Path order, selected file,<br/>reviewed marks"] -->|"update(items, selected_path)"| Tree["NUI file tree<br/>Node ID = path"]
-  Tree -->|"Enter: path"| Open["Controller loads file"]
-  Tree -->|"m: path"| Mark["Controller changes reviewed mark"]
-  Tree -->|"Direction + unreviewed flag"| Next["Controller chooses next path"]
-  Mark --> Store["services/files.lua<br/>Serialized writes + shared reviewed state"]
-  Store --> Controller
-  Open --> Controller
-  Next --> Controller
+  Store["files_service<br/>Files + reviewed marks"] --> Rows["File rows signal"]
+  Selection["Files pane<br/>Selected path"] --> Rows
+  Rows --> Tree["NUI file tree<br/>Node ID = path"]
+  Tree -->|"Enter: path"| Pane["features/files_pane"]
+  Tree -->|"m: path"| Pane
+  Pane -->|"toggle reviewed"| Store
+  Pane -->|"select file"| Source["Review workspace"]
 ```
 
 ## Implementation

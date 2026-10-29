@@ -90,6 +90,7 @@ impl IdentityService for Api {
                 "feedback_scopes".into(),
                 "anchor_evidence".into(),
                 "diff_service".into(),
+                "anchor_service".into(),
                 "file_reviews".into(),
                 "rejected_submission_recovery".into(),
             ],

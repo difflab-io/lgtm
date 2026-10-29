@@ -1,0 +1,4 @@
+---@class lgtm.AnchorPlacement
+---@field status 'exact'|'relocated'|'stale'|'outdated'|'orphaned'|'unverified'
+---@field location table? Backend-confirmed file or line location; absent for fallback statuses.
+---@field reason string?

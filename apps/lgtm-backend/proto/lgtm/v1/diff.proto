@@ -27,7 +27,61 @@ message ContentSide {
 message SuppliedAnchor {
   Anchor original = 1;
   string current_path = 2;
+  ForgeObservation forge_observation = 3;
 }
+
+// A source displayed by a client. Content is absent for a missing file side.
+// Native editors may supply Git/filesystem bytes without changing their buffers.
+message AnchorView {
+  string path = 1;
+  string logical_path = 2;
+  string previous_path = 3;
+  string side = 4;
+  bool confirmed_rename = 5;
+  AnchorSource source = 6;
+  optional string content = 7;
+  ReviewComparison comparison = 8;
+  bool historical = 9;
+  string unavailable = 10;
+}
+
+message GetAnchorPlacementsRequest {
+  repeated SuppliedAnchor anchors = 1;
+  repeated AnchorView views = 2;
+  bool notes = 3;
+}
+
+message GetAnchorPlacementsResponse { repeated AnchorPlacement placements = 1; }
+
+message CaptureAnchorRequest {
+  Anchor location = 1;
+  oneof selection {
+    GetSourceRequest saved = 2;
+    GetFileRequest file = 3;
+  }
+  string side = 4;
+}
+
+message CaptureAnchorResponse { Anchor anchor = 1; }
+
+enum SavedSourceKind {
+  SAVED_SOURCE_KIND_UNSPECIFIED = 0;
+  SAVED_SOURCE_KIND_COMMIT = 1;
+  SAVED_SOURCE_KIND_INDEX = 2;
+  SAVED_SOURCE_KIND_WORKING = 3;
+  SAVED_SOURCE_KIND_LOCAL = 4;
+}
+
+// Read one explicit saved source, including files outside the current changed-file list.
+message GetSourceRequest {
+  string root = 1;
+  string path = 2;
+  SavedSourceKind kind = 3;
+  string commit = 4;
+}
+
+// selected is absent for a confirmed missing file. Failed reads return an error.
+message GetSourceResponse { ContentSide selected = 1; }
 
 message ConfirmedPlacement {
   Anchor location = 1;
@@ -44,7 +98,9 @@ message AnchorPlacement {
     UnplacedAnchor outdated = 4;
     UnplacedAnchor orphaned = 5;
     UnplacedAnchor unverified = 6;
+    UnplacedAnchor stale = 7;
   }
+  string side = 8;
 }
 
 message GetDiffRequest {
@@ -82,4 +138,7 @@ service DiffService {
   rpc GetDiff(GetDiffRequest) returns (GetDiffResponse);
   rpc GetFiles(GetFilesRequest) returns (GetFilesResponse);
   rpc GetFile(GetFileRequest) returns (GetFileResponse);
+  rpc GetAnchorPlacements(GetAnchorPlacementsRequest) returns (GetAnchorPlacementsResponse);
+  rpc CaptureAnchor(CaptureAnchorRequest) returns (CaptureAnchorResponse);
+  rpc GetSource(GetSourceRequest) returns (GetSourceResponse);
 }

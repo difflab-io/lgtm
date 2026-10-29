@@ -8,11 +8,13 @@ local M = {
     "feedback_scopes",
     "anchor_evidence",
     "diff_service",
+    "anchor_service",
     "file_reviews",
   },
 }
 local initializing, waiting, pending = false, {}, {}
--- Public ----------------------------------------------------------------------
+
+-- Methods ---------------------------------------------------------------------
 
 function M.bootstrap(callback)
   if M.identity then
@@ -24,7 +26,7 @@ function M.bootstrap(callback)
     return
   end
   initializing = true
-  local transport = require("lgtm.transport.connect")
+  local transport = require("lgtm.services.connect")
   local function finish(err)
     initializing = false
     local callbacks = waiting
@@ -79,9 +81,15 @@ function M.call(method, input, callback)
       callback(err)
       return
     end
-    local service = ({ GetDiff = true, GetFiles = true, GetFile = true })[method] and "DiffService"
-      or "ReviewService"
-    cancel = require("lgtm.transport.connect").call(service, method, input, M.identity, callback)
+    local service = ({
+      GetDiff = true,
+      GetFiles = true,
+      GetFile = true,
+      GetSource = true,
+      GetAnchorPlacements = true,
+      CaptureAnchor = true,
+    })[method] and "DiffService" or "ReviewService"
+    cancel = require("lgtm.services.connect").call(service, method, input, M.identity, callback)
   end)
   return function()
     cancelled = true

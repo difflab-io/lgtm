@@ -24,7 +24,8 @@ M.defaults = {
   max_response_bytes = 16 * 1024 * 1024,
 }
 M.options = vim.deepcopy(M.defaults)
--- Public ----------------------------------------------------------------------
+
+-- Methods ---------------------------------------------------------------------
 
 function M.setup(opts)
   M.options = vim.tbl_deep_extend("force", vim.deepcopy(M.defaults), opts or {})

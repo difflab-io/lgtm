@@ -385,11 +385,21 @@ impl ReviewService for Api {
             .iter()
             .map(m::SourceChange::from_proto)
             .collect::<Result<Vec<_>, _>>()?;
-        let version = self
-            .reviews
-            .refresh_locations(&scope, &who, &changes, &guard)
-            .await
-            .map_err(ConnectError::from)?;
+        let version = if let Some(path) = &request.observe_path {
+            if !changes.is_empty() {
+                return Err(ConnectError::invalid_argument(
+                    "Select automatic observation or explicit source changes",
+                ));
+            }
+            self.reviews
+                .observe_sources(&scope, &who, path, &guard)
+                .await
+        } else {
+            self.reviews
+                .refresh_locations(&scope, &who, &changes, &guard)
+                .await
+        }
+        .map_err(ConnectError::from)?;
         let refreshed = if let m::ReviewScope::Review { review_id } = scope {
             let selected = self
                 .reviews

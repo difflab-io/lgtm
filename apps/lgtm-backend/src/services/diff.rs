@@ -49,6 +49,59 @@ impl DiffService {
     }
 
     // Diffs and source placement ----------------------------------------------
+
+    /// Read one saved source for native-client evidence, without enumerating a diff or changing Git.
+    pub async fn get_source(
+        &self,
+        root: &str,
+        path: &str,
+        kind: crate::database::types::SourceKind,
+        commit: Option<&str>,
+    ) -> Result<Option<ContentSide>> {
+        use crate::database::types::SourceKind;
+        Anchor::File { path: path.into() }.validate()?;
+        if !Path::new(root).is_absolute() || (kind == SourceKind::Commit) != commit.is_some() {
+            return Err(invalid(
+                "Saved source requires an absolute root and a commit only for committed content",
+            ));
+        }
+        let root = PathBuf::from(root);
+        let path = path.to_owned();
+        let commit = commit.map(str::to_owned);
+        tokio::task::spawn_blocking(move || {
+            let present = match kind {
+                SourceKind::IndexFile | SourceKind::Commit => {
+                    super::workspace::get_source_presence(&root, &path, commit.as_deref())?
+                }
+                _ => match std::fs::symlink_metadata(root.join(&path)) {
+                    Ok(_) => true,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                    Err(error) => return Err(error.into()),
+                },
+            };
+            if !present {
+                return Ok(None);
+            }
+            let (mut source, bytes) =
+                super::workspace::get_source(&root, &path, kind, commit.as_deref())?;
+            if kind == SourceKind::WorkingFile
+                && let Ok((indexed, indexed_bytes)) =
+                    super::workspace::get_source(&root, &path, SourceKind::IndexFile, None)
+                && indexed_bytes == bytes
+            {
+                source = indexed;
+            }
+            Ok(Some(ContentSide {
+                path,
+                source,
+                content: String::from_utf8(bytes)
+                    .map_err(|_| invalid("Selected source requires UTF-8 text"))?,
+            }))
+        })
+        .await
+        .map_err(|_| invalid("Selected source read failed"))?
+    }
+
     /// Verify supplied PR evidence against immutable bytes, preferring associated local Git objects.
     /// Previously served immutable bytes can be verified without another forge request.
     pub async fn get_anchor_evidence(

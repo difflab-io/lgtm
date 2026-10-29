@@ -22,7 +22,7 @@ async function placement(editor: Editor, id: string) {
   return editor.lua(
     `local id=...; local s=require("lgtm.services.state").current
     for _,t in ipairs(s.conversation.threads) do
-      if t.id==id then return require("lgtm.threads").placement(s,t,s.file.path,"new") end
+      if t.id==id then return require("lgtm.features.annotation_overlay").placement(s,t,s.file.path,"new") end
     end`,
     id,
   )
@@ -95,7 +95,7 @@ for (const profile of profiles) {
           const marks =
             flow === 'notes'
               ? await editor.value(
-                  'vim.api.nvim_buf_get_extmarks(...,require("lgtm.threads").namespace,0,-1,{details=true})',
+                  'vim.api.nvim_buf_get_extmarks(...,require("lgtm.features.annotation_overlay").namespace,0,-1,{details=true})',
                   discussion.buf,
                 )
               : await editor.marks()
@@ -147,7 +147,7 @@ for (const profile of profiles) {
         const { workingId } = await prepareOrphanedWorkingFeedback(e, r)
         await e.command('Lgtm threads')
         const panel = await e.lua(
-          `local id = ...; local panel = require("lgtm.threads").last
+          `local id = ...; local panel = require("lgtm.features.threads_pane").last
         for _, entry in ipairs(panel.entries) do
           if entry.thread.id == id then
             vim.api.nvim_win_set_cursor(panel.win, {entry.line, 0})
@@ -213,7 +213,7 @@ for (const profile of profiles) {
           await e.show('second.txt')
           await e.command('Lgtm threads')
           const panel = await e.lua(
-            `local id = ...; local panel = require("lgtm.threads").last
+            `local id = ...; local panel = require("lgtm.features.threads_pane").last
           for _, entry in ipairs(panel.entries) do
             if entry.thread.id == id then
               vim.api.nvim_win_set_cursor(panel.win, {entry.line, 0})
@@ -281,7 +281,7 @@ for (const profile of profiles) {
         )
         await e.show('other.txt')
         await e.command('Lgtm threads')
-        const panel = await e.value('require("lgtm.threads").last')
+        const panel = await e.value('require("lgtm.features.threads_pane").last')
 
         // Assert
         expect(await e.text(panel.buf)).toContain('OUTSIDE DIFF')
@@ -336,7 +336,7 @@ for (const profile of profiles) {
         await e.pane('new', 100)
         await e.command('Lgtm threads')
         const panel = await e.lua(
-          `local id = ...; local panel = require("lgtm.threads").last
+          `local id = ...; local panel = require("lgtm.features.threads_pane").last
         for _, entry in ipairs(panel.entries) do
           if entry.thread.id == id then
             vim.api.nvim_win_set_cursor(panel.win, {entry.line, 0})

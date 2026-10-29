@@ -16,6 +16,8 @@ postgres = ["lgtm-db/postgres"]
 
 [dependencies]
 base64 = "0.22"
+filepath = "0.2"
+same-file = "1"
 octocrab = { version = "0.54.1", default-features = false, features = ["default-client", "rustls", "rustls-ring", "timeout"] }
 url = "2"
 tracing = "0.1"

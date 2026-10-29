@@ -1,5 +1,5 @@
 //! A client-supplied anchor and its confirmed current path for one displayed diff.
-use super::{Anchor, AnchorEvidence, AnchorPlacement, DiffContent};
+use super::{Anchor, AnchorEvidence, AnchorPlacement, DiffContent, ForgeObservation};
 use crate::proto::lgtm::v1 as p;
 use connectrpc::ConnectError;
 use std::path::Path;
@@ -9,6 +9,7 @@ pub struct SuppliedAnchor {
     pub original: Anchor,
     pub evidence: Option<AnchorEvidence>,
     pub current_path: String,
+    pub forge_observation: Option<ForgeObservation>,
 }
 
 impl SuppliedAnchor {
@@ -20,6 +21,11 @@ impl SuppliedAnchor {
             original: Anchor::from_proto(&value.original)?,
             evidence: AnchorEvidence::from_proto_anchor(&value.original)?,
             current_path: value.current_path.clone(),
+            forge_observation: if value.forge_observation.is_set() {
+                Some(ForgeObservation::from_proto(&value.forge_observation)?)
+            } else {
+                None
+            },
         })
     }
 
@@ -29,69 +35,63 @@ impl SuppliedAnchor {
         content: &DiffContent,
         directory_root: Option<&Path>,
     ) -> Result<AnchorPlacement, ConnectError> {
-        let Self {
-            original,
-            evidence,
-            current_path,
-        } = self;
-        if !(current_path.is_empty()
-            || directory_root.is_some() && std::path::Path::new(&current_path).is_absolute())
-        {
-            super::Anchor::File {
-                path: current_path.clone(),
+        if !self.current_path.is_empty() {
+            let current = Path::new(&self.current_path);
+            if current.is_absolute() && directory_root.is_some() {
+                if current
+                    .components()
+                    .any(|part| matches!(part, std::path::Component::ParentDir))
+                {
+                    return Err(ConnectError::invalid_argument(
+                        "Current source location cannot contain ..",
+                    ));
+                }
+            } else {
+                Anchor::File {
+                    path: self.current_path.clone(),
+                }
+                .validate()
+                .map_err(ConnectError::from)?;
             }
-            .validate()
-            .map_err(ConnectError::from)?;
         }
-        let original_path = match &original {
-            super::Anchor::File { path } | super::Anchor::Line { path, .. } => path.as_str(),
-            super::Anchor::General => "",
-        };
-        let displayed = match &original {
-            super::Anchor::Line { side, .. } if side == "old" => content.old.as_ref(),
-            super::Anchor::File { .. } => content.new.as_ref().or(content.old.as_ref()),
-            _ => content.new.as_ref(),
-        };
-        let path = displayed
-            .map(|s| s.path.as_str())
-            .unwrap_or(content.file.path.as_str());
-        let renamed = !content.file.previous_path.is_empty()
-            && (content.file.status == "renamed" || content.file.status.starts_with('R'));
-        let current_matches = if let Some(root) = directory_root
-            .as_ref()
-            .filter(|_| std::path::Path::new(&current_path).is_absolute())
-        {
-            if std::path::Path::new(&current_path)
-                .components()
-                .any(|part| matches!(part, std::path::Component::ParentDir))
-            {
-                return Err(ConnectError::invalid_argument(
-                    "Current source location cannot contain ..",
-                ));
+        let side = match &self.original {
+            Anchor::Line { side, .. } => side.as_str(),
+            _ => {
+                if content.new.is_some() {
+                    "new"
+                } else {
+                    "old"
+                }
             }
-            std::path::Path::new(&current_path) == root.join(&content.file.path)
-        } else {
-            current_path == content.file.path
-                || renamed && current_path == content.file.previous_path
         };
-        // A current association wins over a reused old filename. An exact historical commit remains independently verifiable.
-        let historical = evidence.as_ref().is_some_and(|evidence| {
-                matches!((&evidence.source, displayed.map(|side| &side.source)),
-                    (super::AnchorSource::Commit { sha: origin, .. }, Some(super::AnchorSource::Commit { sha: shown, .. })) if origin == shown && original_path == path)
-            });
-        let confirmed = if current_path.is_empty() {
-            original_path == content.file.path
-                || renamed && original_path == content.file.previous_path
+        let displayed = if side == "old" {
+            &content.old
         } else {
-            current_matches || historical
+            &content.new
         };
-        let result = original.get_placement(
-            evidence.as_ref(),
-            path,
-            displayed.map(|s| &s.source),
-            displayed.map(|s| s.content.as_str()),
-            confirmed,
-        );
-        Ok(result)
+        let view = super::AnchorView {
+            path: displayed
+                .as_ref()
+                .map(|s| &s.path)
+                .unwrap_or(&content.file.path)
+                .clone(),
+            logical_path: directory_root
+                .map(|root| root.join(&content.file.path).to_string_lossy().into_owned())
+                .unwrap_or_else(|| content.file.path.clone()),
+            previous_path: content.file.previous_path.clone(),
+            side: side.into(),
+            confirmed_rename: !content.file.previous_path.is_empty()
+                && (content.file.status == "renamed" || content.file.status.starts_with('R')),
+            source: displayed.as_ref().map(|s| s.source.clone()),
+            content: displayed.as_ref().map(|s| s.content.clone()),
+            comparison: None,
+            historical: false,
+            unavailable: String::new(),
+        };
+        Ok(view
+            .get_placement(&self, false, content.new.is_some())
+            .unwrap_or(AnchorPlacement::Unverified {
+                reason: "File association is not confirmed for this comparison".into(),
+            }))
     }
 }

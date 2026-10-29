@@ -2,210 +2,305 @@
 
 ## Overview
 
-LGTM adds saved-file notes and local/GitHub reviews to Neovim. Feature modules call the backend through Connect JSON, a JSON RPC protocol. UI components display records and return user actions. The backend owns durable review data.
-
-The plugin does not access the database or use the web frontend. CodeDiff owns diff buffers and its Git explorer. NuiComponents and NUI own windows and widgets.
+LGTM adds notes, local reviews, and forge PR reviews to Neovim. Services own reactive application data and backend operations. Feature components render that data and keep only UI interaction state. CodeDiff retains its native diff experience.
 
 ## Requirement
 
 ### Functional
 
-- FR1: Preserve notes, comparisons, thread actions, reviewed marks, exports, and explicit submission.
-- FR2: Keep attribution and permissions in the backend-facing feature modules.
-- FR3: Preserve editable text after failed saves and cancellation.
-- FR4: Keep the thread pane open during navigation and resolution.
-- FR5: Install required plugins through one supported lazy.nvim declaration.
+- Preserve notes, working/staged/branch comparisons, PR reviews, feedback actions, reviewed marks, export, and submission.
+- Keep original evidence, placement, stale/outdated decisions, permissions, and persistence authoritative in the backend.
+- Compose thread panes from threads and comment components. Keep drafts after failed saves.
+- Keep native CodeDiff buffers, explorer, editing, layout changes, and refresh.
+- Install LGTM’s required Lua dependencies through one supported lazy.nvim declaration.
 
 ### Non-Functional
 
-- NFR1: Keep the editor responsive during RPCs and provider operations.
-- NFR2: Follow the active colorscheme and preserve configured mappings and borders.
-- NFR3: Keep UI components independent of session creation, persistence, and forge credentials.
+- Keep RPC and forge requests asynchronous.
+- Keep application records in service signals; components must not keep another conversation or file catalog.
+- Unsubscribe when windows or buffers unmount. Retain selection while service data changes.
 
 ## Design
-
-### Review workspace
-
-The layouts use text captured from Neovim at 100 columns with sample feedback. This example shows the NUI thread pane beside a source buffer. The selected comment uses a background highlight in the editor. The pane stays open when Enter returns focus to code.
-
-```text
-  8 -- review implementation                             │ OPEN · 1 reply · src/review.lua:21
-  9 -- review implementation                             │──────────────────────────────────────────
- 10 -- review implementation                             │ TOP-LEVEL COMMENT · Alex · Published
- 11 -- review implementation                             │   Keep the draft after a failed save.
- 12 -- review implementation                             │
- 13 -- review implementation                             │   └─ REPLY 1 · You · GitHub draft
- 14 -- review implementation                             │      Agreed. This now retains the text.
- 15 -- review implementation                             │
- 16 -- review implementation                             │
- 17 -- review implementation                             │
- 18 -- review implementation                             │
- 19                                                      │
- 20 local function save(body)                            │
- 21   submit(body, done)                                 │
- 22 end                                                  │
-                                                         │
-```
-
-Git reviews also include CodeDiff's diff buffers and native explorer. Explicit directory reviews use the [directory file pane](ui/files.md). [Search](ui/search.md) and the [composer](ui/composer.md) float over the workspace. Each component page shows its rendered layout in different states.
 
 ### Components and Responsibilities
 
 ```mermaid
-flowchart TD
-  Entry["Commands and keymaps"] --> Controllers["review / notes / sessions / threads / files<br/>Editor actions and view lifecycle"]
-  Controllers -->|"Shared state + user intent"| Services["services/<br/>Load, save, synchronize, recover"]
-  Services -.->|"Shared shapes"| Models["models/<br/>ReviewState, Conversation, Draft"]
-  Services --> Store["services/state.lua<br/>Active reviews, notes and drafts"]
-  Services --> Client["services/client.lua<br/>Identity, cancellation, Connect calls"]
-  Client --> Transport["transport/connect.lua"]
-  Transport --> Backend["LGTM backend"]
-  Controllers -->|"Display records + callbacks"| Views["ui/<br/>Component composition"]
-  Views --> NC["NuiComponents<br/>Floating views and signals"]
-  Views --> NUI["NUI<br/>Splits, trees, text"]
-  Controllers --> Diff["codediff.lua<br/>Diff buffers and card alignment"]
+flowchart TB
+  Commands["Commands / keymaps"] --> Dialog["New review / PR / session selectors"]
+  Commands --> App["app.lua<br/>application orchestration"]
+  App --> Notes["notes_service<br/>saved-file contexts and source reads"]
+  Notes --> Threads
+  Notes --> Diff
+  Dialog --> Sessions["session_service<br/>review metadata + catalogs"]
+  App --> Diff["diff_service<br/>comparison + selected sources"]
+  App --> Files["files_service<br/>files + reviewed marks"]
+  App --> Threads["threads_service<br/>conversation + placements + request state"]
+  Threads -->|"reactive data"| Pane["threads_pane"]
+  Pane --> Thread["UI.thread(props)"]
+  Thread --> Comment["UI.comment(props)"]
+  Threads -->|"reactive data"| Cards["annotation_overlay → UI cards"]
+  Files -->|"reactive data"| FilePane["files_pane → UI files"]
+  Pane -->|"reply / edit / delete / resolve"| Threads
+  FilePane -->|"mark reviewed"| Files
+  Sessions --> RPC["Connect client"]
+  Diff --> RPC
+  Files --> RPC
+  Threads --> Anchors["anchor_service<br/>capture / placement operations"]
+  Anchors --> RPC
+  Threads --> RPC
+  RPC --> Backend["LGTM backend<br/>ReviewService + DiffService"]
+  Backend --> Database["Database"]
+  Backend --> Forge["GitHub synchronization"]
+  App --> CodeDiff["CodeDiff adapter"]
+  CodeDiff --> Native["Native Git / index / working buffers"]
 ```
 
-| Path | Responsibility |
+| Owner | Data or state |
 | --- | --- |
-| `review.lua`, `notes.lua`, `sessions.lua` | Commands, prompts, composer callbacks, and opening editor views. |
-| `threads.lua`, `files.lua` | Source annotations, selection, key bindings, and pane lifecycle. |
-| `services/reviews.lua` | Start/resume, version-bound conversation reads, refresh, draft synchronization, and completion. |
-| `services/feedback.lua` | Create guarded drafts, save comments, mutate threads, promote notes, and check ownership. |
-| `services/submissions.lua` | Retain submission intent, send, reconcile, and interpret durable outcomes. |
-| `services/diffs.lua`, `services/files.lua` | Load paginated diffs and selected content, persist reviewed marks, and invalidate changed marks. |
-| `services/sessions.lua` | Load review/PR candidates and consume review pagination. |
-| `services/sources.lua` | Read exact source bytes and reconcile source observations. |
-| `models/` | Shared LuaLS declarations for reviews, files, conversations, comments, threads, drafts and service results. |
-| `services/state.lua` | Active review/tab state, saved-file state, and submission drafts. |
-| `services/client.lua` | Backend capabilities, identity bootstrap, cancellation, and request routing. |
-| `ui/` | [Search](ui/search.md), [composer](ui/composer.md), [conversation](ui/conversation.md), [directory files](ui/files.md), and [cards](ui/cards.md). |
-| `codediff.lua`, `anchors.lua`, `locations.lua` | Diff lifecycle, source-side placement, and observed filesystem moves. |
+| `session_service` | Review metadata, catalogs, creation, completion, submission, recovery and [export reads](../../lgtm.nvim/services/export.md). |
+| [`notes_service`](../../lgtm.nvim/services/notes.md) | Saved-file notes contexts and source/conversation refreshes. |
+| `threads_service` | Conversations, backend placements, loading/saving/error state, paginated reads and guarded feedback operations. |
+| `files_service` | File records, reviewed marks, native file-metadata adoption, and serialized/optimistic mark writes. |
+| `diff_service` | Comparison descriptors and selected saved sources, including backend-loaded fallback content. |
+| `anchor_service` | Capture and placement requests. Results publish into the thread service; it does not create another conversation store. |
+| `forge_service` | Stateless local checkout/revision discovery and the pinned CodeDiff filename workaround. Remote forge operations use backend APIs. |
+| Feature/UI component | Query, selection, expansion, draft text, open/closed windows, buffer bindings, and focus/scroll state. |
 
-### Data and Control Flow
+`ReviewState` gives native integrations read-only projections of service records. Services remain the writers. These projections let a CodeDiff callback identify its review without creating another thread or file model.
+
+### Feature components
+
+The [application module](../../lgtm.nvim/app.md) connects these components to services and manages tabs, buffers and user actions.
+
+| Feature | Composition / service connection |
+| --- | --- |
+| [New review dialog](../../lgtm.nvim/feature/new-review-dialog.md) | Choose a flow and call session operations. |
+| [Branch / PR selector](../../lgtm.nvim/feature/branch-pr-selector.md) | Render the reactive PR catalog and select a review. |
+| [Session selector](../../lgtm.nvim/feature/session-selector.md) | Render the reactive active/completed review catalog. |
+| [Threads pane](../../lgtm.nvim/feature/threads-pane.md) | Subscribe to conversation data and host modal/split interaction. |
+| [Thread](../../lgtm.nvim/feature/thread.md) | Render a header, evidence and comment children from props. |
+| [Thread comment](../../lgtm.nvim/feature/thread-comment.md) | Render a supplied comment; no fetching or review-state lookup. |
+| [Files pane](../../lgtm.nvim/feature/files-pane.md) | Render file-service records or annotate CodeDiff’s explorer. |
+| [Annotation overlay](../../lgtm.nvim/feature/annotation-overlay.md) | Render backend placements as cards and padding. |
+| [CodeDiff view](../../lgtm.nvim/feature/diff-view.md) | Adapt the external plugin’s native lifecycle and buffers. |
+
+The reusable widgets remain documented under `ui/`: [search](ui/search.md), [composer](ui/composer.md), [conversation host](ui/conversation.md), [files](ui/files.md), [cards](ui/cards.md), and [export](ui/export.md).
+
+### State and Data Flow
+
+#### Notes
 
 ```mermaid
 sequenceDiagram
   actor User
-  participant View as UI component
-  participant Controller as Editor controller
-  participant Service as Grouped service operation
-  participant Store as Shared ReviewState
+  participant Notes as Notes component
+  participant Diff as diff_service
+  participant Threads as threads_service
   participant Backend
-  User->>View: Select, edit, save, or resolve
-  View->>Controller: Stable ID or draft body
-  Controller->>Service: Operation with shared state
-  Service->>Backend: Guarded request / subsequent reads
-  Backend-->>Service: Domain records or error
-  Service->>Store: Apply accepted version and records
-  Service-->>Controller: Complete result or recoverable error
-  Controller->>View: Updated display records or save acknowledgement
+  User->>Notes: Open saved file / select lines
+  Notes->>Diff: Get selected saved source
+  Diff->>Backend: GetSource
+  Backend-->>Diff: Exact bytes and typed source identity
+  Notes->>Notes: Check displayed buffer against saved bytes
+  Notes->>Threads: Read saved-file conversation
+  Threads->>Backend: GetConversation + GetAnchorPlacements
+  Threads-->>Notes: Reactive conversation and placements
+  User->>Notes: Add note
+  Notes->>Backend: CaptureAnchor(selection) through anchor_service
+  Backend-->>Notes: Bounded source evidence
+  Notes->>Threads: Save draft body and anchor
+  Threads->>Backend: AddComment / RefreshReview(observePath)
+  Backend-->>Threads: Accepted records and version
+  Threads-->>Notes: Signal update renders cards
 ```
+
+#### Local working, staged, branch and directory reviews
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant Selector
+  participant Sessions as session_service
+  participant Workspace
+  participant CodeDiff
+  participant Data as files / diff / threads services
+  participant Backend
+  User->>Selector: Choose comparison or directory
+  Selector->>Sessions: Create / resume
+  Sessions->>Backend: StartReview
+  Sessions-->>Workspace: Accepted review data
+  alt Local Git comparison
+    Workspace->>CodeDiff: Mount checkout and selected revisions
+    CodeDiff->>CodeDiff: Native explorer, buffers, editing and hunks
+    CodeDiff->>Data: Publish native file metadata
+  else Explicit directory
+    Data->>Backend: GetDiff / GetFiles / GetFile
+    Data-->>Workspace: Reactive files and selected content
+    Workspace->>CodeDiff: Render selected source snapshots
+  end
+  Data->>Backend: GetSource / GetConversation / GetAnchorPlacements
+  Backend-->>Data: Sources, conversations and placements
+  Data-->>Workspace: Reactive inputs render files and annotations
+```
+
+#### Forge PR reviews
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant Selector as PR selector
+  participant Sessions as session_service
+  participant Workspace
+  participant CodeDiff
+  participant Threads as threads_service
+  participant Backend
+  participant GitHub
+  Selector->>Sessions: Query PR catalog
+  Sessions->>Backend: ListPullRequests
+  Backend->>GitHub: Read PR metadata
+  Sessions-->>Selector: Reactive candidates
+  User->>Selector: Select PR
+  Sessions->>Backend: Start / resume PR review
+  Backend->>GitHub: Synchronize complete provider observation
+  alt Commits available locally
+    Workspace->>CodeDiff: Native base/head view and explorer
+  else No local commits
+    Workspace->>Backend: GetDiff / GetFiles / GetFile
+    Workspace->>CodeDiff: Backend source snapshots
+  end
+  Threads->>Backend: Read conversation and placements
+  Backend-->>Threads: Original evidence + provider current/outdated state
+  Threads-->>Workspace: Signal update
+  User->>Workspace: Save draft
+  Workspace->>Threads: Save feedback
+  Threads->>Backend: Guarded comment write
+  User->>Workspace: Submit / reconcile
+  Workspace->>Sessions: submit / reconcile
+  Sessions->>Backend: Explicit submission operation
+  Backend->>GitHub: Private draft or explicit submission
+  Backend-->>Sessions: Confirmed state or recoverable failure
+  Sessions-->>Workspace: Signal update; retain editable text on failure
+```
+
+#### Thread composition and writes
+
+```mermaid
+sequenceDiagram
+  participant Service as threads_service
+  participant Pane as threads_pane
+  participant Thread as UI.thread
+  participant Comment as UI.comment
+  participant Backend
+  Service-->>Pane: Conversation signal
+  Pane->>Thread: Thread, comments, status and allowed actions
+  Thread->>Comment: Comment and stable IDs
+  Comment-->>Pane: Selection / delegated user action
+  Pane->>Service: reply / edit / delete / resolve
+  Service->>Backend: Guarded write and accepted-state read
+  Backend-->>Service: Domain records / error
+  Service-->>Pane: New signal value
+  Pane->>Thread: Re-render props, retain UI selection
+```
+
+#### Reviewed marks and export
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant Files as Files component
+  participant Service as files_service
+  participant Sessions as session_service
+  participant Backend
+  User->>Files: Toggle reviewed
+  Files->>Service: toggle_reviewed(path)
+  Service-->>Files: Optimistic mark signal
+  Service->>Backend: SetFileReviewed
+  Backend-->>Service: Acknowledge / reject
+  Service-->>Files: Keep or roll back mark
+  User->>Sessions: Export review / notes through export component
+  Sessions->>Backend: Export
+  Backend-->>Sessions: Markdown
+  Sessions-->>User: Preview / save / clipboard UI
+```
+
+#### Note promotion
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant Notes
+  participant Threads as threads_service
+  participant Backend
+  User->>Notes: Select note and target review file
+  Notes->>Backend: Capture target anchor through anchor_service
+  Notes->>Threads: promote(source, target, comment, anchor)
+  Threads->>Backend: PromoteNotes with both guarded versions
+  Backend->>Backend: Copy atomically; retain original note
+  Backend-->>Threads: Accepted target feedback
+  Threads-->>Notes: Target conversation signal updates
+```
+
+### Filesystem refresh
+
+```mermaid
+sequenceDiagram
+  participant Editor as Neovim / file manager
+  participant Lua as Plugin services
+  participant Backend as ReviewService
+  participant OS as Filesystem handles
+  participant DB as Database
+  Editor->>Lua: BufFilePost / rename event
+  Lua->>Backend: Read / refresh notes or review
+  Backend->>OS: Resolve current path and verify identity
+  OS-->>Backend: Confirmed move, missing source, or unchanged
+  Backend->>DB: Atomically preserve discussion IDs and update location
+  Backend-->>Lua: Updated review / conversation
+  Lua-->>Editor: Reactive component update
+```
+
+Lua does not supply old/new paths, decide which discussions moved, or retain move retries. Backend reads reconcile opened saved-file and directory scopes independently of editor events. Confirmed locations persist across backend restart.
 
 ### Source structure
 
 ```text
 lua/lgtm/
-├── services/
-│   ├── state.lua          ReviewState, Conversation, Draft + shared stores
-│   ├── reviews.lua        start → apply review → read conversation
-│   ├── feedback.lua       guard → write once → update state → refresh
-│   ├── submissions.lua    retain intent → submit/reconcile → apply outcome
-│   ├── diffs.lua          diff → all file pages → selected file bytes
-│   ├── files.lua          reviewed marks → serialized writes → invalidation
-│   ├── sessions.lua       review/PR candidates
-│   ├── sources.lua        exact source reads and observations
-│   └── client.lua         identity + cancellable transport
-└── ui/
-    ├── search.lua         query input + results list
-    ├── composer.lua       Markdown input + retained draft
-    ├── conversation.lua   thread header + comment rows, in modal/split hosts
-    ├── files.lua          file rows + left split
-    ├── cards.lua          highlighted lines for source annotations
-    └── theme.lua          semantic highlights and borders
+├── features/   Review flows and component composition
+├── models/     Shared record shapes and source conversions
+├── services/   Reactive data, operations, native reads and Connect transport
+├── ui/         NuiComponents / NUI widgets and presentation utilities
+├── app.lua     Application orchestration across services and UI
+├── init.lua    Plugin setup, command dispatch and editor event registration
+├── config.lua  Configuration defaults and validation
+├── keymaps.lua Global keymap API
+├── bindings.lua Save/restore mappings shared with native CodeDiff buffers
+└── health.lua  Neovim’s required :checkhealth discovery entry point
 ```
 
-UI view files use `State`, `Render`, `Lifecycle`, `Methods`, and `Private` separators. Search composes `render_query` and `render_results`. Conversation composes `render_header` and `render_comment` for both hosts. Module-private helpers sit after public operations.
+`app.lua` coordinates review tabs, notes actions and export presentation. The other root files handle plugin setup, configuration, keymaps and Neovim discovery. CodeDiff-specific buffer/lifecycle adaptation lives in `features/diff_view.lua`; it does not implement an alternative diff engine.
 
-### Interfaces and Contracts
+### Public API
 
-Global keyboard API uses the configured prefix, which defaults to `<leader>r`. These keys come from `keymaps.lua`. Component-local keys appear in each component's Public API section.
+The user API remains `require("lgtm").setup(opts)` and `:Lgtm` commands. See the [plugin guide](../../../apps/lgtm.nvim/README.md) for commands and global mappings. Each feature page documents its modes, keys, remapping and permission limits.
 
-| Prefix + key | Action | Mode |
-| --- | --- | --- |
-| b / r | Review the branch / working tree. | Normal |
-| p / S | Search PRs / resume a session. | Normal |
-| D | Review a directory. | Normal |
-| n / c | Add a note / line comment. | Normal or Visual |
-| f / g | Add a file / general comment. | Normal |
-| e / d | Edit / delete the selected comment through its conversation. | Normal |
-| t / F | Open all threads / review files. | Normal |
-| m | Toggle the current file's reviewed mark. | Normal |
-| P | Promote a note. | Normal |
-| x | Export the active review, or notes when no review is active. | Normal |
-| s / y | Submit the review / sync GitHub drafts. | Normal |
-| q | Close the review view. | Normal |
-
-The user API remains `require("lgtm").setup(opts)` and `:Lgtm` commands. See the [plugin guide](../../../apps/lgtm.nvim/README.md) for configuration and commands.
-
-| Shared shape | Use |
-| --- | --- |
-| `ReviewState` | The same active review/notes object passes through controllers, diff loading, reviewed marks, and feedback operations. |
-| `Review`, `ReviewFile` | Backend review metadata and file records. The diff service fills content on the selected file. |
-| `Conversation`, `Thread`, `Comment` | Backend records with stable IDs, versions, ownership, and source evidence. |
-| `Draft` | A body, anchor, guarded version, and stable request key retained for retries. Created by the feedback service. |
-| `OperationResult` | Submission message and optional warning after applying its durable result. |
-
-Shapes are declared in separate files under `models/`, including `review_state.lua`, `conversation.lua` and `operation_result.lua`. Services retain backend records rather than creating a second domain model for each view. UI components receive the small display records that their layout needs.
-
-| Service operation | Work grouped behind the boundary |
-| --- | --- |
-| `reviews.start` | Start/resume, recover comparison conflicts, apply review metadata, and return a `ReviewState`. The caller supplies a conflict-choice callback. |
-| `reviews.get_conversation` | Read every page at one server version and coalesce concurrent readers into a fresh `Conversation`. |
-| `diffs.get_files` / `get_file` | Read diff metadata and all file pages, then fill the selected `ReviewFile` on demand. |
-| `feedback.save` | Ensure a writable review, keep the write identity, save once, and refresh accepted state. |
-| `feedback.mutate` | Find the guarded object version, suppress duplicate writes, apply deletion/resolution, and refresh the conversation. |
-| `submissions.submit` / `reconcile` / `recover` | Retain the final draft and request identity, reconcile uncertainty, and apply the durable outcome. |
-| `files.save_reviewed` | Serialize writes per path, keep optimistic marks, and reconcile an overlapping read. |
-
-See the [backend review architecture](../backend/reviews.md) for persistence and forge contracts.
+```lua
+require("lgtm").setup({
+  identity = {
+    name = "Reviewer",
+    email = "reviewer@example.com",
+  },
+  prefix = "<leader>r",
+})
+```
 
 ## Implementation
 
-### Package and dependency installation
-
-The root `lazy.lua` declares NuiComponents, NUI, CodeDiff, WhichKey, and nvim-notify. It adds `apps/lgtm.nvim` to the runtime path and applies setup once. Lazy.nvim reads package metadata from the Git root. The root `doc` symlink exposes editor help.
-
-```mermaid
-flowchart LR
-  Declaration["One LGTM declaration"] --> Lazy["lazy.nvim package loader"]
-  Lazy --> Metadata["Root lazy.lua"]
-  Metadata --> Dependencies["Managed plugin dependencies"]
-  Metadata --> Runtime["apps/lgtm.nvim runtime and setup"]
-  Switch["Dev/released source-switch task"] --> Declaration
-```
-
-`nvim:install-dev-plugin` selects this checkout root. `nvim:install-released-plugin` selects the repository's main branch. Both preserve user options. Neither task builds the CLI. Restart Neovim after switching.
-
-Other managers and disabled package metadata need explicit dependencies and runtime setup. Older LGTM versions without `lazy.lua` need their version's manual instructions. The CLI, curl, Git, backend GitHub login, and CodeDiff native library remain separate requirements.
-
-### UI and review state
-
-```mermaid
-flowchart LR
-  Backend["Backend<br/>Durable reviews and feedback"] --> Service["Grouped service operations"]
-  Service --> Store["services/state.lua<br/>Ordinary Lua tables"]
-  Store --> Controller["Editor controllers"]
-  Controller --> View["UI component<br/>Selection + mounted windows"]
-  View --> Signal["NuiComponents signals<br/>Query, draft text, display rows"]
-  View -->|"User intent"| Controller
-  Controller -->|"Same shared state"| Service
-```
+- Root `lazy.lua` declares the required Lua dependencies and adds `apps/lgtm.nvim` to Neovim’s runtime. Supported lazy.nvim users install one plugin declaration. Other managers need explicit dependencies/runtime setup; the CLI, curl, Git, backend forge login and CodeDiff native library remain separate requirements.
+- Services use NuiComponents signals without importing UI components or notification providers. Native NUI splits subscribe/unsubscribe at their lifecycle boundary; floating trees receive reactive data props.
+- Use `UI.header`, `UI.body`, `UI.footer` and named child components for composition. Use `Private` for non-rendering helpers.
+- Backend capture verifies source hashes and bounded excerpts. Backend writes independently verify saved sources. Lua checks native buffers and renders results; it does not retain a placement algorithm.
 
 ## References
 
-- [Plugin source](../../../apps/lgtm.nvim/lua/lgtm).
-- [Editor journeys](../../../e2e/nvim).
-- [Installation and usage](../../../apps/lgtm.nvim/README.md).
-- [NuiComponents](https://nui-components.grapp.dev/docs/) and [NUI](https://github.com/MunifTanjim/nui.nvim).
-- [lazy.nvim packages](https://lazy.folke.io/packages).
+- [Backend review contracts](../backend/reviews.md) and [source / anchor APIs](../backend/diffs.md).
+- [Feature source](../../../apps/lgtm.nvim/lua/lgtm/features) and [service source](../../../apps/lgtm.nvim/lua/lgtm/services).
+- [Editor journeys](../../../e2e/nvim) and [replay instructions](../../../e2e/README.md).

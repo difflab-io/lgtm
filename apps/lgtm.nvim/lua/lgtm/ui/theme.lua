@@ -16,7 +16,7 @@ local names = {
   error = "LgtmError",
 }
 
--- Public ----------------------------------------------------------------------
+-- Methods ---------------------------------------------------------------------
 
 function M.highlights()
   for role, source in pairs(require("lgtm.config").options.ui.highlights) do

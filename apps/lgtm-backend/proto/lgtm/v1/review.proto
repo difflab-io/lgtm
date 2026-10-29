@@ -441,6 +441,8 @@ message RefreshReviewRequest {
   string expected_version = 2;
   repeated SourceChange source_changes = 3;
   string request_key = 4;
+  // Observe saved sources for this selected path. Cannot accompany explicit source_changes.
+  optional string observe_path = 5;
 }
 
 message RefreshReviewResponse { Review review = 1; string version = 2; }

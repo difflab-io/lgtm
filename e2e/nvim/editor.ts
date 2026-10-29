@@ -111,7 +111,7 @@ export class Editor {
         version=s.version, file=s.file, files=s.files, panes=s.panes, root=s.root, git_root=s.git_root,
         base=s.base, head=s.head, tab=s.tab, kind=s.kind, layout=s.layout, initializing=s.initializing,
         load_error=s.load_error, empty=s.empty, native_explorer=s.native_explorer, temp_dir=s.temp_dir,
-        render_ready=s.render_ready, reviewed=s.reviewed, moving=s.moving}`)
+        render_ready=s.render_ready, reviewed=s.reviewed}`)
   }
 
   async ready() {
@@ -180,7 +180,7 @@ export class Editor {
   async marks(side = 'new'): Promise<Json[]> {
     return this.lua(
       `local side = ...; local s=require("lgtm.services.state").current
-      return vim.api.nvim_buf_get_extmarks(s.panes[side].buf,require("lgtm.threads").namespace,0,-1,{details=true})`,
+      return vim.api.nvim_buf_get_extmarks(s.panes[side].buf,require("lgtm.features.annotation_overlay").namespace,0,-1,{details=true})`,
       side,
     )
   }
@@ -189,23 +189,23 @@ export class Editor {
     return this.lua('return table.concat(vim.api.nvim_buf_get_lines(...,0,-1,false),"\\n")', buf)
   }
   async notices(): Promise<Json[]> {
-    return this.value('require("lgtm.notifications").history')
+    return this.value('require("lgtm.ui.notifications").history')
   }
   async popup(body?: string) {
     await this.keys('<CR>')
     await this.wait(
-      'require("lgtm.threads").last and vim.api.nvim_win_is_valid(require("lgtm.threads").last.win)',
+      'require("lgtm.features.threads_pane").last and vim.api.nvim_win_is_valid(require("lgtm.features.threads_pane").last.win)',
       'thread modal',
     )
     if (body)
       await this.lua(
-        `local body=...; local popup=require("lgtm.threads").last
+        `local body=...; local popup=require("lgtm.features.threads_pane").last
       for row, value in pairs(popup.rows) do if value.comment and value.comment.body==body then
         vim.api.nvim_win_set_cursor(popup.win,{row,0}); return end end
       error("Comment not present: "..body)`,
         body,
       )
-    return this.value('require("lgtm.threads").last')
+    return this.value('require("lgtm.features.threads_pane").last')
   }
 
   async openLocal(mode: string, replace = false) {

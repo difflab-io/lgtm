@@ -2,7 +2,7 @@
 
 local M = {}
 
--- Public ----------------------------------------------------------------------
+-- Lifecycle -------------------------------------------------------------------
 
 function M.open(options)
   -- State ---------------------------------------------------------------------
@@ -14,20 +14,13 @@ function M.open(options)
   local Tree = require("nui.tree")
   local Line = require("nui.line")
   local origin = vim.api.nvim_get_current_win()
-  local split, tree
+  local split, tree, subscription
   local view = {}
   local selected, map
 
-  -- Render --------------------------------------------------------------------
+  local UI = {}
 
-  local function render_file(node)
-    local line = Line()
-    line:append(node.selected and "▶ " or "  ", "LgtmInfo")
-    line:append(node.reviewed and "✓ " or "· ", node.reviewed and "LgtmSuccess" or "LgtmMuted")
-    line:append(node.changed and "M " or "= ", "LgtmMuted")
-    line:append(node.path, "LgtmNormal")
-    return line
-  end
+  -- Render --------------------------------------------------------------------
 
   local function render()
     return Tree({
@@ -35,8 +28,19 @@ function M.open(options)
       get_node_id = function(node)
         return node.path
       end,
-      prepare_node = render_file,
+      prepare_node = UI.file,
     })
+  end
+
+  -- UI ------------------------------------------------------------------------
+
+  function UI.file(node)
+    local line = Line()
+    line:append(node.selected and "▶ " or "  ", "LgtmInfo")
+    line:append(node.reviewed and "✓ " or "· ", node.reviewed and "LgtmSuccess" or "LgtmMuted")
+    line:append(node.changed and "M " or "= ", "LgtmMuted")
+    line:append(node.path, "LgtmNormal")
+    return line
   end
 
   -- Lifecycle -----------------------------------------------------------------
@@ -92,7 +96,13 @@ function M.open(options)
 
   -- Methods -------------------------------------------------------------------
 
-  function view.update(items, selected_path)
+  local function update(items)
+    local selected_path
+    for _, item in ipairs(items) do
+      if item.selected then
+        selected_path = item.path
+      end
+    end
     tree:set_nodes(vim.tbl_map(function(item)
       return Tree.Node(item)
     end, items))
@@ -104,6 +114,9 @@ function M.open(options)
   end
 
   function view.close()
+    if subscription then
+      subscription:unsubscribe()
+    end
     split:unmount()
     view.win = nil
   end
@@ -123,7 +136,7 @@ function M.open(options)
   end
 
   mount()
+  subscription = options.data:get_observable():subscribe(update)
   return view
 end
-
 return M

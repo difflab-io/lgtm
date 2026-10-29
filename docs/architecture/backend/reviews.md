@@ -431,19 +431,19 @@ An anchor records what a comment discussed. A placement records where that ancho
 
 ```mermaid
 flowchart TB
-    CD["CodeDiff: content and diff hunks"] --> NR["LGTM Neovim anchor resolver"]
-    DS["DiffService: content and anchor mapping"] --> Web["Web UI"]
-    RS["ReviewService: original anchors and forge observations"] --> NR
-    RS --> Web
-    NR --> UI["Confirmed inline placement or labeled fallback"]
-    Web --> UI
+    CD["CodeDiff: native content and diff hunks"] --> Nvim["LGTM Neovim adapter"]
+    RS["ReviewService: original anchors and forge observations"] --> Nvim
+    RS --> Web["Web UI"]
+    Nvim -->|"Displayed source and anchors"| DS["DiffService: shared capture and placement"]
+    Web --> DS
+    DS --> UI["Confirmed inline placement or labeled fallback"]
     GH["GitHub thread locations and outdated state"] --> RS
 ```
 
 - ReviewService: Preserve original anchors and evidence. Maintain confirmed current path associations and orphan state. Enforce scope, comparison, permissions, and write guards. Store forge observations separately.
 - GitHub adapter: Import current and historical locations with their actual source identities and outdated state. Refresh observations for existing threads.
-- LGTM Neovim adapter: Capture source evidence and resolve placements against content supplied by CodeDiff. CodeDiff does not own comment identity or relocation.
-- DiffService: Supply content evidence and resolve supplied anchors for a requested comparison. It does not load or mutate review records.
+- LGTM Neovim adapter: Check native buffers against selected bytes and render backend placements. CodeDiff retains its explorer, buffers, diff rendering and refresh.
+- DiffService: Capture bounded evidence and resolve anchors for all clients, using backend-loaded or client-displayed sources. It does not load or mutate review records.
 - UI: Render confirmed placements inline. Float lost-line discussions to the file header and show orphaned discussions in the review or notes list.
 
 #### Original anchors and source evidence
@@ -534,7 +534,7 @@ For preserved sources, confirmed moves and line shifts update derived locations 
 
 For renamed files or directories, move file comments and every associated thread to the confirmed new path. Keep their IDs, replies, authorship, resolution, and posting state. The service retains current path associations so notes opened at the new path find the same discussions after restart. Each saved-file thread also retains its immutable absolute source location. A moved notes context retains its original lookup key and a separate current root. New comments capture their actual creation location. An old filename reused by another file must not inherit the moved discussion. Use Git rename evidence or observed filesystem moves, supported by content evidence within the selected scope.
 
-Clients report confirmed moves and deletions through `RefreshReview(scope, sourceChanges, requestKey)` when those changes occur. The service validates the evidence and updates path associations or orphan state transactionally. A notes scope does not create a visible review. Repeating the same change keeps the same discussion IDs. Content mapping results remain specific to the displayed source. No continuous polling loop is required.
+Clients request saved-source observation through `RefreshReview(scope, observePath, requestKey)`. The backend reads the selected source and derives moves, deletions, working-source changes and restorations. Explicit filesystem scope moves use `sourceChanges` instead; a request cannot supply both. The service validates the evidence and updates path associations or orphan state transactionally. A notes scope does not create a visible review. Repeating the same change keeps the same discussion IDs. Content mapping results remain specific to the displayed source. No continuous polling loop is required.
 
 If the original line is lost but the file remains, show the discussion above the first code line. Label it as a lost or outdated selection and include the original path, range, and excerpt. Keep it editable and resolvable under the same permissions. Do not turn it into a new general comment or change its remote anchor.
 
@@ -596,7 +596,7 @@ The request shapes define client responsibilities. Final message fields follow t
 | `StartReview` | Target, comparison, resume policy, request key → review | Resolve storage internally. Resume a compatible local review. For a PR, observe current commits and retain its active review ID. |
 | `ListReviews` | Target and lifecycle filters, page token → reviews | Read saved reviews without creating contexts or sessions. |
 | `GetReview` | Review ID → review | Read saved state without implicit refresh or submission. |
-| `RefreshReview` | Review or notes scope, version, optional source changes, request key → refreshed scope state | Validate moves and deletions, update path associations or orphan state, and reconcile forge observations. Keep local and frozen comparisons; update an active PR comparison after a complete provider observation. |
+| `RefreshReview` | Review or notes scope, version, selected observation path or explicit source changes, request key → refreshed scope state | Validate moves and deletions, update path associations or orphan state, and reconcile forge observations. Keep local and frozen comparisons; update an active PR comparison after a complete provider observation. |
 | `GetConversation` | Scope, optional file-path filter, page token → conversation | Read the shared context conversation or its visible-file subset. Return original anchors and separate forge observations. Filtering changes no stored state. |
 | `AddComment` | Scope, anchor evidence, body, optional review version, request key → comment and save states | Validate the selected source and range before accepting the anchor. Resolve notes storage internally and synchronize eligible PR drafts. |
 | `Reply` | Scope, thread ID, body, version, request key → comment and save states | Check scope and allocate reply order transactionally. |
@@ -754,7 +754,7 @@ e2e/
 └── nvim/                           Real editor workflows
 ```
 
-Keep transport changes in the RPC boundary and domain changes in their existing models and services. Extend named repository operations only when a required workflow needs persistence changes. Keep anchor evidence and lifecycle rules in the domain services. The Neovim adapter owns local placement resolution around CodeDiff. DiffService owns equivalent content-based mapping for web clients. Keep file enumeration, content delivery, and UI selection outside the review API.
+Keep transport changes in the RPC boundary and domain changes in their existing models and services. Extend named repository operations only when a required workflow needs persistence changes. Keep anchor evidence and lifecycle rules in the domain services. DiffService owns anchor capture and placement for Neovim and web clients. Neovim keeps CodeDiff content loading and rendering; its adapter checks native buffers and renders backend placement results. Keep file enumeration, content delivery, and UI selection outside the review API.
 
 ### Acceptance flows
 
@@ -804,3 +804,17 @@ Test complete workflows through the public boundary against real SQLite and Post
 - [Backend architecture](index.md).
 - [Database architecture](../db/index.md).
 - [Backend E2E](../../../e2e/backend), [CLI E2E](../../../e2e/cli), and [Neovim E2E](../../../e2e/nvim).
+
+
+### Filesystem identity and saved locations
+
+ReviewService retains filesystem handles for saved-file and directory scopes opened by any client. On reads or refresh, it resolves each handle’s current path and verifies that the old path is absent and the destination has the same filesystem identity. A copy, deletion, or failed read does not confirm a move. The service applies confirmed moves in a database transaction, preserving original anchors, discussion IDs, replies, attribution, and resolution. New locations persist across backend restart. Handles cover moves observed while the backend serves the scope; they do not provide a disk-wide search for moves made while the backend is stopped.
+
+```mermaid
+flowchart LR
+  Client["Any client read / refresh"] --> Review["ReviewService"]
+  Review --> Handles["SourceLocations<br/>OS file and directory handles"]
+  Handles -->|"verified identity and new path"| Review
+  Review -->|"atomic location update"| DB["Saved context and threads"]
+  DB -->|"stable discussion IDs"| Client
+```

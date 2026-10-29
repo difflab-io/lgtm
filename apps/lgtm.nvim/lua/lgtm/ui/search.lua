@@ -2,7 +2,7 @@
 
 local M = {}
 
--- Public ----------------------------------------------------------------------
+-- Lifecycle -------------------------------------------------------------------
 
 function M.open(options)
   -- State ---------------------------------------------------------------------
@@ -17,9 +17,11 @@ function M.open(options)
   local n = require("nui-components")
   local origin = vim.api.nvim_get_current_win()
   local cursor = vim.api.nvim_win_get_cursor(0)
+  local items = options.items or {}
+  local subscription
   local view = {
-    entries = options.items,
-    filtered = options.items,
+    entries = items,
+    filtered = items,
     index = 1,
     query = "",
     closed = false,
@@ -27,9 +29,19 @@ function M.open(options)
   local input, results, signal, renderer, resize
   local close, choose, navigate, filter, select, nodes, get_size
 
+  local UI = {}
+
   -- Render --------------------------------------------------------------------
 
-  local function render_query()
+  local function render()
+    input = UI.query()
+    results = UI.results()
+    return n.rows({ flex = 1 }, input, results)
+  end
+
+  -- UI ------------------------------------------------------------------------
+
+  function UI.query()
     local Query = n.text_input:extend("LgtmSearchInput")
     function Query:mappings()
       return {
@@ -69,7 +81,7 @@ function M.open(options)
     )
   end
 
-  local function render_results()
+  function UI.results()
     local Results = n.select:extend("LgtmSearchSelect")
     function Results:hl_group(name)
       if name == "NodeFocused" or name == "OptionSelected" then
@@ -92,16 +104,13 @@ function M.open(options)
     )
   end
 
-  local function render()
-    input = render_query()
-    results = render_results()
-    return n.rows({ flex = 1 }, input, results)
-  end
-
   -- Lifecycle -----------------------------------------------------------------
 
   local function unmount()
     view.closed = true
+    if subscription then
+      subscription:unsubscribe()
+    end
     if resize then
       vim.api.nvim_del_autocmd(resize)
       resize = nil
@@ -109,7 +118,7 @@ function M.open(options)
   end
 
   local function mount()
-    signal = n.create_signal({ items = nodes(options.items) })
+    signal = n.create_signal({ items = nodes(items) })
     renderer = n.create_renderer(get_size())
     renderer:add_mappings({
       {
@@ -173,7 +182,7 @@ function M.open(options)
       return
     end
     view.query, view.index, view.filtered = query, 1, {}
-    for _, item in ipairs(options.items) do
+    for _, item in ipairs(items) do
       if item.label:lower():find(query:lower(), 1, true) then
         view.filtered[#view.filtered + 1] = item
       end
@@ -197,13 +206,13 @@ function M.open(options)
 
   -- Private -------------------------------------------------------------------
 
-  nodes = function(items)
-    if #items == 0 then
+  nodes = function(entries)
+    if #entries == 0 then
       return { n.option("(no matches)", { id = "empty" }) }
     end
     return vim.tbl_map(function(item)
       return n.option(item.label, { id = item.id })
-    end, items)
+    end, entries)
   end
 
   get_size = function()
@@ -215,8 +224,17 @@ function M.open(options)
 
   view.close = close
   M.last = view
+  if options.data then
+    subscription = options.data:get_observable():subscribe(function(value)
+      items, view.entries = value, value
+      if results then
+        filter(view.query)
+      else
+        view.filtered = value
+      end
+    end)
+  end
   mount()
   return view
 end
-
 return M

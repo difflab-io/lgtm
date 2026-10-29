@@ -1,4 +1,5 @@
 -- State -----------------------------------------------------------------------
+
 local M = {
   current = nil,
   generation = 0,
@@ -7,9 +8,13 @@ local M = {
   submissions = {},
 }
 
--- Public ----------------------------------------------------------------------
+-- Methods ---------------------------------------------------------------------
+
 ---@param state lgtm.ReviewState
 function M.set(state)
+  if state then
+    require("lgtm.services.threads_service").get_data(state)
+  end
   if M.current ~= state then
     M.generation = M.generation + 1
     M.current = state
@@ -38,6 +43,7 @@ end
 
 ---@param state lgtm.ReviewState
 function M.apply(state, review)
+  require("lgtm.services.threads_service").get_data(state)
   if
     state.version
     and tonumber(review.version)
@@ -49,11 +55,16 @@ function M.apply(state, review)
   local comparison_changed = not vim.deep_equal(state.comparison, review.comparison)
   local load_progress = state.reviewed_review ~= review.id or comparison_changed
   if state.kind == "pr" and state.comparison and comparison_changed then
-    state.views, state.reviewed, state.observe_sources = {}, {}, nil
+    state.views, state.observe_sources = {}, nil
+    require("lgtm.services.files_service").set_reviewed(state, {})
     state.source_generation = (state.source_generation or 0) + 1
     state.render_ready = false
   end
-  state.review = review
+  if review.target.directory and state.root ~= review.target.directory.path then
+    state.render_ready = false
+    state.views = {}
+    state.source_generation = (state.source_generation or 0) + 1
+  end
   state.scope = { reviewId = review.id }
   state.target = review.target
   state.comparison = review.comparison
@@ -69,8 +80,9 @@ function M.apply(state, review)
     or state.root
     or (review.target.localGit or {}).path
   state.scope_key = review.id
+  require("lgtm.services.session_service").set_review(state, review)
   if load_progress then
-    require("lgtm.services.files").get_reviewed(state)
+    require("lgtm.services.files_service").get_reviewed(state)
   end
   return state
 end
@@ -78,7 +90,7 @@ end
 function M.create_notes(path)
   local absolute = vim.fn.fnamemodify(path, ":p"):gsub("/$", "")
   absolute = vim.uv.fs_realpath(absolute) or absolute
-  return {
+  local state = {
     note = true,
     kind = "notes",
     mode = "notes",
@@ -87,6 +99,7 @@ function M.create_notes(path)
     scope = { notes = { path = absolute } },
     scope_key = "notes:" .. absolute,
   }
+  require("lgtm.services.threads_service").get_data(state)
+  return state
 end
-
 return M

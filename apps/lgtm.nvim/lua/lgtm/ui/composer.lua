@@ -2,7 +2,7 @@
 
 local M = { drafts = {} }
 
--- Public ----------------------------------------------------------------------
+-- Lifecycle -------------------------------------------------------------------
 
 function M.open(title, initial, submit, options)
   -- State ---------------------------------------------------------------------
@@ -144,7 +144,7 @@ function M.open(title, initial, submit, options)
           view.win, view.buf = input.winid, input.bufnr
           input:focus()
         end
-        require("lgtm.notifications").error(err)
+        require("lgtm.ui.notifications").error(err)
       else
         M.drafts[key] = nil
         close(true)
@@ -177,5 +177,4 @@ function M.open(title, initial, submit, options)
   view.renderer = renderer
   return view
 end
-
 return M

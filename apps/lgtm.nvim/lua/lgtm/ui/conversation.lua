@@ -5,7 +5,8 @@ local M = {}
 local api = vim.api
 
 -- Both hosts share display records and stable comment IDs, without review policy.
--- Public ----------------------------------------------------------------------
+
+-- Lifecycle -------------------------------------------------------------------
 
 function M.open(options)
   -- State ---------------------------------------------------------------------
@@ -21,93 +22,25 @@ function M.open(options)
     rows = {},
     entries = {},
   }
-  local tree, component, renderer, split, resize, signal
-  local records, selected_id, comment_ids = options.threads, nil, {}
+  local tree, component, renderer, split, resize, subscription
+  local data, selected_id, comment_ids = {}, nil, {}
   local width = math.max(1, math.min(options.mode == "split" and 42 or 86, vim.o.columns - 6))
   local nodes, prepare, observe, selection, restore, move, bind
+  local render_selection_footer
 
   -- Render --------------------------------------------------------------------
 
-  local function render_header(thread, index)
-    local heading = thread.status
-      .. " · "
-      .. thread.replies
-      .. (thread.replies == 1 and " reply" or " replies")
-    if #records > 1 then
-      heading = "THREAD " .. index .. " / " .. #records .. " · " .. heading
-    end
-    if options.mode == "split" then
-      heading = heading .. " · " .. thread.location
-    end
-    if thread.location_status then
-      heading = thread.location_status:upper() .. " · " .. heading
-    end
-    local lines = {
-      { " " .. heading, thread.resolved and "LgtmSuccess" or "LgtmInfo" },
-      { string.rep("─", width), "LgtmBorder" },
-    }
-    for _, detail in ipairs(thread.details) do
-      lines[#lines + 1] = { " " .. detail, "LgtmWarning" }
-    end
-    return Tree.Node({
-      id = "thread:" .. thread.id,
-      thread_id = thread.id,
-      lines = lines,
-    })
-  end
-
-  local function render_comment(thread, comment)
-    local prefix = comment.root and " " or "   └─ "
-    local lines = {
-      {
-        prefix .. comment.role:upper() .. " · " .. comment.author .. " · " .. comment.status,
-        comment.root and "LgtmTitle" or "LgtmMuted",
-      },
-    }
-    for _, text in ipairs(vim.split(comment.body, "\n", { plain = true })) do
-      lines[#lines + 1] = { (comment.root and "   " or "      ") .. text, "LgtmNormal" }
-    end
-    lines[#lines + 1] = { "", "LgtmNormal" }
-    return Tree.Node({
-      id = "comment:" .. comment.id,
-      thread_id = thread.id,
-      comment_id = comment.id,
-      role = comment.role,
-      can_resolve = thread.can_resolve,
-      lines = lines,
-    })
-  end
-
-  local function render_selection_footer(entry)
-    local label = "Select a comment with Tab"
-    if entry and entry.role then
-      label = entry.role:gsub("^reply", "Reply")
-      if entry.role == "top-level comment" then
-        label = "Top-level comment"
-      end
-    end
-    local actions = { "Tab next", "c reply", "e edit", "dd delete" }
-    if entry and entry.can_resolve then
-      actions[#actions + 1] = "x resolve"
-    end
-    actions[#actions + 1] = "q close"
-    return " " .. label .. " · " .. table.concat(actions, " · ") .. " "
-  end
-
   nodes = function()
-    local result = {}
     comment_ids = {}
-    for index, thread in ipairs(records) do
-      result[#result + 1] = render_header(thread, index)
-      for _, comment in ipairs(thread.comments) do
-        comment_ids[#comment_ids + 1] = comment.id
-        result[#result + 1] = render_comment(thread, comment)
+    for _, node in ipairs(data) do
+      if node.comment_id then
+        comment_ids[#comment_ids + 1] = node.comment_id
       end
     end
-    if #result == 0 then
-      result = { Tree.Node({ id = "empty", lines = { { "No comments", "LgtmMuted" } } }) }
+    if #data == 0 then
+      return { Tree.Node({ id = "empty", lines = { { "No comments", "LgtmMuted" } } }) }
     end
-    return result
+    return data
   end
 
   prepare = function(node)
@@ -151,6 +84,12 @@ function M.open(options)
       function ConversationTree:mappings()
         return {}
       end
+      function ConversationTree:on_update()
+        ConversationTree.super.on_update(self)
+        if tree and not view.closed then
+          view.refresh_selection()
+        end
+      end
       local function size()
         width = math.max(1, math.min(86, vim.o.columns - 6))
         local rows = 0
@@ -162,13 +101,12 @@ function M.open(options)
         return { width = width + 2, height = math.max(3, math.min(rows + 2, vim.o.lines - 5)) }
       end
       renderer = n.create_renderer(size())
-      signal = n.create_signal({ data = nodes() })
       component = ConversationTree(
         vim.tbl_extend("force", theme.get_component_options(), {
           id = "conversation",
           flex = 1,
           autofocus = true,
-          data = signal.data,
+          data = options.data,
           prepare_node = prepare,
           on_unmount = view.close,
           on_mount = function(c)
@@ -177,11 +115,14 @@ function M.open(options)
             bind()
           end,
         }),
-        theme.get_popup_options(#records == 1 and "Review thread" or "Review threads")
+        theme.get_popup_options(options.title or "Review threads")
       )
       renderer:on_unmount(function()
         if not view.closed then
           view.closed = true
+          if subscription then
+            subscription:unsubscribe()
+          end
           if resize then
             api.nvim_del_autocmd(resize)
             resize = nil
@@ -192,8 +133,11 @@ function M.open(options)
       resize = api.nvim_create_autocmd("VimResized", {
         callback = function()
           if not view.closed then
+            if options.on_resize then
+              options.on_resize(math.max(1, math.min(86, vim.o.columns - 6)))
+            end
             renderer:set_size(size())
-            view.update(records)
+            view.refresh()
           end
         end,
       })
@@ -225,19 +169,19 @@ function M.open(options)
     end
   end
 
-  function view.update(next_records)
-    if view.closed then
-      return
-    end
-    records = next_records
-    if signal then
-      signal.data = nodes()
-    else
-      tree:set_nodes(nodes())
-      tree:render()
-    end
+  function view.refresh_selection()
+    nodes()
     view.select_comment(selected_id or comment_ids[1] or "")
     observe()
+  end
+
+  function view.refresh()
+    if view.closed or not tree then
+      return
+    end
+    tree:set_nodes(nodes())
+    tree:render()
+    view.refresh_selection()
   end
 
   function view.close()
@@ -245,6 +189,9 @@ function M.open(options)
       return
     end
     view.closed = true
+    if subscription then
+      subscription:unsubscribe()
+    end
     if resize then
       api.nvim_del_autocmd(resize)
       resize = nil
@@ -258,6 +205,22 @@ function M.open(options)
   end
 
   -- Private -------------------------------------------------------------------
+
+  render_selection_footer = function(entry)
+    local label = "Select a comment with Tab"
+    if entry and entry.role then
+      label = entry.role:gsub("^reply", "Reply")
+      if entry.role == "top-level comment" then
+        label = "Top-level comment"
+      end
+    end
+    local actions = { "Tab next", "c reply", "e edit", "dd delete" }
+    if entry and entry.can_resolve then
+      actions[#actions + 1] = "x resolve"
+    end
+    actions[#actions + 1] = "q close"
+    return " " .. label .. " · " .. table.concat(actions, " · ") .. " "
+  end
 
   observe = function()
     view.rows, view.entries = {}, {}
@@ -368,8 +331,13 @@ function M.open(options)
     end
   end
 
+  subscription = options.data:get_observable():subscribe(function(value)
+    data = value
+    if split and tree then
+      view.refresh()
+    end
+  end)
   mount()
   return view
 end
-
 return M

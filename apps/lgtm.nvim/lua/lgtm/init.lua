@@ -1,7 +1,9 @@
 -- State -----------------------------------------------------------------------
 
 local M = {}
--- Public ----------------------------------------------------------------------
+local Private = {}
+
+-- Methods ---------------------------------------------------------------------
 
 function M.setup(opts)
   require("lgtm.config").setup(opts)
@@ -28,14 +30,9 @@ function M.setup(opts)
               and state.tab == vim.api.nvim_get_current_tabpage()
               and state.wait_ready
             then
-              if state.reload_pending then
-                require("lgtm.locations").reload(state, function(err)
-                  if err then
-                    require("lgtm.notifications").error(err)
-                  end
-                end)
-              else
-                state.wait_ready()
+              state.wait_ready()
+              if state.kind == "directory" then
+                require("lgtm.app").refresh()
               end
             end
           end)
@@ -48,7 +45,7 @@ function M.setup(opts)
     callback = function()
       local state = require("lgtm.services.state").tabs[vim.api.nvim_get_current_tabpage()]
       if state then
-        require("lgtm.codediff").suspend(state)
+        require("lgtm.features.diff_view").suspend(state)
       end
     end,
   })
@@ -58,7 +55,7 @@ function M.setup(opts)
     callback = function(event)
       local state = require("lgtm.services.state").tabs[event.data.tabpage]
       if state then
-        require("lgtm.codediff").release(state)
+        require("lgtm.features.diff_view").release(state)
       end
     end,
   })
@@ -67,7 +64,7 @@ function M.setup(opts)
     callback = function()
       for tab, state in pairs(require("lgtm.services.state").tabs) do
         if not vim.api.nvim_tabpage_is_valid(tab) then
-          require("lgtm.codediff").release(state)
+          require("lgtm.features.diff_view").release(state)
           local contexts = require("lgtm.services.state")
           if contexts.current == state then
             contexts.set(contexts.tabs[vim.api.nvim_get_current_tabpage()])
@@ -79,38 +76,31 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd("BufEnter", {
     group = group,
     callback = function(event)
-      require("lgtm.notes").restore(event.buf)
-    end,
-  })
-  vim.api.nvim_create_autocmd("BufFilePre", {
-    group = group,
-    callback = function(event)
-      vim.b[event.buf].lgtm_previous_path = vim.api.nvim_buf_get_name(event.buf)
+      require("lgtm.app").restore_notes(event.buf)
     end,
   })
   vim.api.nvim_create_autocmd("BufFilePost", {
     group = group,
     callback = function(event)
-      local previous = vim.b[event.buf].lgtm_previous_path
-      vim.b[event.buf].lgtm_previous_path = nil
-      if previous and previous ~= "" then
-        require("lgtm.locations").rename(previous, vim.api.nvim_buf_get_name(event.buf))
+      if
+        require("lgtm.services.state").notes[event.buf]
+        and not require("lgtm.app").owns_review_buffer(event.buf)
+      then
+        vim.schedule(Private.refresh_sources)
       end
     end,
   })
   vim.api.nvim_create_autocmd("User", {
     group = group,
     pattern = { "MiniFilesActionRename", "LgtmPathRenamed" },
-    callback = function(event)
-      if event.data and event.data.from and event.data.to then
-        require("lgtm.locations").rename(event.data.from, event.data.to)
-      end
+    callback = function()
+      vim.schedule(Private.refresh_sources)
     end,
   })
   vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "BufWritePost" }, {
     group = group,
     callback = function(event)
-      local notes = require("lgtm.notes")
+      local notes = require("lgtm.app")
       local state = require("lgtm.services.state").notes[event.buf]
       if not state or notes.owns_review_buffer(event.buf) then
         return
@@ -118,9 +108,13 @@ function M.setup(opts)
       if event.event == "BufWritePost" then
         state.refresh()
       else
-        state.views = {}
-        state.render_generation = (state.render_generation or 0) + 1
-        vim.api.nvim_buf_clear_namespace(event.buf, require("lgtm.threads").namespace, 0, -1)
+        require("lgtm.services.notes_service").invalidate(state)
+        vim.api.nvim_buf_clear_namespace(
+          event.buf,
+          require("lgtm.features.annotation_overlay").namespace,
+          0,
+          -1
+        )
       end
     end,
   })
@@ -138,9 +132,9 @@ function M.setup(opts)
             vim.api.nvim_buf_is_valid(buf)
             and #vim.fn.win_findbuf(buf) > 0
             and notes.conversation
-            and not require("lgtm.notes").owns_review_buffer(buf)
+            and not require("lgtm.app").owns_review_buffer(buf)
           then
-            require("lgtm.threads").render(notes, buf, notes.path, "new")
+            require("lgtm.features.annotation_overlay").render(notes, buf, notes.path, "new")
           end
         end
       end)
@@ -149,7 +143,7 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd("VimLeavePre", {
     group = group,
     callback = function()
-      require("lgtm.transport.connect").cancel_all()
+      require("lgtm.services.connect").cancel_all()
       local state = require("lgtm.services.state").current
       if state and state.temp_dir then
         vim.fn.delete(state.temp_dir, "rf")
@@ -160,52 +154,65 @@ end
 
 function M.command(args, range)
   local action, rest = args:match("^(%S*)%s*(.-)$")
-  local review = require("lgtm.review")
+  local review = require("lgtm.app")
   local commands = {
-    review = review.select,
+    review = require("lgtm.features.new_review_dialog").open,
     directory = function()
-      review.directory(rest ~= "" and rest or nil)
+      require("lgtm.features.new_review_dialog").directory(rest ~= "" and rest or nil)
     end,
     prs = function()
-      require("lgtm.sessions").prs(rest ~= "" and rest or nil)
+      require("lgtm.features.branch_pr_selector").open(rest ~= "" and rest or nil)
     end,
     sessions = function()
-      require("lgtm.sessions").select(rest == "completed")
+      require("lgtm.features.session_selector").select(rest == "completed")
     end,
     note = function()
-      require("lgtm.notes").add(range)
+      require("lgtm.app").add_note(range)
     end,
     notes = function()
-      require("lgtm.notes").list()
+      require("lgtm.app").show_notes()
     end,
     promote = function()
-      require("lgtm.notes").promote()
+      require("lgtm.app").promote_note()
     end,
     comment = function()
       review.comment(rest ~= "" and rest or "line", range)
     end,
-    threads = review.threads,
+    threads = require("lgtm.features.threads_pane").open,
     files = review.files,
     save = review.save,
     refresh = review.refresh,
     close = review.close,
     complete = review.complete,
     layout = function()
-      require("lgtm.codediff").toggle(require("lgtm.services.state").current)
+      require("lgtm.features.diff_view").toggle(require("lgtm.services.state").current)
     end,
     submit = review.submit,
     reconcile = review.reconcile,
     sync = review.sync,
     export = function()
-      require("lgtm.export").run(rest ~= "" and rest or "review")
+      require("lgtm.app").export(rest ~= "" and rest or "review")
     end,
   }
   if commands[action] then
     commands[action]()
   else
-    require("lgtm.notifications").show(
+    require("lgtm.ui.notifications").show(
       "Lgtm: review | directory [path] | prs [URL] | sessions [completed] | note | notes | promote | comment [line/file/general] | threads | files | save | close | complete | submit | reconcile | sync | export [notes/review]"
     )
+  end
+end
+
+-- Private ---------------------------------------------------------------------
+
+function Private.refresh_sources()
+  local contexts = require("lgtm.services.state")
+  local buffers = vim.tbl_keys(contexts.notes)
+  for _, buf in ipairs(buffers) do
+    require("lgtm.app").restore_notes(buf)
+  end
+  if contexts.current then
+    require("lgtm.app").refresh()
   end
 end
 return M

@@ -17,6 +17,9 @@ pub use anchor_placement::AnchorPlacement;
 pub mod anchor_source;
 pub use anchor_source::AnchorSource;
 
+pub mod anchor_view;
+pub use anchor_view::AnchorView;
+
 pub mod comment;
 pub use comment::Comment;
 

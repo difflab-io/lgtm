@@ -19,6 +19,8 @@ sqlite = ["sea-orm/sqlx-sqlite", "sea-orm-migration/sqlx-sqlite"]
 postgres = ["sea-orm/sqlx-postgres", "sea-orm-migration/sqlx-postgres"]
 
 [dependencies]
+filepath = "0.2"
+same-file = "1"
 base64 = "0.22"
 octocrab = { version = "0.54.1", default-features = false, features = ["default-client", "rustls", "rustls-ring", "timeout"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

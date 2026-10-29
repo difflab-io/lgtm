@@ -4,9 +4,9 @@ describe("When using plugin contracts", function()
   local root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h:h")
   local config = require("lgtm.config")
   local rpc = require("lgtm.services.client")
-  local transport = require("lgtm.transport.connect")
+  local transport = require("lgtm.services.connect")
   local store = require("lgtm.services.state")
-  local notice = require("lgtm.notifications")
+  local notice = require("lgtm.ui.notifications")
   local saved
 
   before_each(function()
@@ -18,16 +18,44 @@ describe("When using plugin contracts", function()
       transport = transport.call,
       current = store.current,
       error = notice.error,
+      system = vim.system,
     }
     rpc.identity = nil
   end)
 
   after_each(function()
+    vim.system = saved.system
     config.options = saved.config
     rpc.call, rpc.identity, rpc.capabilities = saved.call, saved.identity, saved.capabilities
     transport.call, notice.error = saved.transport, saved.error
     store.set(saved.current)
   end)
+
+  local function get_remote_context(remote)
+    vim.system = function(arguments, _, callback)
+      callback({
+        code = 0,
+        stdout = vim.list_contains(arguments, "get-url") and remote or "feature\n",
+        stderr = "",
+      })
+      return {}
+    end
+    local result
+    require("lgtm.services.forge_service").get_pr_context(
+      "/checkout",
+      { remote = "origin" },
+      function(context)
+        result = context
+      end
+    )
+    assert(
+      vim.wait(1000, function()
+        return result ~= nil
+      end),
+      "PR context did not load"
+    )
+    return result
+  end
 
   -- unit tests ----------------------------------------------------------------
 
@@ -50,10 +78,7 @@ describe("When using plugin contracts", function()
         "https://github.com/acme/repo/",
       }) do
         it("Normalizes " .. remote, function()
-          assert.equals(
-            "https://github.com/acme/repo",
-            require("lgtm.sessions").repository_url(remote)
-          )
+          assert.equals("https://github.com/acme/repo", get_remote_context(remote).repository_url)
         end)
       end
     end)
@@ -61,7 +86,7 @@ describe("When using plugin contracts", function()
     describe("When the remote is unsupported", function()
       for _, remote in ipairs({ "git@gitlab.com:acme/repo.git", "/tmp/repo" }) do
         it("Rejects " .. remote, function()
-          local actual = require("lgtm.sessions").repository_url(remote)
+          local actual = get_remote_context(remote).repository_url
           assert.is_falsy(actual)
         end)
       end
@@ -89,7 +114,7 @@ describe("When using plugin contracts", function()
           logical_path = "a",
           side = side,
           content = content,
-          source = require("lgtm.anchors").source_from_wire(source),
+          source = require("lgtm.models.source").source_from_wire(source),
         }
         table.insert(state.conversation.comments, { threadId = side })
         table.insert(state.conversation.threads, {
@@ -106,9 +131,18 @@ describe("When using plugin contracts", function()
         })
       end
 
+      state.placement_views, state.placement_conversation = state.views, state.conversation
+      state.placements = {
+        old = { old = { status = "exact", location = { kind = "line", start = 2, ["end"] = 4 } } },
+        new = { new = { status = "exact", location = { kind = "line", start = 2, ["end"] = 4 } } },
+      }
+
       -- Act / Assert
-      assert.equals("old", require("lgtm.threads").at(state, "a", "old", 3)[1].id)
-      assert.equals(0, #require("lgtm.threads").at(state, "a", "new", 5))
+      assert.equals(
+        "old",
+        require("lgtm.features.annotation_overlay").at(state, "a", "old", 3)[1].id
+      )
+      assert.equals(0, #require("lgtm.features.annotation_overlay").at(state, "a", "new", 5))
     end)
   end)
 
@@ -175,7 +209,7 @@ describe("When using plugin contracts", function()
       local state = store.apply({}, legacy)
 
       -- Act
-      require("lgtm.review").open(state)
+      require("lgtm.app").open(state)
 
       -- Assert
       assert.is_truthy(state.conversation)
@@ -199,7 +233,7 @@ describe("When using plugin contracts", function()
         end
 
         -- Act
-        require("lgtm.review")[operation]()
+        require("lgtm.app")[operation]()
 
         -- Assert
         assert.matches("Update the LGTM CLI/backend", message, 1, true)

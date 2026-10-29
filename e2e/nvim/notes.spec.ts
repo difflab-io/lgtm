@@ -65,7 +65,7 @@ for (const profile of profiles) {
         expect(note.threads[0].anchor).toMatchObject({ start: '1', end: '2' })
         expect(
           await e.value(
-            'vim.api.nvim_buf_get_extmarks(0,require("lgtm.threads").namespace,0,-1,{})',
+            'vim.api.nvim_buf_get_extmarks(0,require("lgtm.features.annotation_overlay").namespace,0,-1,{})',
           ),
         ).toHaveLength(1)
         await e.lua('vim.api.nvim_win_set_cursor(0,{2,0})')
@@ -99,9 +99,9 @@ for (const profile of profiles) {
       await e.keys('<Tab>')
 
       // Assert
-      expect(JSON.stringify(await e.value('require("lgtm.threads").last.selected.role'))).toContain(
-        'reply 1',
-      )
+      expect(
+        JSON.stringify(await e.value('require("lgtm.features.threads_pane").last.selected.role')),
+      ).toContain('reply 1')
 
       // Act
       await e.keys('e')
@@ -143,7 +143,7 @@ for (const profile of profiles) {
         'resolved note card rendered',
         () =>
           e.value(
-            'vim.api.nvim_buf_get_extmarks(0,require("lgtm.threads").namespace,0,-1,{details=true})',
+            'vim.api.nvim_buf_get_extmarks(0,require("lgtm.features.annotation_overlay").namespace,0,-1,{details=true})',
           ),
         (marks) => JSON.stringify(marks).includes('Resolved'),
       )
@@ -322,14 +322,16 @@ for (const profile of profiles) {
         'persisted notes loaded',
       )
       expect(
-        await e.value('vim.api.nvim_buf_get_extmarks(0,require("lgtm.threads").namespace,0,-1,{})'),
+        await e.value(
+          'vim.api.nvim_buf_get_extmarks(0,require("lgtm.features.annotation_overlay").namespace,0,-1,{})',
+        ),
       ).toHaveLength(1)
 
       // Act
       await e.command('Lgtm notes')
 
       // Assert
-      await e.wait('require("lgtm.threads").last ~= nil', 'persisted note modal')
+      await e.wait('require("lgtm.features.threads_pane").last ~= nil', 'persisted note modal')
       expect(await e.text()).toContain('Edited standalone note')
 
       // Act
@@ -358,7 +360,7 @@ for (const profile of profiles) {
 
       // Assert
       await e.wait(
-        'not require("lgtm.services.state").notes[vim.api.nvim_get_current_buf()].moving',
+        '(function() local s=require("lgtm.services.state").notes[vim.api.nvim_get_current_buf()]; local t=s and s.conversation and s.conversation.threads[1]; return t and t.currentPath == vim.api.nvim_buf_get_name(0) end)()',
         'note rename settled',
       )
       const movedState = await e.value(
@@ -410,7 +412,7 @@ for (const profile of profiles) {
       await e.command('Lgtm notes')
 
       // Assert
-      await e.wait('require("lgtm.threads").last ~= nil', 'moved notes modal')
+      await e.wait('require("lgtm.features.threads_pane").last ~= nil', 'moved notes modal')
       expect(await e.text()).toContain('Note before moving')
 
       // Act

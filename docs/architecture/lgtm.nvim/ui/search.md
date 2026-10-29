@@ -83,6 +83,7 @@ Lua API:
 ```lua
 require("lgtm.ui.search").open({
   title = "Reviews",
+  -- Fixed items are supported; service-backed pickers supply data = items_signal.
   items = {
     {
       id = "review-id",
@@ -98,10 +99,12 @@ require("lgtm.ui.search").open({
 
 ```mermaid
 flowchart LR
-  Controller["sessions.lua<br/>Candidates from services/sessions.lua"] -->|"items: id + label"| Query["Query text"]
+  Service["session_service<br/>Reactive review / PR catalog"] -->|"data: id + label signal"| Query["Query text + filtered rows"]
+  Query -->|"Enter: selected ID"| Feature["PR / session selector"]
+  Feature -->|"query / create / resume"| Service
   Query -->|"Filter labels"| Matches["Matching items<br/>Original IDs retained"]
   Matches --> Highlight["Focused result"]
-  Highlight -->|"Enter: selected ID"| Controller
+  Highlight -->|"Enter: selected ID"| Feature
   Query -->|"Esc: no selection"| Close["Close picker"]
 ```
 

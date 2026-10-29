@@ -27,7 +27,7 @@ import {
 async function placement(e: Editor, id: string) {
   return e.lua(
     `local id=...; local s=require("lgtm.services.state").current
-    for _,t in ipairs(s.conversation.threads) do if t.id==id then return require("lgtm.threads").placement(s,t,s.file.path,"new") end end`,
+    for _,t in ipairs(s.conversation.threads) do if t.id==id then return require("lgtm.features.annotation_overlay").placement(s,t,s.file.path,"new") end end`,
     id,
   )
 }
@@ -705,7 +705,7 @@ for (const profile of profiles) {
         await waitFor(
           'review root moved',
           () => e.state(),
-          (s) => Boolean(s?.root === to && !s.moving && s.render_ready),
+          (s) => Boolean(s?.root === to && s.render_ready),
         )
         movedState = (await e.state())!
         expect(movedState.conversation.threads.find((t: Json) => t.id === threadId)).toMatchObject({

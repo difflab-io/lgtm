@@ -1,5 +1,5 @@
 //! A review attempt and the current conversation version.
-use super::Session;
+use super::{ComparisonKind, Context, ContextKey, LocalLocation, Session};
 use super::{ReviewComparison, ReviewTarget};
 use crate::{models as m, proto::lgtm::v1 as p};
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,89 @@ pub struct Review {
 
 impl Review {
     // Public ------------------------------------------------------------------
+
+    /// Build the public review from its selected session and shared conversation context.
+    pub fn from_session(context: Context, session: Session) -> Self {
+        let target = match &context.key {
+            ContextKey::Local {
+                location: LocalLocation::Notes { path },
+            } => ReviewTarget::Directory {
+                path: context
+                    .current_notes_path
+                    .clone()
+                    .unwrap_or_else(|| path.clone()),
+            },
+            ContextKey::Local {
+                location: LocalLocation::Branch { git_dir, branch },
+            } => ReviewTarget::LocalGit {
+                branch: Some(branch.clone()),
+                path: context
+                    .paths
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| git_dir.clone()),
+            },
+            ContextKey::ForgeBacked {
+                repository_url,
+                number,
+            } => ReviewTarget::PullRequest {
+                repository_url: repository_url.as_str().into(),
+                number: *number,
+            },
+        };
+        let comparison_kind = session.comparison_kind;
+        let comparison = match comparison_kind {
+            ComparisonKind::Working => session
+                .commits
+                .base
+                .clone()
+                .map(|base_commit| ReviewComparison::Working { base_commit }),
+            ComparisonKind::Staged => session
+                .commits
+                .base
+                .clone()
+                .map(|base_commit| ReviewComparison::Staged { base_commit }),
+            ComparisonKind::Directory => Some(ReviewComparison::Directory),
+            ComparisonKind::Branch | ComparisonKind::PullRequest => session
+                .commits
+                .base
+                .clone()
+                .zip(session.commits.head.clone())
+                .map(|(base_commit, head_commit)| {
+                    if comparison_kind == ComparisonKind::Branch {
+                        ReviewComparison::Branch {
+                            base_commit,
+                            head_commit,
+                        }
+                    } else {
+                        ReviewComparison::PullRequest {
+                            base_commit,
+                            head_commit,
+                        }
+                    }
+                }),
+            ComparisonKind::Notes => None,
+        };
+        Review {
+            target,
+            comparison,
+            observed_comparison: if context.key.is_forge_backed() {
+                context
+                    .refreshed_base
+                    .clone()
+                    .zip(context.refreshed_head.clone())
+                    .map(|(base_commit, head_commit)| ReviewComparison::PullRequest {
+                        base_commit,
+                        head_commit,
+                    })
+            } else {
+                None
+            },
+            session,
+            version: context.revision,
+            forge_state: context.forge_state,
+        }
+    }
 
     // RPC conversion ----------------------------------------------------------
 

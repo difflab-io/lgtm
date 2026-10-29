@@ -22,6 +22,7 @@ pub struct ReviewService {
     database: Database,
     auth: AuthService,
     sources: super::diff::DiffService,
+    locations: std::sync::Arc<super::source_locations::SourceLocations>,
 }
 
 /// Remote acknowledgments contain no copy of the comment, thread, or request body.
@@ -43,6 +44,7 @@ impl ReviewService {
             database,
             auth,
             sources: super::diff::DiffService::default(),
+            locations: Default::default(),
         }
     }
 
@@ -89,7 +91,9 @@ impl ReviewService {
     }
 
     pub async fn get_context_by_id(&self, id: &uuid::Uuid) -> Result<Context> {
-        self.load_context(&self.database, id).await
+        let context = self.load_context(&self.database, id).await?;
+        self.observe_location(&context);
+        Ok(context)
     }
 
     pub async fn ensure_context(&self, key: ContextKey, path: Option<&str>) -> Result<Context> {
@@ -129,31 +133,21 @@ impl ReviewService {
         }
         let context = Self::context_from_db_model(row, &tx).await?;
         tx.commit().await?;
+        self.observe_location(&context);
         Ok(context)
     }
 
     /// A notes read returns no storage when the file has no discussion.
     pub async fn get_scope_context(&self, scope: &ReviewScope) -> Result<Option<Context>> {
-        match scope {
-            ReviewScope::Review { review_id } => Ok(Some(
-                self.get_context_by_id(&self.get_session(review_id).await?.context_id)
-                    .await?,
-            )),
-            ReviewScope::Notes { path } => {
-                let path = Self::get_notes_path(path)?;
-                match self
-                    .database
-                    .review_contexts
-                    .get_notes_for_path(&path)
-                    .await?
-                {
-                    Some(row) => Ok(Some(
-                        Self::context_from_db_model(row, &self.database).await?,
-                    )),
-                    None => Ok(None),
-                }
+        self.reconcile_locations().await?;
+        let context = self.load_scope_context(scope).await?;
+        if let Some(context) = &context {
+            self.observe_location(context);
+            if let ReviewScope::Notes { path } = scope {
+                self.locations.observe(context.id, path);
             }
         }
+        Ok(context)
     }
 
     /// Resolve a consumer target into internal storage. The target location is always explicit.
@@ -322,93 +316,16 @@ impl ReviewService {
 
     /// Read a session-backed public review with a consistent conversation version.
     pub async fn get_review(&self, id: &uuid::Uuid) -> Result<Review> {
+        self.reconcile_locations().await?;
         let seed = self.get_session(id).await?;
         let context = self.get_context_by_id(&seed.context_id).await?;
         let session = self.get_session(id).await?;
-        let target = match &context.key {
-            ContextKey::Local {
-                location: LocalLocation::Notes { path },
-            } => ReviewTarget::Directory {
-                path: context
-                    .current_notes_path
-                    .clone()
-                    .unwrap_or_else(|| path.clone()),
-            },
-            ContextKey::Local {
-                location: LocalLocation::Branch { git_dir, branch },
-            } => ReviewTarget::LocalGit {
-                branch: Some(branch.clone()),
-                path: context
-                    .paths
-                    .first()
-                    .cloned()
-                    .unwrap_or_else(|| git_dir.clone()),
-            },
-            ContextKey::ForgeBacked {
-                repository_url,
-                number,
-            } => ReviewTarget::PullRequest {
-                repository_url: repository_url.as_str().into(),
-                number: *number,
-            },
-        };
-        let comparison_kind = session.comparison_kind;
-        let comparison = match comparison_kind {
-            ComparisonKind::Working => session
-                .commits
-                .base
-                .clone()
-                .map(|base_commit| ReviewComparison::Working { base_commit }),
-            ComparisonKind::Staged => session
-                .commits
-                .base
-                .clone()
-                .map(|base_commit| ReviewComparison::Staged { base_commit }),
-            ComparisonKind::Directory => Some(ReviewComparison::Directory),
-            ComparisonKind::Branch | ComparisonKind::PullRequest => session
-                .commits
-                .base
-                .clone()
-                .zip(session.commits.head.clone())
-                .map(|(base_commit, head_commit)| {
-                    if comparison_kind == ComparisonKind::Branch {
-                        ReviewComparison::Branch {
-                            base_commit,
-                            head_commit,
-                        }
-                    } else {
-                        ReviewComparison::PullRequest {
-                            base_commit,
-                            head_commit,
-                        }
-                    }
-                }),
-            ComparisonKind::Notes => None,
-        };
         if self.get_context_by_id(&context.id).await?.revision != context.revision {
             return Err(Error::Conflict(
                 "Review changed during the read; retry".into(),
             ));
         }
-        Ok(Review {
-            target,
-            comparison,
-            observed_comparison: if context.key.is_forge_backed() {
-                context
-                    .refreshed_base
-                    .clone()
-                    .zip(context.refreshed_head.clone())
-                    .map(|(base_commit, head_commit)| ReviewComparison::PullRequest {
-                        base_commit,
-                        head_commit,
-                    })
-            } else {
-                None
-            },
-            session,
-            version: context.revision,
-            forge_state: context.forge_state,
-        })
+        Ok(Review::from_session(context, session))
     }
 
     /// Read a bounded page of saved reviews without creating records or refreshing a forge.
@@ -1914,282 +1831,21 @@ impl ReviewService {
         changes: &[SourceChange],
         guard: &MutationGuard,
     ) -> Result<i64> {
-        use crate::database::types::SourceKind;
-        if changes.len() > 500 {
-            return Err(invalid("Refresh exceeds 500 source observations"));
-        }
-        let actor = self.auth.validate_requester(actor).await?;
-        let Some(context) = self.get_scope_context(scope).await? else {
-            if !changes.is_empty() {
-                return Err(Error::NotFound("Notes with saved discussions".into()));
-            }
-            return Ok(0);
-        };
-        if context.key.is_forge_backed() && !changes.is_empty() {
-            return Err(invalid("Forge locations come from provider observations"));
-        }
-        let guard = guard.bind(&(scope, changes))?;
-        let tx = self.database.begin().await?;
-        if let Some(saved) = self
-            .begin_mutation::<i64>(
-                &tx,
-                &context.id,
-                &actor.id,
-                "refresh_locations",
-                Some(&guard),
-                true,
-            )
-            .await?
-        {
-            tx.commit().await?;
-            return Ok(saved);
-        }
-        if !changes.is_empty() {
-            Self::validate_local_context(&context).await?;
-        }
-        if changes
-            .iter()
-            .any(|c| matches!(c, SourceChange::LocationMoved { .. }))
-        {
-            if changes.len() != 1 {
-                return Err(invalid("A scope move must be one atomic observation"));
-            }
-            if let SourceChange::LocationMoved {
-                previous_path,
-                current_path,
-            } = &changes[0]
-            {
-                self.apply_location_move(&tx, &context, scope, previous_path, current_path)
-                    .await?;
-            }
-        }
-        let root = match &context.key {
-            ContextKey::Local {
-                location: LocalLocation::Notes { path },
-            } => {
-                let path =
-                    std::path::PathBuf::from(context.current_notes_path.as_ref().unwrap_or(path));
-                let selected_is_child = matches!(scope, ReviewScope::Notes { path: selected } if std::path::Path::new(selected).starts_with(&path) && std::path::Path::new(selected) != path);
-                if matches!(scope, ReviewScope::Notes { .. })
-                    && !path.is_dir()
-                    && !selected_is_child
-                {
-                    path.parent()
-                        .ok_or_else(|| invalid("Notes file has no parent"))?
-                        .to_path_buf()
-                } else {
-                    path
-                }
-            }
-            ContextKey::Local {
-                location: LocalLocation::Branch { .. },
-            } => context
-                .paths
-                .first()
-                .map(std::path::PathBuf::from)
-                .ok_or_else(|| invalid("Review has no working tree location"))?,
-            ContextKey::ForgeBacked { .. } => std::path::PathBuf::new(),
-        };
-        for change in changes {
-            let (id, previous, current, observed) = match change {
-                SourceChange::LocationMoved { .. } => continue,
-                SourceChange::Moved {
-                    thread_id,
-                    previous_path,
-                    current_path,
-                    source,
-                } => (
-                    thread_id,
-                    Some(previous_path.as_str()),
-                    current_path.as_str(),
-                    Some(source),
-                ),
-                SourceChange::Deleted { thread_id, path } => {
-                    (thread_id, Some(path.as_str()), path.as_str(), None)
-                }
-                SourceChange::WorkingSourceChanged {
-                    thread_id,
-                    path,
-                    source,
-                }
-                | SourceChange::Restored {
-                    thread_id,
-                    path,
-                    source,
-                } => (thread_id, None, path.as_str(), Some(source)),
-            };
-            let relative_current = context.key.is_notes()
-                && matches!(scope, ReviewScope::Review { .. })
-                && !std::path::Path::new(current).is_absolute();
-            let supplied_current = current;
-            let saved_path = |path: &str| -> Result<String> {
-                if context.key.is_notes() {
-                    let absolute = if std::path::Path::new(path).is_absolute() {
-                        std::path::PathBuf::from(path)
-                    } else {
-                        root.join(path)
-                    };
-                    Self::get_notes_path(&absolute.to_string_lossy())
-                } else {
-                    Anchor::File { path: path.into() }.validate()?;
-                    Ok(path.into())
-                }
-            };
-            let current = saved_path(current)?;
-            let previous = previous.map(saved_path).transpose()?;
-            let mut thread = self.load_thread(&tx, id, &context.id).await?;
-            let original_path = match &thread.anchor {
-                Anchor::File { path } | Anchor::Line { path, .. } => path,
-                Anchor::General => return Err(invalid("General discussions have no file source")),
-            };
-            let known_path = saved_path(
-                thread
-                    .current_path
-                    .as_deref()
-                    .or(thread.source_path.as_deref())
-                    .unwrap_or(original_path),
-            )?;
-            if previous.as_deref().is_some_and(|path| path != known_path) {
-                return Err(Error::Conflict(
-                    "Source observation does not match the current saved path".into(),
-                ));
-            }
-            if observed.is_none() {
-                let path = root.join(&current);
-                let missing = match std::fs::symlink_metadata(&path) {
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
-                    Err(e) => return Err(e.into()),
-                    Ok(_) => false,
-                };
-                if !missing {
-                    return Err(Error::Conflict("File deletion was not confirmed".into()));
-                }
-                thread.orphan_reason = Some(OrphanReason::FileDeleted);
-            } else if let Some(observed) = observed {
-                observed.validate()?;
-                let (kind, commit) = match observed {
-                    AnchorSource::Commit { sha, .. } => (SourceKind::Commit, Some(sha.clone())),
-                    AnchorSource::IndexFile { .. } => (SourceKind::IndexFile, None),
-                    AnchorSource::WorkingFile { .. } => (SourceKind::WorkingFile, None),
-                    AnchorSource::LocalFile { .. } => (SourceKind::LocalFile, None),
-                };
-                if context.key.is_notes() != (kind == SourceKind::LocalFile) {
-                    return Err(invalid("Observed source does not belong to this scope"));
-                }
-                let (source_root, path) = if context.key.is_notes() {
-                    let absolute = std::path::Path::new(&current);
-                    (
-                        absolute
-                            .parent()
-                            .ok_or_else(|| invalid("Notes file has no parent"))?
-                            .to_path_buf(),
-                        absolute
-                            .file_name()
-                            .and_then(|s| s.to_str())
-                            .ok_or_else(|| invalid("Notes file has no name"))?
-                            .to_owned(),
-                    )
-                } else {
-                    (root.clone(), current.clone())
-                };
-                let (actual, bytes) = tokio::task::spawn_blocking(move || {
-                    super::workspace::get_source(&source_root, &path, kind, commit.as_deref())
-                })
-                .await
-                .map_err(|_| invalid("Source observation failed"))??;
-                if actual != *observed {
-                    return Err(Error::Conflict(
-                        "Observed source changed before refresh".into(),
-                    ));
-                }
-                if matches!(change, SourceChange::WorkingSourceChanged { .. }) {
-                    if !matches!(
-                        thread.evidence.as_ref().map(|e| &e.source),
-                        Some(AnchorSource::WorkingFile { .. })
-                    ) {
-                        return Err(invalid(
-                            "Only unstaged working anchors use working-source orphaning",
-                        ));
-                    }
-                    if thread
-                        .evidence
-                        .as_ref()
-                        .is_some_and(|e| e.source.content_hash() == observed.content_hash())
-                    {
-                        return Err(invalid("Working source has not changed"));
-                    }
-                    thread.orphan_reason = Some(OrphanReason::WorkingSourceChanged);
-                } else {
-                    let text = std::str::from_utf8(&bytes)
-                        .map_err(|_| invalid("Source observation requires text"))?;
-                    let supported = if matches!(change, SourceChange::Moved { .. }) {
-                        // A reported move preserves file identity, even when its selected lines were lost.
-                        // The request names the known old path and actual new source; absence is checked below.
-                        true
-                    } else if let Some(evidence) = &thread.evidence {
-                        evidence.source.content_hash() == observed.content_hash()
-                            || (!matches!(evidence.source, AnchorSource::WorkingFile { .. })
-                                && evidence.get_matching_range(text).is_some())
-                    } else {
-                        false
-                    };
-                    if !supported {
-                        return Err(Error::Conflict(
-                            "Preserved evidence cannot confirm this move or restoration".into(),
-                        ));
-                    }
-                    if let SourceChange::Moved { previous_path, .. } = change {
-                        match std::fs::symlink_metadata(root.join(saved_path(previous_path)?)) {
-                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                            Err(e) => return Err(e.into()),
-                            Ok(_) => {
-                                return Err(Error::Conflict(
-                                    "Move source still exists; a copy is not a confirmed move"
-                                        .into(),
-                                ));
-                            }
-                        }
-                    }
-                    thread.current_path = Some(if relative_current {
-                        supplied_current.into()
-                    } else {
-                        current.clone()
-                    });
-                    thread.orphan_reason = None;
-                    if matches!(scope, ReviewScope::Notes { .. }) {
-                        tx.workspace
-                            .insert_path(&workspace_paths::Model {
-                                context_id: context.id,
-                                path: root.join(&current).to_string_lossy().into_owned(),
-                            })
-                            .await?;
-                    }
-                }
-            }
-            tx.comments
-                .update_thread(&threads::Model::from(&thread))
-                .await?;
-        }
-        if !changes.is_empty() {
-            Self::validate_local_context(&context).await?;
-        }
-        let version = tx
-            .review_contexts
-            .get_by_id(&context.id)
-            .await?
-            .ok_or_else(|| Error::NotFound("Context".into()))?
-            .revision;
-        Self::record_mutation(
-            &tx,
-            &context.id,
-            &actor.id,
-            "refresh_locations",
-            Some(&guard),
-            &version,
-        )
-        .await?;
-        tx.commit().await?;
-        Ok(version)
+        self.refresh_sources(scope, actor, changes, guard, None)
+            .await
+    }
+
+    /// Observe local saved sources using the selected review, without client-side anchor rules.
+    pub async fn observe_sources(
+        &self,
+        scope: &ReviewScope,
+        actor: &Actor,
+        path: &str,
+        guard: &MutationGuard,
+    ) -> Result<i64> {
+        Anchor::File { path: path.into() }.validate()?;
+        self.refresh_sources(scope, actor, &[], guard, Some(path))
+            .await
     }
 
     // Forge synchronization and recovery --------------------------------------
@@ -2982,6 +2638,625 @@ impl ReviewService {
     }
 
     // Private -----------------------------------------------------------------
+
+    fn observe_location(&self, context: &Context) {
+        if let ContextKey::Local {
+            location: LocalLocation::Notes { path },
+        } = &context.key
+        {
+            self.locations.observe(
+                context.id,
+                context.current_notes_path.as_ref().unwrap_or(path),
+            );
+        }
+    }
+
+    async fn reconcile_locations(&self) -> Result<()> {
+        for (id, previous, current, directory) in self.locations.get_moves() {
+            let tx = self.database.begin().await?;
+            self.lock_context(&tx, &id).await?;
+            let context = self.load_context(&tx, &id).await?;
+            let ContextKey::Local {
+                location: LocalLocation::Notes { path },
+            } = &context.key
+            else {
+                continue;
+            };
+            let known = context.current_notes_path.as_ref().unwrap_or(path);
+            if known == &current {
+                self.locations.relocate(id, &previous, &current);
+                continue;
+            }
+            if directory && known != &previous {
+                self.observe_location(&context);
+                continue;
+            }
+            let scope = if directory {
+                let session = tx
+                    .sessions
+                    .get_all(Some(&id), false)
+                    .await?
+                    .into_iter()
+                    .next();
+                match session {
+                    Some(session) => ReviewScope::Review {
+                        review_id: session.id,
+                    },
+                    None => continue,
+                }
+            } else {
+                ReviewScope::Notes {
+                    path: previous.clone(),
+                }
+            };
+            self.apply_location_move(&tx, &context, &scope, &previous, &current)
+                .await?;
+            tx.commit().await?;
+            self.locations.relocate(id, &previous, &current);
+        }
+        Ok(())
+    }
+
+    async fn load_scope_context(&self, scope: &ReviewScope) -> Result<Option<Context>> {
+        match scope {
+            ReviewScope::Review { review_id } => Ok(Some(
+                self.get_context_by_id(&self.get_session(review_id).await?.context_id)
+                    .await?,
+            )),
+            ReviewScope::Notes { path } => {
+                let path = Self::get_notes_path(path)?;
+                match self
+                    .database
+                    .review_contexts
+                    .get_notes_for_path(&path)
+                    .await?
+                {
+                    Some(row) => Ok(Some(
+                        Self::context_from_db_model(row, &self.database).await?,
+                    )),
+                    None => Ok(None),
+                }
+            }
+        }
+    }
+
+    /// Apply only validated source observations. Hidden files and failed reads never imply deletion.
+    /// Derive changes while holding the context write lock. Failed reads never prove deletion.
+    async fn get_source_changes(
+        &self,
+        tx: &db::Transaction,
+        scope: &ReviewScope,
+        context: &Context,
+        selected_path: &str,
+    ) -> Result<Vec<SourceChange>> {
+        use crate::database::types::SourceKind;
+        use std::path::PathBuf;
+        if context.key.is_forge_backed() {
+            return Err(invalid("Forge locations come from provider observations"));
+        }
+        let (root, comparison, target) = match scope {
+            ReviewScope::Review { review_id } => {
+                let row = tx
+                    .sessions
+                    .get_by_id(review_id)
+                    .await?
+                    .ok_or_else(|| Error::NotFound("Review".into()))?;
+                let session = Self::session_from_db_model(row, tx).await?;
+                let review = Review::from_session(context.clone(), session);
+                let root = match &review.target {
+                    ReviewTarget::Directory { path } | ReviewTarget::LocalGit { path, .. } => {
+                        PathBuf::from(path)
+                    }
+                    _ => return Err(invalid("Source observation requires a local review")),
+                };
+                (
+                    root,
+                    review.comparison.unwrap_or(ReviewComparison::Directory),
+                    Some(review.target),
+                )
+            }
+            ReviewScope::Notes { path } => {
+                let path = PathBuf::from(Self::get_notes_path(path)?);
+                let root = path
+                    .parent()
+                    .ok_or_else(|| invalid("Notes file has no parent"))?
+                    .to_path_buf();
+                if root.join(selected_path) != path {
+                    return Err(invalid("Selected source differs from the notes scope"));
+                }
+                (root, ReviewComparison::Directory, None)
+            }
+        };
+        let files = if matches!(target, Some(ReviewTarget::LocalGit { .. })) {
+            let diff = self
+                .sources
+                .get_diff(target.unwrap(), Some(comparison.clone()))
+                .await?;
+            self.sources.get_files(&diff).await?
+        } else {
+            Vec::new()
+        };
+        let selected = files.iter().find(|file| file.path == selected_path);
+        let (kind, commit) = match &comparison {
+            ReviewComparison::Working { .. } => (SourceKind::WorkingFile, None),
+            ReviewComparison::Staged { .. } => (SourceKind::IndexFile, None),
+            ReviewComparison::Branch { head_commit, .. } => {
+                (SourceKind::Commit, Some(head_commit.clone()))
+            }
+            ReviewComparison::Directory => (SourceKind::LocalFile, None),
+            _ => return Err(invalid("Source observation requires local content")),
+        };
+        let selected_source =
+            if selected.is_some_and(|f| ["deleted", "removed"].contains(&f.status.as_str())) {
+                None
+            } else {
+                self.sources
+                    .get_source(
+                        root.to_string_lossy().as_ref(),
+                        selected_path,
+                        kind,
+                        commit.as_deref(),
+                    )
+                    .await?
+            };
+        let visible: HashSet<_> = tx
+            .comments
+            .get_comments(&context.id)
+            .await?
+            .into_iter()
+            .map(|c| c.thread_id)
+            .collect();
+        let threads =
+            Self::threads_from_db_models(tx.comments.get_threads(&context.id).await?, tx).await?;
+        let mut changes = Vec::new();
+        for thread in threads
+            .into_iter()
+            .filter(|thread| visible.contains(&thread.id))
+        {
+            let original_path = match &thread.anchor {
+                Anchor::File { path } | Anchor::Line { path, .. } => path,
+                Anchor::General => continue,
+            };
+            let known = thread
+                .current_path
+                .as_deref()
+                .filter(|p| !p.is_empty())
+                .or(thread.source_path.as_deref())
+                .unwrap_or(original_path);
+            let absolute = root.join(known);
+            let matches = absolute == root.join(selected_path);
+            if matches!(scope, ReviewScope::Notes { .. }) && !matches {
+                continue;
+            }
+            let absent = matches!(std::fs::symlink_metadata(&absolute), Err(e) if e.kind() == std::io::ErrorKind::NotFound);
+            let renamed = selected.is_some_and(|f| {
+                !f.previous_path.is_empty()
+                    && (f.status == "renamed" || f.status.starts_with('R'))
+                    && root.join(&f.previous_path) == absolute
+            });
+            if renamed
+                && absent
+                && let Some(source) = &selected_source
+            {
+                changes.push(SourceChange::Moved {
+                    thread_id: thread.id,
+                    previous_path: known.into(),
+                    current_path: selected_path.into(),
+                    source: source.source.clone(),
+                });
+            } else if matches
+                && selected_source.is_none()
+                && absent
+                && thread.orphan_reason != Some(OrphanReason::FileDeleted)
+            {
+                changes.push(SourceChange::Deleted {
+                    thread_id: thread.id,
+                    path: known.into(),
+                });
+            } else if !matches && absent && thread.orphan_reason != Some(OrphanReason::FileDeleted)
+            {
+                let is_rename = files.iter().any(|f| {
+                    !f.previous_path.is_empty()
+                        && root.join(&f.previous_path) == absolute
+                        && (f.status == "renamed" || f.status.starts_with('R'))
+                });
+                if is_rename {
+                    continue;
+                }
+                let relative = absolute.strip_prefix(&root).ok().and_then(|p| p.to_str());
+                let present = if matches!(kind, SourceKind::IndexFile | SourceKind::Commit) {
+                    if let Some(path) = relative {
+                        let root = root.clone();
+                        let path = path.to_owned();
+                        let commit = commit.clone();
+                        tokio::task::spawn_blocking(move || {
+                            super::workspace::get_source_presence(&root, &path, commit.as_deref())
+                        })
+                        .await
+                        .map_err(|_| invalid("Source observation failed"))??
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if !present {
+                    changes.push(SourceChange::Deleted {
+                        thread_id: thread.id,
+                        path: known.into(),
+                    });
+                }
+            } else if matches
+                && let (Some(source), Some(evidence)) = (&selected_source, &thread.evidence)
+            {
+                if matches!(evidence.source, AnchorSource::WorkingFile { .. })
+                    && evidence.source.content_hash() != source.source.content_hash()
+                    && thread.orphan_reason != Some(OrphanReason::WorkingSourceChanged)
+                {
+                    changes.push(SourceChange::WorkingSourceChanged {
+                        thread_id: thread.id,
+                        path: known.into(),
+                        source: source.source.clone(),
+                    });
+                } else if thread.orphan_reason.is_some()
+                    && (evidence.source.content_hash() == source.source.content_hash()
+                        || matches!(thread.anchor, Anchor::Line { .. })
+                            && !matches!(evidence.source, AnchorSource::WorkingFile { .. })
+                            && evidence.get_matching_range(&source.content).is_some())
+                {
+                    changes.push(SourceChange::Restored {
+                        thread_id: thread.id,
+                        path: known.into(),
+                        source: source.source.clone(),
+                    });
+                }
+            }
+        }
+        if changes.len() > 500 {
+            return Err(invalid("Refresh exceeds 500 source observations"));
+        }
+        Ok(changes)
+    }
+
+    async fn refresh_sources(
+        &self,
+        scope: &ReviewScope,
+        actor: &Actor,
+        changes: &[SourceChange],
+        guard: &MutationGuard,
+        observe_path: Option<&str>,
+    ) -> Result<i64> {
+        use crate::database::types::SourceKind;
+        if changes.len() > 500 {
+            return Err(invalid("Refresh exceeds 500 source observations"));
+        }
+        let actor = self.auth.validate_requester(actor).await?;
+        let Some(context) = self.load_scope_context(scope).await? else {
+            if !changes.is_empty() {
+                return Err(Error::NotFound("Notes with saved discussions".into()));
+            }
+            return Ok(0);
+        };
+        if context.key.is_forge_backed() && !changes.is_empty() {
+            return Err(invalid("Forge locations come from provider observations"));
+        }
+        let guard = guard.bind(&(scope, changes, observe_path))?;
+        let tx = self.database.begin().await?;
+        if let Some(saved) = self
+            .begin_mutation::<i64>(
+                &tx,
+                &context.id,
+                &actor.id,
+                "refresh_locations",
+                Some(&guard),
+                observe_path.is_none(),
+            )
+            .await?
+        {
+            tx.commit().await?;
+            return Ok(saved);
+        }
+        let inferred_moves: Vec<_> = if changes.is_empty() {
+            self.locations
+                .get_moves()
+                .into_iter()
+                .filter(|(id, ..)| *id == context.id)
+                .map(
+                    |(_, previous_path, current_path, _)| SourceChange::LocationMoved {
+                        previous_path,
+                        current_path,
+                    },
+                )
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let observed_changes;
+        let changes = if !inferred_moves.is_empty() {
+            if observe_path.is_some()
+                && !tx
+                    .review_contexts
+                    .advance_revision(&context.id, guard.write_version())
+                    .await?
+            {
+                return Err(Error::Conflict(
+                    "Review data changed; read its current version".into(),
+                ));
+            }
+            inferred_moves.as_slice()
+        } else if let Some(path) = observe_path {
+            observed_changes = self.get_source_changes(&tx, scope, &context, path).await?;
+            if !observed_changes.is_empty()
+                && !tx
+                    .review_contexts
+                    .advance_revision(&context.id, guard.write_version())
+                    .await?
+            {
+                return Err(Error::Conflict(
+                    "Review data changed; read its current version".into(),
+                ));
+            }
+            observed_changes.as_slice()
+        } else {
+            changes
+        };
+        if !changes.is_empty() {
+            Self::validate_local_context(&context).await?;
+        }
+        if changes
+            .iter()
+            .any(|c| matches!(c, SourceChange::LocationMoved { .. }))
+        {
+            if changes.len() != 1 {
+                return Err(invalid("A scope move must be one atomic observation"));
+            }
+            if let SourceChange::LocationMoved {
+                previous_path,
+                current_path,
+            } = &changes[0]
+            {
+                self.apply_location_move(&tx, &context, scope, previous_path, current_path)
+                    .await?;
+            }
+        }
+        let root = match &context.key {
+            ContextKey::Local {
+                location: LocalLocation::Notes { path },
+            } => {
+                let path =
+                    std::path::PathBuf::from(context.current_notes_path.as_ref().unwrap_or(path));
+                let selected_is_child = matches!(scope, ReviewScope::Notes { path: selected } if std::path::Path::new(selected).starts_with(&path) && std::path::Path::new(selected) != path);
+                if matches!(scope, ReviewScope::Notes { .. })
+                    && !path.is_dir()
+                    && !selected_is_child
+                {
+                    path.parent()
+                        .ok_or_else(|| invalid("Notes file has no parent"))?
+                        .to_path_buf()
+                } else {
+                    path
+                }
+            }
+            ContextKey::Local {
+                location: LocalLocation::Branch { .. },
+            } => context
+                .paths
+                .first()
+                .map(std::path::PathBuf::from)
+                .ok_or_else(|| invalid("Review has no working tree location"))?,
+            ContextKey::ForgeBacked { .. } => std::path::PathBuf::new(),
+        };
+        for change in changes {
+            let (id, previous, current, observed) = match change {
+                SourceChange::LocationMoved { .. } => continue,
+                SourceChange::Moved {
+                    thread_id,
+                    previous_path,
+                    current_path,
+                    source,
+                } => (
+                    thread_id,
+                    Some(previous_path.as_str()),
+                    current_path.as_str(),
+                    Some(source),
+                ),
+                SourceChange::Deleted { thread_id, path } => {
+                    (thread_id, Some(path.as_str()), path.as_str(), None)
+                }
+                SourceChange::WorkingSourceChanged {
+                    thread_id,
+                    path,
+                    source,
+                }
+                | SourceChange::Restored {
+                    thread_id,
+                    path,
+                    source,
+                } => (thread_id, None, path.as_str(), Some(source)),
+            };
+            let relative_current = context.key.is_notes()
+                && matches!(scope, ReviewScope::Review { .. })
+                && !std::path::Path::new(current).is_absolute();
+            let supplied_current = current;
+            let saved_path = |path: &str| -> Result<String> {
+                if context.key.is_notes() {
+                    let absolute = if std::path::Path::new(path).is_absolute() {
+                        std::path::PathBuf::from(path)
+                    } else {
+                        root.join(path)
+                    };
+                    Self::get_notes_path(&absolute.to_string_lossy())
+                } else {
+                    Anchor::File { path: path.into() }.validate()?;
+                    Ok(path.into())
+                }
+            };
+            let current = saved_path(current)?;
+            let previous = previous.map(saved_path).transpose()?;
+            let mut thread = self.load_thread(&tx, id, &context.id).await?;
+            let original_path = match &thread.anchor {
+                Anchor::File { path } | Anchor::Line { path, .. } => path,
+                Anchor::General => return Err(invalid("General discussions have no file source")),
+            };
+            let known_path = saved_path(
+                thread
+                    .current_path
+                    .as_deref()
+                    .or(thread.source_path.as_deref())
+                    .unwrap_or(original_path),
+            )?;
+            if previous.as_deref().is_some_and(|path| path != known_path) {
+                return Err(Error::Conflict(
+                    "Source observation does not match the current saved path".into(),
+                ));
+            }
+            if observed.is_none() {
+                let path = root.join(&current);
+                let missing = match std::fs::symlink_metadata(&path) {
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+                    Err(e) => return Err(e.into()),
+                    Ok(_) => false,
+                };
+                if !missing {
+                    return Err(Error::Conflict("File deletion was not confirmed".into()));
+                }
+                thread.orphan_reason = Some(OrphanReason::FileDeleted);
+            } else if let Some(observed) = observed {
+                observed.validate()?;
+                let (kind, commit) = match observed {
+                    AnchorSource::Commit { sha, .. } => (SourceKind::Commit, Some(sha.clone())),
+                    AnchorSource::IndexFile { .. } => (SourceKind::IndexFile, None),
+                    AnchorSource::WorkingFile { .. } => (SourceKind::WorkingFile, None),
+                    AnchorSource::LocalFile { .. } => (SourceKind::LocalFile, None),
+                };
+                if context.key.is_notes() != (kind == SourceKind::LocalFile) {
+                    return Err(invalid("Observed source does not belong to this scope"));
+                }
+                let (source_root, path) = if context.key.is_notes() {
+                    let absolute = std::path::Path::new(&current);
+                    (
+                        absolute
+                            .parent()
+                            .ok_or_else(|| invalid("Notes file has no parent"))?
+                            .to_path_buf(),
+                        absolute
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .ok_or_else(|| invalid("Notes file has no name"))?
+                            .to_owned(),
+                    )
+                } else {
+                    (root.clone(), current.clone())
+                };
+                let (actual, bytes) = tokio::task::spawn_blocking(move || {
+                    super::workspace::get_source(&source_root, &path, kind, commit.as_deref())
+                })
+                .await
+                .map_err(|_| invalid("Source observation failed"))??;
+                if actual != *observed {
+                    return Err(Error::Conflict(
+                        "Observed source changed before refresh".into(),
+                    ));
+                }
+                if matches!(change, SourceChange::WorkingSourceChanged { .. }) {
+                    if !matches!(
+                        thread.evidence.as_ref().map(|e| &e.source),
+                        Some(AnchorSource::WorkingFile { .. })
+                    ) {
+                        return Err(invalid(
+                            "Only unstaged working anchors use working-source orphaning",
+                        ));
+                    }
+                    if thread
+                        .evidence
+                        .as_ref()
+                        .is_some_and(|e| e.source.content_hash() == observed.content_hash())
+                    {
+                        return Err(invalid("Working source has not changed"));
+                    }
+                    thread.orphan_reason = Some(OrphanReason::WorkingSourceChanged);
+                } else {
+                    let text = std::str::from_utf8(&bytes)
+                        .map_err(|_| invalid("Source observation requires text"))?;
+                    let supported = if matches!(change, SourceChange::Moved { .. }) {
+                        // A reported move preserves file identity, even when its selected lines were lost.
+                        // The request names the known old path and actual new source; absence is checked below.
+                        true
+                    } else if let Some(evidence) = &thread.evidence {
+                        evidence.source.content_hash() == observed.content_hash()
+                            || (!matches!(evidence.source, AnchorSource::WorkingFile { .. })
+                                && evidence.get_matching_range(text).is_some())
+                    } else {
+                        false
+                    };
+                    if !supported {
+                        return Err(Error::Conflict(
+                            "Preserved evidence cannot confirm this move or restoration".into(),
+                        ));
+                    }
+                    if let SourceChange::Moved { previous_path, .. } = change {
+                        match std::fs::symlink_metadata(root.join(saved_path(previous_path)?)) {
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                            Err(e) => return Err(e.into()),
+                            Ok(_) => {
+                                return Err(Error::Conflict(
+                                    "Move source still exists; a copy is not a confirmed move"
+                                        .into(),
+                                ));
+                            }
+                        }
+                    }
+                    thread.current_path = Some(if relative_current {
+                        supplied_current.into()
+                    } else {
+                        current.clone()
+                    });
+                    thread.orphan_reason = None;
+                    if matches!(scope, ReviewScope::Notes { .. }) {
+                        tx.workspace
+                            .insert_path(&workspace_paths::Model {
+                                context_id: context.id,
+                                path: root.join(&current).to_string_lossy().into_owned(),
+                            })
+                            .await?;
+                    }
+                }
+            }
+            tx.comments
+                .update_thread(&threads::Model::from(&thread))
+                .await?;
+        }
+        if !changes.is_empty() {
+            Self::validate_local_context(&context).await?;
+        }
+        let version = tx
+            .review_contexts
+            .get_by_id(&context.id)
+            .await?
+            .ok_or_else(|| Error::NotFound("Context".into()))?
+            .revision;
+        Self::record_mutation(
+            &tx,
+            &context.id,
+            &actor.id,
+            "refresh_locations",
+            Some(&guard),
+            &version,
+        )
+        .await?;
+        tx.commit().await?;
+        for change in changes {
+            if let SourceChange::LocationMoved {
+                previous_path,
+                current_path,
+            } = change
+            {
+                self.locations
+                    .relocate(context.id, previous_path, current_path);
+            }
+        }
+        Ok(version)
+    }
 
     // Contexts ----------------------------------------------------------------
 

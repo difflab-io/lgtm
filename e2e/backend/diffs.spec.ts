@@ -49,6 +49,58 @@ describe('When reading diff metadata and source bytes', () => {
     },
   )
 
+  it('Consumers select a range and the backend captures evidence from saved files, Git commits, the index and working files', async () => {
+    // Arrange
+    const { runtime } = fixture()
+    const { bytes, plans, diff } = await prepareSource(runtime)
+    const location = { kind: 'line', path: 'PLAN.md', side: 'new', start: '2', end: '2' }
+
+    // Act
+    const local = await runtime.rpc('CaptureAnchor', {
+      location,
+      saved: { root: plans, path: 'PLAN.md', kind: 4 },
+    })
+    const comparison = await runtime.rpc('CaptureAnchor', {
+      location,
+      file: { diff, path: 'PLAN.md' },
+      side: 'new',
+    })
+
+    // Assert
+    expect(local.anchor).toEqual(line(bytes, 'PLAN.md'))
+    expect(comparison.anchor).toEqual(local.anchor)
+
+    // Arrange
+    await runtime.git('init', '-q', '-b', 'main')
+    await runtime.write('tracked.txt', 'before\ncommitted selection\nafter\n')
+    await runtime.commit('source for backend anchor capture')
+    const commit = await runtime.git('rev-parse', 'HEAD')
+    await runtime.write('tracked.txt', 'before\nstaged selection\nafter\n')
+    await runtime.git('add', 'tracked.txt')
+    await runtime.write('tracked.txt', 'before\nworking selection\nafter\n')
+    const sources = [
+      { kind: 1, commit, selected: 'committed selection', variant: 'commit' },
+      { kind: 2, selected: 'staged selection', variant: 'indexFile' },
+      { kind: 3, selected: 'working selection', variant: 'workingFile' },
+    ]
+    for (const source of sources) {
+      // Act
+      const captured = await runtime.rpc('CaptureAnchor', {
+        location: { ...location, path: 'tracked.txt' },
+        saved: {
+          root: runtime.workspace,
+          path: 'tracked.txt',
+          kind: source.kind,
+          commit: source.commit,
+        },
+      })
+
+      // Assert
+      expect(captured.anchor.evidence.selectedText).toBe(source.selected)
+      expect(captured.anchor.source[source.variant]).toBeDefined()
+    }
+  })
+
   it('A stale diff descriptor cannot silently return changed source bytes', async () => {
     // Arrange
     const { runtime } = fixture()

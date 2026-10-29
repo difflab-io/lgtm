@@ -103,14 +103,14 @@ Keyboard API:
 | Enter | Normal, split only | Navigate to the thread's source. Keep the pane open. |
 | q / Esc | Normal | Close and restore a valid source window. |
 
-`setup.mappings` can replace Tab, Shift-Tab, c, e, dd, x, Enter, q, and Esc in this view. j/k remain wrapped-row motions. Controllers enforce permissions even when a key is mapped.
+`setup.mappings` can replace Tab, Shift-Tab, c, e, dd, x, Enter, q, and Esc in this view. j/k remain wrapped-row motions. Services guard actions and the backend enforces permissions even when a key is mapped.
 
 Lua API:
 
 ```lua
 require("lgtm.ui.conversation").open({
   mode = "modal", -- or "split"
-  threads = display_records,
+  data = rendered_nodes, -- service-derived signal of NUI tree nodes
   mappings = {},
   on_action = function(action, thread_id, comment_id)
   end,
@@ -121,22 +121,22 @@ require("lgtm.ui.conversation").open({
   on_ready = function()
   end,
 })
--- Handle: selected(), select_comment(id), update(records), close().
+-- Handle: selected(), select_comment(id), close().
 ```
 
 ### State and Data Flow
 
 ```mermaid
 flowchart TD
-  Models["Threads, comments, ownership<br/>Source locations and anchor evidence"] --> Controller["threads.lua"]
-  Controller -->|"Display records + allowed actions"| View["Modal or persistent pane<br/>Selected comment ID"]
-  View -->|"action + thread ID + comment ID"| Controller
-  Controller -->|"Selected IDs + action"| Service["services/feedback.lua<br/>Permissions, guarded write, refresh"]
-  Service -->|"Updated shared state"| Controller
-  Controller -->|"Refresh or split resolution<br/>update(records); retain selected ID"| View
-  View -->|"Enter: thread ID"| Location["Controller resolves source location"]
-  Location -->|"Exact line or stale card"| Source["CodeDiff source buffer"]
-  Location -->|"Outside diff"| Notice["Explain limit; keep pane focus"]
+  Service["threads_service<br/>Conversation signal"] --> Pane["features/threads_pane"]
+  Pane --> Thread["UI.thread(props)"]
+  Thread --> Comment["UI.comment(props)"]
+  Comment -->|"NUI nodes"| View["Conversation host<br/>Selected ID + window state"]
+  View -->|"action + stable IDs"| Pane
+  Pane -->|"reply / edit / delete / resolve"| Service
+  Service -->|"signal update"| Pane
+  View -->|"Enter: thread ID"| Location["Pane navigates using backend placement"]
+  Location --> Source["CodeDiff buffer / labeled fallback"]
 ```
 
 ## Implementation

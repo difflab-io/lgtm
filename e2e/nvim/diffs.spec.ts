@@ -252,7 +252,7 @@ for (const profile of profiles) {
           review: await editor.value('vim.b.lgtm'),
         }
         await editor.wait(
-          'vim.inspect(vim.api.nvim_buf_get_extmarks(0,require("lgtm.threads").namespace,0,-1,{details=true})):find("Standalone note outside",1,true) ~= nil',
+          'vim.inspect(vim.api.nvim_buf_get_extmarks(0,require("lgtm.features.annotation_overlay").namespace,0,-1,{details=true})):find("Standalone note outside",1,true) ~= nil',
           'ordinary note card displayed',
         )
         await editor.lua('vim.api.nvim_exec_autocmds("ColorScheme",{modeline=false})')

@@ -1,7 +1,8 @@
 -- State -----------------------------------------------------------------------
 
 local M = {}
--- Public ----------------------------------------------------------------------
+
+-- Methods ---------------------------------------------------------------------
 
 function M.check()
   vim.health.start("lgtm.nvim")
@@ -76,7 +77,7 @@ function M.check()
       )
     end
   end
-  local endpoint, err = require("lgtm.transport.connect").endpoint()
+  local endpoint, err = require("lgtm.services.connect").endpoint()
   if endpoint then
     local reachable, response = pcall(function()
       return vim

@@ -1,9 +1,24 @@
 //! Explicit local content selection. Ignored files are included for notes roots.
 use crate::error::{Result, invalid};
+use crate::extensions::git;
 use crate::models::WorkspaceFile;
 use crate::models::{Context, ContextKey, LocalLocation};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+
+/// Check the selected index/tree without loading hidden file bodies or consulting the working file.
+pub fn get_source_presence(root: &Path, path: &str, commit: Option<&str>) -> Result<bool> {
+    crate::models::Anchor::File { path: path.into() }.validate()?;
+    let arguments = if let Some(commit) = commit {
+        if ![40, 64].contains(&commit.len()) || !commit.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(invalid("Expected a full commit identity"));
+        }
+        vec!["ls-tree", "-z", commit, "--", path]
+    } else {
+        vec!["ls-files", "--stage", "-z", "--", path]
+    };
+    Ok(!git::get_bytes(root, &arguments)?.is_empty())
+}
 
 /// Read one saved source without changing the index, checkout, or review records.
 /// Index identity comes from stage zero, independently of the working file.
@@ -19,22 +34,9 @@ pub fn get_source(
     };
     Anchor::File { path: path.into() }.validate()?;
     let root = root.canonicalize()?;
-    let git = |args: &[&str]| -> Result<Vec<u8>> {
-        let result = std::process::Command::new("git")
-            .arg("--literal-pathspecs")
-            .arg("-C")
-            .arg(&root)
-            .args(args)
-            .env("GIT_OPTIONAL_LOCKS", "0")
-            .output()?;
-        if !result.status.success() {
-            return Err(invalid("Selected Git source is unavailable"));
-        }
-        Ok(result.stdout)
-    };
     let (oid, sha) = match kind {
         SourceKind::IndexFile => {
-            let entries = git(&["ls-files", "--stage", "-z", "--", path])?;
+            let entries = git::get_bytes(&root, &["ls-files", "--stage", "-z", "--", path])?;
             let entries: Vec<_> = entries
                 .split(|b| *b == 0)
                 .filter(|s| !s.is_empty())
@@ -64,8 +66,11 @@ pub fn get_source(
             if ![40, 64].contains(&sha.len()) || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
                 return Err(invalid("Expected a full commit identity"));
             }
-            git(&["rev-parse", "--verify", &format!("{sha}^{{commit}}")])?;
-            let entries = git(&["ls-tree", "-z", sha, "--", path])?;
+            git::get_bytes(
+                &root,
+                &["rev-parse", "--verify", &format!("{sha}^{{commit}}")],
+            )?;
+            let entries = git::get_bytes(&root, &["ls-tree", "-z", sha, "--", path])?;
             let entry =
                 std::str::from_utf8(&entries).map_err(|_| invalid("Invalid Git tree entry"))?;
             let (meta, found) = entry
@@ -85,7 +90,7 @@ pub fn get_source(
         SourceKind::WorkingFile | SourceKind::LocalFile => (None, None),
     };
     let bytes = if let Some(oid) = &oid {
-        let size = git(&["cat-file", "-s", oid])?;
+        let size = git::get_bytes(&root, &["cat-file", "-s", oid])?;
         if std::str::from_utf8(&size)
             .ok()
             .and_then(|s| s.trim().parse::<u64>().ok())
@@ -93,7 +98,7 @@ pub fn get_source(
         {
             return Err(invalid("Selected source exceeds the text size limit"));
         }
-        git(&["cat-file", "blob", oid])?
+        git::get_bytes(&root, &["cat-file", "blob", oid])?
     } else {
         let mut candidate = root.clone();
         for component in Path::new(path).components() {

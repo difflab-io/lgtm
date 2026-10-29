@@ -69,7 +69,7 @@ Keyboard API:
 | x | Normal | Resolve/reopen a single thread at the line, or open the chooser when several exist. Permissions still apply. |
 | dd | Normal, on commented source | Open the conversation. It does not immediately delete the comment. |
 
-These keys belong to `threads.lua`, which hosts the card in the source buffer. `setup.mappings` can replace them. Away from feedback, Enter/K and normal editing/folding actions keep their existing behavior.
+These keys belong to `features/annotation_overlay.lua`, which hosts the card in the source buffer. `setup.mappings` can replace them. Away from feedback, Enter/K and normal editing/folding actions keep their existing behavior.
 
 Lua API:
 
@@ -107,7 +107,7 @@ flowchart TD
   Footer --> Sections
   Summary --> Sections
   Sections --> Adapter["One converter to Neovim virtual lines"]
-  Adapter --> Placement["threads.lua + codediff.other_line<br/>Source placement and opposite-side padding"]
+  Adapter --> Placement["annotation_overlay + diff_view.other_line<br/>Backend placements and opposite-side padding"]
 ```
 
 ## Implementation

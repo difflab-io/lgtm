@@ -1,6 +1,6 @@
 # lgtm.nvim
 
-Notes and local/GitHub review through the LGTM backend, with CodeDiff and compact comment overlays. This plugin calls Connect RPCs directly; it never connects to the web frontend or opens the database.
+Notes and local/GitHub review through the LGTM backend, with CodeDiff and compact comment overlays. This plugin calls Connect RPCs directly; it never connects to the web frontend or opens the database. CodeDiff retains native diff loading and editing. The backend captures anchor evidence, calculates comment locations, and tracks saved-source changes.
 
 [Setup and troubleshooting](#setup) · [Usage](#usage) · [Editor help](doc/lgtm.txt)
 
@@ -165,16 +165,15 @@ The backend resolves the selected root and enumerates its content. Nested symlin
 
 Saved-file notes and explicit directory reviews follow confirmed moves, including moves between parent directories. LGTM keeps the original source, thread IDs, replies, author, and resolution. A new note records the file's current location. Copies do not move the original discussion.
 
-The plugin observes `BufFilePre`/`BufFilePost` and MiniFiles rename events. Other file managers can report a completed filesystem move:
+The backend verifies moves using filesystem identity while it serves an opened notes file or directory review. `BufFilePost` and MiniFiles rename events only trigger a refresh. Other file managers can request the same refresh:
 
 ```lua
 vim.api.nvim_exec_autocmds("User", {
   pattern = "LgtmPathRenamed",
-  data = { from = "/old/absolute/path", to = "/new/absolute/path" },
 })
 ```
 
-The old path must be absent and the destination must exist. A failed read alone does not prove deletion. LGTM does not scan for renamed files. Refresh retries an unresolved move with its saved operation identity. Cards with a lost anchor show a status and comment preview. The full thread view retains the original range and excerpt. When a working-tree file changes, its comments appear as stale cards above the file. Deleted-file discussions remain in `:Lgtm threads` and exports. The threads pane labels files outside the selected comparison as `OUTSIDE DIFF`.
+The old path must be absent and the destination must exist. A failed read alone does not prove deletion. LGTM does not scan for renamed files. The backend persists confirmed locations, so discussions remain attached after restart. Lua does not track old/new paths or retain move requests. Cards with a lost anchor show a status and comment preview. The full thread view retains the original range and excerpt. When a working-tree file changes, its comments appear as stale cards above the file. Deleted-file discussions remain in `:Lgtm threads` and exports. The threads pane labels files outside the selected comparison as `OUTSIDE DIFF`.
 
 ### Keys and selection
 

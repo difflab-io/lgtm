@@ -53,11 +53,22 @@ These rules apply to every app and library in the workspace.
 
 ## Lua and Neovim UI
 
-- [Proposed] Keep shared Lua model declarations under `lua/lgtm/models/`, grouped by model where useful. Keep state management and service operations outside model files.
+- Keep review business operations, anchor evidence capture, anchor placement and location-status decisions in backend APIs shared with the web UI. Do not duplicate those rules in Lua; add a backend contract when one is missing. Preserve CodeDiff's native explorer, buffers, editing and refresh experience. CodeDiff and Neovim may read Git and filesystem content directly for that experience. Use backend data wherever it supports the existing experience, and keep editor buffer checks, selection, interaction state and rendering in Lua.
+- Keep saved-source move detection and reconciliation in the backend. Editor rename events only request refreshed data; Lua must not retain old/new path associations, pending moves, or move-specific retries.
+- Services own reactive application data and expose operations. Components render that data declaratively and call service methods. Compose thread panes from threads, and threads from comment components that receive data and callbacks as inputs. Keep transient selection and window state in components. Do not coordinate data refreshes or push display records through imperative feature controllers.
+- [Proposed] Use `app.lua` for plugin orchestration. Keep notes data and export reads in services; reserve `features/` for LGTM-specific UI and `ui/` for reusable widgets.
+- Capture anchor evidence from backend-read Git or saved-file content. Clients supply selection intent, not source bodies or evidence.
+- Keep component state limited to UI interaction, such as selection, expansion and window visibility. Keep substantive Lua implementation under `features/`, `models/`, `services/` and `ui/`; root modules should be small plugin entry points, except `app.lua`, which owns application orchestration.
 
-- Organize view modules as State, Render, Lifecycle, Methods, then Private. Use only sections that contain code. Pad `-- Section` separators with hyphens to column 80. Keep public entry points above module-private helpers.
+- Put review-flow and thread components under `lua/lgtm/features/`, composed around new-review dialogs, branch/PR selection, thread panes, threads and comments. Keep reusable visual components under `ui/`.
+- Group Lua RPC clients behind session, thread, file, diff and forge service modules. Keep business workflows in the backend and feature interactions in `features/`.
+
+- Keep shared Lua model declarations under `lua/lgtm/models/`, grouped by model where useful. Keep state management and service operations outside model files.
+
+- Order Lua modules as State, Render, UI, Lifecycle, Methods, then Private/helpers. Use only sections that contain code. Pad `-- Section` separators with hyphens to column 80. Keep public entry points above module-private helpers.
 - Put private helper definitions at the bottom. Use a module-local namespace or explicit local forward declarations when earlier functions need them. Do not export helpers only to avoid Lua's declaration order.
 - Make each render method reveal the visual structure directly. Compose named sections such as header, body, and footer, or meaningful child components. Keep label calculation, text fitting, wrapping, and annotation conversion outside the composition. Do not hide a large procedure behind a renamed body helper.
+- Denote subcomponents with a module-local `UI` namespace, including imported child renderers: `UI.header`, `UI.body`, `UI.footer`, `UI.comment`, or another meaningful component name. Reserve `Private` for non-rendering helpers so render composition is distinct from calculations and workflows.
 - Build floating views with NuiComponents composition, props, signals, and lifecycle hooks. Use NUI primitives for persistent splits and source annotations. Reuse documented library behavior before writing imperative window code or a generic component framework. Keep the CodeDiff virtual-line adapter small and separate from card composition.
 - Put each component property on its own line. Expand nested property tables. Keep callbacks short and delegate named operations instead of nesting workflow logic in props.
 - Keep RPC calls and business workflows under `lua/lgtm/services/`. Group the reads, guarded writes, retries, and state updates needed for a complete operation. UI handlers supply intent and present results. Services must not import UI components or notification providers.

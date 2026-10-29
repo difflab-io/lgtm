@@ -269,7 +269,7 @@ for (const profile of profiles) {
 
       // Act
       await editor.popup('Top-level concern')
-      const selected = await editor.value('require("lgtm.threads").last.selected')
+      const selected = await editor.value('require("lgtm.features.threads_pane").last.selected')
       const text = await editor.text()
 
       // Assert
@@ -294,7 +294,9 @@ for (const profile of profiles) {
       await editor.comments(2)
       await editor.pane('new', 2)
       await editor.popup('First reply')
-      const replySelection = await editor.value('require("lgtm.threads").last.selected')
+      const replySelection = await editor.value(
+        'require("lgtm.features.threads_pane").last.selected',
+      )
       const discussion = await editor.text()
       await editor.keys('e')
       await editor.composer()
@@ -324,7 +326,9 @@ for (const profile of profiles) {
       await editor.compose('Unpublished concern')
       await editor.comments(1)
       await editor.popup('Unpublished concern')
-      const canResolve = await editor.value('require("lgtm.threads").last.selected.can_resolve')
+      const canResolve = await editor.value(
+        'require("lgtm.features.threads_pane").last.selected.can_resolve',
+      )
 
       // Act
       await editor.keys('x')
@@ -929,7 +933,9 @@ for (const profile of profiles) {
       const { editor, github } = await openPublishedConcern()
       await editor.pane('new', 2)
       await editor.popup('Published concern from another reviewer')
-      const canResolve = await editor.value('require("lgtm.threads").last.selected.can_resolve')
+      const canResolve = await editor.value(
+        'require("lgtm.features.threads_pane").last.selected.can_resolve',
+      )
 
       // Act
       await editor.keys('e')

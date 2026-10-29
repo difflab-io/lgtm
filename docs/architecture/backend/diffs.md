@@ -58,16 +58,22 @@ Diff browsing works without starting a review. Clients can read conversation and
 #### Neovim client
 
 ```mermaid
-flowchart LR
-    A["CodeDiff reads comparison and selected content"] --> B["Neovim renders diff"]
-    B --> M["LGTM adapter resolves saved comment placements"]
-    M --> C["User selects lines and writes a comment"]
-    C --> D["Send review ID, anchor, and source evidence"]
-    D --> E["ReviewService persists and synchronizes the comment"]
+sequenceDiagram
+    participant CodeDiff
+    participant Nvim as LGTM Lua
+    participant Diff as DiffService
+    participant Review as ReviewService
+    CodeDiff->>CodeDiff: Load native buffers and render diff
+    Nvim->>Diff: GetAnchorPlacements(anchors, displayed sources)
+    Diff-->>Nvim: Locations or labeled fallbacks
+    Nvim->>Nvim: Render source annotations
+    Nvim->>Diff: CaptureAnchor(selection, backend source reference)
+    Diff-->>Nvim: Original anchor and bounded evidence
+    Nvim->>Review: AddComment(scope, anchor, body)
+    Review->>Review: Verify source and persist or synchronize
 ```
 
-Neovim does not need DiffService for local content already supplied by CodeDiff. LGTM owns its anchor resolver around CodeDiff. It computes source evidence and placement results using the [review anchor contract](reviews.md#anchor-ownership). Neovim uses DiffService for explicit directories and PR content unavailable in its local checkout. The future web UI can use the same contract.
-
+Neovim keeps CodeDiff's native Git explorer, buffers, editing, and refresh. CodeDiff loads the native diff directly. LGTM requests saved-source identities and bytes from the backend for anchor checks, then verifies that its native buffers still match. It sends those sources to the shared backend anchor operations. Directory and remote fallback views can also load their content through DiffService.
 
 ### Components and Responsibilities
 
@@ -75,6 +81,7 @@ Neovim does not need DiffService for local content already supplied by CodeDiff.
 flowchart TB
     Web["Future web UI"] --> Diff["DiffService"]
     Nvim["Neovim UI"] --> CodeDiff["CodeDiff"]
+    Nvim -->|"Anchor capture and placement"| Diff
     Diff --> Local["Local Git and directory adapter"]
     Diff --> Forge["Forge content adapter"]
     CodeDiff --> Git["Local Git and working files"]
@@ -132,12 +139,15 @@ Comparison = {
 | `GetDiff` | Target and optional local selection → comparison | Resolve metadata without creating a review or downloading all content. |
 | `GetFiles` | Comparison and page token → file metadata | Return paths, statuses, rename information, and the next page token. |
 | `GetFile` | Comparison, relative path, optional anchors → content sides, source identities, and placements | Read the selected file only. Resolve supplied anchors without querying review records. |
+| `GetAnchorPlacements` | Original anchors, provider observations and up to two displayed source views → indexed placements | Share placement rules with native editors without taking over their content loading. Each batch accepts up to 500 anchors. |
+| `GetSource` | Absolute root, relative path, saved-source kind and optional commit → selected content side or confirmed absence | Read exact saved bytes for native-client anchor checks, including files outside the current diff. Matching working/index bytes retain index identity. |
+| `CaptureAnchor` | File/line selection and saved-source or comparison-file reference → anchor with source identity and bounded evidence | Read the selected Git commit, index, working file, saved file or remote comparison on the backend; capture the hash and bounded evidence there. Clients send no source bytes or evidence. Review writes independently verify the saved bytes. |
 
 Local selection applies only to Git targets. PR and directory targets determine their own content sources. Branch references resolve to commit identities. File responses distinguish commit, working, index, and non-Git sources. Index responses retain the actual blob object ID so staged anchors can survive a commit. Clients supply those identities to ReviewService with the selected anchor. ReviewService still enforces its own scope and lifecycle rules.
 
 #### Anchor mapping contract
 
-Use the same [source and placement rules](reviews.md#mapping-and-stale-content) as the LGTM Neovim adapter, including the allowed orphaning of unstaged Git anchors. Return `Exact`, `Relocated`, `Outdated`, `Orphaned`, or `Unverified` for each supplied anchor. Bind each result to the requested comparison and actual content identity. Hash exact source bytes and return bounded selected-text evidence.
+The backend owns the [source and placement rules](reviews.md#mapping-and-stale-content) for all clients. Return `Exact`, `Relocated`, `Stale`, `Outdated`, `Orphaned`, or `Unverified` for each associated anchor. Bind each result to the requested comparison and actual content identity. Hash exact source bytes and return bounded selected-text evidence.
 
 ```mermaid
 flowchart LR
@@ -147,7 +157,7 @@ flowchart LR
     R --> UI["UI renders confirmed locations or labeled fallbacks"]
 ```
 
-DiffService does not decide whether a discussion is resolved or published. It does not change original anchors or forge outdated state. If original content is unavailable, use preserved excerpts only when they support one unambiguous mapping. For preserved sources, confirmed moves return the new path automatically. Lost lines return a file-header fallback, and confirmed file deletion returns an orphaned result. Changed unstaged Git sources can also return an orphaned result. Otherwise, return a reason without guessing a line. No full-file snapshot store is required by this contract.
+DiffService does not decide whether a discussion is resolved or published. It does not change original anchors or forge outdated state. If original content is unavailable, use preserved excerpts only when they support one unambiguous mapping. For preserved sources, confirmed moves return the new path automatically. Lost lines return a file-header fallback, and confirmed file deletion returns an orphaned result. Changed unstaged Git sources return a stale fallback without coordinates. Otherwise, return a reason without guessing a line. No full-file snapshot store is required by this contract.
 
 ## Implementation
 
@@ -165,9 +175,9 @@ The router mounts `rpc/diff.rs` beside the review service. `services/diff.rs` ow
 | Open the first PR file | Fetch metadata and the selected sides without fetching unrelated file bodies. |
 | Read mutable local content | Detect changes between observation and file access. Return the actual source identity. |
 | Use an ignored directory | Read only the explicitly selected root, including ignored files. |
-| Use CodeDiff in Neovim | Start, comment, export, and complete a local Git review without DiffService calls. |
+| Use CodeDiff in Neovim | Keep native Git content loading; use backend anchor operations for comments and annotations. |
 | Preserve review independence | Rendering failures do not change review state. Review persistence does not require a file-body request. |
-| Resolve supplied anchors | Return the same placement decisions as the Neovim adapter for identical evidence, including deletion, duplicate text, rename, and source changes. |
+| Resolve supplied anchors | Return shared placement decisions for identical evidence, including deletion, duplicate text, rename, and source changes. |
 | Preserve exact bytes | Distinguish working and index content, line endings, and final newlines in returned hashes. |
 
 ## References
@@ -175,4 +185,4 @@ The router mounts `rpc/diff.rs` beside the review service. `services/diff.rs` ow
 - [Review API architecture](reviews.md).
 - [System architecture](../index.md).
 - [Backend architecture](index.md).
-- [Neovim CodeDiff integration](../../../apps/lgtm.nvim/lua/lgtm/codediff.lua).
+- [Neovim CodeDiff integration](../../../apps/lgtm.nvim/lua/lgtm/features/diff_view.lua).

@@ -20,6 +20,9 @@ pub enum AnchorPlacement {
     Orphaned {
         reason: String,
     },
+    Stale {
+        reason: String,
+    },
     Unverified {
         reason: String,
     },
@@ -68,6 +71,10 @@ impl AnchorPlacement {
                     ..Default::default()
                 }))
             }
+            m::AnchorPlacement::Stale { reason } => Kind::Stale(Box::new(p::UnplacedAnchor {
+                reason,
+                ..Default::default()
+            })),
         };
         p::AnchorPlacement {
             index: index as u32,

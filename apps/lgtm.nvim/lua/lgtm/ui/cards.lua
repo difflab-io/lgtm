@@ -1,22 +1,8 @@
 -- State -----------------------------------------------------------------------
 
 local M = {}
-local Private = {}
+local UI, Private = {}, {}
 local border_highlight = { "LgtmNormal", "LgtmCommentBorder" }
-
--- Public ----------------------------------------------------------------------
-
-function M.highlights()
-  require("lgtm.ui.theme").highlights()
-  for name, source in pairs({
-    Body = "LgtmNormal",
-    Border = "LgtmBorder",
-    Status = "LgtmInfo",
-    Resolved = "LgtmSuccess",
-  }) do
-    vim.api.nvim_set_hl(0, "LgtmComment" .. name, { link = source, default = true })
-  end
-end
 
 -- Render ----------------------------------------------------------------------
 
@@ -24,20 +10,20 @@ function M.render(card, width, expanded)
   width = math.max(8, width)
   if card.resolved and not expanded then
     return Private.to_virtual_lines({
-      Private.resolved_summary(width),
+      UI.resolved_summary(width),
     })
   end
 
   return Private.to_virtual_lines({
-    Private.header(card, width),
-    Private.body(card, width, expanded),
-    Private.footer(card, width, expanded),
+    UI.header(card, width),
+    UI.body(card, width, expanded),
+    UI.footer(card, width, expanded),
   })
 end
 
--- Private ---------------------------------------------------------------------
+-- UI --------------------------------------------------------------------------
 
-function Private.header(card, width)
+function UI.header(card, width)
   local Text = require("nui.text")
   local border = require("lgtm.ui.theme").border()
   local status = card.resolved and "LgtmCommentResolved" or "LgtmCommentStatus"
@@ -52,16 +38,16 @@ function Private.header(card, width)
   }
 end
 
-function Private.body(card, width, expanded)
+function UI.body(card, width, expanded)
   if expanded then
-    return Private.conversation(card.comments, width)
+    return UI.conversation(card.comments, width)
   end
   return {
-    Private.content(Private.preview(card.comments[1].body), width),
+    UI.content(Private.preview(card.comments[1].body), width),
   }
 end
 
-function Private.footer(card, width, expanded)
+function UI.footer(card, width, expanded)
   local Text = require("nui.text")
   local border = require("lgtm.ui.theme").border()
   local author = not expanded and card.comments[1].author .. " · " or ""
@@ -77,7 +63,7 @@ function Private.footer(card, width, expanded)
   }
 end
 
-function Private.resolved_summary(width)
+function UI.resolved_summary(width)
   local Text = require("nui.text")
   return {
     {
@@ -89,18 +75,18 @@ function Private.resolved_summary(width)
   }
 end
 
-function Private.conversation(comments, width)
+function UI.conversation(comments, width)
   local rows = {}
   for _, comment in ipairs(comments) do
-    rows[#rows + 1] = Private.content(comment.author, width)
+    rows[#rows + 1] = UI.content(comment.author, width)
     for _, text in ipairs(Private.wrap(comment.body, width - 4)) do
-      rows[#rows + 1] = Private.content(text, width)
+      rows[#rows + 1] = UI.content(text, width)
     end
   end
   return rows
 end
 
-function Private.content(text, width)
+function UI.content(text, width)
   local Text = require("nui.text")
   local border = require("lgtm.ui.theme").border()
   return {
@@ -109,6 +95,22 @@ function Private.content(text, width)
     Text(" " .. border[4], { hl_group = border_highlight }),
   }
 end
+
+-- Methods ---------------------------------------------------------------------
+
+function M.highlights()
+  require("lgtm.ui.theme").highlights()
+  for name, source in pairs({
+    Body = "LgtmNormal",
+    Border = "LgtmBorder",
+    Status = "LgtmInfo",
+    Resolved = "LgtmSuccess",
+  }) do
+    vim.api.nvim_set_hl(0, "LgtmComment" .. name, { link = source, default = true })
+  end
+end
+
+-- Private ---------------------------------------------------------------------
 
 function Private.heading(card)
   local status = card.resolved and "Resolved" or "Open"
@@ -206,5 +208,4 @@ function Private.take_line(text, width)
   end
   return part, length
 end
-
 return M

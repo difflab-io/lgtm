@@ -1,14 +1,18 @@
 ---@class lgtm.ReviewState
----@field review lgtm.Review?
+---@field review lgtm.Review? Read-only projection of session_service data.
 ---@field scope table Backend review or saved-file scope.
 ---@field version string?
----@field files lgtm.ReviewFile[]?
+---@field files lgtm.ReviewFile[]? Read-only projection of files_service data.
 ---@field file lgtm.ReviewFile?
----@field conversation lgtm.Conversation?
+---@field conversation lgtm.Conversation? Read-only projection of threads_service data.
+---@field placements table<string, table<string, lgtm.AnchorPlacement>>? Backend results by thread and displayed side.
+---@field placement_views table? Source snapshot associated with the placement results.
+---@field placement_conversation lgtm.Conversation? Conversation snapshot associated with the placement results.
 ---@field reviewed table<string, string>?
 ---@field kind 'git'|'directory'|'pr'|'notes'
 ---@field closed boolean?
 ---@field initializing boolean?
+---@field retry_load fun()?
+---@field load_error lgtm.ServiceError?
 ---@field on_error fun(err: lgtm.ServiceError)?
----@field on_files_changed fun()?
 ---@field refresh fun(done: function?) Refresh the owning editor view.
