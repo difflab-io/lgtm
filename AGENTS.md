@@ -6,6 +6,9 @@
 - Put general helpers in `src/utils.rs`. Keep forge import contracts in `src/forge/models.rs` and review export behavior with its domain model. Domain models represent application entities.
 - Keep database entities private; expose actual SeaORM models and the repositories required by backend workflows. Shared SeaORM entity types belong in `libs/lgtm-db/src/entities/common.rs`.
 
+- [Proposed] Preserve the Neovim development/release plugin installation tasks when resetting plugin features.
+- [Proposed] Preserve pinned Neovim dependencies in plugin installation and E2E setup when resetting plugin features.
+
 ## Docs
 
 - Use soft wraps for documentation prose. Keep each paragraph on one source line and let the editor wrap it for display. Do not add manual line breaks between sentences or at a fixed column width. Preserve structural line breaks in lists, tables, code, and Mermaid diagrams.

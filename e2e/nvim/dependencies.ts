@@ -14,6 +14,7 @@ export default async function verifyDependencies() {
     assert(package.loaded['lgtm'], vim.v.errmsg ~= '' and vim.v.errmsg or 'LGTM initialization failed')
     assert(vim.v.errmsg == '', vim.v.errmsg)
     assert(vim.g.loaded_lgtm, 'LGTM runtime entry failed')
+    assert(require('codediff.core.diff').compute_diff({'before'}, {'after'}), 'Native diff failed')
   end); if not ok then vim.api.nvim_err_writeln(tostring(err)); vim.cmd('cquit 1') end`
   try {
     for (const profile of profiles) {

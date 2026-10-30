@@ -1,4 +1,16 @@
 {
+  "codediff.nvim": {
+    "repository": "https://github.com/esmuellert/codediff.nvim.git",
+    "commit": "09d9ebef2cc5a5c04db7a349cd6c61bdf84ecc8e"
+  },
+  "which-key.nvim": {
+    "repository": "https://github.com/folke/which-key.nvim.git",
+    "commit": "3aab2147e74890957785941f0c1ad87d0a44c15a"
+  },
+  "nvim-notify": {
+    "repository": "https://github.com/rcarriga/nvim-notify.git",
+    "commit": "8701bece920b38ea289b457f902e2ad184131a5d"
+  },
   "kak.nvim": {
     "repository": "https://github.com/mirlge/kak.nvim.git",
     "commit": "b299d2689429b48afe48b1b294a6046487dacb6b",
