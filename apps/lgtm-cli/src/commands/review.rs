@@ -1,6 +1,6 @@
 use crate::{
     commands::NotImplemented,
-    models::{LocalArgs, ReviewOutcome, parse_nonempty},
+    models::{LocalArgs, ReviewGroupBy, ReviewOutcome, parse_nonempty},
     rpc_client::Client,
     store::Store,
 };
@@ -9,13 +9,38 @@ use clap::{Args, Subcommand};
 #[derive(Subcommand)]
 pub enum ReviewCommand {
     /// Call the backend hello-review demonstration; no reviews are persisted.
-    List(LocalArgs),
+    List {
+        #[command(flatten)]
+        location: LocalArgs,
+        #[arg(long)]
+        all: bool,
+    },
     /// Create a review (not implemented yet).
     New(LocalArgs),
+    /// Refresh review comments and anchors (not implemented yet).
+    Refresh {
+        #[arg(value_parser = parse_nonempty)]
+        review: Option<String>,
+        #[command(flatten)]
+        location: LocalArgs,
+    },
+    /// Show review comments and diff hunks (not implemented yet).
+    Show {
+        #[arg(value_parser = parse_nonempty)]
+        review: Option<String>,
+        #[command(flatten)]
+        location: LocalArgs,
+        #[arg(long, value_enum, default_value_t = ReviewGroupBy::File)]
+        group_by: ReviewGroupBy,
+        #[arg(long)]
+        unresolved: bool,
+    },
     /// Close a review (not implemented yet).
     Close {
         #[arg(value_parser = parse_nonempty)]
-        review_id: String,
+        review: Option<String>,
+        #[command(flatten)]
+        location: LocalArgs,
         #[arg(long = "with", value_enum)]
         outcome: ReviewOutcome,
         #[arg(long)]
@@ -31,7 +56,7 @@ pub struct ReviewArgs {
 
 pub async fn run(args: ReviewArgs, store: &Store, json: bool) -> anyhow::Result<()> {
     match args.command {
-        ReviewCommand::List(_) => {
+        ReviewCommand::List { .. } => {
             let response = Client::new(store)?.get_hello("CLI").await?;
             if json {
                 println!(
@@ -45,6 +70,14 @@ pub async fn run(args: ReviewArgs, store: &Store, json: bool) -> anyhow::Result<
         }
         ReviewCommand::New(_) => Err(NotImplemented {
             operation: "review new",
+        }
+        .into()),
+        ReviewCommand::Refresh { .. } => Err(NotImplemented {
+            operation: "review refresh",
+        }
+        .into()),
+        ReviewCommand::Show { .. } => Err(NotImplemented {
+            operation: "review show",
         }
         .into()),
         ReviewCommand::Close { .. } => Err(NotImplemented {

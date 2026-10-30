@@ -143,7 +143,7 @@ Only the CLI publishes. GoReleaser defines macOS and Linux archives for arm64 an
 lgtm/
 ├── apps/
 │   ├── lgtm-cli/       CLI and bundled application
-│   ├── lgtm-backend/   Rust services and shared Protobuf schema
+│   ├── lgtm-forge/     Rust services and shared Protobuf schema
 │   └── lgtm-web/       SvelteKit interface and generated client
 └── libs/
     └── lgtm-db/        Private Rust library

@@ -14,7 +14,7 @@ mod health_service {
 
     #[tokio::test]
     async fn should_report_health_over_connect_and_grpc() {
-        let (router, health) = lgtm_backend::router();
+        let (router, health) = lgtm_forge::router();
         let bound = Server::bind("127.0.0.1:0").await.unwrap();
         let address = bound.local_addr().unwrap();
         let (stop, stopped) = tokio::sync::oneshot::channel();

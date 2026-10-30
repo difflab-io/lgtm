@@ -22,7 +22,7 @@ run = "cargo clean"
 
 [tasks.test]
 description = "Run the library contracts"
-run = "mise run //:test-rust-project -- lgtm-backend"
+run = "mise run //:test-rust-project -- lgtm-forge"
 
 [tasks.lint]
 description = "Lint with clippy (deny warnings)"
@@ -34,11 +34,11 @@ run = "cargo clippy --fix --allow-dirty --allow-staged --allow-no-vcs"
 
 [tasks.format]
 description = "Format Rust sources"
-run = "cargo fmt -p lgtm-backend"
+run = "cargo fmt -p lgtm-forge"
 
 [tasks."format:check"]
 description = "Check formatting without modifying files"
-run = "cargo fmt -p lgtm-backend --check"
+run = "cargo fmt -p lgtm-forge --check"
 
 [tasks.env-pull]
 description = "Pull external environment configuration"
@@ -55,7 +55,7 @@ run = 'echo "Private package; publication disabled"'
 [tasks.run]
 description = "Start the LGTM backend"
 depends = ["//apps/lgtm-web:generate"]
-run = "cargo run -p lgtm-backend"
+run = "cargo run -p lgtm-forge"
 
 [tasks.dev]
 description = "Watch backend and Protobuf sources and restart the server"

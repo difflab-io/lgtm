@@ -2,7 +2,7 @@
 
 ## Repo Structure
 
-- Keep backend domain models in `apps/lgtm-backend/src/models/`, services in `src/services/`, and application errors in `src/error.rs`.
+- Keep backend domain models in `apps/lgtm-forge/src/models/`, services in `src/services/`, and application errors in `src/error.rs`.
 - Put general helpers in `src/utils.rs`. Keep forge import contracts in `src/forge/models.rs` and review export behavior with its domain model. Domain models represent application entities.
 - Keep database entities private; expose actual SeaORM models and the repositories required by backend workflows. Shared SeaORM entity types belong in `libs/lgtm-db/src/entities/common.rs`.
 
@@ -19,7 +19,7 @@
 
 - During alpha, update branch-introduced contracts directly. Do not retain duplicate fields or add compatibility code for earlier versions of this branch.
 
-- Keep stateless SDK and CLI adapters in `apps/lgtm-backend/src/extensions/` (for example, `extensions/gh.rs`). Call existing library features directly and share external-tool wrappers here instead of duplicating them in services or providers. Keep domain mapping and review behavior in their existing model and service modules.
+- Keep stateless SDK and CLI adapters in `apps/lgtm-forge/src/extensions/` (for example, `extensions/gh.rs`). Call existing library features directly and share external-tool wrappers here instead of duplicating them in services or providers. Keep domain mapping and review behavior in their existing model and service modules.
 - Name mutating operations and factories with imperative verbs (for example, `promote`, not `promoted`).
 
 - Name public repository and service reads `get_*`.

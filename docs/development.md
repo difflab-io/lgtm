@@ -49,7 +49,7 @@ If you change the backend address, set the matching Vite target. If another proc
 Individual development tasks are available:
 
 ```sh
-premise run //apps/lgtm-backend:dev
+premise run //apps/lgtm-forge:dev
 premise run //apps/lgtm-web:dev
 ```
 
@@ -81,11 +81,11 @@ premise run nvim:install-released-plugin
 ```sh
 premise run build
 premise run //apps/lgtm-web:generate
-premise run //apps/lgtm-backend:build
+premise run //apps/lgtm-forge:build
 premise run //apps/lgtm-cli:bundle
 ```
 
-The shared schemas live under `apps/lgtm-backend/proto/lgtm/v1/`: `hello.proto` defines the greeting API, `review.proto` defines the hello-review API. Backend build tasks regenerate the TypeScript client inside the web app, so no separate client package is needed.
+The shared schemas live under `apps/lgtm-forge/proto/lgtm/v1/`: `hello.proto` defines the greeting API, `review.proto` defines the hello-review API. Backend build tasks regenerate the TypeScript client inside the web app, so no separate client package is needed.
 
 The backend's `build.rs` generates Rust protocol code. The CLI bundle task builds the backend and static web app. It copies backend and database sources, generated Rust protocol files and web assets into `apps/lgtm-cli/bundle`. The bundled entry point is `bundle/backend/mod.rs`.
 
@@ -111,13 +111,13 @@ premise run e2e:fixtures:test
 premise run e2e:smoke
 ```
 
-Use project task addresses such as `premise run //apps/lgtm-backend:test` for focused checks. Run full E2E only for final validation or shared-fixture changes. The reduced suites cover hello-review, CLI safety, daemon/UI and Neovim loading; offline cassette tests preserve recorder/replay behavior. See [E2E](../e2e/README.md) for recording limits and commands.
+Use project task addresses such as `premise run //apps/lgtm-forge:test` for focused checks. Run full E2E only for final validation or shared-fixture changes. The reduced suites cover hello-review, CLI safety, daemon/UI and Neovim loading; offline cassette tests preserve recorder/replay behavior. See [E2E](../e2e/README.md) for recording limits and commands.
 
 ### Database checks
 
 ```sh
 premise run //libs/lgtm-db:test
-premise run //apps/lgtm-backend:test
+premise run //apps/lgtm-forge:test
 ```
 
 The DB package is a dummy data facade, with no SQL drivers, migrations or PostgreSQL matrix. Existing user databases remain untouched and unused. Backend and DB project tasks run their current public contracts through the tracked `test-rust-project` task.

@@ -1,3 +1,3 @@
 [workspace]
-members = ["apps/lgtm-cli", "apps/lgtm-backend", "libs/lgtm-db"]
+members = ["apps/lgtm-cli", "apps/lgtm-forge", "libs/lgtm-db"]
 resolver = "3"

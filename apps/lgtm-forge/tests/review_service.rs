@@ -1,5 +1,5 @@
 //! Domain service contract with the dummy database package.
-use lgtm_backend::{database::Database, services::ReviewService};
+use lgtm_forge::{database::Database, services::ReviewService};
 
 // tests -----------------------------------------------------------------------
 

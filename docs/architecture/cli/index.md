@@ -86,12 +86,17 @@ flowchart LR
 | `down` | Stop the identified server |
 | `status [--json]` | Report discovery data |
 | `ui [--no-open] [--port PORT] [--json]` | Ensure readiness and print/open the URL |
-| `review list [--local] [--json]` | Call the real hello-review demonstration |
+| `add PATHS... [--local]` | Unimplemented |
+| `review list [--local] [--all] [--json]` | Call the real hello-review demonstration |
 | `review new [--local]` | Unimplemented |
-| `review close ID --with comment\|reject\|approve\|request [--body TEXT]` | Unimplemented |
+| `review refresh [REVIEW] [--local]` | Unimplemented |
+| `review show [REVIEW] [--local] [--group-by file\|session] [--unresolved]` | Unimplemented |
+| `review close [REVIEW] [--local] --with comment\|reject\|approve\|request [--body TEXT]` | Unimplemented |
 | `commit [--local] [--as NAME] [-m MESSAGE]` | Unimplemented |
 | `push [--local]` | Unimplemented |
-| `comment BODY [--review ID] [--local] [--as NAME]` | Unimplemented |
+| `comment new BODY [--review REVIEW] [--file PATH] [--line LINE] [--reply-to ID] [--local] [--as NAME]` | Unimplemented |
+| `comment update ID [--body TEXT] [--file PATH] [--line LINE] [--local] [--as NAME]` | Unimplemented |
+| `comment delete ID [--local] [--as NAME]` | Unimplemented |
 | `serve --daemonize` | Hidden background startup |
 
 The default port is `8080`; `0` selects an available port. `LGTM_HOME` selects the runtime directory, defaulting to `~/.lgtm`. `LGTM_RPC_URL` overrides the hello-review endpoint. Domain commands support `--json`; failures retain a nonzero exit status.

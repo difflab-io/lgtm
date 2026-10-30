@@ -117,8 +117,8 @@ lgtm [--json] review new [--local]
 lgtm [--json] review refresh [<review-id-or-name>] [--local]
 lgtm [--json] review show [<review-id-or-name>] [--local] [--group-by <file|session>] [--unresolved]
 lgtm [--json] review close [<review-id-or-name>] --with <comment|reject|approve|request> [--body <text>]
-lgtm [--json] comment new <body> [--review <review-id-or-name>] [--file <path>] [--line <line>] [--side <left|right>] [--reply-to <comment-id>] [--local] [--as <agent-name>]
-lgtm [--json] comment update <comment-id> [--body <text>] [--file <path>] [--line <line>] [--side <left|right>] [--local] [--as <agent-name>]
+lgtm [--json] comment new <body> [--review <review-id-or-name>] [--file <path>] [--line <line>] [--reply-to <comment-id>] [--local] [--as <agent-name>]
+lgtm [--json] comment update <comment-id> [--body <text>] [--file <path>] [--line <line>] [--local] [--as <agent-name>]
 lgtm [--json] comment delete <comment-id> [--local] [--as <agent-name>]
 lgtm [--json] ui [--port <port>] [--no-open]
 lgtm up [--port <port>] [--foreground] [--no-open]
@@ -131,7 +131,7 @@ lgtm [--json] status
 - If you omit the review ID or name, LGTM selects the latest review for the current branch. `lgtm review list` also shows only the current branch by default.
 - `lgtm review refresh` pulls comments and anchor updates from the remote forge, or recomputes comment anchors against the latest local snapshot when `--local` is passed.
 - `lgtm review show` prints comments for a review with their diff hunks (changed line blocks). `--group-by <file|session>` groups output by file or in time order by session (with the top-level comment of each session), and `--unresolved` keeps only open threads.
-- `lgtm comment new|update|delete` creates a comment, updates its text or anchor (`--file`, `--line`, `--side`), or deletes it by ID.
+- `lgtm comment new|update|delete` creates a comment, updates its text or anchor (`--file`, `--line`), or deletes it by ID.
 - `--as <agent-name>` records an agent identity on a commit or comment without changing your Git or forge login.
 - `--json` prints structured output on stdout and errors on stderr so tests and agents can run every command.
 
@@ -166,7 +166,7 @@ Base: a1b2c3d -> Head: 9f8e7d6 (snapshot)
 
 ══ src/services/review.rs ═══════════════════════════════════════════════
 
-── line 18 (RIGHT @ 9f8e7d6) • resolved ─────────────────────────────────
+── line 18 (@ 9f8e7d6) • resolved ───────────────────────────────────────
    17 │ pub async fn get_review(&self, id: u64) -> Result<Review> {
  + 18 │     self.repo.get_review(id).await
    19 │ }
@@ -174,7 +174,7 @@ Base: a1b2c3d -> Head: 9f8e7d6 (snapshot)
   [100] sid • session #1 (published)
     Return a domain error when the review is missing.
 
-── line 42 (RIGHT @ 9f8e7d6) • unresolved ───────────────────────────────
+── line 42 (@ 9f8e7d6) • unresolved ─────────────────────────────────────
    40 │ pub async fn close_review(&self, id: u64) -> Result<Review> {
    41 │     let review = self.repo.get_review(id).await?;
  + 42 │     self.flush_session_drafts(review.id).await?;
@@ -198,7 +198,7 @@ Base: a1b2c3d -> Head: 9f8e7d6 (snapshot)
 ══ Session #1 • sid • request • published 2026-10-30 01:40 ══════════════
   Address open comments before we wire the RPC handler.
 
-── src/services/review.rs:42 (RIGHT @ 9f8e7d6) • unresolved ─────────────
+── src/services/review.rs:42 (@ 9f8e7d6) • unresolved ───────────────────
    40 │ pub async fn close_review(&self, id: u64) -> Result<Review> {
    41 │     let review = self.repo.get_review(id).await?;
  + 42 │     self.flush_session_drafts(review.id).await?;
@@ -211,7 +211,7 @@ Base: a1b2c3d -> Head: 9f8e7d6 (snapshot)
 ══ Session #2 • claude-sonnet-4-5 (agent) • comment • draft ═════════════
   Ready for another pass.
 
-── src/services/review.rs:42 (RIGHT @ 9f8e7d6) • unresolved ─────────────
+── src/services/review.rs:42 (@ 9f8e7d6) • unresolved ───────────────────
   [102] claude-sonnet-4-5 (agent) (reply to #101)
     Wrapped flush and status update in one transaction.
 ```

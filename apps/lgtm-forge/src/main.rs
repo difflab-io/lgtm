@@ -12,7 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let address: SocketAddr = std::env::var("LGTM_BACKEND_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:8080".to_owned())
         .parse()?;
-    let (router, health) = lgtm_backend::router();
+    let (router, health) = lgtm_forge::router();
     let server = Server::bind(address).await?;
     eprintln!("LGTM backend listening on http://{}", server.local_addr()?);
     server

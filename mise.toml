@@ -49,7 +49,7 @@ alias = "dev:cli"
 run = "cargo run -p lgtm-cli --bin lgtm --"
 
 [tasks."dev:backend"]
-run = "mise run //apps/lgtm-backend:dev"
+run = "mise run //apps/lgtm-forge:dev"
 
 [tasks."dev:web"]
 run = "mise run //apps/lgtm-web:dev"
@@ -71,7 +71,7 @@ run = "cargo publish -p lgtm-cli --locked"
 
 [tasks.dev]
 description = "Run the backend watcher and web development server together"
-depends = ["//apps/lgtm-backend:dev", "//apps/lgtm-web:dev"]
+depends = ["//apps/lgtm-forge:dev", "//apps/lgtm-web:dev"]
 
 [tasks."e2e:backend"]
 description = "Run backend E2E tests"

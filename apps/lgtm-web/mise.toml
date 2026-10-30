@@ -17,7 +17,7 @@ run = "bun run clean"
 
 [tasks.test]
 description = "Run the Bun test suite against the built backend"
-depends = ["install", "//apps/lgtm-backend:build"]
+depends = ["install", "//apps/lgtm-forge:build"]
 run = "bun run test"
 
 [tasks.lint]
@@ -99,4 +99,4 @@ run = 'bunx --no-install svelte-kit sync && bunx --no-install svelte-check --tsc
 [tasks.generate]
 description = "Regenerate the web RPC client from the backend Protobuf schema"
 depends = ["install"]
-run = ["buf lint ../lgtm-backend/proto", "buf generate ../lgtm-backend/proto --template buf.gen.yaml --path ../lgtm-backend/proto/lgtm/v1/hello.proto --path ../lgtm-backend/proto/lgtm/v1/review.proto"]
+run = ["buf lint ../lgtm-forge/proto", "buf generate ../lgtm-forge/proto --template buf.gen.yaml --path ../lgtm-forge/proto/lgtm/v1/hello.proto --path ../lgtm-forge/proto/lgtm/v1/review.proto"]

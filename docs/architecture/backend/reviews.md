@@ -110,7 +110,7 @@ The message is `Hello, {name}!`; the dummy DB supplies `Hello`.
 
 #### Public review boundary
 
-HelloReview is the only domain RPC in [review.proto](../../../apps/lgtm-backend/proto/lgtm/v1/review.proto); greeting and health remain infrastructure services.
+HelloReview is the only domain RPC in [review.proto](../../../apps/lgtm-forge/proto/lgtm/v1/review.proto); greeting and health remain infrastructure services.
 
 #### Storage ownership
 

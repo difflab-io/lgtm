@@ -1,5 +1,5 @@
 [tasks.test]
-depends = ["//apps/lgtm-backend:build"]
+depends = ["//apps/lgtm-forge:build"]
 description = "Readable TypeScript backend E2E journeys"
 dir = "{{config_root}}/../.."
 run = "bun x vitest run --config e2e/backend/vitest.config.ts"
@@ -22,7 +22,7 @@ dir = "{{config_root}}/../.."
 run = "bun x vitest list --config e2e/backend/vitest.config.ts"
 
 [tasks.smoke]
-depends = ["//apps/lgtm-backend:build"]
+depends = ["//apps/lgtm-forge:build"]
 description = "Run representative backend E2E flows for local iteration"
 dir = "{{config_root}}/../.."
 run = "bun x vitest run --config e2e/backend/vitest.config.ts --tags-filter=smoke --hideSkippedTests"
