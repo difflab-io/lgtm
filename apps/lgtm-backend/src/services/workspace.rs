@@ -1,24 +1,32 @@
-//! Literal Git source reads and local repository discovery. SnapshotService owns saved review source.
+//! Literal saved-source reads and local repository discovery through gitoxide.
 use crate::error::{Result, invalid};
-use crate::extensions::git;
+use gix::bstr::ByteSlice;
 use std::path::Path;
 
-/// Check the selected index/tree without loading hidden file bodies or consulting the working file.
+/// Check the index or a committed tree without reading file bodies.
 pub fn get_source_presence(root: &Path, path: &str, commit: Option<&str>) -> Result<bool> {
     crate::models::Anchor::File { path: path.into() }.validate()?;
-    let arguments = if let Some(commit) = commit {
-        if ![40, 64].contains(&commit.len()) || !commit.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(invalid("Expected a full commit identity"));
-        }
-        vec!["ls-tree", "-z", commit, "--", path]
+    let repo = gix::open(root)?;
+    if let Some(commit) = commit {
+        let id = gix::ObjectId::from_hex(commit.as_bytes())
+            .map_err(|_| invalid("Expected a full commit identity"))?;
+        Ok(repo
+            .find_commit(id)?
+            .tree()?
+            .lookup_entry_by_path(path)?
+            .is_some())
     } else {
-        vec!["ls-files", "--stage", "-z", "--", path]
-    };
-    Ok(!git::get_bytes(root, &arguments)?.is_empty())
+        let index = repo.index_or_empty()?;
+        Ok(index
+            .entry_by_path_and_stage(
+                path.as_bytes().as_bstr(),
+                gix::index::entry::Stage::Unconflicted,
+            )
+            .is_some())
+    }
 }
 
-/// Read one saved source without changing the index, checkout, or review records.
-/// Index identity comes from stage zero, independently of the working file.
+/// Read exact saved bytes. The user's index and checkout remain untouched.
 pub fn get_source(
     root: &Path,
     path: &str,
@@ -31,71 +39,54 @@ pub fn get_source(
     };
     Anchor::File { path: path.into() }.validate()?;
     let root = root.canonicalize()?;
-    let (oid, sha) = match kind {
-        SourceKind::IndexFile => {
-            let entries = git::get_bytes(&root, &["ls-files", "--stage", "-z", "--", path])?;
-            let entries: Vec<_> = entries
-                .split(|b| *b == 0)
-                .filter(|s| !s.is_empty())
-                .collect();
-            if entries.len() != 1 {
-                return Err(invalid("Selected file requires one stage-zero index entry"));
+    let git_source = match kind {
+        SourceKind::IndexFile | SourceKind::Commit => {
+            let repo = gix::open(&root)?;
+            let id = if kind == SourceKind::IndexFile {
+                let index = repo.index_or_empty()?;
+                let entry = index
+                    .entry_by_path_and_stage(
+                        path.as_bytes().as_bstr(),
+                        gix::index::entry::Stage::Unconflicted,
+                    )
+                    .ok_or_else(|| {
+                        invalid("Selected file requires a regular stage-zero index entry")
+                    })?;
+                if !entry
+                    .mode
+                    .to_tree_entry_mode()
+                    .is_some_and(|mode| mode.is_blob())
+                {
+                    return Err(invalid("Selected source is not a regular file"));
+                }
+                entry.id
+            } else {
+                let id = gix::ObjectId::from_hex(
+                    commit
+                        .ok_or_else(|| invalid("Commit source requires its full identity"))?
+                        .as_bytes(),
+                )
+                .map_err(|_| invalid("Expected a full commit identity"))?;
+                let entry = repo
+                    .find_commit(id)?
+                    .tree()?
+                    .lookup_entry_by_path(path)?
+                    .ok_or_else(|| invalid("Selected committed file is unavailable"))?;
+                if !entry.mode().is_blob() {
+                    return Err(invalid("Selected source is not a regular file"));
+                }
+                entry.id().detach()
+            };
+            let header = repo.find_header(id)?;
+            if header.size() > 2 * 1024 * 1024 {
+                return Err(invalid("Selected source exceeds the text size limit"));
             }
-            let entry =
-                std::str::from_utf8(entries[0]).map_err(|_| invalid("Invalid index path"))?;
-            let (meta, found) = entry
-                .split_once('\t')
-                .ok_or_else(|| invalid("Invalid index entry"))?;
-            let parts: Vec<_> = meta.split_whitespace().collect();
-            if found != path
-                || parts.len() != 3
-                || parts[2] != "0"
-                || !["100644", "100755"].contains(&parts[0])
-            {
-                return Err(invalid(
-                    "Selected file requires a regular stage-zero index entry",
-                ));
-            }
-            (Some(parts[1].to_owned()), None)
+            Some((id, repo.find_blob(id)?.data.clone()))
         }
-        SourceKind::Commit => {
-            let sha = commit.ok_or_else(|| invalid("Commit source requires its full identity"))?;
-            if ![40, 64].contains(&sha.len()) || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
-                return Err(invalid("Expected a full commit identity"));
-            }
-            git::get_bytes(
-                &root,
-                &["rev-parse", "--verify", &format!("{sha}^{{commit}}")],
-            )?;
-            let entries = git::get_bytes(&root, &["ls-tree", "-z", sha, "--", path])?;
-            let entry =
-                std::str::from_utf8(&entries).map_err(|_| invalid("Invalid Git tree entry"))?;
-            let (meta, found) = entry
-                .trim_end_matches('\0')
-                .split_once('\t')
-                .ok_or_else(|| invalid("Selected committed file is unavailable"))?;
-            let parts: Vec<_> = meta.split_whitespace().collect();
-            if found != path
-                || parts.len() != 3
-                || parts[1] != "blob"
-                || !["100644", "100755"].contains(&parts[0])
-            {
-                return Err(invalid("Selected source is not a regular file"));
-            }
-            (Some(parts[2].to_owned()), Some(sha.to_owned()))
-        }
-        SourceKind::WorkingFile | SourceKind::LocalFile => (None, None),
+        _ => None,
     };
-    let bytes = if let Some(oid) = &oid {
-        let size = git::get_bytes(&root, &["cat-file", "-s", oid])?;
-        if std::str::from_utf8(&size)
-            .ok()
-            .and_then(|s| s.trim().parse::<u64>().ok())
-            .is_none_or(|n| n > 2 * 1024 * 1024)
-        {
-            return Err(invalid("Selected source exceeds the text size limit"));
-        }
-        git::get_bytes(&root, &["cat-file", "blob", oid])?
+    let (oid, bytes) = if let Some((oid, bytes)) = git_source {
+        (Some(oid), bytes)
     } else {
         let mut candidate = root.clone();
         for component in Path::new(path).components() {
@@ -114,7 +105,7 @@ pub fn get_source(
         if file.metadata()?.len() > 2 * 1024 * 1024 {
             return Err(invalid("Selected source exceeds the text size limit"));
         }
-        std::fs::read(file)?
+        (None, std::fs::read(file)?)
     };
     if bytes.contains(&0) || std::str::from_utf8(&bytes).is_err() {
         return Err(invalid("Anchor source requires UTF-8 text"));
@@ -122,11 +113,11 @@ pub fn get_source(
     let content_hash = AnchorSource::hash(&bytes);
     let source = match kind {
         SourceKind::Commit => AnchorSource::Commit {
-            sha: sha.unwrap(),
+            sha: commit.unwrap().into(),
             content_hash,
         },
         SourceKind::IndexFile => AnchorSource::IndexFile {
-            blob_oid: oid.unwrap(),
+            blob_oid: oid.unwrap().to_string(),
             content_hash,
         },
         SourceKind::WorkingFile => AnchorSource::WorkingFile { content_hash },
@@ -143,43 +134,30 @@ pub async fn get_git_repository(path: &str) -> Result<(String, String, Option<St
     if !path.is_dir() {
         return Err(invalid("Local Git target requires a directory"));
     }
-    let read = |args: Vec<&str>| {
-        let mut cmd = tokio::process::Command::new("git");
-        cmd.arg("-C")
-            .arg(&path)
-            .args(args)
-            .env("GIT_OPTIONAL_LOCKS", "0")
-            .kill_on_drop(true);
-        cmd
-    };
-    let output = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        read(vec!["rev-parse", "--show-toplevel", "--absolute-git-dir"]).output(),
-    )
+    tokio::task::spawn_blocking(move || {
+        let repo = gix::discover(&path)?;
+        let root = repo
+            .workdir()
+            .ok_or_else(|| invalid("Target is not an available Git working tree"))?
+            .canonicalize()?;
+        let git_dir = repo.git_dir().canonicalize()?;
+        let branch = repo
+            .head_name()?
+            .map(|name| {
+                name.as_bstr()
+                    .to_str()
+                    .map(str::to_owned)
+                    .map_err(|_| invalid("Git branch is not UTF-8"))
+            })
+            .transpose()?;
+        Ok((
+            root.to_string_lossy().into_owned(),
+            git_dir.to_string_lossy().into_owned(),
+            branch,
+        ))
+    })
     .await
-    .map_err(|_| invalid("Git location lookup timed out"))??;
-    if !output.status.success() {
-        return Err(invalid("Target is not an available Git working tree"));
-    }
-    let values: Vec<_> = std::str::from_utf8(&output.stdout)
-        .map_err(|_| invalid("Git location is not UTF-8"))?
-        .lines()
-        .map(str::to_owned)
-        .collect();
-    if values.len() != 2 {
-        return Err(invalid("Git location metadata is incomplete"));
-    }
-    let branch = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        read(vec!["symbolic-ref", "-q", "HEAD"]).output(),
-    )
-    .await
-    .map_err(|_| invalid("Git branch lookup timed out"))??;
-    let branch = branch
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&branch.stdout).trim().to_owned());
-    Ok((values[0].clone(), values[1].clone(), branch))
+    .map_err(|_| invalid("Git location lookup failed"))?
 }
 
 pub async fn get_git_location(path: &str) -> Result<(String, String, String)> {

@@ -533,6 +533,64 @@ describe('When there are changes during a PR review', () => {
     expect(thread.forgeObservation.current.start).toBe(change === 'shifted' ? '3' : '2')
   })
 
+  it.each([
+    { kind: 'file', change: 'another file' },
+    { kind: 'file', change: 'the commented file' },
+    { kind: 'line', change: 'another file' },
+  ])(
+    'Syncs an unsent $kind comment from an earlier snapshot when $change changes',
+    async ({ kind, change }) => {
+      // Arrange
+      const { runtime, github } = fixture()
+      const { scope, anchor, review } = await prepareReview(runtime, github)
+      const original =
+        kind === 'line'
+          ? anchor
+          : { kind: 'file', path: github.path, snapshotId: review.snapshot.id }
+      await github.changeFiles(
+        change === 'another file'
+          ? { [`${github.run}-other.txt`]: 'unrelated source changes\n' }
+          : { [github.path]: 'replacement file content\n' },
+      )
+
+      // Act
+      const saved = await saveDraft(runtime, scope, 'Keep feedback across a push', original)
+      const current = (await runtime.rpc('GetReview', { reviewId: review.id })).review
+      const remote = await readPendingComment(
+        runtime,
+        github,
+        review.id,
+        saved.comment.forgeCommentId,
+      )
+      const conversation = await runtime.rpc('GetConversation', {
+        scope,
+        snapshotId: current.snapshot.id,
+      })
+      const thread = conversation.threads.find(
+        (thread: Json) => thread.id === saved.comment.threadId,
+      )
+
+      // Assert
+      expect(saved.syncError).toBeFalsy()
+      expect(thread.displayStatus).toBe('exact')
+      expect(current.id).toBe(review.id)
+      expect(current.snapshot.id).not.toBe(review.snapshot.id)
+      expect(remote.body).toContain('Keep feedback across a push')
+      expect(remote.original_commit_id).toBe(github.head)
+      expect(thread.anchor).toMatchObject({
+        kind,
+        path: github.path,
+        snapshotId: review.snapshot.id,
+      })
+      if (kind === 'line') {
+        expect(thread.anchor.start).toBe('2')
+        expect(remote.thread.line).toBe(2)
+      } else {
+        expect(remote.thread.subjectType).toBe('FILE')
+      }
+    },
+  )
+
   it('Saving an old selection after an unseen push retains it locally without relocating it', async () => {
     // Arrange
     const { runtime, github } = fixture()
@@ -545,7 +603,7 @@ describe('When there are changes during a PR review', () => {
     const conversation = await runtime.rpc('GetConversation', { scope })
 
     // Assert
-    expect(saved.syncError).toMatch(/historical|revision|snapshot/i)
+    expect(saved.syncError).toMatch(/changed source bytes/i)
     expect(saved.comment.body).toBe('Continue without a manual refresh')
     expect(saved.comment.forgeCommentId).toBeFalsy()
     expect(current.id).toBe(review.id)

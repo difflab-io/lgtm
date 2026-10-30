@@ -76,13 +76,13 @@ $LGTM_HOME/snapshots/<repository-id>/.git/
     └── head
 ```
 
-Imported commits keep their hashes. Clean working and staged captures reuse HEAD when their trees match it. Changed saved files and index content use synthetic commits. Capture uses a separate index and does not change the user's branch, index or files. Retained refs keep historical objects available.
+Imported commits keep their hashes. Clean working and staged captures reuse HEAD when their trees match it. Changed saved files and index content use synthetic commits. Gitoxide reads the source index or saved files and writes trees directly into LGTM's repository. Capture does not change the user's branch, index, files or `git status` output. Retained refs keep historical objects available.
 
 The same normalized origin produces the same repository ID for local and forge reviews. A matching commit hash identifies shared source; it does not automatically merge their conversations.
 
 ## Implementation
 
-`services/snapshot.rs` owns capture and refs. `services/diff.rs` owns descriptors and selected-file reads. `services/review.rs` persists revision metadata and validates comment ranges. RPC handlers select these workflows and convert transport data.
+`extensions/git.rs` provides typed Gitoxide operations for fetching commits, reading the index and writing trees. It does not parse Git command output. Gitoxide is a Rust dependency, so users do not install a Gitoxide executable. Existing Git and GitHub authentication requirements remain unchanged. `services/snapshot.rs` owns capture and refs. `services/diff.rs` owns descriptors and selected-file reads. `services/review.rs` persists revision metadata and validates comment ranges. RPC handlers select these workflows and convert transport data.
 
 ### Acceptance flows
 

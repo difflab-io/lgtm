@@ -65,7 +65,7 @@ sequenceDiagram
   UI->>Data: Create selected review
   Data->>Backend: StartReview
   Backend->>Snapshots: Capture saved selection
-  Snapshots->>Git: Import commits or write saved bytes with isolated index
+  Snapshots->>Git: Use Gitoxide to import commits or write saved bytes
   Snapshots-->>Backend: Revision ID, store, base and head
   Backend-->>Data: Session and saved revision
   Data-->>UI: Reactive records
@@ -101,8 +101,13 @@ flowchart LR
   Data --> View[CodeDiff opens new saved commits]
   Data --> Composer[Open composer retains body and original revision]
   Draft[Draft from an older revision] --> Sync[Try forge synchronization]
-  Sync --> Accepted[Provider accepts original location]
-  Sync --> Local[Unsupported location: keep this draft locally with sync error]
+  Sync --> Kind{Comment location}
+  Kind -->|File| Accepted[Send file path to provider]
+  Kind -->|Line| Bytes{Original and current file bytes match?}
+  Bytes -->|Yes| AcceptedLine[Send unchanged line coordinates]
+  Bytes -->|No| Local[Keep draft locally with sync error]
+  Accepted --> Observed[Import provider-confirmed display location]
+  AcceptedLine --> Observed
 ```
 
 ### Interfaces and Contracts
@@ -135,7 +140,7 @@ $LGTM_HOME/
 
 CodeDiff reads the managed Git store when backend and editor share a filesystem. For a remote backend, diff_service reads saved file content through RPC and the adapter creates read-only local display buffers.
 
-Git stores complete source objects. The database stores revision metadata and conversation records. Imported commits keep their original hashes. Working and directory snapshots use synthetic commits when saved content differs. Index capture uses staged bytes. No capture includes unsaved editor changes.
+Gitoxide writes complete source objects into LGTM's separate repository. Capture leaves the user's branch, index, files and `git status` output unchanged. The database stores revision metadata and conversation records. Imported commits keep their original hashes. Working and directory snapshots use synthetic commits when saved content differs. Index capture uses staged bytes. No capture includes unsaved editor changes.
 
 ### Lua modules and public keys
 

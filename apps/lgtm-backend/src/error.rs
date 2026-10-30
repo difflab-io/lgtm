@@ -16,6 +16,8 @@ pub enum Error {
     #[error(transparent)]
     Json(#[from] serde_json::Error),
     #[error(transparent)]
+    Git(#[from] gix::Error),
+    #[error(transparent)]
     Io(#[from] std::io::Error),
 }
 

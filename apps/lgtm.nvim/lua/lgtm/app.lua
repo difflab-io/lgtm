@@ -100,10 +100,10 @@ function M.open(state, on_loaded)
     notice.error("File is outside this diff. Its discussion is retained in :Lgtm threads.")
   end
   if not state.snapshot then
-    notice.error(
-      "Saved review has no retained source. Use :Lgtm threads or export, or start a new review."
-    )
     if not state.initializing and not state.load_error then
+      notice.error(
+        "Saved review has no retained source. Use :Lgtm threads or export, or start a new review."
+      )
       state.refresh(on_loaded)
     end
     return
@@ -265,6 +265,9 @@ function M.sync()
         pending
       )
     end
+    if not state.render_ready then
+      M.refresh_view(state)
+    end
   end)
 end
 
@@ -327,6 +330,9 @@ function M.comment(kind, range)
           )
         end
         done(save_error)
+        if not save_error and not state.render_ready then
+          M.refresh_view(state)
+        end
       end)
     end)
   end

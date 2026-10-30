@@ -369,7 +369,7 @@ The backend validates new ranges against a retained snapshot. A comment keeps it
 
 GitHub supplies current coordinates and outdated status for forge threads. Those observations apply only to the matching PR commits. Original coordinates remain unchanged. Historical local discussions open their original retained revision, including files that disappeared from the current diff.
 
-A private draft created on an earlier revision stays local when GitHub cannot attach its original coordinates to the current pending review. The save response reports that synchronization error and retains its body. Existing remote drafts keep their forge identity; PR pushes preserve the session, pending review and composers.
+File drafts from earlier revisions can synchronize by path. Line drafts can synchronize when the entire file retains its original bytes. If the file bytes change, the draft stays local without relocating its original coordinates. The save response reports that synchronization error and retains its body. Existing remote drafts keep their forge identity; PR pushes preserve the session, pending review and composers.
 
 #### Response contracts
 

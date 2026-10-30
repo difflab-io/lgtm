@@ -1,14 +1,28 @@
 mod common;
 use lgtm_backend::{
-    extensions::git,
     models::{ReviewComparison, ReviewTarget},
     services::SnapshotService,
 };
 use std::path::Path;
 
 // fixtures --------------------------------------------------------------------
+fn get_bytes(root: &Path, args: &[&str]) -> std::io::Result<Vec<u8>> {
+    let output = std::process::Command::new("git")
+        .arg("--literal-pathspecs")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()?;
+    if !output.status.success() {
+        return Err(std::io::Error::other(
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        ));
+    }
+    Ok(output.stdout)
+}
+
 fn command(root: &Path, args: &[&str]) -> String {
-    String::from_utf8(git::run(root, args, &[], None).unwrap())
+    String::from_utf8(get_bytes(root, args).unwrap())
         .unwrap()
         .trim()
         .into()
@@ -343,14 +357,14 @@ async fn should_preserve_literal_saved_bytes_and_deleted_files_despite_git_attri
         )
         .await
         .unwrap();
-    let saved = git::get_bytes(
+    let saved = get_bytes(
         Path::new(&snapshot.root),
         &["show", &format!("{}:{path}", snapshot.head_commit)],
     )
     .unwrap();
     assert_eq!(saved, bytes);
     assert!(
-        git::get_bytes(
+        get_bytes(
             Path::new(&snapshot.root),
             &[
                 "cat-file",

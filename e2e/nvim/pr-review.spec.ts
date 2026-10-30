@@ -530,6 +530,44 @@ for (const profile of profiles) {
   describe(`When the PR changes during review [${profile}]`, { tags: [profile] }, () => {
     const fixture = usePrEditor(profile)
 
+    it('Saving a file comment after a push keeps its original snapshot and shows the synced card', async () => {
+      // Arrange
+      const { editor, github } = fixture()
+      await selectBranchPr(editor, github)
+      await editor.pane('new', 2)
+      await editor.command('Lgtm comment file')
+      const original = (await editor.state())!
+      await github.changeFiles({ [`${github.run}-other.txt`]: 'unrelated committed change\n' })
+
+      // Act
+      await editor.compose('Whole-file feedback survives a push')
+      await editor.wait(
+        `require("lgtm.services.state").current.head == "${github.head}" and require("lgtm.services.state").current.render_ready`,
+        'updated review ready',
+      )
+      await editor.show(github.path)
+      const saved = (await editor.comments(1))!
+      const pending = await github.api(
+        `repos/${github.repository}/pulls/${github.number}/reviews/${saved.review.forgeReviewId}/comments`,
+      )
+
+      // Assert
+      expect(saved.review.id).toBe(original.review.id)
+      expect(saved.conversation.threads[0].anchor).toMatchObject({
+        kind: 'file',
+        snapshotId: original.snapshot.id,
+      })
+      expect(saved.conversation.comments[0].forgeCommentId).toBeTruthy()
+      expect(pending).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            body: expect.stringContaining('Whole-file feedback survives a push'),
+          }),
+        ]),
+      )
+      expect(JSON.stringify(await editor.marks())).toContain('Whole-file feedback')
+    })
+
     it('Refresh displays the new commit and retains the pending review and comment card', async () => {
       // Arrange
       const { editor, github } = fixture()

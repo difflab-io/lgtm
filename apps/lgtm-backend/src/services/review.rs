@@ -143,11 +143,11 @@ impl ReviewService {
                     .iter()
                     .chain(review.session.commits.head.iter())
                     .all(|commit| {
-                        crate::extensions::git::get_bytes(
-                            std::path::Path::new(path),
-                            &["cat-file", "-e", &format!("{commit}^{{commit}}")],
-                        )
-                        .is_ok()
+                        gix::open(path).ok().is_some_and(|repo| {
+                            gix::ObjectId::from_hex(commit.as_bytes())
+                                .ok()
+                                .is_some_and(|id| repo.find_commit(id).is_ok())
+                        })
                     });
                 if commits_available {
                     target = ReviewTarget::LocalGit {

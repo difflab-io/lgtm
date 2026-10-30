@@ -1,5 +1,5 @@
 //! Content comparisons and selected-file reads. This service has no review database handle.
-use crate::extensions::gh;
+use crate::extensions::{gh, git};
 use crate::forge::ForgeClient;
 use crate::{
     error::{Error, Result, invalid},
@@ -10,6 +10,7 @@ use crate::{
         ReviewTarget,
     },
 };
+use gix::bstr::ByteSlice;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -258,16 +259,9 @@ impl DiffService {
                         | ReviewComparison::Staged { .. }
                         | ReviewComparison::Branch { .. }),
                     ) => value,
-                    None => {
-                        let head = Self::get_git_bytes(
-                            Path::new(&root),
-                            &["rev-parse", "--verify", "HEAD^{commit}"],
-                        )
-                        .await?;
-                        ReviewComparison::Working {
-                            base_commit: String::from_utf8_lossy(&head).trim().into(),
-                        }
-                    }
+                    None => ReviewComparison::Working {
+                        base_commit: gix::open(&root)?.head_id()?.to_string(),
+                    },
                     _ => {
                         return Err(invalid(
                             "Local Git target requires working, staged, or branch content",
@@ -539,95 +533,131 @@ impl DiffService {
             .await
             .map_err(|_| invalid("Directory metadata read failed"))?;
         }
-        let mut args = vec!["diff", "--no-ext-diff", "--raw", "--no-abbrev", "-z", "-M"];
-        match &diff.comparison {
-            ReviewComparison::Working { base_commit } => args.push(base_commit),
-            ReviewComparison::Staged { base_commit } => {
-                args.push("--cached");
-                args.push(base_commit);
-            }
-            ReviewComparison::Branch {
-                base_commit,
-                head_commit,
-            } => {
-                args.push(base_commit);
-                args.push(head_commit);
-            }
-            _ => return Err(invalid("Unsupported local comparison")),
-        }
-        args.push("--");
-        let raw = Self::get_git_bytes(&root, &args).await?;
-        let mut parts = raw.split(|b| *b == 0).filter(|part| !part.is_empty());
-        let mut files = Vec::new();
-        while let Some(header) = parts.next() {
-            let header =
-                std::str::from_utf8(header).map_err(|_| invalid("Git metadata is not UTF-8"))?;
-            let fields: Vec<_> = header.split_whitespace().collect();
-            if fields.len() != 5 || !fields[0].starts_with(':') {
-                return Err(invalid("Incomplete Git file metadata"));
-            }
-            let first =
-                std::str::from_utf8(parts.next().ok_or_else(|| invalid("Git path missing"))?)
-                    .map_err(|_| invalid("Git path is not UTF-8"))?;
-            let (path, previous_path) = if fields[4].starts_with('R') || fields[4].starts_with('C')
-            {
-                (
-                    std::str::from_utf8(
-                        parts
-                            .next()
-                            .ok_or_else(|| invalid("Git destination path missing"))?,
-                    )
-                    .map_err(|_| invalid("Git path is not UTF-8"))?,
-                    first,
-                )
-            } else {
-                (first, "")
+        let comparison = diff.comparison.clone();
+        tokio::task::spawn_blocking(move || {
+            use gix::object::tree::diff::{Action, ChangeDetached};
+            let repo = gix::open(&root)?.with_object_memory();
+            let base = match &comparison {
+                ReviewComparison::Working { base_commit }
+                | ReviewComparison::Staged { base_commit }
+                | ReviewComparison::Branch { base_commit, .. } => base_commit,
+                _ => return Err(invalid("Unsupported local comparison")),
             };
-            Anchor::File { path: path.into() }.validate()?;
-            let status = match fields[4].as_bytes()[0] {
-                b'A' => "added",
-                b'D' => "deleted",
-                b'R' => "renamed",
-                b'C' => "copied",
-                b'T' => "type_changed",
-                b'U' => "unmerged",
-                _ => "modified",
+            let id = gix::ObjectId::from_hex(base.as_bytes())
+                .map_err(|_| invalid("Expected a full commit identity"))?;
+            let old = repo.find_commit(id)?.tree()?;
+            let new = match &comparison {
+                ReviewComparison::Branch { head_commit, .. } => repo
+                    .find_commit(
+                        gix::ObjectId::from_hex(head_commit.as_bytes())
+                            .map_err(|_| invalid("Expected a full commit identity"))?,
+                    )?
+                    .tree()?,
+                ReviewComparison::Staged { .. } => {
+                    repo.find_tree(git::write_index_tree(&repo, &repo)?)?
+                }
+                ReviewComparison::Working { .. } => repo.find_tree(git::write_files(
+                    &repo,
+                    &root,
+                    git::get_worktree_paths(&repo)?,
+                )?)?,
+                _ => return Err(invalid("Unsupported local comparison")),
             };
-            let stamp = if matches!(diff.comparison, ReviewComparison::Working { .. }) {
-                Self::get_file_stamp(&root.join(path))?
-            } else {
-                String::new()
-            };
-            files.push(DiffFile {
-                path: path.into(),
-                previous_path: previous_path.into(),
-                status: status.into(),
-                identity: format!("{}:{}:{stamp}", fields[2], fields[3]),
-            });
-            if files.len() > 5000 {
-                return Err(invalid("Diff exceeds 5000 files"));
-            }
-        }
-        if matches!(diff.comparison, ReviewComparison::Working { .. }) {
-            let untracked =
-                Self::get_git_bytes(&root, &["ls-files", "--others", "--exclude-standard", "-z"])
-                    .await?;
-            for path in untracked.split(|b| *b == 0).filter(|p| !p.is_empty()) {
-                let path =
-                    std::str::from_utf8(path).map_err(|_| invalid("Git path is not UTF-8"))?;
+            let mut changes = Vec::new();
+            old.changes()?.for_each_to_obtain_tree(&new, |change| {
+                changes.push(change.detach());
+                Ok(Action::Continue(()))
+            })?;
+            let null = gix::ObjectId::null(repo.object_hash());
+            let mut files = Vec::new();
+            for change in changes {
+                let (path, previous, status, old_id, new_id, mode) = match change {
+                    ChangeDetached::Addition {
+                        location,
+                        id,
+                        entry_mode,
+                        ..
+                    } => (location, Default::default(), "added", null, id, entry_mode),
+                    ChangeDetached::Deletion {
+                        location,
+                        id,
+                        entry_mode,
+                        ..
+                    } => (
+                        location,
+                        Default::default(),
+                        "deleted",
+                        id,
+                        null,
+                        entry_mode,
+                    ),
+                    ChangeDetached::Modification {
+                        location,
+                        previous_id,
+                        id,
+                        entry_mode,
+                        previous_entry_mode,
+                        ..
+                    } => (
+                        location,
+                        Default::default(),
+                        if entry_mode.kind() != previous_entry_mode.kind() {
+                            "type_changed"
+                        } else {
+                            "modified"
+                        },
+                        previous_id,
+                        id,
+                        entry_mode,
+                    ),
+                    ChangeDetached::Rewrite {
+                        source_location,
+                        source_id,
+                        location,
+                        id,
+                        copy,
+                        entry_mode,
+                        ..
+                    } => (
+                        location,
+                        source_location,
+                        if copy { "copied" } else { "renamed" },
+                        source_id,
+                        id,
+                        entry_mode,
+                    ),
+                };
+                if mode.is_tree() {
+                    continue;
+                }
+                let path = path
+                    .to_str()
+                    .map_err(|_| invalid("Git path is not UTF-8"))?
+                    .to_owned();
+                Anchor::File { path: path.clone() }.validate()?;
+                let stamp = if matches!(comparison, ReviewComparison::Working { .. }) {
+                    Self::get_file_stamp(&root.join(&path))?
+                } else {
+                    String::new()
+                };
                 files.push(DiffFile {
-                    path: path.into(),
-                    previous_path: String::new(),
-                    status: "added".into(),
-                    identity: Self::get_file_stamp(&root.join(path))?,
+                    path,
+                    previous_path: previous
+                        .to_str()
+                        .map_err(|_| invalid("Git path is not UTF-8"))?
+                        .to_owned(),
+                    status: status.into(),
+                    identity: format!("{old_id}:{new_id}:{stamp}"),
                 });
                 if files.len() > 5000 {
                     return Err(invalid("Diff exceeds 5000 files"));
                 }
             }
-        }
-        files.sort_by(|a, b| a.path.cmp(&b.path));
-        Ok(files)
+            files.sort_by(|a, b| a.path.cmp(&b.path));
+            Ok(files)
+        })
+        .await
+        .map_err(|_| invalid("Git comparison metadata read failed"))?
     }
 
     fn get_observation_token(diff: &DiffComparison, files: &[DiffFile]) -> Result<String> {
@@ -691,28 +721,5 @@ impl DiffService {
             });
         }
         Ok(())
-    }
-
-    async fn get_git_bytes(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
-        let output = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            tokio::process::Command::new("git")
-                .arg("--literal-pathspecs")
-                .arg("-C")
-                .arg(root)
-                .args(args)
-                .env("GIT_OPTIONAL_LOCKS", "0")
-                .kill_on_drop(true)
-                .output(),
-        )
-        .await
-        .map_err(|_| invalid("Git content metadata timed out"))??;
-        if !output.status.success() {
-            return Err(invalid("Git comparison metadata is unavailable"));
-        }
-        if output.stdout.len() > 16 * 1024 * 1024 {
-            return Err(invalid("Git metadata exceeds the bounded response limit"));
-        }
-        Ok(output.stdout)
     }
 }

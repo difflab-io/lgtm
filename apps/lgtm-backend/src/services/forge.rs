@@ -516,6 +516,14 @@ impl ForgeService {
         if matches!(thread.anchor, Anchor::General) {
             return Ok(comment);
         }
+        let source_changed = comment.position == 0
+            && thread.evidence.as_ref().is_some_and(|evidence| {
+                matches!(&evidence.source, crate::models::AnchorSource::Commit { sha, .. }
+                if Some(sha) != match &thread.anchor {
+                    Anchor::Line { side, .. } if side == "old" => session.commits.base.as_ref(),
+                    _ => session.commits.head.as_ref(),
+                })
+            });
         let payload = if comment.forge_comment_id.is_none()
             && !["sending", "uncertain"].contains(&comment.posting.state().as_str())
         {
@@ -660,6 +668,9 @@ impl ForgeService {
                 }
                 return Err(error);
             }
+        }
+        if source_changed && let Err(error) = self.refresh_context(&context.id, None).await {
+            tracing::warn!(%error, "Draft saved remotely; provider locations need a refresh");
         }
         self.reviews.get_comment(&context.id, comment_id).await
     }
@@ -1591,15 +1602,29 @@ impl ForgeService {
                 .iter()
                 .find(|t| t.id == comment.thread_id)
                 .ok_or_else(|| invalid("Draft thread missing"))?;
-            if let Some(evidence) = &thread.evidence
+            if let Anchor::Line { side, .. } = &thread.anchor
+                && let Some(evidence) = &thread.evidence
                 && let crate::models::AnchorSource::Commit { sha, .. } = &evidence.source
             {
-                let selected = match &thread.anchor {
-                    Anchor::Line { side, .. } if side == "old" => session.commits.base.as_ref(),
-                    _ => session.commits.head.as_ref(),
+                let selected = if side == "old" {
+                    session.commits.base.as_ref()
+                } else {
+                    session.commits.head.as_ref()
                 };
                 if selected != Some(sha) {
-                    return Err(Error::Conflict("Draft belongs to an earlier saved revision and remains local; GitHub cannot attach its original coordinates to this pending review".into()));
+                    let review = self.reviews.prepare_review(&session.id).await?;
+                    let snapshot = review
+                        .snapshot
+                        .ok_or_else(|| invalid("Review has no saved revision"))?;
+                    let current = self
+                        .reviews
+                        .get_snapshot_location(&session.id, &snapshot.id, &thread.anchor)
+                        .await?;
+                    if current.source.content_hash() != evidence.source.content_hash() {
+                        return Err(Error::Conflict(
+                            "Line draft belongs to changed source bytes and remains local; its original coordinates were not relocated".into(),
+                        ));
+                    }
                 }
             }
         }
