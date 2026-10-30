@@ -50,11 +50,6 @@ return {
     name = "lgtm",
     main = "lgtm",
     lazy = false,
-    dependencies = {
-      { "esmuellert/codediff.nvim", commit = "09d9ebef2cc5a5c04db7a349cd6c61bdf84ecc8e", opts = {} },
-      { "folke/which-key.nvim", commit = "3aab2147e74890957785941f0c1ad87d0a44c15a", opts = {} },
-      { "rcarriga/nvim-notify", commit = "8701bece920b38ea289b457f902e2ad184131a5d", opts = {} },
-    },
     opts = %s,
 %s
   },
@@ -72,7 +67,7 @@ if vim.uv.fs_lstat(previous) then
   assert(vim.uv.fs_unlink(previous))
 end
 print("LGTM plugin: " .. target .. " -> " .. (released and "difflab-io/lgtm (main)" or plugin_dir))
-print("Restart Neovim to use the selected plugin. Configure opts.identity if needed.")
+print("Restart Neovim to use the selected plugin.")
 LUA
 
 # Fetch main even when Lazy already has an older checkout or lockfile entry.
