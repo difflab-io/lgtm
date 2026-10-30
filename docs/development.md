@@ -85,18 +85,9 @@ All runtime files live in `~/.lgtm`. The store module owns runtime paths and the
 
 The database library provides persistent contexts, sessions and comments. See the [database architecture](architecture/db/index.md) and [CLI examples](../apps/lgtm-cli/README.md). SeaORM 2.0.4 uses SQLite by default and optional PostgreSQL. The server opens `LGTM_HOME/reviews.sqlite` or `LGTM_DATABASE_URL`; status and review clients do not open a database. The browser remains a demonstration UI. It does not yet implement review workflows.
 
-### Neovim connection
+### Neovim shell
 
-The plugin can start the shared server and discover its addresses without opening a browser:
-
-```sh
-lgtm up --no-open
-lgtm status --json
-```
-
-The discovery response contains `running`, `pid`, `ui_url`, `server_url`, and `rpc_url`. When the server is stopped, it returns `{"running":false}`. `/health` confirms that the shared UI/API server is ready.
-
-Use Neovim's `vim.system` to run these commands asynchronously. Call backend methods through the discovered `rpc_url` using Connect JSON. The standalone backend uses its listen URL without the bundled server’s `/rpc` prefix. The web interface and plugin then use the same backend instead of separate servers.
+The Neovim plugin retains loading entry points and E2E machinery while its UI and business logic are rewritten. It currently makes no backend calls. See the [plugin README](../apps/lgtm.nvim/README.md) for shell setup and the [E2E guide](../e2e/README.md) for real-editor command and lifecycle fixtures.
 
 The `path` query parameter selects a directory in the browser. It does not grant file access or create a review. The backend exposes identity, review and diff APIs as well as greeting and health services.
 

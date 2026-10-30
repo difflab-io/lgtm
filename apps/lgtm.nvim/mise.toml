@@ -3,10 +3,12 @@ stylua = "2.1.0"
 neovim = "0.12.5"
 
 [tasks.test]
+depends = ["//e2e/nvim:install"]
 description = "Plugin syntax and public contract checks"
 run = "nvim --headless -u NONE -l {{config_root}}/tests/contracts.lua"
 
 [tasks.lint]
+depends = ["//e2e/nvim:install"]
 run = "nvim --headless -u NONE -l {{config_root}}/tests/contracts.lua"
 
 [tasks.format]

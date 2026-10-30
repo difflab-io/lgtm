@@ -6,7 +6,7 @@ Backend, CLI and Neovim journeys use TypeScript and Vitest. Each suite has its o
 | --- | --- | --- | --- |
 | Backend | [Notes](backend/notes.spec.ts), [local reviews](backend/local-review.spec.ts), [PR reviews](backend/pr-review.spec.ts), [diff data](backend/diffs.spec.ts) | Standalone backend and Connect JSON | `premise run e2e:backend` |
 | CLI | [Notes](cli/notes.spec.ts), [local reviews](cli/local-review.spec.ts), [PR reviews](cli/pr-review.spec.ts) | CLI commands and bundled backend | `premise run e2e:cli` |
-| Neovim | [Notes](nvim/notes.spec.ts), [local reviews](nvim/local-review.spec.ts), [PR reviews](nvim/pr-review.spec.ts), [CodeDiff](nvim/diffs.spec.ts), [editor services](nvim/editor.spec.ts) | Editor, keys, modals, CodeDiff and backend | `premise run e2e:nvim` |
+| Neovim | [Plugin shell](nvim/editor.spec.ts) | Real editor startup, Lua, Ex commands, keys, diagnostics and package help | `premise run e2e:nvim` |
 
 Native Vitest `describe` groups name states, such as `When resuming an existing draft review`. Each `it` names one visible behavior. Suite and feature names come from Vitest tags. Plain `// Arrange`, `// Act` and `// Assert` comments separate setup, actions and assertions. Tests use Vitest directly, without custom test aliases or step runners.
 
@@ -48,18 +48,13 @@ e2e/
 │   ├── vitest.config.ts
 │   └── mise.toml
 ├── nvim/
-│   ├── notes.spec.ts
-│   ├── local-review.spec.ts
-│   ├── pr-review.spec.ts
-│   ├── diffs.spec.ts
-│   ├── dependencies.ts
 │   ├── editor.spec.ts
-│   ├── assertions.ts
 │   ├── editor.ts
 │   ├── fixtures.ts
-│   ├── local-review.fixtures.ts
 │   ├── pr-review.fixtures.ts
+│   ├── profiles.ts
 │   ├── init.lua
+│   ├── dependencies.ts
 │   ├── install.ts
 │   ├── dependencies.lock.json
 │   ├── vitest.config.ts
@@ -67,13 +62,13 @@ e2e/
 └── tsconfig.json
 ```
 
-The editor profiles pin CodeDiff, WhichKey and nvim-notify. The second profile adds Kak with compatible keys; Kak remains optional for users. Runs use only the required profile by default. Set `LGTM_E2E_NVIM_PROFILES=required,kak` to include Kak, or `kak` to run it alone. Both use native CodeDiff views and fresh databases. Lua contains editor runtime setup. TypeScript owns the scenarios, input, assertions and process lifecycle.
+The required editor profile loads the plugin shell with pinned NuiComponents/NUI, CodeDiff, WhichKey and nvim-notify dependencies retained for the rewrite. The optional `kak` profile adds pinned Kak keybindings. Runs use only the required profile by default. Set `LGTM_E2E_NVIM_PROFILES=required,kak` to include Kak, or `kak` to run it alone. Lua contains editor runtime setup. TypeScript owns scenarios, command execution, input, assertions and process lifecycle. The shared runtime still starts a real CLI/backend with a fresh database, while the plugin shell makes no backend calls.
 
 `common/` owns processes, credentials, GitHub resources and test configuration. Backend fixtures construct API states. Neovim fixtures perform editor actions. Large feature setups live beside their spec as `*.fixtures.ts`. Small setups used by one file stay private in that file. Tests keep the actions and assertions that describe the behavior under test.
 
 Fixture hooks compose in stack order. Setup creates the PR, starts the backend, then opens the editor. Cleanup closes the editor, stops the backend, resets the PR, then removes the group’s refs. The local and PR editor fixtures share the same editor lifecycle.
 
-Failed runs retain their workspace, database and logs under `target/e2e/`. Editor failure logs also include the rendered screen and window viewports so card visibility failures can be diagnosed from CI output. Successful runs remove temporary local state. Fixture hooks stop processes after each case. Waits, subprocesses and RPC requests have deadlines.
+Failed runs retain their workspace, database and logs under `target/e2e/`. Editor failure logs also include the rendered screen and window viewports to diagnose editor failures from CI output. Successful runs remove temporary local state. Fixture hooks stop processes after each case. Waits, subprocesses and RPC requests have deadlines.
 
 ## Run and inspect
 
@@ -89,7 +84,7 @@ premise run e2e:format:check
 The `e2e` task builds the binaries before it runs the suites. After a build, use the `:run` tasks for focused tests. Select a feature file and profile with native Vitest arguments:
 
 ```sh
-premise run e2e:nvim:run -- diffs.spec.ts --tags-filter=required
+premise run e2e:nvim:run -- editor.spec.ts --tags-filter=required
 premise run e2e:backend:run -- pr-review.spec.ts -t "When resuming"
 ```
 
@@ -102,7 +97,7 @@ premise run //e2e/nvim:smoke
 premise run e2e:nvim:run -- --tags-filter=smoke
 ```
 
-The smoke selection has 11 cases: four backend, three CLI and four Neovim cases. It covers notes, local reviews, diff data and native CodeDiff, plus remote draft creation through each public boundary. The editor smoke cases use the required dependency profile; extended runs also cover Kak. These are the same tests used by the full suite. PR cases use the selected GitHub provider and clean up their run-owned PRs and refs. The smoke tasks build changed binaries and install missing editor dependencies; the `:run` example uses existing binaries.
+The default smoke selection has nine cases: four backend, three CLI and two Neovim shell cases. Backend and CLI cases cover notes, local reviews, diff data and remote drafts. Neovim smoke checks shell startup and Lua, Ex command and key control. Editor smoke uses the required profile by default. These are the same tests used by the full suite. PR cases use the selected GitHub provider and clean up their run-owned PRs and refs. The smoke tasks build changed binaries and install selected editor dependencies; the `:run` example uses existing binaries.
 
 Run focused tests during development. Use a file, test name or tag to select cases. Use `e2e:smoke` for a quick check across features. Run all tests for final validation or changes to shared fixtures. Reuse passing results for unchanged code.
 
@@ -130,9 +125,8 @@ premise run e2e
 # Run unchanged journeys against real GitHub without updating recordings:
 LGTM_E2E_GITHUB_MODE=live premise run e2e:smoke
 LGTM_E2E_GITHUB_MODE=live premise run e2e
-# Refresh JSON for one selected journey (suite: backend, cli or nvim):
+# Refresh JSON for one selected PR journey (backend or cli):
 premise run e2e:record -- backend pr-review.spec.ts -t "User can immediately persist a file-level draft comment"
-premise run e2e:record -- nvim pr-review.spec.ts -t "Viewed files survive"
 # Refresh every journey, including extended cases, using only the required editor profile:
 premise run e2e:record -- all
 # Verify replay matching and mutation barriers without GitHub:
@@ -141,7 +135,7 @@ premise run e2e:fixtures:test
 
 Recordings live under `e2e/recordings/<suite>/<spec>.json`, with one entry per journey keyed by `<test>-<id>`. Each entry contains the fixture metadata, deduplicated HTTP responses and the requests that refer to them. Successful selected cases replace only their own entries and preserve sibling journeys; failed cases leave existing recordings intact. Entries are sorted by key for stable diffs. Record mode forwards actual requests to GitHub and saves the responses. Authorization headers and authenticated-user email/plan metadata are excluded, and saving a known credential in JSON is rejected. Review the JSON diff before committing it. A renamed journey needs an entry under its new name; remove obsolete entries when removing tests.
 
-Neovim recordings also include a small base64-encoded Git bundle in the JSON, containing the real Git objects and refs used by that case. Replay materializes and fetches from that local bundle while retaining a canonical GitHub origin for repository detection. It does not change the user's Git configuration or active GitHub account. Required and Kak profiles share one HTTP recording per journey. The refresh task enables extended cases and defaults to the required profile, so it does not record the same journey twice for editor profiles.
+Historical Neovim recordings remain available for future fixture work; the shell tests do not use GitHub recordings. The retained PR editor fixture can compose the shared GitHub fixture with editor startup when replacement PR journeys are added.
 
 The refresh task builds the selected suite and accepts its usual Vitest filters. `all` accepts no filters and runs suites serially to avoid API bursts. Recording forwards mutating API requests at least one second apart. Live and recording setup use Git pushes for run-owned source branches rather than GitHub content-creation APIs. Both validate private visibility before writes and clean up only run-owned PRs and refs. A local replay pass cannot establish current GitHub parity; use a focused live run or refresh the affected journeys when changing provider behavior.
 
@@ -167,6 +161,6 @@ Each PR state group creates unique base/head branches and one PR in that same re
 Premise removes generic publication credentials such as `GH_TOKEN` from task environments. Set `LGTM_E2E_GITHUB_TOKEN` and `LGTM_E2E_GITHUB_SECONDARY_TOKEN` to supply tokens explicitly, or use the stored account logins described above. `LGTM_E2E_GITHUB_REPOSITORY` selects a different permanent private fixture. The PR fixtures pass the selected token only to their test processes and GitHub subprocesses. Ordinary commit and PR jobs receive no fixture credential.
 
 
-Private Rust unit tests, database integration tests and the plugin's Lua unit contracts remain in their existing app and library locations.
+Private Rust unit tests, database integration tests and the plugin's Lua load checks remain in their existing app and library locations.
 
-Neovim runs a global preflight before test hooks create any PRs. It starts each selected editor profile and computes a native CodeDiff diff. Missing modules or native binaries fail the suite once, with the startup error. The installer always checks out each pinned revision, including on a fresh clone whose default HEAD already matches the pin.
+Neovim runs a global preflight before fixture setup. It starts each selected profile, verifies shell loading and startup errors, and computes a native CodeDiff diff. Missing modules fail the suite once, with the startup error. The installer fetches pinned NuiComponents/NUI, CodeDiff, WhichKey and nvim-notify dependencies, plus Kak when selected. It also retains lazy.nvim and Plenary for package-manager fixtures. It always checks out the selected revision, including on a fresh clone whose default HEAD already matches the pin.

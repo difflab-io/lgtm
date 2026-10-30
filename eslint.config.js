@@ -6,6 +6,7 @@ export default tseslint.config(
   {
     ignores: [
       '**/node_modules/**',
+      'e2e/nvim/.cache/**',
       '**/dist/**',
       '**/.output/**',
       '**/.svelte-kit/**',
