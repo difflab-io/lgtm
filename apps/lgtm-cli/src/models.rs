@@ -12,18 +12,18 @@ pub enum ReviewMode {
 
 #[derive(Args, Clone, Debug, Default)]
 pub struct ContextArgs {
-    #[arg(long,conflicts_with_all=["branch","notes"])]
+    #[arg(long,conflicts_with_all=["branch","directory"])]
     pub pr: Option<String>,
-    #[arg(long, conflicts_with = "notes")]
+    #[arg(long, conflicts_with = "directory")]
     pub branch: Option<String>,
     /// Git comparison used by session start or machine-mode review.
-    #[arg(long, value_enum, conflicts_with_all = ["pr", "notes"])]
+    #[arg(long, value_enum, conflicts_with_all = ["pr", "directory"])]
     pub mode: Option<ReviewMode>,
     /// Base branch for --mode branch (defaults to main).
     #[arg(long, requires = "mode")]
     pub base: Option<String>,
     #[arg(long,num_args=0..=1,default_missing_value=".")]
-    pub notes: Option<PathBuf>,
+    pub directory: Option<PathBuf>,
     #[arg(long)]
     pub path: Option<PathBuf>,
     #[arg(long)]

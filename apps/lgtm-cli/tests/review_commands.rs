@@ -10,18 +10,25 @@ mod review_commands {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join("unused-home");
         for args in [
-            vec!["session", "start", "--notes"],
-            vec!["session", "show", "--notes"],
-            vec!["session", "complete", "--notes"],
-            vec!["session", "export", "--notes"],
+            vec!["session", "start", "--directory"],
+            vec!["session", "show", "--directory"],
+            vec!["session", "complete", "--directory"],
+            vec!["session", "export", "--directory"],
             vec!["session", "refresh", "--pr", "acme/repo#1"],
             vec!["session", "submit", "--pr", "acme/repo#1"],
             vec!["session", "list", "--all"],
-            vec!["comments", "list", "--notes"],
-            vec!["comments", "add", "--notes", "--body", "Dummy"],
-            vec!["comments", "reply", "thread", "--notes", "--body", "Dummy"],
-            vec!["comments", "resolve", "thread", "--notes"],
-            vec!["comments", "reopen", "thread", "--notes"],
+            vec!["comments", "list", "--directory"],
+            vec!["comments", "add", "--directory", "--body", "Dummy"],
+            vec![
+                "comments",
+                "reply",
+                "thread",
+                "--directory",
+                "--body",
+                "Dummy",
+            ],
+            vec!["comments", "resolve", "thread", "--directory"],
+            vec!["comments", "reopen", "thread", "--directory"],
         ] {
             let out = Command::new(env!("CARGO_BIN_EXE_lgtm"))
                 .env("LGTM_HOME", &home)

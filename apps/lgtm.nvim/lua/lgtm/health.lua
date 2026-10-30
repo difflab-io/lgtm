@@ -1,4 +1,9 @@
+-- State -----------------------------------------------------------------------
+
 local M = {}
+
+-- Methods ---------------------------------------------------------------------
+
 function M.check()
   vim.health.start("lgtm.nvim")
   if vim.fn.has("nvim-0.11") == 1 then
@@ -14,6 +19,9 @@ function M.check()
     end
   end
   for _, module in ipairs({
+    "nui-components",
+    "nui.split",
+    "nui.tree",
     "codediff",
     "codediff.ui.view",
     "codediff.ui.lifecycle",
@@ -27,6 +35,7 @@ function M.check()
     end
   end
   for module, functions in pairs({
+    ["nui-components"] = { "create_renderer", "create_signal", "text_input", "select" },
     ["codediff.ui.view"] = { "create", "update" },
     ["codediff.ui.lifecycle"] = { "get_session", "get_panel_view" },
     ["codediff.core.git"] = {
@@ -38,9 +47,16 @@ function M.check()
     local available, api = pcall(require, module)
     if available then
       for _, name in ipairs(functions) do
-        if type(api[name]) ~= "function" then
+        if
+          type(api[name]) ~= "function"
+          and not (
+            type(api[name]) == "table"
+            and getmetatable(api[name])
+            and getmetatable(api[name]).__call
+          )
+        then
           vim.health.error(
-            "Incompatible CodeDiff API: "
+            "Incompatible plugin API: "
               .. module
               .. "."
               .. name
@@ -61,9 +77,9 @@ function M.check()
       )
     end
   end
-  local endpoint, err = require("lgtm.transport.connect").endpoint()
+  local endpoint, err = require("lgtm.services.connect").endpoint()
   if endpoint then
-    local ok, response = pcall(function()
+    local reachable, response = pcall(function()
       return vim
         .system({
           "curl",
@@ -87,7 +103,7 @@ function M.check()
         }, { text = true })
         :wait()
     end)
-    if not ok or response.code ~= 0 then
+    if not reachable or response.code ~= 0 then
       vim.health.error(
         "Backend unavailable at " .. endpoint .. "; run lgtm up --no-open or configure endpoint_url"
       )
@@ -107,7 +123,7 @@ function M.check()
       else
         local missing = vim.tbl_filter(function(name)
           return not vim.list_contains(capabilities.capabilities or {}, name)
-        end, require("lgtm.rpc").required_capabilities)
+        end, require("lgtm.services.client").required_capabilities)
         if #missing > 0 then
           vim.health.error(
             "Backend is missing "

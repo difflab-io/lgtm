@@ -247,19 +247,19 @@ impl Conversation {
             if let Some(hint) = hint {
                 out.push('\n');
                 body(&mut out, &hint, &indent);
-                if let Some(excerpt) = thread
-                    .evidence
-                    .as_ref()
-                    .map(|evidence| evidence.selected_text.as_str())
-                    .filter(|excerpt| !excerpt.is_empty())
-                {
+            }
+            if let Some(excerpt) = thread
+                .evidence
+                .as_ref()
+                .map(|evidence| evidence.selected_text.as_str())
+                .filter(|excerpt| !excerpt.is_empty())
+            {
+                out.push('\n');
+                for line in excerpt.lines().take(12) {
+                    out.push_str(&indent);
+                    out.push_str("> ");
+                    out.push_str(line);
                     out.push('\n');
-                    for line in excerpt.lines().take(12) {
-                        out.push_str(&indent);
-                        out.push_str("> ");
-                        out.push_str(line);
-                        out.push('\n');
-                    }
                 }
             }
             let mut replies: Vec<_> = conversation

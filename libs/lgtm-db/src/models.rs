@@ -35,3 +35,8 @@ pub mod comments {
 pub mod mutation_receipts {
     pub use super::super::entities::mutation_receipts::Model;
 }
+
+/// Retained immutable source pairs.
+pub mod review_revisions {
+    pub use super::super::entities::review_revisions::Model;
+}

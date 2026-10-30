@@ -9,14 +9,15 @@ use crate::{
     store::Store,
 };
 use anyhow::{Context as _, Result, bail};
+use gix::bstr::ByteSlice;
 use serde_json::{Value, json};
-use std::{path::PathBuf, process::Command};
+use std::path::PathBuf;
 
 // Private ---------------------------------------------------------------------
 
 fn location(args: &ContextArgs) -> Result<PathBuf> {
     let supplied = args
-        .notes
+        .directory
         .as_ref()
         .or(args.path.as_ref())
         .cloned()
@@ -41,12 +42,7 @@ fn target_input(args: &ContextArgs) -> Result<Value> {
                 let repository = args
                     .repo
                     .clone()
-                    .or_else(|| {
-                        git_value(
-                            &["remote", "get-url", "origin"],
-                            Some(&location(args).ok()?),
-                        )
-                    })
+                    .or_else(|| get_git_config("remote.origin.url", Some(&location(args).ok()?)))
                     .context("--pr NUMBER requires --repo URL or a GitHub origin")?;
                 (repository, pr.parse::<i64>()?)
             };
@@ -55,14 +51,21 @@ fn target_input(args: &ContextArgs) -> Result<Value> {
         );
     }
     let path = location(args)?;
-    if args.notes.is_some() {
+    if args.directory.is_some() {
         return Ok(json!({"directory":{"path":path}}));
     }
-    if let Some(root) = git_value(&["rev-parse", "--show-toplevel"], Some(&path)) {
+    if let Ok(repo) = gix::discover(&path)
+        && let Some(root) = repo.workdir()
+    {
         let branch = args
             .branch
             .clone()
-            .or_else(|| git_value(&["symbolic-ref", "HEAD"], Some(&path)))
+            .or_else(|| {
+                repo.head_name()
+                    .ok()
+                    .flatten()
+                    .and_then(|name| name.as_bstr().to_str().ok().map(str::to_owned))
+            })
             .context("Check out a branch for local Git review")?;
         let branch = if branch.starts_with("refs/heads/") {
             branch
@@ -97,7 +100,7 @@ fn repository_url(input: &str, host: &str) -> Result<String> {
 async fn start(client: &Client, args: &ContextArgs) -> Result<Value> {
     let target = target_input(args)?;
     if target["directory"].is_object() && !location(args)?.is_dir() {
-        bail!("File notes need no review; use comments add --notes FILE");
+        bail!("Start a directory review with --directory PATH");
     }
     let comparison = if target["localGit"].is_object() {
         let root = std::path::Path::new(
@@ -105,18 +108,25 @@ async fn start(client: &Client, args: &ContextArgs) -> Result<Value> {
                 .as_str()
                 .context("Missing local repository")?,
         );
-        let head = git_value(&["rev-parse", "HEAD"], Some(root))
-            .context("Repository has no HEAD commit")?;
+        let repo = gix::discover(root)?;
+        let head = repo
+            .head_id()
+            .context("Repository has no HEAD commit")?
+            .detach();
         match args.mode.unwrap_or(crate::models::ReviewMode::Working) {
-            crate::models::ReviewMode::Working => json!({"working":{"baseCommit":head}}),
-            crate::models::ReviewMode::Staged => json!({"staged":{"baseCommit":head}}),
+            crate::models::ReviewMode::Working => {
+                json!({"working":{"baseCommit":head.to_string()}})
+            }
+            crate::models::ReviewMode::Staged => json!({"staged":{"baseCommit":head.to_string()}}),
             crate::models::ReviewMode::Branch => {
-                let base = git_value(
-                    &["merge-base", args.base.as_deref().unwrap_or("main"), "HEAD"],
-                    Some(root),
-                )
-                .context("Cannot find a common ancestor with the selected base")?;
-                json!({"branch":{"baseCommit":base,"headCommit":head}})
+                let selected = repo.rev_parse_single(
+                    args.base.as_deref().unwrap_or("main").as_bytes().as_bstr(),
+                )?;
+                let base = repo
+                    .merge_base(selected.detach(), head)?
+                    .context("Cannot find a common ancestor with the selected base")?
+                    .to_string();
+                json!({"branch":{"baseCommit":base,"headCommit":head.to_string()}})
             }
         }
     } else {
@@ -127,7 +137,8 @@ async fn start(client: &Client, args: &ContextArgs) -> Result<Value> {
         input["comparison"] = comparison;
     }
     if target["pullRequest"].is_object()
-        && let Some(root) = git_value(&["rev-parse", "--show-toplevel"], Some(&location(args)?))
+        && let Ok(repo) = gix::discover(location(args)?)
+        && let Some(root) = repo.workdir()
     {
         input["localGitPath"] = json!(root);
     }
@@ -176,13 +187,13 @@ async fn get_review(client: &Client, args: &ContextArgs) -> Result<Value> {
 async fn get_scope(
     client: &Client,
     args: &ContextArgs,
-    file: Option<&str>,
+    _file: Option<&str>,
     write: bool,
 ) -> Result<Value> {
-    if args.notes.is_some() {
+    if args.directory.is_some() {
         let path = location(args)?;
         if !path.is_dir() {
-            return Ok(json!({"notes":{"path":path}}));
+            bail!("--directory requires a directory; live-buffer notes are no longer supported");
         }
         let target = target_input(args)?;
         if let Some(review) = get_reviews(client, Some(&target), None)
@@ -197,10 +208,7 @@ async fn get_scope(
         {
             return Ok(json!({"reviewId":review["id"]}));
         }
-        if let Some(file) = file {
-            return Ok(json!({"notes":{"path":path.join(file)}}));
-        }
-        bail!("Use --notes FILE for ordinary notes, or start a directory review first");
+        bail!("Start a directory review before adding feedback");
     }
     match get_review(client, args).await {
         Ok(review)
@@ -269,12 +277,12 @@ async fn client_for_actor(store: &Store, actor: &ActorArgs) -> Result<Client> {
         .as_name
         .clone()
         .or_else(|| std::env::var("LGTM_NAME").ok())
-        .or_else(|| git_value(&["config", "user.name"], None))
+        .or_else(|| get_git_config("user.name", None))
         .context("Set git user.name, LGTM_NAME, or pass --as")?;
     let input = if let Some(model) = &actor.model {
         json!({"name":name,"model":model,"provider":actor.provider})
     } else {
-        json!({"name":name,"email":std::env::var("LGTM_EMAIL").ok().or_else(||git_value(&["config","user.email"],None)).context("Set git user.email or LGTM_EMAIL")?})
+        json!({"name":name,"email":std::env::var("LGTM_EMAIL").ok().or_else(||get_git_config("user.email",None)).context("Set git user.email or LGTM_EMAIL")?})
     };
     let value = client.call("EnsureIdentity", input).await?;
     Ok(client.with_identity(
@@ -285,18 +293,17 @@ async fn client_for_actor(store: &Store, actor: &ActorArgs) -> Result<Client> {
     ))
 }
 
-fn git_value(args: &[&str], path: Option<&std::path::Path>) -> Option<String> {
-    let mut command = Command::new("git");
-    command.args(args);
-    if let Some(path) = path {
-        command.current_dir(path);
-    }
-    let output = command.output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let value = String::from_utf8(output.stdout).ok()?.trim().to_owned();
-    if value.is_empty() { None } else { Some(value) }
+fn get_git_config(key: &str, path: Option<&std::path::Path>) -> Option<String> {
+    let root = path
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())?;
+    let value = if let Ok(repo) = gix::discover(&root) {
+        repo.config_snapshot().string(key)?
+    } else {
+        gix::config::File::from_globals().ok()?.string(key)?
+    };
+    let value = value.to_str().ok()?.trim();
+    (!value.is_empty()).then(|| value.to_owned())
 }
 
 fn print_result(value: &Value, _json_output: bool) -> Result<()> {

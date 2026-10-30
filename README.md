@@ -4,7 +4,7 @@ LGTM is a local code and document review tool for people and agents. The CLI and
 
 ## Features
 
-The backend provides persistent notes, local reviews and GitHub review RPCs over SQLite with optional PostgreSQL. The CLI and [lgtm.nvim](apps/lgtm.nvim/README.md) use that API. Neovim adds CodeDiff comments, thread actions, selection, export and submission UI. The bundled browser remains a hello-world demonstration.
+The backend provides snapshot-backed local reviews and GitHub review RPCs over SQLite with optional PostgreSQL. The CLI and [lgtm.nvim](apps/lgtm.nvim/README.md) use that API. Neovim adds CodeDiff comments, thread actions, selection, export and submission UI. The bundled browser remains a hello-world demonstration.
 
 ## Quick start
 
@@ -33,8 +33,8 @@ Install the Neovim plugin from Git using the [plugin setup guide](apps/lgtm.nvim
 ## Docs
 
 - [Development](docs/development.md): local setup, live updates, builds, checks, and releases.
-- [CLI review usage](apps/lgtm-cli/README.md): daemon startup, notes, ignored-directory reviews, export and GitHub review commands.
-- [User guide](docs/user-guide.md): Neovim reviews, notes, comments, exports, and troubleshooting.
+- [CLI review usage](apps/lgtm-cli/README.md): daemon startup, ignored-directory reviews, export and GitHub review commands.
+- [User guide](docs/user-guide.md): Neovim reviews, comments, exports, and troubleshooting.
 - [Neovim setup and usage](apps/lgtm.nvim/README.md): required plugins, keybindings, notifications and troubleshooting.
 - [End-to-end tests](e2e/README.md): separate backend, CLI and Neovim suites.
 - [Database architecture](docs/architecture/db/index.md): schema, adapters, concurrency and migration contracts.

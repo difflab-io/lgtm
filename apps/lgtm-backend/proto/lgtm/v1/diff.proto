@@ -24,30 +24,9 @@ message ContentSide {
   string content = 3;
 }
 
-message SuppliedAnchor {
-  Anchor original = 1;
-  string current_path = 2;
-}
-
-message ConfirmedPlacement {
-  Anchor location = 1;
-  AnchorSource displayed_source = 2;
-}
-
-message UnplacedAnchor { string reason = 1; }
-
-message AnchorPlacement {
-  uint32 index = 1;
-  oneof kind {
-    ConfirmedPlacement exact = 2;
-    ConfirmedPlacement relocated = 3;
-    UnplacedAnchor outdated = 4;
-    UnplacedAnchor orphaned = 5;
-    UnplacedAnchor unverified = 6;
-  }
-}
-
 message GetDiffRequest {
+  string review_id = 3;
+  string revision_id = 4;
   ReviewTarget target = 1;
   ReviewComparison comparison = 2;
 }
@@ -68,14 +47,12 @@ message GetFilesResponse {
 message GetFileRequest {
   DiffDescriptor diff = 1;
   string path = 2;
-  repeated SuppliedAnchor anchors = 3;
 }
 
 message GetFileResponse {
   DiffFile file = 1;
   ContentSide old_side = 2;
   ContentSide new_side = 3;
-  repeated AnchorPlacement placements = 4;
 }
 
 service DiffService {

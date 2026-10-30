@@ -19,6 +19,7 @@ sqlite = ["sea-orm/sqlx-sqlite", "sea-orm-migration/sqlx-sqlite"]
 postgres = ["sea-orm/sqlx-postgres", "sea-orm-migration/sqlx-postgres"]
 
 [dependencies]
+gix = { version = "0.90", default-features = false, features = ["revision", "blob-diff", "status", "blocking-http-transport-reqwest-rust-tls", "sha1", "sha256"] }
 base64 = "0.22"
 octocrab = { version = "0.54.1", default-features = false, features = ["default-client", "rustls", "rustls-ring", "timeout"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

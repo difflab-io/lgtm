@@ -13,21 +13,14 @@ import type { Editor } from './editor.js'
 import {
   prepareStagedFeedback,
   prepareCommittedFeedback,
-  prepareShiftedFeedback,
-  prepareRenamedFeedback,
-  prepareLostSelection,
-  prepareDeletedFile,
-  prepareRestoredFile,
   prepareWorkingFeedback,
-  prepareOrphanedWorkingFeedback,
-  prepareIgnoredWorkspace,
   prepareIgnoredDirectory,
   prepareIgnoredDiscussion,
 } from './local-review.fixtures.js'
 async function placement(e: Editor, id: string) {
   return e.lua(
-    `local id=...; local s=require("lgtm.context").current
-    for _,t in ipairs(s.conversation.threads) do if t.id==id then return require("lgtm.threads").placement(s,t,s.file.path,"new") end end`,
+    `local id=...; local s=require("lgtm.services.state").current
+    for _,t in ipairs(s.conversation.threads) do if t.id==id then return require("lgtm.features.annotation_overlay").placement(s,t,s.file.path,"new") end end`,
     id,
   )
 }
@@ -44,11 +37,10 @@ for (const profile of profiles) {
         const { editor: e, runtime: r } = fixture()
 
         // Act
-        const { original, oid, stagedBytes, replyId } = await prepareStagedFeedback(e, r)
+        const { original, stagedBytes, replyId } = await prepareStagedFeedback(e, r)
 
         // Assert
-        expect(original.source.indexFile).toMatchObject({
-          blobOid: oid,
+        expect(original.source.commit).toMatchObject({
           contentHash: hash(stagedBytes),
         })
         expect(original.evidence.selectedText).toBe('selected')
@@ -65,7 +57,7 @@ for (const profile of profiles) {
       const state = (await e.state())!
 
       // Assert
-      expect((await placement(e, rootId)).location.start).toBe(2)
+      expect(await placement(e, rootId)).toBeNull()
       expect(
         state.conversation.threads.find((thread: Json) => thread.id === rootId).anchor,
       ).toEqual(original)
@@ -73,295 +65,98 @@ for (const profile of profiles) {
     })
   })
 
-  describe(`When reviewed source files change [${profile}]`, { tags: [profile] }, () => {
+  describe(`When reviewing saved source [${profile}]`, { tags: [profile, 'local-review'] }, () => {
     const fixture = useEditor(profile)
 
-    it('Inserting lines moves the card to the selected text without changing original evidence', async () => {
+    it('Changing or deleting working files leaves the open staged source and comment locations fixed', async () => {
       // Arrange
       const { editor: e, runtime: r } = fixture()
-      const { path, rootId, original } = await prepareCommittedFeedback(e, r)
+      const { path, rootId, original, stagedBytes } = await prepareStagedFeedback(e, r)
+      const initial = (await e.state())!
 
       // Act
-      await r.commit('insert leading line')
-      await e.openLocal('branch', true)
-      await e.show(path)
-      const relocated = await placement(e, rootId)
-      await e.pane('new', 3)
-      await e.popup()
+      await r.write(path, 'replacement\n')
+      await r.git('rm', '-f', '--cached', '--', path)
+      await e.pane('new', 2)
+      const fixed = await placement(e, rootId)
 
       // Assert
-      expect(relocated).toMatchObject({ status: 'relocated', location: { start: 3 } })
+      expect(fixed).toMatchObject({ status: 'exact', location: { start: 2 } })
+      expect((await e.state())!.snapshot.id).toBe(initial.snapshot.id)
       expect(
         (await e.state())!.conversation.threads.find((thread: Json) => thread.id === rootId).anchor,
       ).toEqual(original)
-      expect(await e.text()).toContain('Preserve this staged selection')
-    })
-
-    it('Renaming the reviewed directory moves its cards and keeps replies attached', async () => {
-      // Arrange
-      const { editor: e, runtime: r } = fixture()
-      const { moved, rootId, original } = await prepareShiftedFeedback(e, r)
-
-      // Act
-      await r.git('mv', 'src', 'moved')
-      await r.commit('move reviewed directory')
-      await e.openLocal('branch', true)
-      await e.show(moved)
-      await waitFor(
-        'confirmed rename persisted',
-        () => e.state(),
-        (state) =>
-          state?.conversation.threads.find((thread: Json) => thread.id === rootId)?.currentPath ===
-          moved,
+      expect((await e.text(initial.panes.new.buf)).replaceAll('\r', '')).toBe(
+        stagedBytes.replaceAll('\r', ''),
       )
-      const state = (await e.state())!
-
-      // Assert
-      expect((await placement(e, rootId)).location.start).toBe(3)
-      expect(
-        state.conversation.threads.find((thread: Json) => thread.id === rootId).anchor,
-      ).toEqual(original)
-      expect(state.conversation.comments).toHaveLength(2)
+      expect(await e.value('vim.bo[...].modifiable', initial.panes.new.buf)).toBe(false)
     })
 
-    it('Losing the selected text shows a compact outdated card and keeps evidence in the thread view', async () => {
+    it('Refresh adds a revision to the same working session and keeps its earlier discussion', async () => {
       // Arrange
       const { editor: e, runtime: r } = fixture()
-      const { moved, shifted, rootId } = await prepareRenamedFeedback(e, r)
+      const { workingId } = await prepareWorkingFeedback(e, r)
+      const first = (await e.state())!
 
       // Act
-      await r.write(moved, shifted.replace('selected', 'replacement'))
-      await r.commit('replace reviewed selection')
-      await e.openLocal('branch', true)
-      await e.show(moved)
-      const lost = await placement(e, rootId)
-      const marks = await e.marks()
-      await e.pane()
-      const popup = await e.popup()
-      const bounds = await e.value('vim.api.nvim_win_get_config(...)', popup.win)
-
-      // Assert
-      expect(lost.status).toBe('outdated')
-      expect(lost.location).toBeUndefined()
-      expect(marks).toHaveLength(1)
-      expect(marks[0][1]).toBe(0)
-      expect(marks[0][3].virt_lines_above).toBe(true)
-      for (const text of ['Outdated', 'anchor lost', 'Preserve this staged selection'])
-        expect(JSON.stringify(marks)).toContain(text)
-      expect(JSON.stringify(marks)).not.toContain('Original lines')
-      expect(JSON.stringify(marks)).not.toContain('> selected')
-      for (const text of ['OUTDATED', 'Original lines 2', 'selected'])
-        expect(await e.text()).toContain(text)
-      expect(bounds.row).toBe(Math.floor((40 - bounds.height - 2) / 2))
-    })
-
-    it('Deleting the file keeps orphaned discussions available in the thread list', async () => {
-      // Arrange
-      const { editor: e, runtime: r } = fixture()
-      const { moved, rootId } = await prepareLostSelection(e, r)
-
-      // Act
-      await r.git('rm', '--', moved)
-      await r.commit('delete reviewed file')
-      await e.openLocal('branch', true)
-      await waitFor(
-        'file deletion persisted',
-        () => e.state(),
-        (state) =>
-          state?.conversation.threads.find((thread: Json) => thread.id === rootId)?.orphanReason ===
-          'file_deleted',
+      await r.write('other.txt', 'replacement saved source\n')
+      await e.command('Lgtm refresh')
+      await e.wait(
+        'require("lgtm.services.state").current.render_ready and require("lgtm.services.state").current.snapshot.id ~= ' +
+          JSON.stringify(first.snapshot.id),
+        'new saved revision ready',
       )
+      const next = (await e.state())!
       await e.command('Lgtm threads')
 
       // Assert
-      for (const text of ['ORPHANED', 'File was deleted', 'Preserve this staged selection'])
-        expect(await e.text()).toContain(text)
-    })
-
-    it('Restoring matching source reconnects the same discussion to its original selection', async () => {
-      // Arrange
-      const { editor: e, runtime: r } = fixture()
-      const { moved, shifted, rootId, original } = await prepareDeletedFile(e, r)
-
-      // Act
-      await r.write(moved, shifted)
-      await r.commit('restore matching source')
-      await e.openLocal('branch', true)
-      await e.show(moved)
-      await waitFor(
-        'source reconnected',
-        () => e.state(),
-        (state) =>
-          !state?.conversation.threads.find((thread: Json) => thread.id === rootId)?.orphanReason,
-      )
-
-      // Assert
-      expect((await placement(e, rootId)).location.start).toBe(3)
+      expect(next.review.id).toBe(first.review.id)
+      expect(next.review.revisions).toHaveLength(2)
       expect(
-        (await e.state())!.conversation.threads.find((thread: Json) => thread.id === rootId).anchor,
-      ).toEqual(original)
+        next.conversation.threads.find((thread: Json) => thread.id === workingId).anchor.snapshotId,
+      ).toBe(first.snapshot.id)
+      expect(await e.text()).toContain('Retain this unstaged feedback')
+      expect(await e.text()).toContain('SAVED REVISION')
     })
 
-    it('Selecting a diff without the commented file hides its card without orphaning the discussion', async () => {
+    it('A restart resumes the same saved source even after the original directory moves', async () => {
       // Arrange
       const { editor: e, runtime: r } = fixture()
-      const { rootId } = await prepareRestoredFile(e, r)
-      await r.write('other.txt', 'working selection\n')
-      await r.git('add', 'other.txt')
-
-      // Act
-      await e.openLocal('staged', true)
-      await e.show('other.txt')
-      const state = (await e.state())!
-      const marks = await e.marks()
-      await e.command('Lgtm threads')
-
-      // Assert
-      expect(state.conversation.comments).toHaveLength(2)
-      expect(
-        state.conversation.threads.find((thread: Json) => thread.id === rootId).orphanReason,
-      ).toBeFalsy()
-      expect(marks).toHaveLength(0)
-      expect(await e.text()).toContain('Preserve this staged selection')
-      expect(await e.text()).not.toContain('ORPHANED')
-      expect(await e.text()).toContain('OUTSIDE DIFF')
-    })
-  })
-
-  describe(`When unstaged source changes [${profile}]`, { tags: [profile] }, () => {
-    const fixture = useEditor(profile)
-
-    it.each([
-      { change: 'the selected line', content: 'changed working selection\n' },
-      { change: 'another line', content: 'working selection\nanother line\n' },
-    ])(
-      'Changing $change marks unstaged feedback stale and shows its card above the file',
-      async ({ content }) => {
-        // Arrange
-        const { editor: e, runtime: r } = fixture()
-        const { working, workingId } = await prepareWorkingFeedback(e, r)
-
-        // Act
-        await r.write('other.txt', content)
-        await e.command('Lgtm refresh')
-        await waitFor(
-          'working source orphaned',
-          () => e.state(),
-          (state) =>
-            Boolean(
-              state?.render_ready &&
-              state.conversation.threads.find((thread: Json) => thread.id === workingId)
-                ?.orphanReason === 'working_source_changed',
-            ),
-        )
-
-        // Assert
-        expect(working.anchor.source.workingFile).toBeDefined()
-        const stale = await placement(e, workingId)
-        expect(stale.status).toBe('stale')
-        expect(stale.location).toBeUndefined()
-        await e.pane('new', 1)
-        expect(await e.value('vim.api.nvim_get_current_buf()')).toBe(
-          (await e.state())!.panes.new.buf,
-        )
-        expect(await e.value('vim.bo.filetype')).not.toBe('lgtm')
-        const marks = await e.marks()
-        expect(marks).toHaveLength(1)
-        expect(marks[0][1]).toBe(0)
-        expect(marks[0][3].virt_lines_above).toBe(true)
-        for (const text of ['Stale', 'anchor lost', 'Retain this unstaged feedback'])
-          expect(JSON.stringify(marks)).toContain(text)
-        for (const text of ['Original lines', 'Unstaged source changed', '> working selection'])
-          expect(JSON.stringify(marks)).not.toContain(text)
-        expect(marks[0][3].virt_lines).toHaveLength(3)
-        expect(
-          (await e.state())!.conversation.threads.find((thread: Json) => thread.id === workingId)
-            .anchor,
-        ).toEqual(working.anchor)
-      },
-    )
-
-    it('Export contains preserved replies and orphaned feedback without internal IDs or source hashes', async () => {
-      // Arrange
-      const { editor: e, runtime: r } = fixture()
-      const { rootId, oid } = await prepareOrphanedWorkingFeedback(e, r)
-      const before = (await e.state())!.conversation
-
-      // Act
-      await e.choose('Preview')
-      await e.command('Lgtm export review')
-      const text = await waitFor(
-        'feedback export',
-        () => e.text(),
-        (text) => text.includes('Retain this unstaged feedback'),
-      )
-      await e.keys('q')
-
-      // Assert
-      expect(text).toContain('1. **[COMMENT]**')
-      expect(text).toContain('Keep this reply')
-      expect(text).not.toContain(rootId)
-      expect(text).not.toContain(oid)
-      expect((await e.state())!.conversation).toEqual(before)
-    })
-
-    it('Closing the review restores the working buffer’s original key mappings', async () => {
-      // Arrange
-      const { editor: e, runtime: r } = fixture()
-      const { beforeMapping, workingBuffer } = await prepareWorkingFeedback(e, r)
-
-      // Act
-      await e.command('Lgtm close')
-      const restored = await e.lua(
-        'return vim.api.nvim_buf_call(...,function() return vim.fn.maparg("c","n",false,true).desc end)',
-        workingBuffer,
-      )
-
-      // Assert
-      expect(restored).toBe(beforeMapping)
-    })
-
-    it('Resuming after restart preserves renamed anchors, replies and stale working-tree discussions', async () => {
-      // Arrange
-      const { editor: e, runtime: r } = fixture()
-      const { moved, rootId, original, workingId, replyId } = await prepareOrphanedWorkingFeedback(
-        e,
-        r,
-      )
-      const reviewId = (await e.state())!.review.id
-      await e.command('Lgtm close')
+      const plans = await prepareIgnoredDiscussion(e, r)
+      const initial = (await e.state())!
       await e.close()
+      await rename(plans, join(r.directory, 'moved-plan'))
       await r.restart()
       await e.start()
 
       // Act
       await e.command('Lgtm sessions')
-      await e.wait(
-        'require("lgtm.picker").last and not require("lgtm.picker").last.closed',
-        'saved review picker',
-      )
+      await e.wait('require("lgtm.ui.search").last and vim.fn.mode() == "i"', 'saved review picker')
       await e.keys('<CR>')
-      const state = await e.loaded()
-      await e.command('Lgtm threads')
+      const resumed = await e.loaded()
 
       // Assert
-      expect(state.review.id).toBe(reviewId)
-      expect(state.conversation.threads.find((thread: Json) => thread.id === rootId)).toMatchObject(
-        { currentPath: moved, anchor: original },
+      expect(resumed.review.id).toBe(initial.review.id)
+      expect(resumed.snapshot).toEqual(initial.snapshot)
+      expect(resumed.conversation.comments).toHaveLength(3)
+      expect(await e.text(resumed.panes.new.buf)).toContain('Review ignored content')
+    })
+
+    it('Closing a snapshot view preserves the original editing buffer and its mappings', async () => {
+      // Arrange
+      const { editor: e, runtime: r } = fixture()
+      const { beforeMapping, originalBuffer } = await prepareWorkingFeedback(e, r)
+
+      // Act
+      await e.command('Lgtm close')
+      const restored = await e.lua(
+        'return vim.api.nvim_buf_call(...,function() return vim.fn.maparg("c","n",false,true).desc end)',
+        originalBuffer,
       )
-      expect(
-        state.conversation.threads.find((thread: Json) => thread.id === rootId).orphanReason,
-      ).toBeFalsy()
-      expect(
-        state.conversation.threads.find((thread: Json) => thread.id === workingId).orphanReason,
-      ).toBe('working_source_changed')
-      expect(state.conversation.comments.map((comment: Json) => comment.id)).toContain(replyId)
-      for (const text of [
-        'Preserve this staged selection',
-        'Retain this unstaged feedback',
-        'STALE',
-      ])
-        expect(await e.text()).toContain(text)
+
+      // Assert
+      expect(restored).toBe(beforeMapping)
+      expect(await e.value('vim.bo[...].modifiable', originalBuffer)).toBe(true)
     })
   })
   describe(`When navigating an ignored directory review [${profile}]`, { tags: [profile] }, () => {
@@ -390,7 +185,9 @@ for (const profile of profiles) {
       expect(directoryReview.file.path).toBe('PLAN.md')
       expect(await e.text(directoryReview.panes.new.buf)).toContain('# Plan')
       expect(
-        await e.value('vim.api.nvim_win_get_width(require("lgtm.context").current.explorer.win)'),
+        await e.value(
+          'vim.api.nvim_win_get_width(require("lgtm.services.state").current.explorer.win)',
+        ),
       ).toBe(30)
 
       // Act
@@ -398,18 +195,20 @@ for (const profile of profiles) {
       await e.keys('f')
 
       // Assert
-      await e.wait('require("lgtm.context").current.explorer.win == nil', 'explorer hidden')
-      expect(await e.value('require("lgtm.context").current.explorer.win')).toBeNull()
+      await e.wait('require("lgtm.services.state").current.explorer.win == nil', 'explorer hidden')
+      expect(await e.value('require("lgtm.services.state").current.explorer.win')).toBeNull()
 
       // Act
       await e.keys('f')
-      await e.wait('require("lgtm.context").current.explorer.win ~= nil', 'explorer shown')
-      await e.lua('vim.api.nvim_win_set_cursor(require("lgtm.context").current.explorer.win,{2,0})')
+      await e.wait('require("lgtm.services.state").current.explorer.win ~= nil', 'explorer shown')
+      await e.lua(
+        'vim.api.nvim_win_set_cursor(require("lgtm.services.state").current.explorer.win,{2,0})',
+      )
       await e.keys('<CR>')
 
       // Assert
       await e.wait(
-        'require("lgtm.context").current.file.path == "SECOND.md"',
+        'require("lgtm.services.state").current.file.path == "SECOND.md"',
         'selected second file',
       )
 
@@ -417,14 +216,14 @@ for (const profile of profiles) {
       await e.keys('[f')
 
       // Assert
-      await e.wait('require("lgtm.context").current.file.path == "PLAN.md"', 'previous file')
+      await e.wait('require("lgtm.services.state").current.file.path == "PLAN.md"', 'previous file')
 
       // Act
       await e.keys(' rm')
 
       // Assert
       await e.wait(
-        'require("lgtm.context").current.reviewed["PLAN.md"] ~= nil',
+        'require("lgtm.services.state").current.reviewed["PLAN.md"] ~= nil',
         'PLAN.md marked reviewed',
       )
       expect((await e.state())!.reviewed['PLAN.md']).toBeTruthy()
@@ -434,7 +233,7 @@ for (const profile of profiles) {
 
       // Assert
       await e.wait(
-        'require("lgtm.context").current.reviewed["PLAN.md"] == nil',
+        'require("lgtm.services.state").current.reviewed["PLAN.md"] == nil',
         'PLAN.md mark removed',
       )
       expect((await e.state())!.reviewed['PLAN.md']).toBeUndefined()
@@ -442,22 +241,22 @@ for (const profile of profiles) {
       // Act
       await e.keys(' rm')
       await e.wait(
-        'require("lgtm.context").current.reviewed["PLAN.md"] ~= nil',
+        'require("lgtm.services.state").current.reviewed["PLAN.md"] ~= nil',
         'PLAN.md marked before explorer navigation',
       )
       await e.lua(
-        'vim.api.nvim_set_current_win(require("lgtm.context").current.explorer.win); vim.api.nvim_win_set_cursor(0,{2,0})',
+        'vim.api.nvim_set_current_win(require("lgtm.services.state").current.explorer.win); vim.api.nvim_win_set_cursor(0,{2,0})',
       )
       await e.keys('m')
 
       // Assert
       await e.wait(
-        'require("lgtm.context").current.reviewed["SECOND.md"] ~= nil',
+        'require("lgtm.services.state").current.reviewed["SECOND.md"] ~= nil',
         'SECOND.md marked reviewed',
       )
       expect((await e.state())!.reviewed['SECOND.md']).toBeTruthy()
       const explorerLines = await e.value<string[]>(
-        'vim.api.nvim_buf_get_lines(require("lgtm.context").current.explorer.buf, 0, -1, false)',
+        'vim.api.nvim_buf_get_lines(require("lgtm.services.state").current.explorer.buf, 0, -1, false)',
       )
       expect(explorerLines[1]).toMatch(/✓ .*SECOND\.md/)
       expect(await e.value('vim.api.nvim_win_get_cursor(0)[1]')).toBe(2)
@@ -467,7 +266,7 @@ for (const profile of profiles) {
 
       // Assert
       await e.wait(
-        'require("lgtm.context").current.reviewed["SECOND.md"] == nil',
+        'require("lgtm.services.state").current.reviewed["SECOND.md"] == nil',
         'SECOND.md mark removed',
       )
       expect((await e.state())!.reviewed['SECOND.md']).toBeUndefined()
@@ -477,13 +276,19 @@ for (const profile of profiles) {
       await e.keys('<Tab>')
 
       // Assert
-      await e.wait('require("lgtm.context").current.file.path == "SECOND.md"', 'next unreviewed')
+      await e.wait(
+        'require("lgtm.services.state").current.file.path == "SECOND.md"',
+        'next unreviewed',
+      )
 
       // Act
       await e.keys(']f')
 
       // Assert
-      await e.wait('require("lgtm.context").current.file.path == "PLAN.md"', 'all-file navigation')
+      await e.wait(
+        'require("lgtm.services.state").current.file.path == "PLAN.md"',
+        'all-file navigation',
+      )
 
       // Act
       await r.write('.difflab/specific-plan/PLAN.md', '# Plan\nReview ignored content changed\n')
@@ -491,7 +296,7 @@ for (const profile of profiles) {
 
       // Assert
       await e.wait(
-        'require("lgtm.context").current.render_ready and not require("lgtm.context").current.reviewed["PLAN.md"]',
+        'require("lgtm.services.state").current.render_ready and not require("lgtm.services.state").current.reviewed["PLAN.md"]',
         'changed mark invalidated',
       )
     })
@@ -578,7 +383,7 @@ for (const profile of profiles) {
 
       // Assert
       await e.wait(
-        'require("lgtm.context").current.review.state == "completed"',
+        'require("lgtm.services.state").current.review.state == "completed"',
         'local completion',
       )
       const directoryReview = (await e.state())!
@@ -606,7 +411,7 @@ for (const profile of profiles) {
 
       // Assert
       await e.wait(
-        'require("lgtm.picker").last and not require("lgtm.picker").last.closed',
+        'require("lgtm.ui.search").last and not require("lgtm.ui.search").last.closed and vim.api.nvim_get_current_buf() == require("lgtm.ui.search").last.buf and vim.fn.mode() == "i"',
         'session picker',
       )
 
@@ -614,8 +419,8 @@ for (const profile of profiles) {
       await e.keys('specific-plan')
 
       // Assert
-      await e.wait('#require("lgtm.picker").last.filtered == 1', 'session filter')
-      expect(await e.value('vim.api.nvim_win_get_width(require("lgtm.picker").last.win)')).toBe(76)
+      await e.wait('#require("lgtm.ui.search").last.filtered == 1', 'session filter')
+      expect(await e.value('require("lgtm.ui.search").last.closed')).toBe(false)
 
       // Act
       await e.keys('<CR>')
@@ -651,107 +456,6 @@ for (const profile of profiles) {
       // Act
       await e.command('tabclose')
       await e.command('Lgtm close')
-    })
-  })
-  describe(`When an ignored review directory moves [${profile}]`, { tags: [profile] }, () => {
-    const fixture = useEditor(profile)
-    it('Confirmed root moves preserve discussions and remain usable after restart', async () => {
-      // Arrange
-      const { editor: e, runtime: r } = fixture()
-      await prepareIgnoredWorkspace(r)
-      const original = join(r.directory, 'plans/move-case')
-      await r.write('.difflab/move-case/PLAN.md', 'before\nselected\nafter\n')
-      const last = join(r.directory, 'plans/final-plan')
-
-      // Act
-      await e.command(`Lgtm directory ${original}`)
-
-      // Assert
-      await e.loaded()
-
-      // Act
-      await e.show('PLAN.md')
-      await e.pane('new', 2)
-      await e.keys('c')
-      await e.compose('Review before root move')
-      let movedState = (await e.state())!
-      const reviewId = movedState.review.id
-      const commentId = movedState.conversation.comments[0].id
-
-      // Arrange
-      const threadId = movedState.conversation.comments[0].threadId
-      let from = original
-
-      // Assert
-      for (const [index, to] of [join(r.directory, 'plans/moved-plan'), last].entries()) {
-        // Act
-        await rename(from, to)
-
-        // Assert
-        await e.lua(
-          'local from,to,pattern=...; vim.api.nvim_exec_autocmds("User",{pattern=pattern,data={from=from,to=to}})',
-          from,
-          to,
-          index === 0 ? 'MiniFilesActionRename' : 'LgtmPathRenamed',
-        )
-        await waitFor(
-          'review root moved',
-          () => e.state(),
-          (s) => Boolean(s?.root === to && !s.moving && s.render_ready),
-        )
-        movedState = (await e.state())!
-        expect(movedState.conversation.threads.find((t: Json) => t.id === threadId)).toMatchObject({
-          sourcePath: join(original, 'PLAN.md'),
-          currentPath: join(to, 'PLAN.md'),
-          anchor: { path: 'PLAN.md' },
-        })
-        expect(JSON.stringify(await e.marks())).toContain('Review before root move')
-        if (index === 0) {
-          // Act
-          await e.pane('new', 3)
-          await e.keys('c')
-          await e.compose('Review after first root move')
-        }
-        from = to
-      }
-
-      // Assert
-      expect((await e.state())!.conversation.comments).toHaveLength(2)
-      const movedBefore = (await e.state())!.conversation
-
-      // Act
-      await e.choose('Preview')
-      await e.command('Lgtm export review')
-
-      // Assert
-      await waitFor(
-        'moved export',
-        () => e.text(),
-        (text) => text.includes('Review after first root move'),
-      )
-      expect(await e.text()).toContain('Review before root move')
-
-      // Act
-      await e.keys('q')
-
-      // Assert
-      expect((await e.state())!.conversation).toEqual(movedBefore)
-
-      // Act
-      await e.command('Lgtm close')
-      await e.close()
-      await r.restart()
-      await e.start()
-      await e.command(`Lgtm directory ${last}`)
-
-      // Arrange
-      const restartedState = await e.loaded()
-
-      // Assert
-      expect(restartedState.review.id).toBe(reviewId)
-      expect(restartedState.root).toBe(last)
-      expect(restartedState.conversation.comments).toHaveLength(2)
-      expect(restartedState.conversation.comments.map((c: Json) => c.id)).toContain(commentId)
     })
   })
 }

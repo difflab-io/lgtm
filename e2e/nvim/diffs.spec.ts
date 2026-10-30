@@ -3,11 +3,9 @@
  * @module-tag nvim
  * @module-tag diffs
  */
-import { join } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { profiles, useEditor } from './fixtures.js'
 import { type TestHarness } from '../common/test-harness.js'
-import { waitFor } from '../common/test-utils.js'
 import { expectFileSeen } from './assertions.js'
 
 async function prepareNativeCheckout(runtime: TestHarness) {
@@ -46,7 +44,7 @@ for (const profile of profiles) {
         await expectFileSeen(editor, state.file.path, false)
         await editor.command('Lgtm complete')
         await editor.wait(
-          'require("lgtm.context").current.review.state == "completed"',
+          'require("lgtm.services.state").current.review.state == "completed"',
           'branch completed',
         )
 
@@ -74,7 +72,7 @@ for (const profile of profiles) {
         const notices = await editor.notices()
         await editor.command('Lgtm complete')
         await editor.wait(
-          'require("lgtm.context").current.review.state == "completed"',
+          'require("lgtm.services.state").current.review.state == "completed"',
           'empty review completed',
         )
 
@@ -113,12 +111,12 @@ for (const profile of profiles) {
       await editor.comments(2)
       await editor.command('Lgtm layout')
       await editor.wait(
-        'require("lgtm.context").current.layout == "inline"',
+        'require("lgtm.services.state").current.layout == "inline"',
         'inline CodeDiff layout',
       )
       await editor.command('Lgtm layout')
       await editor.wait(
-        'require("lgtm.context").current.layout == "side-by-side"',
+        'require("lgtm.services.state").current.layout == "side-by-side"',
         'side-by-side CodeDiff layout',
       )
       const state = await editor.loaded()
@@ -147,7 +145,7 @@ for (const profile of profiles) {
       await editor.keys(' rm')
 
       await editor.wait(
-        'next(require("lgtm.context").current.reviewed_pending or {}) == nil',
+        'next(require("lgtm.services.state").current.reviewed_pending or {}) == nil',
         'file mark saved by backend',
       )
 
@@ -155,10 +153,10 @@ for (const profile of profiles) {
       await editor.close()
       await runtime.restart()
       await editor.start()
-      const state = await editor.openLocal('working')
+      await editor.openLocal('working')
       await editor.show('review.txt')
       await editor.wait(
-        'require("lgtm.context").current.reviewed["review.txt"] ~= nil',
+        'require("lgtm.services.state").current.reviewed["review.txt"] ~= nil',
         'persisted local file mark',
       )
 
@@ -172,12 +170,14 @@ for (const profile of profiles) {
       await runtime.write('review.txt', 'working content changed after marking seen\n')
       await editor.command('Lgtm refresh')
       await editor.wait(
-        'require("lgtm.context").current.render_ready and not require("lgtm.context").current.reviewed["review.txt"]',
+        'require("lgtm.services.state").current.render_ready and not require("lgtm.services.state").current.reviewed["review.txt"]',
         'working checkmark invalidated',
       )
 
       // Assert
-      expect(await editor.text(state.panes.new.buf)).toContain('working content changed')
+      expect(await editor.text((await editor.state())!.panes.new.buf)).toContain(
+        'working content changed',
+      )
       await expectFileSeen(editor, 'review.txt', false)
     })
 
@@ -204,7 +204,7 @@ for (const profile of profiles) {
         if (mode === 'staged') await runtime.git('add', 'src/lib.rs')
         await editor.command('Lgtm refresh')
         await editor.wait(
-          'require("lgtm.context").current.render_ready and not require("lgtm.context").current.reviewed["src/lib.rs"]',
+          'require("lgtm.services.state").current.render_ready and not require("lgtm.services.state").current.reviewed["src/lib.rs"]',
           'hidden file checkmark invalidated',
         )
 
@@ -223,59 +223,6 @@ for (const profile of profiles) {
       },
     )
   })
-
-  describe(
-    `When a working buffer is shared with ordinary editing [${profile}]`,
-    { tags: [profile] },
-    () => {
-      const fixture = useEditor(profile)
-
-      it('Ordinary tabs keep note cards and original keys while review tabs keep review comments and keys', async () => {
-        // Arrange
-        const { editor, runtime } = fixture()
-        await prepareNativeCheckout(runtime)
-        await runtime.write('review.txt', 'working edit\n')
-        await editor.edit(join(runtime.workspace, 'review.txt'))
-        await editor.command('Lgtm note')
-        await editor.compose('Standalone note outside the review')
-        const mapping = await editor.value('vim.fn.maparg("c","n",false,true).desc')
-        const state = await editor.openLocal('working')
-        await editor.show('review.txt')
-        const reviewTab = state.tab
-        const buffer = state.panes.new.buf
-
-        // Act
-        await editor.command(`tabnew ${join(runtime.workspace, 'review.txt')}`)
-        const ordinary = {
-          buffer: await editor.value('vim.api.nvim_get_current_buf()'),
-          mapping: await editor.value('vim.fn.maparg("c","n",false,true).desc'),
-          review: await editor.value('vim.b.lgtm'),
-        }
-        await editor.wait(
-          'vim.inspect(vim.api.nvim_buf_get_extmarks(0,require("lgtm.threads").namespace,0,-1,{details=true})):find("Standalone note outside",1,true) ~= nil',
-          'ordinary note card displayed',
-        )
-        await editor.lua('vim.api.nvim_exec_autocmds("ColorScheme",{modeline=false})')
-        await editor.command('tabclose')
-        await waitFor(
-          'review keys restored',
-          () =>
-            editor.lua<string>(
-              'return vim.api.nvim_buf_call(...,function() return vim.fn.maparg("c","n",false,true).desc end)',
-              buffer,
-            ),
-          (value) => value === 'Add review comment',
-        )
-
-        // Assert
-        expect(ordinary.buffer).toBe(buffer)
-        expect(ordinary.mapping).toBe(mapping)
-        expect(ordinary.review).toBeFalsy()
-        expect(await editor.value('vim.api.nvim_get_current_tabpage()')).toBe(reviewTab)
-        expect(JSON.stringify(await editor.marks())).not.toContain('Standalone note outside')
-      })
-    },
-  )
 
   describe(`When changing the saved comparison [${profile}]`, { tags: [profile] }, () => {
     const fixture = useEditor(profile)
@@ -308,7 +255,7 @@ for (const profile of profiles) {
       const replaced = await editor.openLocal('branch', true)
       await editor.command('Lgtm complete')
       await editor.wait(
-        'require("lgtm.context").current.review.state == "completed"',
+        'require("lgtm.services.state").current.review.state == "completed"',
         'replacement completed',
       )
 
@@ -334,20 +281,20 @@ for (const profile of profiles) {
       await runtime.git('restore', 'review.txt')
       await editor.command('Lgtm refresh')
       await editor.wait(
-        'require("lgtm.context").current.empty and #require("lgtm.context").current.files == 0 and require("lgtm.context").current.file == nil',
+        'require("lgtm.services.state").current.empty and #require("lgtm.services.state").current.files == 0 and require("lgtm.services.state").current.file == nil',
         'last change restored',
       )
 
       // Assert
-      expect(await editor.value('vim.tbl_isempty(require("lgtm.context").current.views)')).toBe(
-        true,
-      )
-      expect(await editor.value('require("lgtm.context").current.observe_sources ~= nil')).toBe(
-        false,
-      )
+      expect(
+        await editor.value('vim.tbl_isempty(require("lgtm.services.state").current.views)'),
+      ).toBe(true)
+      expect(
+        await editor.value('require("lgtm.services.state").current.observe_sources ~= nil'),
+      ).toBe(false)
       expect(
         await editor.value(
-          'require("codediff.ui.lifecycle").get_session(require("lgtm.context").current.tab) ~= nil',
+          'require("codediff.ui.lifecycle").get_session(require("lgtm.services.state").current.tab) ~= nil',
         ),
       ).toBe(true)
     })

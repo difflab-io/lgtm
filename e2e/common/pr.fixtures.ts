@@ -40,6 +40,7 @@ export function usePrFixture(kind: 'backend' | 'cli') {
       }
       if (mode === 'record') await github!.record(file, journey)
     }
+    await github!.prepareSnapshots()
     console.info(`${mode} GitHub journey: ${spec}#${journey}`)
   })
   // Stack order stops the editor/backend before recording or replaying cleanup.

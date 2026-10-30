@@ -1,0 +1,7 @@
+std = "neovim"
+
+[lints]
+high_cyclomatic_complexity = "deny"
+
+[config]
+high_cyclomatic_complexity = { maximum_complexity = 10 }

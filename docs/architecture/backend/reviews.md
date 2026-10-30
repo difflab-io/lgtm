@@ -12,29 +12,28 @@ This page describes the intended contract. It does not report implementation sta
 
 - FR1: Accept a typed target when starting or listing reviews. Resolve contexts and sessions inside services.
 - FR2: Record reviews for working, staged, branch, directory, and PR comparisons selected by clients. Accept anchors for ignored files.
-- FR3: Accept notes by file location without a visible review or separate setup call.
 - FR4: Preserve comments, replies, attribution, resolution, and exports across restarts and content changes.
 - FR5: Save eligible PR comments as remote private drafts. Submit them only after an explicit review submission.
 - FR6: Keep local completion separate from PR submission. Preserve unsent drafts when a PR closes or merges.
-- FR7: Preserve original anchor evidence and location status. Distinguish confirmed mappings from outdated or unconfirmed locations.
-- FR8: Support note promotion, final review comments, exports, and explicit recovery after uncertain remote writes.
+- FR7: Preserve original anchor evidence and location status. Distinguish current coordinates from historical or provider-outdated locations.
+- FR8: Support final review comments, exports and explicit recovery after uncertain remote writes.
 - FR9: Detect changed comparisons and concurrent edits before applying a stale client request.
 - FR10: Keep original anchors immutable and derived placements specific to their displayed sources.
 - FR11: Preserve GitHub current locations, historical locations, and outdated status separately.
-- FR12: Automatically float comments whose selected lines are lost to the file header, with their original location and excerpt.
-- FR13: Automatically follow confirmed file and directory moves while retaining comment and thread identity.
-- FR14: Keep comments on confirmed deleted files as orphaned discussions. Restore preserved anchors when matching content returns.
+- FR12: Show provider-outdated feedback and retain access to original saved source.
+- FR13: Preserve saved source after workspace files move or disappear.
+- FR14: Navigate historical local discussions at their fixed original coordinates.
 - FR15: Share staged and branch discussions in one local branch context. Filter each view by the files in its selected diff. Keep PR discussions in their PR context.
-- FR16: Allow unstaged Git anchors to become orphaned. Require staged or committed source evidence for local Git anchor preservation.
+- FR16: Capture saved working and index bytes independently without changing the user's Git state.
 
 ### Non-Functional
 
-- NFR1: Return review data without enumerating files, downloading file bodies, or requiring a diff view.
+- NFR1: Return review data without requiring a diff view. Starting or refreshing a review captures its source.
 - NFR2: Preserve the same transaction rules in SQLite and PostgreSQL.
 - NFR3: Keep GitHub credentials in the backend. Separate local attribution from remote account permissions.
 - NFR4: Make retries safe. Preserve receipts that prove which remote writes succeeded.
 - NFR5: Bound conversation reads and forge requests. Report incomplete observations explicitly.
-- NFR6: Limit any content validation to the relevant anchor. Respect path boundaries without changing checkouts or scanning directories.
+- NFR6: Validate comment ranges against retained source. Respect capture roots and leave user checkouts unchanged.
 
 ## Design
 
@@ -51,7 +50,6 @@ This section is for API clients. Examples show request shapes, not generated SDK
 | Review a branch | Repository location and compared commit identities | Review attempt and its pinned commits |
 | Review an ignored directory | Explicit root and selected file anchors | Local review data and discussions |
 | Review a PR | Repository URL and PR number | Review attempt, PR metadata, drafts, and submission |
-| Add an ordinary note | File location and anchor evidence | Notes context, comments, and internal write session |
 
 Clients choose files and load their content through their own content integration. Neovim uses CodeDiff for now. The future web UI uses [DiffService](diffs.md). Each client chooses how to browse explicitly selected ignored directories.
 
@@ -59,29 +57,18 @@ Supply explicit locations. The backend cannot infer the selected repository from
 
 #### Local context and preservation policy
 
-Working, staged, and branch views use the same local branch context. Staged and branch comments remain in that shared conversation across review attempts. Switching a comparison changes the displayed files, not comment ownership. PR conversations use their separate forge context and do not import local comments automatically.
+Working, staged and branch views share a local branch conversation. Every session has retained revisions. Each comment keeps its original revision, side, path and range. Directory reviews capture their selected root, including ignored files. Workspace edits, moves and deletions do not change saved review source.
 
 ```mermaid
-flowchart TB
-    L["Local context: Git directory and branch"] --> S["Staged diff: visible-file filter"]
-    L --> B["Branch diff: visible-file filter"]
-    L --> W["Working diff: unstaged anchors can become orphaned"]
-    P["PR context: repository and PR number"] --> PR["PR diff and remote discussions"]
+flowchart LR
+  Context[Local branch or PR conversation] --> Session[Session]
+  Session --> R1[Saved revision 1]
+  Session --> R2[Saved revision 2]
+  R1 --> C1[Original comment coordinates]
+  R2 --> C2[New comment coordinates]
 ```
 
-| Anchor source | Preservation contract |
-| --- | --- |
-| Committed content | Preserve its source commit and derive locations in later selected diffs. |
-| Staged content | Preserve the index blob identity, hash, selected text, and context. Carry matching content into commits and branch views. |
-| Unstaged working content | Keep it while its source matches. It can become orphaned after edits, staging, commits, or checkout changes. Carry-forward is not required. |
-| Notes or explicit directory content | Preserve saved-file evidence and use the note mapping rules. These workflows do not require Git staging. |
-| PR content | Keep it in the PR context and preserve separate provider current and historical observations. |
-
-Staged content is the minimum required source for local Git anchor preservation. This depends on the annotated source, not only the UI's mode name. Staging content later does not require upgrading an earlier unstaged anchor. Its discussion remains saved even when its location becomes orphaned.
-
-The UI selects comments whose confirmed current path or rename association belongs to the selected diff. It then resolves their range against that displayed source. A file outside the diff is a visibility filter, not an orphaning event. All saved discussions remain available in the context-wide thread list and export, including orphaned items.
-
-`GetConversation` can accept an optional file-path filter to bound the visible-file query. Without that filter, it returns the context conversation. Filtering never deletes comments, changes their context, or marks them resolved. The staged and branch views can therefore show the same thread ID when its file appears in both diffs.
+PR conversations remain separate from local conversations. Matching repository and commit identities make their source comparable; they do not copy or merge discussions. The context-wide thread list and export retain discussions outside the selected diff.
 
 #### Start or find a review
 
@@ -126,45 +113,26 @@ The review API returns domain data. It does not choose a file, diff tool, or lay
 
 #### Add a comment on displayed content
 
-A scope selects either a review or a notes location. A version identifies saved review or comment state. Anchor evidence identifies the content that the client displayed.
+The client supplies selection intent. The backend reads the retained source and captures bounded evidence.
 
 ```text
-# The client reads selected staged content through its content integration.
-displayed = client.selected_content()
-
-saved = AddComment({
+AddComment({
   scope: { reviewId: review.id },
-  anchor: { line: {
-    path: displayed.path, side: "new", start: 11, end: 12,
-    source: { indexFile: { blobOid: displayed.blobOid, contentHash: displayed.contentHash } },
-    evidence: { selectedText: displayed.selectedText, context: displayed.context }
-  } },
+  anchor: {
+    kind: "line",
+    snapshotId: review.snapshot.id,
+    path: "src/main.rs",
+    side: "new",
+    start: 11,
+    end: 12
+  },
   expectedVersion: review.version,
   body: "Handle this failure.",
   requestKey: comment_key
 })
 ```
 
-Use a file anchor for a file comment and a general anchor for a review comment. This example uses staged content so its source can survive a commit. Use a commit identity for committed text, the actual blob identity for index text, and a content hash for mutable or non-Git text. Capture the hash, selected text, and bounded surrounding context from the displayed saved source. The service validates the anchor against its scope and recorded comparison. It does not require a preceding file read through the review API.
-
-#### Add notes without starting a review
-
-```text
-displayed = client.selected_content()
-
-saved = AddComment({
-  scope: { notes: { path: "/work/project/plan.md" } },
-  anchor: { line: {
-    side: "new", start: 4, end: 4,
-    source: { localFile: { contentHash: displayed.contentHash } },
-    evidence: { selectedText: displayed.selectedText, context: displayed.context }
-  } },
-  body: "Explain the rollback.",
-  requestKey: note_key
-})
-```
-
-The notes path identifies the file, so its line anchor needs no second path. The service finds or creates internal storage during the write. Reads do not create an empty note session or scan the notes directory.
+File comments use a snapshot ID and relative path. General comments need no source range. Standalone notes writes are removed; existing notes remain readable and exportable.
 
 #### Read and manage discussions
 
@@ -179,43 +147,23 @@ The notes path identifies the file, so its line anchor needs no second path. The
 
 Select a comment ID for edit or delete. Select a thread ID for resolution. Responses identify the root, ordered replies, ownership, permissions, and remote save state. Keep local-save success separate from remote-save success.
 
-#### Place saved discussions on displayed content
-
-```text
-conversation = GetConversation({
-  scope: { reviewId: review.id },
-  filePaths: client.selected_diff_paths()
-})
-displayed = client.selected_content()
-
-# LGTM-owned logic around CodeDiff, or DiffService mapping results.
-placements = client.anchor_resolver.resolve(conversation.threads, displayed)
-client.clear_comment_overlays()
-
-for placement in placements:
-  if placement.matches(displayed) and placement.status in [Exact, Relocated]:
-    client.show_inline(placement)
-  else:
-    client.show_labeled_fallback(placement)
-```
-
-`client.*` denotes client logic, not CodeDiff methods or review RPCs. Load content and discussion independently, then resolve each placement before drawing it. Recompute placements when either source changes. The original anchor remains available in the thread window and export.
-
-#### Refresh without replacing the review
-
-`GetReview` reads saved state. `RefreshReview` accepts a review or notes scope and observes source metadata or PR state. It also accepts source-change evidence from the client. It updates known path associations and remote discussions without replacing the selected comparison or submitting a review.
+#### Display and refresh saved revisions
 
 ```mermaid
-flowchart TD
-    A["RefreshReview(scope, version, changes, key)"] --> B{"What changed?"}
-    B -->|"No comparison change"| C["Return current review data"]
-    B -->|"Comparison changed"| D["Return changed source identities"]
-    B -->|"PR closed or merged"| E["Keep discussions and drafts; block new submission"]
-    B -->|"Source unavailable"| F["Keep saved data and export access"]
-    D --> G["UI chooses how to show the change"]
+sequenceDiagram
+  participant Client
+  participant ReviewService
+  participant SnapshotService
+  Client->>ReviewService: GetConversation(scope, snapshotId)
+  ReviewService-->>Client: Original anchor, display location and status
+  Client->>Client: Render supplied coordinates in the matching pane
+  Client->>ReviewService: RefreshReview(scope, version, key)
+  ReviewService->>SnapshotService: Capture current saved source
+  SnapshotService-->>ReviewService: Retained base/head pair
+  ReviewService-->>Client: Same session and next revision
 ```
 
-Use explicit refresh when needed. Clients do not need a continuous refresh loop to open a review. Clients detect displayed content changes and compare them with stored anchor evidence. The service reports domain state and permitted operations. Clients choose how to show those results.
+`GetReview` resumes local saved state. An observed PR update can add a revision within its active session. Explicit refresh captures current local saved bytes or PR commits. Capture failure leaves the prior revision available. A completed review keeps its recorded comparison. Refresh accepts no source moves or text-matching evidence.
 
 #### Complete or submit
 
@@ -229,27 +177,9 @@ PR outcomes are `approve`, `comment`, and `request_changes`. GitHub self-reviews
 
 After a confirmed PR submission, clients call `StartReview` with the same PR target before creating the next draft comment or reply. Use the returned review ID and version for writes. This creates or resumes the next active attempt; it does not change the submitted attempt, its final body or its outcome. Reading the completed attempt does not create a successor.
 
-#### Promote notes or export
+#### Export
 
-```text
-source = { notes: { path: "/work/project/plan.md" } }
-notes = GetConversation({ scope: source })
-
-PromoteNotes({
-  source: source,
-  commentIds: selected_root_ids,
-  targetReviewId: review.id,
-  anchors: confirmed_target_anchors,
-  expectedSourceVersion: notes.version,
-  expectedReviewVersion: review.version,
-  requestKey: promotion_key
-})
-
-markdown = Export({ scope: { reviewId: review.id } }).markdown
-notes = Export({ scope: source }).markdown
-```
-
-Promotion retains source notes and original authorship. The copied comment records its source note ID. The same request key cannot duplicate a copy; a fresh request can promote again after deletion. No separate promotion history is stored. Each target anchor includes its source identity and evidence. The client confirms target locations before promotion. A PR target follows the remote draft rules. Export changes no review state and performs no GitHub write.
+`Export(scope)` returns Markdown without changing review state or writing to GitHub. It includes original locations, authors, replies and resolution. The archived notes scope remains available for reads and export. Promotion is removed.
 
 #### Retry after a failure
 
@@ -381,8 +311,7 @@ Confirmed remote deletions remove cached text from conversations, cards, modals,
 | Selected local comparison and source identities | Recorded comparison and compatibility with the active review |
 | PR target | Authoritative PR metadata and submission eligibility |
 | Review ID after start or selection | Internal session, context, lifecycle, and remote account |
-| Anchor and source evidence | Anchor shape, source consistency, and recorded location status |
-| Notes location | Notes context and internal write session |
+| Snapshot and selected range | Saved source, valid bounds and fixed location |
 
 The client does not create storage records as setup. The review API does not list files or return file bodies.
 
@@ -398,17 +327,16 @@ Comparison   = Working { baseCommit }
 Scope        = Review { reviewId }
              | Notes { path }
 
-Source       = Commit { sha, contentHash }
-             | WorkingFile { contentHash }
-             | IndexFile { blobOid, contentHash }
-             | LocalFile { contentHash }
+Snapshot     = { id, repositoryId, root, baseCommit, headCommit }
 
 Anchor       = General
-             | File { path }
-             | Line { path?, side, start, end, source, evidence }
+             | File { snapshotId, path }
+             | Line { snapshotId, path, side, start, end }
+
+Thread       = { anchor, displayLocation?, displayStatus, forgeObservation? }
 ```
 
-Each union becomes a typed discriminator, such as a Protobuf `oneof`. Local comparison fields describe what the client selected. The service resolves storage from the target. For PRs, the service obtains authoritative base, head, and lifecycle metadata from the forge. A review line anchor requires a relative path. A notes line anchor uses its scope's file path. Directory reviews use the notes context model internally.
+Each union becomes a typed discriminator, such as a Protobuf `oneof`. Local comparison fields describe what the client selected. The service resolves storage from the target. For PRs, the service obtains authoritative base, head, and lifecycle metadata from the forge. A review line anchor requires a relative path. Directory reviews reuse the path-scoped context model internally.
 
 #### Storage ownership
 
@@ -425,151 +353,23 @@ Local reviews own their discussion, source evidence and resolution state. GitHub
 
 A retry record is not a second PR history. Local requests may need their committed result after later edits or deletion. PR creation requests keep cache IDs; remote mutations keep identity, a payload hash and an acknowledgment. Uncertain writes recover against GitHub before replay. Promotion uses this shared retry contract and a nullable source-note ID on the copied comment.
 
-### Anchor ownership
-
-An anchor records what a comment discussed. A placement records where that anchor belongs in one displayed comparison. They have separate lifetimes.
-
-```mermaid
-flowchart TB
-    CD["CodeDiff: content and diff hunks"] --> NR["LGTM Neovim anchor resolver"]
-    DS["DiffService: content and anchor mapping"] --> Web["Web UI"]
-    RS["ReviewService: original anchors and forge observations"] --> NR
-    RS --> Web
-    NR --> UI["Confirmed inline placement or labeled fallback"]
-    Web --> UI
-    GH["GitHub thread locations and outdated state"] --> RS
-```
-
-- ReviewService: Preserve original anchors and evidence. Maintain confirmed current path associations and orphan state. Enforce scope, comparison, permissions, and write guards. Store forge observations separately.
-- GitHub adapter: Import current and historical locations with their actual source identities and outdated state. Refresh observations for existing threads.
-- LGTM Neovim adapter: Capture source evidence and resolve placements against content supplied by CodeDiff. CodeDiff does not own comment identity or relocation.
-- DiffService: Supply content evidence and resolve supplied anchors for a requested comparison. It does not load or mutate review records.
-- UI: Render confirmed placements inline. Float lost-line discussions to the file header and show orphaned discussions in the review or notes list.
-
-#### Original anchors and source evidence
-
-```text
-Anchor = General
-       | File { path }
-       | Line { path, side, start, end }
-
-AnchorEvidence = {
-  source,
-  selectedText,
-  contextBefore,
-  contextAfter
-}
-
-Source = Commit { sha, contentHash }
-       | WorkingFile { contentHash }
-       | IndexFile { blobOid, contentHash }
-       | LocalFile { contentHash }
-
-Placement = {
-  threadId,
-  displayedComparison,
-  displayedSource,
-  status: Exact | Relocated | Outdated | Orphaned | Unverified,
-  location?,
-  reason?,
-  evidenceSource: Original | LocalMapping | ForgeObservation
-}
-```
-
-`Anchor` stores location only. `AnchorEvidence.source` is the single source of commit, index blob, and content identity. The original path, side, range, source, and selected text remain immutable. Replies share their thread's anchor. Edits to comment text, resolution, commits, and refreshes do not replace it. Imported history retains the provider's original fields when its original source cannot be established. Never invent a commit identity for that history.
-
-| Content being annotated | Required source identity |
-| --- | --- |
-| A committed side | Actual commit SHA, repository scope, path, and content identity of that side |
-| Unstaged working text | Hash of the saved working file, with the baseline recorded separately. No carry-forward guarantee. |
-| Staged text | Actual stage-zero index blob object ID and byte hash, independently of working content |
-| Notes or directory content | Hash of the selected saved file, including ignored and non-Git files |
-
-Content hashes use SHA-256 over the exact source bytes, including line endings and the final newline. Joining Neovim buffer lines does not establish that identity. The LGTM adapter obtains or reconstructs the actual saved bytes. Reject a new annotation on unsaved text until the user saves it.
-
-Preserve the selected text and bounded surrounding context as mapping evidence. This is a selected excerpt, not a full-file snapshot. A source hash identifies a file version. It does not prove that a line in different content has the same meaning.
-
-#### Mapping and stale content
+### Fixed comment locations
 
 ```mermaid
 flowchart TD
-    A["Original anchor plus displayed source"] --> B{"Same scope, path, side, and source?"}
-    B -->|"Yes, range and text match"| E["Exact placement"]
-    B -->|"Source or path changed"| Stable{"Preserved source or unstaged working source?"}
-    Stable -->|"Unstaged"| Ephemeral["Orphaned: unstaged source changed"]
-    Stable -->|"Preserved"| C["Resolve path and map the selected range"]
-    C --> Deleted{"File deletion confirmed?"}
-    Deleted -->|"Yes"| P["Orphaned discussion in the review or notes list"]
-    Deleted -->|"No"| D{"One supported mapping with matching text and context?"}
-    D -->|"Yes"| R["Relocated placement"]
-    D -->|"Deleted, changed, or ambiguous"| O["Outdated with a reason"]
-    D -->|"Evidence unavailable"| U["Unverified with a reason"]
-    E --> I["Render inline for this displayed source only"]
-    R --> I
-    O --> F["Float discussion to the file header with original lines"]
-    U --> V["Labeled unverified discussion without a guessed line"]
-    Ephemeral --> P
+  Thread[Original thread location] --> Same{Same source commit?}
+  Same -->|Yes| Exact[Show original coordinates]
+  Same -->|No| Forge{Current provider coordinates?}
+  Forge -->|Yes| Current[Show provider coordinates]
+  Forge -->|Outdated| Outdated[Show provider outdated status]
+  Forge -->|No| Historical[Open retained original revision from threads]
 ```
 
-Use source identity first. For changed content, use supported Git or diff mappings and selected-text context to establish one destination. A unique text match without conflicting path or context evidence can support relocation. Repeated text, replaced ranges, uncertain renames, and missing source evidence cannot support a guessed location.
+The backend validates new ranges against a retained snapshot. A comment keeps its snapshot ID and commit identity. Evidence excerpts support display and export; no client or backend searches for matching text to relocate a comment.
 
-For preserved sources, a moved range must preserve its selected text and order. If any selected line changes or disappears, mark the range outdated. Do not split it or shorten it silently. Never clamp a historical line to the end of the current file.
+GitHub supplies current coordinates and outdated status for forge threads. Those observations apply only to the matching PR commits. Original coordinates remain unchanged. Historical local discussions open their original retained revision, including files that disappeared from the current diff.
 
-Extmarks can track candidate positions during edits. They do not prove that the selected text survived a deletion or replacement. Revalidate candidates after a save and before rendering them as current. Preserve original coordinates instead of saving moved extmark coordinates over them.
-
-Only `Exact` and `Relocated` placements contain a confirmed code location. `Outdated`, `Orphaned`, and `Unverified` require a reason and retain the original anchor for fallback display.
-
-A placement applies only to its named comparison and source identities. On file changes, comparison switches, refresh, or reopening, invalidate placements before drawing new ones. Discard asynchronous results for another file generation or source. A stored review version does not validate mutable file content.
-
-| State | Required display |
-| --- | --- |
-| `Exact` | Show inline at the original range in the matching source. |
-| `Relocated` | Show inline at the confirmed derived range. Keep the original location available. |
-| `Outdated` | Float the discussion to the file header. Show that the original selection changed, disappeared, or became ambiguous, with its original range and excerpt. |
-| `Orphaned` | Keep the discussion under its original file in the review or notes list. State whether the file was deleted or an unstaged source changed. Preserve its range, excerpt, replies, and resolution. |
-| `Unverified` | Show a discussion with an unverified location. Allow retry when source evidence becomes available. |
-| Source unavailable | Keep the discussion accessible as unverified. A failed read or unavailable checkout does not prove file deletion. |
-
-For preserved sources, confirmed moves and line shifts update derived locations automatically. They need no user confirmation. Unstaged Git comments can instead become orphaned when their source changes. Original anchors remain immutable in both cases.
-
-For renamed files or directories, move file comments and every associated thread to the confirmed new path. Keep their IDs, replies, authorship, resolution, and posting state. The service retains current path associations so notes opened at the new path find the same discussions after restart. Each saved-file thread also retains its immutable absolute source location. A moved notes context retains its original lookup key and a separate current root. New comments capture their actual creation location. An old filename reused by another file must not inherit the moved discussion. Use Git rename evidence or observed filesystem moves, supported by content evidence within the selected scope.
-
-Clients report confirmed moves and deletions through `RefreshReview(scope, sourceChanges, requestKey)` when those changes occur. The service validates the evidence and updates path associations or orphan state transactionally. A notes scope does not create a visible review. Repeating the same change keeps the same discussion IDs. Content mapping results remain specific to the displayed source. No continuous polling loop is required.
-
-If the original line is lost but the file remains, show the discussion above the first code line. Label it as a lost or outdated selection and include the original path, range, and excerpt. Keep it editable and resolvable under the same permissions. Do not turn it into a new general comment or change its remote anchor.
-
-If deletion is confirmed, mark the discussion orphaned and retain it in the review or notes list. If matching content returns or a confirmed move becomes known, automatically reconnect its derived location. Reusing a deleted filename for unrelated content does not reconnect a discussion.
-
-File comments follow confirmed path mappings without needing a line match. General comments need no line mapping. Resolution, publication, and anchor validity remain separate states.
-
-#### GitHub location observations
-
-GitHub exposes `line`, `startLine`, `originalLine`, `originalStartLine`, `diffSide`, `startDiffSide`, and `isOutdated`. Its review comments also expose commit evidence. Import current and original coordinates separately, with the observed comparison. See the [GitHub schema](https://docs.github.com/en/graphql/reference/pulls#pullrequestreviewthread).
-
-Treat `isOutdated` as the provider's status for that PR comparison. A missing current line or an outdated thread cannot produce a current placement from `originalLine`. Original coordinates remain historical evidence. Refresh current observations for existing threads without rewriting their original anchors.
-
-In the live PR view, keep provider-outdated threads in the outdated fallback. A local text match does not override the provider's status. An unavailable current observation cannot establish a current provider placement.
-
-Use a current provider location only when its comparison matches the displayed source. If the user opens historical content, resolve against that historical source explicitly. A confirmed historical placement does not make the thread current on GitHub. If metadata changes during observation, retain the last complete observation and report uncertainty.
-
-#### Context changes
-
-| Event | Required anchor handling |
-| --- | --- |
-| Insert lines before unchanged selected text | Derive the new range from supported mapping evidence. Keep the original anchor. |
-| Stage or unstage | Preserve staged blob identities independently of working content. Earlier unstaged anchors can become orphaned. |
-| Commit staged text | Match its saved index blob to the committed file and retain the same thread in branch views. Preserve the original staged source. |
-| Change or commit previously unstaged text | Keep its discussion saved. It can remain orphaned without automatic carry-forward. |
-| Amend, rebase, reset, or advance a branch | Map from original evidence to the selected comparison. A new SHA alone does not prove that text moved or became invalid. |
-| Rename a file or directory | Follow the confirmed new path automatically for all associated comments and threads. Retain original paths and current path associations. |
-| Lose a selected line or range | Float the intact discussion to the file header with its original range, excerpt, and lost-selection reason. |
-| Delete a file | Keep its comments as orphaned discussions in the review or notes list. Do not attach them to another file. |
-| Restore deleted content | Automatically reconnect when path and content evidence establish the same discussion location. |
-| Reopen after edits made outside Neovim | Resolve from persisted source and text evidence. Extmarks from an old buffer are insufficient. |
-| Switch PR base or head | Follow the complete provider observation within the same active review. Keep the owned pending review and original anchors. Invalidate placements and reviewed marks for the old comparison. |
-| Merge or close a PR | Preserve original anchors and the last complete observation. Lifecycle changes do not resolve threads or confirm draft publication. |
-
-The preservation rules apply to staged, committed, notes, directory, and PR sources. Unstaged Git anchors have the explicit orphaning exception above. A changed local comparison can require a new review attempt. A changed PR comparison keeps its active review and pending review identity. Frozen submission intents and completed reviews keep their recorded comparison.
+File drafts from earlier revisions can synchronize by path. Line drafts can synchronize when the entire file retains its original bytes. If the file bytes change, the draft stays local without relocating its original coordinates. The save response reports that synchronization error and retains its body. Existing remote drafts keep their forge identity; PR pushes preserve the session, pending review and composers.
 
 #### Response contracts
 
@@ -577,7 +377,7 @@ The preservation rules apply to staged, committed, notes, directory, and PR sour
 | --- | --- |
 | Review | Stable ID, target, comparison, lifecycle, version, allowed actions, and recovery state |
 | Conversation | Version, root and reply identity, authorship, order, resolution, local state, remote state, and current path associations |
-| Thread location | Immutable original anchor and evidence, confirmed current path associations or orphan state, plus separate forge observations and their comparison identities |
+| Thread location | Immutable original anchor and evidence, selected revision display coordinates, plus provider observations and their comparison identities |
 | Refreshed scope state | Scope version, accepted source changes, updated path associations or orphan state, and review metadata when applicable |
 | Conflict | Changed fields, current version, and allowed recovery choices |
 
@@ -595,20 +395,19 @@ The request shapes define client responsibilities. Final message fields follow t
 | `EnsureIdentity` | Human or agent fields → actor | Humans require email. Agents require model and provider without email. |
 | `StartReview` | Target, comparison, resume policy, request key → review | Resolve storage internally. Resume a compatible local review. For a PR, observe current commits and retain its active review ID. |
 | `ListReviews` | Target and lifecycle filters, page token → reviews | Read saved reviews without creating contexts or sessions. |
-| `GetReview` | Review ID → review | Read saved state without implicit refresh or submission. |
-| `RefreshReview` | Review or notes scope, version, optional source changes, request key → refreshed scope state | Validate moves and deletions, update path associations or orphan state, and reconcile forge observations. Keep local and frozen comparisons; update an active PR comparison after a complete provider observation. |
-| `GetConversation` | Scope, optional file-path filter, page token → conversation | Read the shared context conversation or its visible-file subset. Return original anchors and separate forge observations. Filtering changes no stored state. |
-| `AddComment` | Scope, anchor evidence, body, optional review version, request key → comment and save states | Validate the selected source and range before accepting the anchor. Resolve notes storage internally and synchronize eligible PR drafts. |
+| `GetReview` | Review ID → review | Resume saved local source; retain a next revision when an active PR comparison advances. Never submit implicitly. |
+| `RefreshReview` | Review scope, version and request key → refreshed review | Capture another revision and reconcile provider observations without replacing the active session. |
+| `GetConversation` | Scope, optional snapshot ID, file filter and page token → conversation | Return original anchors, provider observations and fixed display locations for the selected revision. |
+| `AddComment` | Review scope, snapshot selection, body, version and request key → comment and save states | Validate the retained source and range; synchronize eligible PR drafts. |
 | `Reply` | Scope, thread ID, body, version, request key → comment and save states | Check scope and allocate reply order transactionally. |
 | `EditComment` | Scope, comment ID, body, version, request key → comment | Enforce ownership and remote permissions. Preserve authorship and anchor. |
 | `DeleteComment` | Scope, comment ID, version, request key → receipt | Enforce ownership and provider permissions. Confirmed remote deletion removes the cached comment; surviving replies keep their thread. Local roots require deleting replies first. |
 | `ResolveThread` | Scope, thread ID, resolved, version, request key → thread | Resolve or reopen according to thread origin. Confirm remote resolution from the targeted mutation response. |
 | `GetFileReviews` | Review ID → paths and content identities | Read local per-reviewer marks or GitHub Viewed state. |
 | `SetFileReviewed` | Review ID, path, reviewed, content identity → acknowledgment | Upsert/delete local progress or update GitHub Viewed state. No comment or resolution changes. |
-| `SyncDraftComment` | Review ID, comment ID → save state | Recover a known draft using receipts. Detect changed PR commits, update the active comparison, and derive safe placement before a new private write. Reuse its pending review. Keep saved drafts on failure. |
+| `SyncDraftComment` | Review ID, comment ID → save state | Recover a known draft using receipts. Detect changed PR commits, update the active comparison, and require compatible original coordinates before a new private write. Reuse its pending review. Keep saved drafts on failure. |
 | `CompleteReview` | Review ID, final body, version, request key → review | Complete a local review. Reject PR targets. Keep discussion and resolution. |
 | `Export` | Scope, optional selected roots → Markdown | Export notes or reviews without changing state. Selected roots include their threads. |
-| `PromoteNotes` | Notes location, root IDs, target review ID, anchors, source and target versions, request key → comments | Keep source notes and provenance. Synchronize eligible PR drafts. |
 | `ListPullRequests` | Repository URL, query, page token → PRs | Return bounded PR data. Clients own repository inference and selection UI. |
 | `SubmitReview` | Review ID, outcome, final body, version, request key → review | Require an eligible PR and current comparison. Publish only the staged intent. |
 | `ReconcileSubmission` | Review ID, request key → review | Recover the saved submission. Report uncertainty when evidence is incomplete. |
@@ -638,20 +437,22 @@ Clients invalidate local reviewed-file marks when their compared content changes
 
 The context key is the repository URL and PR number. Commits describe the current comparison, not the context identity. Active reviews with no frozen final submission follow complete provider observations on refresh, reopen, and draft synchronization. Keep the review ID, authorship, comments, replies, and bound pending-review ID. Never submit, discard, or recreate a pending review merely because its creation commit is old.
 
+The authenticated GitHub account's existing pending review is reused when a new local session has no review receipt, including reviews started on GitHub or by an earlier LGTM session. Adding feedback preserves the pending review's ID, summary and existing comments. A bound receipt cannot switch to another review; uncertain creation still requires its exact recovery evidence. Never discard a pending review to make a local session writable.
+
 ```mermaid
 flowchart TD
     A["Refresh, reopen, or save PR draft"] --> B["Observe PR state, base, head, and comments"]
     B --> C{"Active and unfrozen?"}
     C -->|Yes| D["Update comparison in the same review"]
     C -->|No| E["Keep completed or frozen comparison"]
-    D --> F{"Unsent selection has a unique match?"}
-    F -->|Yes| G["Post private draft at current path and lines"]
-    F -->|No| H["Post file feedback with original location and excerpt"]
-    G --> I["Retain original anchor and pending review ID"]
+    D --> F{"Draft uses current source commit?"}
+    F -->|Yes| G["Post at selected coordinates"]
+    F -->|No| H["Retain local draft with sync error"]
+    G --> I["Keep session and pending review IDs"]
     H --> I
 ```
 
-Recover uncertain pending-review creation by exact marker, account, and original commit before advancing its comparison. If those receipts do not prove ownership, keep uncertainty and do not repeat creation. Confirmed remote comments keep provider-owned coordinates. Original anchors stay immutable. Follow only confirmed file renames. Deleted or unavailable files retain their discussions without inventing a new location.
+Recover uncertain pending-review creation by exact marker, account, and original commit before advancing its comparison. If those receipts do not prove ownership, keep uncertainty and do not repeat creation. Confirmed remote comments keep provider-owned coordinates. Original anchors stay immutable. Use provider-supplied rename coordinates only for their observed commits. Deleted or unavailable files retain their discussions without inventing a new location.
 
 Final submission checks the explicitly reviewed base and head against the provider before staging and immediately before publication. A push during submission must not turn an old approval into approval of unseen content. Once a final intent is frozen, recover that exact intent rather than changing its comparison or payload.
 
@@ -661,7 +462,7 @@ Final submission checks the explicitly reviewed base and head against the provid
 flowchart TD
     A["Save comment"] --> B["Persist local draft"]
     B --> C{"Destination?"}
-    C -->|"Local review or notes"| D["Keep local"]
+    C -->|"Local review"| D["Keep local"]
     C -->|"PR file, line, or supported reply"| E["Save GitHub private draft"]
     C -->|"General PR comment"| F["Keep for final review body"]
     E --> G{"Confirmed receipt?"}
@@ -708,7 +509,7 @@ For a frozen `failed` attempt, `ReconcileSubmission` first verifies the owning a
 
 ### Internal persistence
 
-Contexts and sessions organize persisted review data internally. A public review ID identifies a session-backed attempt. This mapping does not require another review table. Directory reviews reuse notes storage. Ordinary notes resolve their internal write session on demand.
+Contexts and sessions organize persisted review data internally. A public review ID identifies a session-backed attempt. This mapping does not require another review table. Directory reviews reuse path-scoped context storage. Archived notes are read-only.
 
 ```mermaid
 erDiagram
@@ -754,39 +555,25 @@ e2e/
 └── nvim/                           Real editor workflows
 ```
 
-Keep transport changes in the RPC boundary and domain changes in their existing models and services. Extend named repository operations only when a required workflow needs persistence changes. Keep anchor evidence and lifecycle rules in the domain services. The Neovim adapter owns local placement resolution around CodeDiff. DiffService owns equivalent content-based mapping for web clients. Keep file enumeration, content delivery, and UI selection outside the review API.
+Keep transport changes in the RPC boundary and domain changes in their existing models and services. Extend named repository operations only when a required workflow needs persistence changes. Keep anchor evidence and lifecycle rules in the domain services. DiffService owns anchor capture and placement for Neovim and web clients. Neovim keeps CodeDiff content loading and rendering; its adapter checks native buffers and renders backend placement results. Keep file enumeration, content delivery, and UI selection outside the review API.
 
 ### Acceptance flows
 
 | Area | Required flow evidence |
 | --- | --- |
-| Client-oriented boundary | Start and list reviews from targets without context, session, or workspace setup calls. |
-| Notes by location | Add, reply, export, and promote notes without a visible review or storage IDs. |
-| Client and service boundary | Start, read, comment, export, and complete without file-list or file-body RPCs. Two clients remain isolated. |
-| Versions and safe retries | A lost creation response does not duplicate a comment. A stale edit does not overwrite another edit. |
-| Working and index anchors | Record the actual reviewed content instead of assigning changed text to the starting HEAD. |
-| Preserved range movement | Insert lines before a staged or committed selection, save, and reopen. Derive the new range without changing its original anchor. |
-| Unstaged source changes | Change or commit previously unstaged content. Keep its discussion accessible even when its anchor becomes orphaned. |
-| Staged-to-branch carry-forward | Comment on an index blob, commit it, and open a branch diff. Show the same thread ID at its supported location. |
-| Shared local view filtering | Switch staged and branch views. Select comments by files in each diff without copying conversations or orphaning hidden files. |
-| PR separation | Open a PR for a locally reviewed branch. Keep local comments in the local context and PR comments in the PR context. |
-| Ambiguous or deleted text | Duplicate, replace, or delete selected text. Float the discussion to the file header, never a clamped current line. |
-| Exact byte identity | Distinguish working and index bytes, CRLF, and a missing final newline. Hash the actual selected source. |
-| GitHub current and historical locations | Import an outdated thread with no current line. Preserve original coordinates and refresh existing observations without drawing a false current placement. |
-| Placement isolation | Switch files and comparisons during mapping. Discard stale asynchronous results and invalidate old overlays. |
-| Composer source changes | Reject changed local bytes while retaining text. For a PR push, verify the captured source and derive a unique current placement or explicit file-level feedback. Keep original evidence. |
-| Commit, amend, and rebase | Preserve stable comments and original evidence. Return verified mappings or explicit outdated fallbacks. |
-| Rename and directory move | Move a file or its parent directory. Find all the same discussion IDs at the new path after reopening and restarting. |
-| Lost selected lines | Delete or replace a selected range while keeping the file. Show its entire discussion at the file header with an original-location-lost label. |
-| File deletion and restoration | Delete the file and keep its discussions in the orphaned list. Restore matching content and reconnect automatically. An unrelated replacement remains separate. |
-| Comparison selection | Resume working, staged, and branch reviews unambiguously. Reject writes against another comparison. |
-| PR lifecycle and comparison changes | Observe open, closed, merged, base, and head state. Gate mutations and stale submissions. |
-| External pending-review changes | Detect external submit or discard without creating replacement drafts silently. |
-| Remote write recovery | Survive lost responses for draft save, edit, delete, resolution, and submission without false success. |
-| Note promotion | Retain source attribution and provenance. Save eligible promoted PR drafts remotely. Reply transfer requires an explicit policy. |
-| UI progress | Marks persist across restart. Changed files lose their marks while unchanged files keep them. PR marks agree with GitHub Viewed state. Marking is silent. |
+| Client boundary | Start, comment, export and complete through public RPCs. |
+| Capture | Distinguish working and index bytes; preserve CRLF, literal paths and final newlines. |
+| Retained source | Delete the original checkout; read the saved revision after restart. |
+| Refresh | Keep session identity, add a revision and retain original thread locations. |
+| Historical navigation | Open an earlier comment's saved file and original line. |
+| PR continuity | Keep an open composer and pending review across pushes; add feedback on the new revision. |
+| Historical draft | Retain an unsupported old selection locally with a specific synchronization error. |
+| Provider locations | Honor current coordinates and outdated status without matching text. |
+| Attribution and permissions | Keep authorship, reply ordering and resolution; reject unauthorized mutations. |
+| Recovery | Use saved receipts to avoid duplicate drafts or submissions. |
+| Progress | Keep unchanged file marks; invalidate changed saved comparisons. |
 
-Test complete workflows through the public boundary against real SQLite and PostgreSQL. Keep dummy forge behavior at the HTTP boundary. Use separate backend, CLI, and Neovim E2E suites. The editor suite uses real Neovim, CodeDiff, WhichKey, notifications, and backend processes, plus an optional Kak profile. Any live fixture repository must be private. Confirm visibility before uploading content.
+Test database workflows against SQLite and PostgreSQL. Backend, CLI and Neovim E2E suites exercise their public boundaries. Live provider checks use the permanent private fixture and run-owned PRs and refs.
 
 ## References
 

@@ -4,9 +4,9 @@ Backend, CLI and Neovim journeys use TypeScript and Vitest. Each suite has its o
 
 | Suite | Features | Public boundary | Run |
 | --- | --- | --- | --- |
-| Backend | [Notes](backend/notes.spec.ts), [local reviews](backend/local-review.spec.ts), [PR reviews](backend/pr-review.spec.ts), [diff data](backend/diffs.spec.ts) | Standalone backend and Connect JSON | `premise run e2e:backend` |
-| CLI | [Notes](cli/notes.spec.ts), [local reviews](cli/local-review.spec.ts), [PR reviews](cli/pr-review.spec.ts) | CLI commands and bundled backend | `premise run e2e:cli` |
-| Neovim | [Notes](nvim/notes.spec.ts), [local reviews](nvim/local-review.spec.ts), [PR reviews](nvim/pr-review.spec.ts), [CodeDiff](nvim/diffs.spec.ts), [editor services](nvim/editor.spec.ts) | Editor, keys, modals, CodeDiff and backend | `premise run e2e:nvim` |
+| Backend | [local reviews](backend/local-review.spec.ts), [PR reviews](backend/pr-review.spec.ts), [diff data](backend/diffs.spec.ts) | Standalone backend and Connect JSON | `premise run e2e:backend` |
+| CLI | [local reviews](cli/local-review.spec.ts), [PR reviews](cli/pr-review.spec.ts) | CLI commands and bundled backend | `premise run e2e:cli` |
+| Neovim | [local reviews](nvim/local-review.spec.ts), [PR reviews](nvim/pr-review.spec.ts), [CodeDiff](nvim/diffs.spec.ts), [editor services](nvim/editor.spec.ts) | Editor, keys, modals, CodeDiff and backend | `premise run e2e:nvim` |
 
 Native Vitest `describe` groups name states, such as `When resuming an existing draft review`. Each `it` names one visible behavior. Suite and feature names come from Vitest tags. Plain `// Arrange`, `// Act` and `// Assert` comments separate setup, actions and assertions. Tests use Vitest directly, without custom test aliases or step runners.
 
@@ -14,7 +14,7 @@ Live and recording runs share one PR per state group through `beforeAll` and `af
 
 ## Test boundaries
 
-PR E2E replays genuine GitHub HTTP recordings by default. Set `LGTM_E2E_GITHUB_MODE=live` to run the same journeys and assertions against real GitHub without changing recordings, or use the `e2e:record` task to refresh them. Unknown modes and missing recordings fail; replay never falls back to the network. REST and GraphQL responses come from recorded GitHub interactions, with strict request matching and ordered writes. Reads may poll, reorder or reuse past recorded observations when asynchronous requests overlap; responses from after a future write remain unavailable until that write matches. Locally generated UUIDs are bound consistently across requests and responses; other request fields must match. LGTM processes, databases, CLI commands, editor actions and Git remain real. The fixture never intercepts LGTM RPCs or simulates GitHub review behavior. Notes and local reviews use temporary local files, Git repositories and real databases. Each suite checks its own public boundary.
+PR E2E replays genuine GitHub HTTP recordings by default. Set `LGTM_E2E_GITHUB_MODE=live` to run the same journeys and assertions against real GitHub without changing recordings, or use the `e2e:record` task to refresh them. Unknown modes and missing recordings fail; replay never falls back to the network. REST and GraphQL responses come from recorded GitHub interactions, with strict request matching and ordered writes. Reads may poll, reorder or reuse past recorded observations when asynchronous requests overlap; responses from after a future write remain unavailable until that write matches. Locally generated UUIDs are bound consistently across requests and responses; other request fields must match. LGTM processes, databases, CLI commands, editor actions and Git remain real. The fixture never intercepts LGTM RPCs or simulates GitHub review behavior. Local reviews use temporary local files, Git repositories and real databases. Each suite checks its own public boundary.
 
 ```text
 e2e/
@@ -29,9 +29,8 @@ e2e/
 │   ├── pr.fixtures.ts             # PR group lifecycle, composed with the test harness fixture
 │   ├── test-utils.ts              # Polling, content hashes and wire-value types
 │   ├── config.ts
-│   └── anchor_cases.json
+│   └── config.ts
 ├── backend/
-│   ├── notes.spec.ts
 │   ├── local-review.spec.ts
 │   ├── pr-review.spec.ts
 │   ├── diffs.spec.ts
@@ -42,13 +41,11 @@ e2e/
 │   ├── vitest.config.ts
 │   └── mise.toml
 ├── cli/
-│   ├── notes.spec.ts
 │   ├── local-review.spec.ts
 │   ├── pr-review.spec.ts
 │   ├── vitest.config.ts
 │   └── mise.toml
 ├── nvim/
-│   ├── notes.spec.ts
 │   ├── local-review.spec.ts
 │   ├── pr-review.spec.ts
 │   ├── diffs.spec.ts
@@ -67,13 +64,15 @@ e2e/
 └── tsconfig.json
 ```
 
-The editor profiles pin CodeDiff, WhichKey and nvim-notify. The second profile adds Kak with compatible keys; Kak remains optional for users. Runs use only the required profile by default. Set `LGTM_E2E_NVIM_PROFILES=required,kak` to include Kak, or `kak` to run it alone. Both use native CodeDiff views and fresh databases. Lua contains editor runtime setup. TypeScript owns the scenarios, input, assertions and process lifecycle.
+The editor profiles pin NuiComponents, NUI, CodeDiff, WhichKey, and nvim-notify. The installation journey also pins lazy.nvim and uses a fresh manager root. It checks the development and released plugin sources in isolated user profiles and preserves existing provider configuration. The second profile adds Kak with compatible keys; Kak remains optional for users. Runs use only the required profile by default. Set `LGTM_E2E_NVIM_PROFILES=required,kak` to include Kak, or `kak` to run it alone. Both use native CodeDiff views and fresh databases. Lua contains editor runtime setup. TypeScript owns the scenarios, input, assertions, and process lifecycle.
 
 `common/` owns processes, credentials, GitHub resources and test configuration. Backend fixtures construct API states. Neovim fixtures perform editor actions. Large feature setups live beside their spec as `*.fixtures.ts`. Small setups used by one file stay private in that file. Tests keep the actions and assertions that describe the behavior under test.
 
 Fixture hooks compose in stack order. Setup creates the PR, starts the backend, then opens the editor. Cleanup closes the editor, stops the backend, resets the PR, then removes the group’s refs. The local and PR editor fixtures share the same editor lifecycle.
 
 Failed runs retain their workspace, database and logs under `target/e2e/`. Editor failure logs also include the rendered screen and window viewports so card visibility failures can be diagnosed from CI output. Successful runs remove temporary local state. Fixture hooks stop processes after each case. Waits, subprocesses and RPC requests have deadlines.
+
+The UI refactor reuses application BDD journeys. Geometry, widget rendering, and library internals stay outside test scope. The failed-save integration case controls the persistence callback while using real UI components.
 
 ## Run and inspect
 
@@ -141,7 +140,7 @@ premise run e2e:fixtures:test
 
 Recordings live under `e2e/recordings/<suite>/<spec>.json`, with one entry per journey keyed by `<test>-<id>`. Each entry contains the fixture metadata, deduplicated HTTP responses and the requests that refer to them. Successful selected cases replace only their own entries and preserve sibling journeys; failed cases leave existing recordings intact. Entries are sorted by key for stable diffs. Record mode forwards actual requests to GitHub and saves the responses. Authorization headers and authenticated-user email/plan metadata are excluded, and saving a known credential in JSON is rejected. Review the JSON diff before committing it. A renamed journey needs an entry under its new name; remove obsolete entries when removing tests.
 
-Neovim recordings also include a small base64-encoded Git bundle in the JSON, containing the real Git objects and refs used by that case. Replay materializes and fetches from that local bundle while retaining a canonical GitHub origin for repository detection. It does not change the user's Git configuration or active GitHub account. Required and Kak profiles share one HTTP recording per journey. The refresh task enables extended cases and defaults to the required profile, so it does not record the same journey twice for editor profiles.
+PR recordings also include a small base64-encoded Git bundle in the JSON, containing the real Git objects and refs used by that case. Replay materializes and fetches from that local bundle while retaining a canonical GitHub origin for repository detection. It does not change the user's Git configuration or active GitHub account. Required and Kak profiles share one HTTP recording per journey. The refresh task enables extended cases and defaults to the required profile, so it does not record the same journey twice for editor profiles.
 
 The refresh task builds the selected suite and accepts its usual Vitest filters. `all` accepts no filters and runs suites serially to avoid API bursts. Recording forwards mutating API requests at least one second apart. Live and recording setup use Git pushes for run-owned source branches rather than GitHub content-creation APIs. Both validate private visibility before writes and clean up only run-owned PRs and refs. A local replay pass cannot establish current GitHub parity; use a focused live run or refresh the affected journeys when changing provider behavior.
 
@@ -170,3 +169,7 @@ Premise removes generic publication credentials such as `GH_TOKEN` from task env
 Private Rust unit tests, database integration tests and the plugin's Lua unit contracts remain in their existing app and library locations.
 
 Neovim runs a global preflight before test hooks create any PRs. It starts each selected editor profile and computes a native CodeDiff diff. Missing modules or native binaries fail the suite once, with the startup error. The installer always checks out each pinned revision, including on a fresh clone whose default HEAD already matches the pin.
+
+## Lua plugin checks
+
+Run `premise run //apps/lgtm.nvim:test` for nested Plenary cases under `apps/lgtm.nvim/tests/unit/` and `tests/integration/`. The shared pinned dependency cache includes Plenary for tests only. Installation E2E cases run `nvim:install-dev-plugin` and `nvim:install-released-plugin` in temporary user profiles, then start Neovim and check the installed plugin.

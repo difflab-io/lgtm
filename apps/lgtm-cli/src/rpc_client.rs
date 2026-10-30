@@ -103,11 +103,6 @@ impl Client {
                 resolve_thread_with_options
             ),
             "Export" => invoke!(ReviewServiceClient, ExportRequest, export_with_options),
-            "PromoteNotes" => invoke!(
-                ReviewServiceClient,
-                PromoteNotesRequest,
-                promote_notes_with_options
-            ),
             "ListPullRequests" => invoke!(
                 ReviewServiceClient,
                 ListPullRequestsRequest,

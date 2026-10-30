@@ -45,6 +45,13 @@ export class GithubFixture {
     return this.driver.env
   }
 
+  async prepareSnapshots() {
+    await this.driver.prepareGit?.([this.base, this.head])
+    if (this.driver.gitSource) {
+      this.env.LGTM_GITHUB_TEST_GIT_URL = this.driver.gitSource
+    }
+  }
+
   credentials(account?: string) {
     return this.driver.credentials(account)
   }
@@ -168,6 +175,7 @@ export class GithubFixture {
       sha: commit.sha,
     })
     this.head = commit.sha
+    await this.driver.prepareGit?.([this.head])
     await this.waitForHead(this.head)
   }
 

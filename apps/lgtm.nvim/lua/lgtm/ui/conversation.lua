@@ -1,0 +1,343 @@
+-- State -----------------------------------------------------------------------
+
+local M = {}
+
+local api = vim.api
+
+-- Both hosts share display records and stable comment IDs, without review policy.
+
+-- Lifecycle -------------------------------------------------------------------
+
+function M.open(options)
+  -- State ---------------------------------------------------------------------
+
+  local theme = require("lgtm.ui.theme")
+  if not theme.available() then
+    return
+  end
+  local n, Tree, Line = require("nui-components"), require("nui.tree"), require("nui.line")
+  local origin, cursor = api.nvim_get_current_win(), api.nvim_win_get_cursor(0)
+  local view = {
+    closed = false,
+    rows = {},
+    entries = {},
+  }
+  local tree, component, renderer, split, resize, subscription
+  local data, selected_id, comment_ids = {}, nil, {}
+  local width = math.max(1, math.min(options.mode == "split" and 42 or 86, vim.o.columns - 6))
+  local nodes, prepare, observe, selection, restore, move, bind
+  local render_selection_footer
+
+  -- Render --------------------------------------------------------------------
+
+  nodes = function()
+    comment_ids = {}
+    for _, node in ipairs(data) do
+      if node.comment_id then
+        comment_ids[#comment_ids + 1] = node.comment_id
+      end
+    end
+    if #data == 0 then
+      return { Tree.Node({ id = "empty", lines = { { "No comments", "LgtmMuted" } } }) }
+    end
+    return data
+  end
+
+  prepare = function(node)
+    return vim.tbl_map(function(part)
+      local line = Line()
+      line:append(part[1], node.comment_id == selected_id and "LgtmSelection" or part[2])
+      return line
+    end, node.lines)
+  end
+
+  -- Lifecycle -----------------------------------------------------------------
+
+  local function mount()
+    if options.mode == "split" then
+      split = require("nui.split")({
+        relative = "editor",
+        position = "right",
+        size = width,
+        enter = true,
+        buf_options = { filetype = "lgtm" },
+        win_options = {
+          number = false,
+          relativenumber = false,
+        },
+      })
+      split:mount()
+      theme.apply(split.winid)
+      view.buf, view.win = split.bufnr, split.winid
+      tree = Tree({
+        bufnr = view.buf,
+        nodes = nodes(),
+        get_node_id = function(node)
+          return node.id
+        end,
+        prepare_node = prepare,
+      })
+      tree:render()
+      bind()
+    else
+      local ConversationTree = n.tree:extend("LgtmConversationTree")
+      function ConversationTree:mappings()
+        return {}
+      end
+      function ConversationTree:on_update()
+        ConversationTree.super.on_update(self)
+        if tree and not view.closed then
+          view.refresh_selection()
+        end
+      end
+      local function size()
+        width = math.max(1, math.min(86, vim.o.columns - 6))
+        local rows = 0
+        for _, node in ipairs(nodes()) do
+          for _, line in ipairs(node.lines) do
+            rows = rows + math.max(1, math.ceil(vim.fn.strdisplaywidth(line[1]) / width))
+          end
+        end
+        return { width = width + 2, height = math.max(3, math.min(rows + 2, vim.o.lines - 5)) }
+      end
+      renderer = n.create_renderer(size())
+      component = ConversationTree(
+        vim.tbl_extend("force", theme.get_component_options(), {
+          id = "conversation",
+          flex = 1,
+          autofocus = true,
+          data = options.data,
+          prepare_node = prepare,
+          on_unmount = view.close,
+          on_mount = function(c)
+            view.buf, view.win = c.bufnr, c.winid
+            tree = c:get_tree()
+            bind()
+          end,
+        }),
+        theme.get_popup_options(options.title or "Review threads")
+      )
+      renderer:on_unmount(function()
+        if not view.closed then
+          view.closed = true
+          if subscription then
+            subscription:unsubscribe()
+          end
+          if resize then
+            api.nvim_del_autocmd(resize)
+            resize = nil
+          end
+          restore()
+        end
+      end)
+      resize = api.nvim_create_autocmd("VimResized", {
+        callback = function()
+          if not view.closed then
+            if options.on_resize then
+              options.on_resize(math.max(1, math.min(86, vim.o.columns - 6)))
+            end
+            renderer:set_size(size())
+            view.refresh()
+          end
+        end,
+      })
+      renderer:render(component)
+    end
+  end
+
+  -- Methods -------------------------------------------------------------------
+
+  function view.selected()
+    if not view.win or not api.nvim_win_is_valid(view.win) then
+      return nil
+    end
+    local node = tree:get_node(api.nvim_win_get_cursor(view.win)[1])
+    return node
+      and {
+        thread_id = node.thread_id,
+        comment_id = node.comment_id,
+        role = node.role,
+        can_resolve = node.can_resolve,
+      }
+  end
+
+  function view.select_comment(id)
+    local node, row = tree:get_node("comment:" .. id)
+    if node and row and api.nvim_win_is_valid(view.win) then
+      api.nvim_win_set_cursor(view.win, { row, 0 })
+      selection()
+    end
+  end
+
+  function view.refresh_selection()
+    nodes()
+    view.select_comment(selected_id or comment_ids[1] or "")
+    observe()
+  end
+
+  function view.refresh()
+    if view.closed or not tree then
+      return
+    end
+    tree:set_nodes(nodes())
+    tree:render()
+    view.refresh_selection()
+  end
+
+  function view.close()
+    if view.closed then
+      return
+    end
+    view.closed = true
+    if subscription then
+      subscription:unsubscribe()
+    end
+    if resize then
+      api.nvim_del_autocmd(resize)
+      resize = nil
+    end
+    if renderer then
+      renderer:close()
+    else
+      split:unmount()
+    end
+    restore()
+  end
+
+  -- Private -------------------------------------------------------------------
+
+  render_selection_footer = function(entry)
+    local label = "Select a comment with Tab"
+    if entry and entry.role then
+      label = entry.role:gsub("^reply", "Reply")
+      if entry.role == "top-level comment" then
+        label = "Top-level comment"
+      end
+    end
+    local actions = { "Tab next", "c reply", "e edit", "dd delete" }
+    if entry and entry.can_resolve then
+      actions[#actions + 1] = "x resolve"
+    end
+    actions[#actions + 1] = "q close"
+    return " " .. label .. " · " .. table.concat(actions, " · ") .. " "
+  end
+
+  observe = function()
+    view.rows, view.entries = {}, {}
+    for _, node in ipairs(tree:get_nodes()) do
+      local _, first, last = tree:get_node(node.id)
+      if first then
+        local entry = {
+          thread_id = node.thread_id,
+          comment_id = node.comment_id,
+          role = node.role,
+          line = first,
+          last_line = last,
+        }
+        for row = first, last do
+          view.rows[row] = entry
+        end
+        if node.comment_id then
+          view.entries[#view.entries + 1] = entry
+        end
+      end
+    end
+    if options.on_change then
+      options.on_change(view)
+    end
+  end
+
+  selection = function()
+    local entry = view.selected()
+    local next_id = entry and entry.comment_id
+    if next_id ~= selected_id then
+      selected_id = next_id
+      tree:render()
+    end
+    if component then
+      component:set_border_text("bottom", render_selection_footer(entry), "left")
+    end
+    observe()
+  end
+
+  restore = function()
+    if api.nvim_win_is_valid(origin) then
+      api.nvim_set_current_win(origin)
+      pcall(api.nvim_win_set_cursor, origin, cursor)
+    end
+  end
+
+  move = function(direction)
+    local index = 0
+    for i, id in ipairs(comment_ids) do
+      if id == selected_id then
+        index = i
+        break
+      end
+    end
+    if #comment_ids > 0 then
+      view.select_comment(comment_ids[(index - 1 + direction) % #comment_ids + 1])
+    end
+  end
+
+  bind = function()
+    local function map(key, callback)
+      local mapped = options.mappings[key] or key
+      vim.keymap.set("n", mapped, vim.schedule_wrap(callback), {
+        buffer = view.buf,
+        silent = true,
+      })
+    end
+    for key, action in pairs({ c = "reply", e = "edit", dd = "delete", x = "resolve" }) do
+      map(key, function()
+        local selected = view.selected()
+        if selected then
+          options.on_action(action, selected.thread_id, selected.comment_id)
+        end
+      end)
+    end
+    map("q", view.close)
+    map("<Esc>", view.close)
+    map("<Tab>", function()
+      move(1)
+    end)
+    map("<S-Tab>", function()
+      move(-1)
+    end)
+    if options.mode == "split" then
+      map("<CR>", function()
+        local selected = view.selected()
+        if selected then
+          options.on_navigate(selected.thread_id)
+        end
+      end)
+    end
+    vim.keymap.set("n", "j", "gj", {
+      buffer = view.buf,
+      silent = true,
+    })
+    vim.keymap.set("n", "k", "gk", {
+      buffer = view.buf,
+      silent = true,
+    })
+    api.nvim_create_autocmd("CursorMoved", { buffer = view.buf, callback = selection })
+    vim.bo[view.buf].syntax = "markdown"
+    vim.wo[view.win].wrap, vim.wo[view.win].linebreak, vim.wo[view.win].cursorline =
+      true, true, false
+    view.select_comment(comment_ids[1] or "")
+    observe()
+    if options.on_ready then
+      options.on_ready()
+    end
+  end
+
+  subscription = options.data:get_observable():subscribe(function(value)
+    data = value
+    if split and tree then
+      view.refresh()
+    end
+  end)
+  mount()
+  return view
+end
+return M

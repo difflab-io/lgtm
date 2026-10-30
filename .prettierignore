@@ -25,3 +25,6 @@ RELEASE_NOTES.md
 
 apps/lgtm-cli/bundle/
 apps/lgtm-cli/.bundle-stage/
+
+# Downloaded test dependencies
+**/.cache/

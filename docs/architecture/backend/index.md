@@ -10,7 +10,7 @@ See [review architecture](reviews.md) for context requirements, backend data flo
 
 ### Functional
 
-- FR1: Persist notes, local branch reviews and forge-review conversations through services.
+- FR1: Persist local branch reviews and forge-review conversations through services.
 - FR2: Track human identities (email) and agent identities (model/provider), independently of forge posting accounts.
 - FR3: Keep one active session per context shared by identities; publish drafts on completion and retain completed metadata.
 - FR4: Preserve context-owned threads/comments and scoped forge IDs across later sessions.
@@ -80,7 +80,7 @@ flowchart TB
 
 - lib.rs: greeting/health router and router_with_database for stateful identity/review/diff APIs.
 - rpc/: review and diff handlers, per-request tracing and requester metadata.
-- services/workspace.rs: ignored-inclusive notes content and Git working/index/revision reads.
+- services/snapshot.rs: immutable working, index, directory and commit capture. services/workspace.rs: literal Git reads and repository discovery.
 - services/forge.rs and forge/: GitHub review orchestration, Octocrab HTTP calls and local credential lookup.
 - models/: domain types, validators and `from_proto` / `into_proto` conversions. Each main type has its own file.
 - services/auth.rs: requester metadata resolution, explicit human/agent lookup/create and requester validation. Authentication and authorization remain future work.
@@ -106,7 +106,7 @@ flowchart TD
     P --> L["Bodies and resolution remain current; no snapshots"]
 ```
 
-Contexts own conversations. Completing a session publishes its drafts and stores a Completed variant with actor/time/outcome/retry metadata. Later reviewers reuse threads rather than copying them. Snapshots are deferred.
+Contexts own conversations. Completing a session publishes its drafts and stores a Completed variant with actor/time/outcome/retry metadata. Later reviewers reuse threads rather than copying them. SnapshotService retains every review revision in owned Git objects.
 
 ### Interfaces and Contracts
 
@@ -302,9 +302,9 @@ These protobuf services share a router, process and database. Service names orga
 
 DiffService supplies descriptors, paged file metadata, and selected content without review persistence. CodeDiff supplies local Git content in Neovim. Explicit symlink roots resolve to physical identities; nested links and selected escapes are rejected. Binary and oversized files have explicit statuses.
 
-Original anchors retain typed source identities and bounded excerpts. Thread current paths, immutable saved-file source paths, notes current roots, and separate forge observations preserve discussion identity across confirmed moves. Clients derive placements from the displayed source; ReviewService does not rewrite response anchors or serve file bodies. Provider coordinates without saved-byte evidence remain unverified outside their confirmed PR comparison.
+Original anchors retain a snapshot ID, commit, side, path and range. ReviewService returns fixed coordinates for the selected revision. GitHub remains authoritative for provider current coordinates and outdated status. Historical local threads open their retained source without relocation.
 
-Promotion preserves source notes and attribution in one transaction. Markdown exports contain numbered feedback and useful original locations without internal IDs. Export does not mutate review state. The [review contract](reviews.md) defines lifecycle and retry behavior.
+Standalone notes writes and promotion are removed; archived notes remain readable and exportable. Markdown exports contain numbered feedback and useful original locations without internal IDs. Export does not mutate review state. The [review contract](reviews.md) defines lifecycle and retry behavior.
 
 PR draft saves persist locally first, then synchronize line/file comments and replies through Octocrab to one pending GitHub review. Session and comment receipts survive daemon/editor restart; no separate submission store is added. The shared forge service serializes refresh and remote mutations so a refresh cannot import a newly accepted draft before its receipt is recorded. A lost response is reconciled against exact account, review and payload evidence. General comments remain local until submission. `SyncDraftComment` explicitly recovers or synchronizes saved drafts without publishing the review. Add/reply RPC responses expose `sync_error` separately from durable local-save success.
 

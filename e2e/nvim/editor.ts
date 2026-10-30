@@ -22,23 +22,19 @@ export class Editor {
     readonly profile: 'required' | 'kak',
   ) {}
 
-  async start() {
+  async start(init = join(ROOT, 'e2e/nvim/init.lua')) {
     this.errors = ''
-    this.child = spawn(
-      'nvim',
-      ['--embed', '--headless', '-u', join(ROOT, 'e2e/nvim/init.lua'), '-i', 'NONE', '-n'],
-      {
-        cwd: this.runtime.workspace,
-        env: {
-          ...this.runtime.env,
-          LGTM_REPO_ROOT: ROOT,
-          LGTM_E2E_KAK: this.profile === 'kak' ? '1' : '0',
-          LGTM_RPC_URL: this.runtime.endpoint,
-          PATH: join(ROOT, 'target/debug') + ':' + process.env.PATH,
-        },
-        stdio: ['pipe', 'pipe', 'pipe'],
+    this.child = spawn('nvim', ['--embed', '--headless', '-u', init, '-i', 'NONE', '-n'], {
+      cwd: this.runtime.workspace,
+      env: {
+        ...this.runtime.env,
+        LGTM_REPO_ROOT: ROOT,
+        LGTM_E2E_KAK: this.profile === 'kak' ? '1' : '0',
+        LGTM_RPC_URL: this.runtime.endpoint,
+        PATH: join(ROOT, 'target/debug') + ':' + process.env.PATH,
       },
-    )
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
     this.child.stderr?.on('data', (chunk) => {
       this.errors += chunk
       appendFileSync(join(this.runtime.directory, 'editor.log'), chunk)
@@ -109,17 +105,18 @@ export class Editor {
     await this.lua('vim.cmd.edit(vim.fn.fnameescape(...))', path)
   }
   async state(): Promise<Json | null> {
-    return this.lua(`local s = require("lgtm.context").current; if not s then return vim.NIL end
-      return {review=s.review, scope=s.scope, target=s.target, comparison=s.comparison, conversation=s.conversation,
+    return this
+      .lua(`local s = require("lgtm.services.state").current; if not s then return vim.NIL end
+      return {review=s.review, snapshot=s.snapshot, scope=s.scope, target=s.target, comparison=s.comparison, conversation=s.conversation,
         version=s.version, file=s.file, files=s.files, panes=s.panes, root=s.root, git_root=s.git_root,
         base=s.base, head=s.head, tab=s.tab, kind=s.kind, layout=s.layout, initializing=s.initializing,
         load_error=s.load_error, empty=s.empty, native_explorer=s.native_explorer, temp_dir=s.temp_dir,
-        render_ready=s.render_ready, reviewed=s.reviewed, moving=s.moving}`)
+        render_ready=s.render_ready, reviewed=s.reviewed}`)
   }
 
   async ready() {
     await this.wait(
-      'require("lgtm.context").current and require("lgtm.context").current.render_ready',
+      'require("lgtm.services.state").current and require("lgtm.services.state").current.render_ready',
       'review render',
     )
     return (await this.state())!
@@ -127,7 +124,7 @@ export class Editor {
 
   async loaded() {
     await this.wait(
-      'require("lgtm.context").current and require("lgtm.context").current.render_ready and not require("lgtm.context").current.initializing and require("lgtm.context").current.conversation ~= nil',
+      'require("lgtm.services.state").current and require("lgtm.services.state").current.render_ready and not require("lgtm.services.state").current.initializing and require("lgtm.services.state").current.conversation ~= nil',
       'review and conversation ready',
     )
     return (await this.state())!
@@ -135,7 +132,7 @@ export class Editor {
 
   async pane(side = 'new', line = 1) {
     await this.lua(
-      `local side, line = ...; local p = require("lgtm.context").current.panes[side]
+      `local side, line = ...; local p = require("lgtm.services.state").current.panes[side]
       vim.api.nvim_set_current_win(p.win); vim.api.nvim_win_set_cursor(p.win, {line,0})`,
       side,
       line,
@@ -143,7 +140,7 @@ export class Editor {
   }
 
   async show(path: string) {
-    await this.lua('require("lgtm.context").current.show_file(...)', path)
+    await this.lua('require("lgtm.services.state").current.show_file(...)', path)
     await waitFor(
       `selected ${path}`,
       () => this.state(),
@@ -153,14 +150,14 @@ export class Editor {
 
   async composer() {
     await this.wait(
-      'require("lgtm.composer").last and vim.api.nvim_win_is_valid(require("lgtm.composer").last.win)',
+      'require("lgtm.ui.composer").last and vim.api.nvim_win_is_valid(require("lgtm.ui.composer").last.win)',
       'composer open',
     )
-    return this.lua('local c=require("lgtm.composer").last; return {buf=c.buf,win=c.win}')
+    return this.lua('local c=require("lgtm.ui.composer").last; return {buf=c.buf,win=c.win}')
   }
   async body(body: string) {
     await this.lua(
-      'vim.api.nvim_buf_set_lines(require("lgtm.composer").last.buf, 0, -1, false, vim.split(..., "\\n", {plain=true}))',
+      'vim.api.nvim_buf_set_lines(require("lgtm.ui.composer").last.buf, 0, -1, false, vim.split(..., "\\n", {plain=true}))',
       body,
     )
   }
@@ -168,10 +165,7 @@ export class Editor {
     await this.composer()
     await this.body(body)
     await this.keys('<C-s>')
-    await this.wait(
-      'not vim.api.nvim_win_is_valid(require("lgtm.composer").last.win)',
-      'composer saved',
-    )
+    await this.wait('require("lgtm.ui.composer").last.closed', 'composer saved')
   }
 
   async comments(count: number) {
@@ -185,8 +179,8 @@ export class Editor {
 
   async marks(side = 'new'): Promise<Json[]> {
     return this.lua(
-      `local side = ...; local s=require("lgtm.context").current
-      return vim.api.nvim_buf_get_extmarks(s.panes[side].buf,require("lgtm.threads").namespace,0,-1,{details=true})`,
+      `local side = ...; local s=require("lgtm.services.state").current
+      return vim.api.nvim_buf_get_extmarks(s.panes[side].buf,require("lgtm.features.annotation_overlay").namespace,0,-1,{details=true})`,
       side,
     )
   }
@@ -195,23 +189,23 @@ export class Editor {
     return this.lua('return table.concat(vim.api.nvim_buf_get_lines(...,0,-1,false),"\\n")', buf)
   }
   async notices(): Promise<Json[]> {
-    return this.value('require("lgtm.notifications").history')
+    return this.value('require("lgtm.ui.notifications").history')
   }
   async popup(body?: string) {
     await this.keys('<CR>')
     await this.wait(
-      'require("lgtm.threads").last and vim.api.nvim_win_is_valid(require("lgtm.threads").last.win)',
+      'require("lgtm.features.threads_pane").last and vim.api.nvim_win_is_valid(require("lgtm.features.threads_pane").last.win)',
       'thread modal',
     )
     if (body)
       await this.lua(
-        `local body=...; local popup=require("lgtm.threads").last
+        `local body=...; local popup=require("lgtm.features.threads_pane").last
       for row, value in pairs(popup.rows) do if value.comment and value.comment.body==body then
         vim.api.nvim_win_set_cursor(popup.win,{row,0}); return end end
       error("Comment not present: "..body)`,
         body,
       )
-    return this.value('require("lgtm.threads").last')
+    return this.value('require("lgtm.features.threads_pane").last')
   }
 
   async openLocal(mode: string, replace = false) {
@@ -263,12 +257,12 @@ export class Editor {
         messages: await this.lua('return vim.api.nvim_exec2("messages",{output=true}).output'),
         notices: await this.notices(),
         state: await this.state(),
-        picker: await this.lua(`local p = require("lgtm.picker").last
+        picker: await this.lua(`local p = require("lgtm.ui.search").last
           if not p then return vim.NIL end
           return {query=p.query,closed=p.closed,index=p.index,mode=vim.fn.mode(),
             text=vim.api.nvim_buf_is_valid(p.buf) and vim.api.nvim_buf_get_lines(p.buf,0,-1,false) or {},
-            entries=vim.tbl_map(function(pr) return {number=pr.number,title=pr.title,next_page=pr.nextPage} end,p.entries),
-            filtered=vim.tbl_map(function(pr) return {number=pr.number,title=pr.title,next_page=pr.nextPage} end,p.filtered)}`),
+            entries=p.entries,
+            filtered=p.filtered}`),
         current: await this.lua(
           'return {buf=vim.api.nvim_get_current_buf(),win=vim.api.nvim_get_current_win(),tab=vim.api.nvim_get_current_tabpage(),mapping=vim.fn.maparg("c","n",false,true).desc}',
         ),

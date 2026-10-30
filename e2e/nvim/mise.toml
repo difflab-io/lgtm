@@ -13,11 +13,11 @@ run = "bun x eslint e2e/nvim e2e/common"
 
 [tasks.format]
 dir = "{{config_root}}/../.."
-run = "bun x prettier --write e2e/nvim/**/*.ts e2e/common/**/*.ts"
+run = "bun x prettier --write 'e2e/nvim/*.ts' 'e2e/common/*.ts'"
 
 [tasks."format:check"]
 dir = "{{config_root}}/../.."
-run = "bun x prettier --check e2e/nvim/**/*.ts e2e/common/**/*.ts"
+run = "bun x prettier --check 'e2e/nvim/*.ts' 'e2e/common/*.ts'"
 
 [tasks.install]
 description = "Ensure pinned real editor dependencies, fetching only missing revisions"

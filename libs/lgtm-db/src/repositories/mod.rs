@@ -1,4 +1,6 @@
 //! Entity-centered repositories bound to a pool or transaction.
+pub mod revisions;
+pub use revisions::RevisionRepository;
 pub mod comments;
 pub mod identities;
 pub mod mutations;

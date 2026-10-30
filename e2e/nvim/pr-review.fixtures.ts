@@ -17,12 +17,12 @@ export async function selectBranchPr(editor: Editor, github: GithubFixture, comm
   if (command === 'Lgtm review') await editor.choose('PR')
   await editor.command(command)
   await editor.wait(
-    'require("lgtm.picker").last and not require("lgtm.picker").last.closed and vim.api.nvim_get_current_buf() == require("lgtm.picker").last.buf and vim.fn.mode():sub(1,1) == "i"',
+    'require("lgtm.ui.search").last and not require("lgtm.ui.search").last.closed and vim.api.nvim_get_current_buf() == require("lgtm.ui.search").last.buf and vim.fn.mode():sub(1,1) == "i"',
     'branch PR picker',
   )
   await editor.keys(`#${github.number} `)
   await editor.wait(
-    `require("lgtm.picker").last.query == ${JSON.stringify(`#${github.number} `)} and #require("lgtm.picker").last.filtered == 1 and tonumber(require("lgtm.picker").last.filtered[1].number) == ${github.number}`,
+    `require("lgtm.ui.search").last.query == ${JSON.stringify(`#${github.number} `)} and #require("lgtm.ui.search").last.filtered == 1 and require("lgtm.ui.search").last.filtered[1].label:find(${JSON.stringify(`#${github.number} `)}, 1, true) == 1`,
     'typed query selects the fixture PR',
   )
   await editor.keys('<CR>')

@@ -176,59 +176,6 @@ describe('When starting a fresh draft review', () => {
       expect(remote.body).toContain(text)
   })
 
-  it('Agent notes can be promoted as remote drafts without changing the original note', async () => {
-    // Arrange
-    const { runtime, github } = fixture()
-    const { scope, review, anchor } = await prepareReview(runtime, github)
-    const promoter = runtime.actor
-    await runtime.identify({
-      name: 'Planning agent',
-      model: 'test-model',
-      provider: 'test-provider',
-    })
-    const path = await runtime.write('agent-note.md', 'agent source\n')
-    const source = { notes: { path } }
-    const note = (
-      await runtime.rpc('AddComment', {
-        scope: source,
-        body: 'Promote agent concern',
-        expectedVersion: '0',
-        requestKey: randomUUID(),
-      })
-    ).comment
-    await runtime.identify({ name: 'E2E user', email: 'e2e@example.test' })
-    const before = await runtime.rpc('GetConversation', { scope: source })
-    const current = await runtime.rpc('GetConversation', { scope })
-
-    // Act
-    const promoted = await runtime.rpc('PromoteNotes', {
-      source,
-      targetReviewId: review.id,
-      commentIds: [note.id],
-      anchors: [anchor],
-      expectedSourceVersion: before.version,
-      expectedReviewVersion: current.version,
-      requestKey: randomUUID(),
-    })
-    const remote = await readPendingComment(
-      runtime,
-      github,
-      review.id,
-      promoted.comments[0].forgeCommentId,
-    )
-
-    // Assert
-    expect(promoted.comments[0].author).toEqual(note.author)
-    expect(promoted.comments[0].ownerId).toBe(promoter)
-    expect(promoted.comments[0].author.id).not.toBe(promoter)
-    for (const text of ['Promote agent concern', 'Planning agent', 'test-model', 'test-provider'])
-      expect(remote.body).toContain(text)
-    expect((await runtime.rpc('GetConversation', { scope: source })).comments[0]).toMatchObject({
-      id: note.id,
-      body: note.body,
-    })
-  })
-
   it('Retrying an accepted draft after a push and restart does not create another remote comment', async () => {
     // Arrange
     const { runtime, github } = fixture()
@@ -366,6 +313,103 @@ describe('When starting a fresh draft review', () => {
   )
 })
 
+describe('When a pending review already exists on GitHub', () => {
+  const fixture = usePrFixture('backend')
+
+  it.each([
+    { origin: 'GitHub before opening LGTM', beforeOpening: true, earlierSession: false },
+    { origin: 'GitHub while LGTM is open', beforeOpening: false, earlierSession: false },
+    { origin: 'an earlier LGTM session', beforeOpening: true, earlierSession: true },
+  ])(
+    'Preserves the pending review created directly on GitHub from $origin',
+    async ({ beforeOpening, earlierSession }) => {
+      // Arrange
+      const { runtime, github } = fixture()
+      const route = `repos/${github.repository}/pulls/${github.number}/reviews`
+      const body = earlierSession
+        ? `<!-- lgtm-review:${randomUUID()} -->`
+        : 'Native GitHub draft summary'
+      const opened = beforeOpening ? undefined : await prepareReview(runtime, github)
+      const native = await github.api(route, 'POST', {
+        commit_id: github.head,
+        body,
+        comments: [{ path: github.path, line: 2, side: 'RIGHT', body: 'Native GitHub feedback' }],
+      })
+      const original = await github.api<Json[]>(`${route}/${native.id}/comments`)
+      const { scope, anchor, review } = opened ?? (await prepareReview(runtime, github))
+      // A pending review can have been created on an older PR commit.
+      await github.changeFiles({ [github.path]: github.headContent + 'new tail context\n' })
+      await refreshReview(runtime, scope)
+      const latest = (await runtime.rpc('GetReview', { reviewId: review.id })).review
+
+      // Act
+      const saved = await saveDraft(runtime, scope, 'Additional LGTM feedback', {
+        ...anchor,
+        snapshotId: latest.snapshot.id,
+      })
+      await runtime.restart()
+      await refreshReview(runtime, scope)
+      const current = (await runtime.rpc('GetReview', { reviewId: review.id })).review
+      const conversation = await runtime.rpc('GetConversation', { scope })
+      const pending = await github.api(`${route}/${native.id}`)
+      const comments = await github.api<Json[]>(`${route}/${native.id}/comments`)
+
+      // Assert
+      expect(saved.syncError).toBeFalsy()
+      expect(current.forgeReviewId).toBe(String(native.id))
+      expect(pending).toMatchObject({ id: native.id, state: 'PENDING', body })
+      expect(comments).toHaveLength(2)
+      expect(comments.find((comment) => comment.id === original[0].id)).toMatchObject({
+        body: original[0].body,
+      })
+      expect(comments.some((comment) => String(comment.id) === saved.comment.forgeCommentId)).toBe(
+        true,
+      )
+      expect(conversation.comments.map((comment: Json) => comment.body)).toEqual(
+        expect.arrayContaining(['Native GitHub feedback', 'Additional LGTM feedback']),
+      )
+    },
+  )
+})
+
+describe('When submitting general feedback with an existing GitHub pending review', () => {
+  const fixture = usePrFixture('backend')
+
+  it('Submits the existing review and keeps its native comment when LGTM adds only general feedback', async () => {
+    // Arrange
+    const { runtime, github } = fixture()
+    const route = `repos/${github.repository}/pulls/${github.number}/reviews`
+    const native = await github.api(route, 'POST', {
+      commit_id: github.head,
+      body: 'Native draft summary',
+      comments: [{ path: github.path, line: 2, side: 'RIGHT', body: 'Keep this native comment' }],
+    })
+    const original = await github.api<Json[]>(`${route}/${native.id}/comments`)
+    const { scope, review } = await prepareReview(runtime, github)
+    await saveDraft(runtime, scope, 'General LGTM feedback', { kind: 'general' })
+
+    // Act
+    const { response } = await submitReview(
+      runtime,
+      review.id,
+      'comment',
+      `${native.body}\n\nFinal LGTM message`,
+    )
+    const submitted = await github.api(`${route}/${native.id}`)
+    const comments = await github.api<Json[]>(`${route}/${native.id}/comments`)
+
+    // Assert
+    expect(response.status).toBe(200)
+    expect(response.body.review.forgeReviewId).toBe(String(native.id))
+    expect(submitted).toMatchObject({ id: native.id, state: 'COMMENTED' })
+    expect(submitted.body).toContain('Native draft summary')
+    expect(submitted.body).toContain('Final LGTM message')
+    expect(comments.find((comment) => comment.id === original[0].id)).toMatchObject({
+      body: original[0].body,
+    })
+  })
+})
+
 describe('When resuming an existing draft review', () => {
   const fixture = usePrFixture('backend')
 
@@ -489,7 +533,65 @@ describe('When there are changes during a PR review', () => {
     expect(thread.forgeObservation.current.start).toBe(change === 'shifted' ? '3' : '2')
   })
 
-  it('Saving a selection after an unseen push automatically updates the PR without replacing the review', async () => {
+  it.each([
+    { kind: 'file', change: 'another file' },
+    { kind: 'file', change: 'the commented file' },
+    { kind: 'line', change: 'another file' },
+  ])(
+    'Syncs an unsent $kind comment from an earlier snapshot when $change changes',
+    async ({ kind, change }) => {
+      // Arrange
+      const { runtime, github } = fixture()
+      const { scope, anchor, review } = await prepareReview(runtime, github)
+      const original =
+        kind === 'line'
+          ? anchor
+          : { kind: 'file', path: github.path, snapshotId: review.snapshot.id }
+      await github.changeFiles(
+        change === 'another file'
+          ? { [`${github.run}-other.txt`]: 'unrelated source changes\n' }
+          : { [github.path]: 'replacement file content\n' },
+      )
+
+      // Act
+      const saved = await saveDraft(runtime, scope, 'Keep feedback across a push', original)
+      const current = (await runtime.rpc('GetReview', { reviewId: review.id })).review
+      const remote = await readPendingComment(
+        runtime,
+        github,
+        review.id,
+        saved.comment.forgeCommentId,
+      )
+      const conversation = await runtime.rpc('GetConversation', {
+        scope,
+        snapshotId: current.snapshot.id,
+      })
+      const thread = conversation.threads.find(
+        (thread: Json) => thread.id === saved.comment.threadId,
+      )
+
+      // Assert
+      expect(saved.syncError).toBeFalsy()
+      expect(thread.displayStatus).toBe('exact')
+      expect(current.id).toBe(review.id)
+      expect(current.snapshot.id).not.toBe(review.snapshot.id)
+      expect(remote.body).toContain('Keep feedback across a push')
+      expect(remote.original_commit_id).toBe(github.head)
+      expect(thread.anchor).toMatchObject({
+        kind,
+        path: github.path,
+        snapshotId: review.snapshot.id,
+      })
+      if (kind === 'line') {
+        expect(thread.anchor.start).toBe('2')
+        expect(remote.thread.line).toBe(2)
+      } else {
+        expect(remote.thread.subjectType).toBe('FILE')
+      }
+    },
+  )
+
+  it('Saving an old selection after an unseen push retains it locally without relocating it', async () => {
     // Arrange
     const { runtime, github } = fixture()
     const { scope, anchor, review } = await prepareReview(runtime, github)
@@ -497,25 +599,22 @@ describe('When there are changes during a PR review', () => {
 
     // Act
     const saved = await saveDraft(runtime, scope, 'Continue without a manual refresh', anchor)
-    expect(saved.syncError).toBeFalsy()
-    const remote = await readPendingComment(
-      runtime,
-      github,
-      review.id,
-      saved.comment.forgeCommentId,
-    )
     const current = (await runtime.rpc('GetReview', { reviewId: review.id })).review
+    const conversation = await runtime.rpc('GetConversation', { scope })
 
     // Assert
-    expect(saved.syncError).toBeFalsy()
-    expect(remote.thread.line).toBe(3)
+    expect(saved.syncError).toMatch(/changed source bytes/i)
+    expect(saved.comment.body).toBe('Continue without a manual refresh')
+    expect(saved.comment.forgeCommentId).toBeFalsy()
     expect(current.id).toBe(review.id)
     expect(current.comparison.pullRequest.headCommit).toBe(github.head)
-    const conversation = await runtime.rpc('GetConversation', { scope })
     expect(
-      conversation.threads.find((thread: Json) => thread.id === saved.comment.threadId).anchor
-        .evidence.selectedText,
-    ).toBe('changed')
+      conversation.threads.find((thread: Json) => thread.id === saved.comment.threadId).anchor,
+    ).toMatchObject({
+      start: '2',
+      snapshotId: review.snapshot.id,
+      evidence: { selectedText: 'changed' },
+    })
   })
 
   it('User comment follows a renamed file', async () => {

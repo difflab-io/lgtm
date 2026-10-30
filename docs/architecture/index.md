@@ -2,9 +2,9 @@
 
 ## Overview
 
-LGTM provides notes, local reviews, and GitHub reviews through a shared backend managed by the CLI. CLI commands, Neovim, and other API consumers use the same persistence and review workflows. The bundled browser interface currently provides a dummy UI rather than the review frontend.
+LGTM provides local reviews and GitHub reviews through a shared backend managed by the CLI. CLI commands, Neovim, and other API consumers use the same persistence and review workflows. The bundled browser interface currently provides a dummy UI rather than the review frontend.
 
-This page owns the key concepts, component design, and context-specific flow and lifecycle behavior. The [backend review architecture](backend/reviews.md) owns RPC contracts and backend implementation details. The [user guide](../user-guide.md) explains using the Neovim plugin and the availability of the web interface.
+This page owns the key concepts, component design, and context-specific flow and lifecycle behavior. The [backend review architecture](backend/reviews.md) owns RPC contracts and backend implementation details. The [Neovim plugin architecture](lgtm.nvim/index.md) describes its controllers and UI components. The [user guide](../user-guide.md) explains using the Neovim plugin and the availability of the web interface.
 
 General PR dashboards, merge commands, CI browsing, and other forge implementations remain outside the review scope. Execution evidence and remaining implementation gaps belong in the reconciliation plan.
 
@@ -12,7 +12,7 @@ General PR dashboards, merge commands, CI browsing, and other forge implementati
 
 ### Functional
 
-- FR1: Support notes without requiring a visible review session.
+- FR1: Retain immutable saved source for every review session.
 - FR2: Support explicit directories, working files, the Git index, branch comparisons, and GitHub PR reviews.
 - FR3: Preserve conversations and attribution across application restarts and successor review sessions.
 - FR4: Keep comments accessible when content changes, even when a current line cannot be established.
@@ -43,7 +43,7 @@ lgtm up --no-open
 :Lgtm review
 ```
 
-The [product guide](../user-guide.md) covers notes, local reviews, PR reviews, and exports. API clients use the [review service](backend/reviews.md#usage) for review data. The future web UI uses [DiffService](backend/diffs.md#usage) for content access.
+The [product guide](../user-guide.md) covers local reviews, PR reviews, and exports. API clients use the [review service](backend/reviews.md#usage) for review data. The future web UI uses [DiffService](backend/diffs.md#usage) for content access.
 
 
 ### Components and Responsibilities
@@ -90,7 +90,7 @@ The installed application serves web assets and backend methods in the same proc
 | Thread | A root comment, ordered replies, an anchor, and an independent open or resolved state. |
 | Comment | Saved text and attribution with stable identity, origin session, local visibility, and remote posting evidence. |
 | Anchor | Immutable evidence of the content discussed, including original path, side, range, source identity, and selected text. |
-| Placement | A derived location for one displayed comparison, with a confirmed, outdated, orphaned, or unverified status. |
+| Placement | Backend coordinates for one saved revision, with exact, provider-outdated or historical status. |
 | Actor | A human or agent author. The GitHub posting account is a separate identity. |
 | Receipt | Evidence that an external write was accepted, used to recover without duplicates. |
 | Reviewed-file mark | Per-reviewer progress for a reviewed comparison, independent of discussion resolution. |
@@ -106,11 +106,11 @@ flowchart LR
 ```
 
 - UI: Select comparisons and files. Render content, discussions, notifications, and viewed-file marks.
-- CodeDiff: Supply file content and diff hunks. The LGTM Neovim adapter captures source evidence and resolves comment placements.
-- DiffService: Supply file metadata, comparison content, source identities, and mapping results for supplied anchors.
+- CodeDiff: Supply file content and diff hunks. It reads retained commits; LGTM renders coordinates supplied by ReviewService.
+- DiffService: Supply file metadata, comparison content and source identities.
 - ReviewService: Store review data, preserve original anchors and forge observations separately, enforce lifecycle rules, and synchronize forge reviews.
 
-Review operations accept comparison and anchor data from either content source. They do not require a file-list or file-body request through ReviewService. The [diff architecture](backend/diffs.md) describes the content-service boundary.
+Review writes accept selection intent against the session snapshot. They do not require a file-list or file-body request through ReviewService. The [diff architecture](backend/diffs.md) describes the content-service boundary.
 
 ### Interfaces and Contracts
 
@@ -164,14 +164,13 @@ The context owns the conversation while its sessions record individual review at
 
 | User context | Existing context identity | Reviewed content | Expected lifecycle |
 | --- | --- | --- | --- |
-| Notes while browsing | `notes` with a canonical absolute file or directory path | Current local text, including non-Git files | Save immediately. Keep notes without requiring a visible review session. |
 | Explicit directory review | The existing `notes` context for the selected root | Files under that root, including ignored files | Start or resume a visible local session. Complete locally and retain its conversation. |
-| Working-tree review | `branch` with an absolute `gitDir` and full branch ref | Selected baseline versus saved working files | Keep comments local. Unstaged anchors can become orphaned when the source changes. |
+| Working-tree review | `branch` with an absolute `gitDir` and full branch ref | Selected baseline versus saved working files | Keep comments local. Keep the captured source and original comment locations across workspace changes. |
 | Staged review | The same branch context | Selected baseline versus the Git index | Preserve the actual index blob and its comments when it becomes a commit. Filter the view by files in this diff. |
 | Branch review | The same branch context | A resolved merge base versus a resolved branch head | Pin the reviewed commits. A later head does not replace them silently. |
 | GitHub PR review | `forge_backed` with a repository URL and PR number | The observed PR base, head, files, and conversation | Save eligible comments into a private pending review. Publish only through explicit submission. |
 
-Working, staged, and branch comparisons select content in the same local branch context. Staged and branch comments share that conversation and are filtered by files in the selected diff. A file outside the selected diff remains in the context and is not orphaned by filtering. PR comments belong to a separate PR context. Notes and explicit directory reviews also share an existing context kind. The consumer determines whether that notes context needs a visible review workflow.
+Working, staged, and branch comparisons select content in the same local branch context. Staged and branch comments share that conversation and are filtered by files in the selected diff. A file outside the selected diff remains in the context and is not orphaned by filtering. PR comments belong to a separate PR context. Directory reviews use the existing path-scoped context kind. Archived notes remain readable and exportable; standalone notes writes and promotion are removed.
 
 The following invariants apply:
 
@@ -188,27 +187,17 @@ A review records its comparison kind and commits. Changing a local comparison re
 
 ### Changes to local content
 
-Preserving a comment means retaining its body, replies, attribution, resolution, and original location, even if its current location becomes uncertain.
+```mermaid
+stateDiagram-v2
+  [*] --> Saved: StartReview captures source
+  Saved --> Saved: Edit, stage, commit, move or delete workspace files
+  Saved --> Next: Explicit refresh captures saved files
+  Next --> Saved: Same session, new revision
+  Saved --> Historical: Open a thread from an earlier revision
+  Historical --> Saved: Refresh selects latest revision
+```
 
-| Event | Expected handling |
-| --- | --- |
-| Edit a noted file or directory file | Find a unique match for the selected text. Otherwise show an outdated file thread with its original location. |
-| Edit working content after commenting | Allow unstaged anchors to become orphaned. Keep the discussion, without attaching it to unrelated text. |
-| Stage or unstage changes | Keep the shared conversation and preserve staged blob identity. Earlier unstaged anchors can become orphaned. |
-| Commit staged changes | Keep staged comments in the branch conversation and match their index blob to the committed file. Previously unstaged anchors can remain orphaned. |
-| Continue after a commit | Keep the open session pinned. Offer explicit resume or completion followed by a new comparison. |
-| Amend, rebase, or reset a branch | Treat rewritten commits as new content identities. Preserve history and map only uniquely supported locations. |
-| Rename a file or directory | Automatically follow confirmed moves for all associated comments and threads. Keep original anchors and stable discussion IDs. |
-| Delete a selected line or repeat its text ambiguously | Retain the original anchor and float its discussion to the file header with the lost or ambiguous selection indicated. |
-| Delete a file | Keep its discussions as orphaned items with their original path, range, excerpt, replies, and resolution. |
-| Switch branches or worktrees | Keep the original context. Require explicit selection of the new branch or worktree context before mutations. |
-| Rename or delete a branch | Retain its saved context and conversation. Do not infer another branch from the current checkout. |
-| Create a PR from a locally reviewed branch | Keep the local and forge contexts distinct. Do not upload local comments automatically. |
-| Lose access to the checkout or selected root | Retain comments and export access. Report unavailable content without deleting the conversation. |
-
-Committing is not submission, completion, resolution, or deletion. A comment on staged content follows matching content into a commit. An earlier unstaged comment can become orphaned, but its discussion remains available. If preserved selected lines are lost, float the discussion to the file header.
-
-`PromoteNotes` copies selected root notes into a target review with explicit anchors. It does not transfer an entire local branch review into a PR. General transfer between local and forge contexts requires a separate design decision and remains pending.
+SnapshotService imports existing commits without changing their hashes. Working and index captures reuse HEAD when their trees match it; changed trees get synthetic commits. Directory captures use an empty baseline. The backend retains all source objects independently of the original checkout. Local and forge snapshots with the same normalized repository and commit hashes can identify shared source; conversations remain separate.
 
 ### Changes to a GitHub PR
 
@@ -253,7 +242,7 @@ A merged PR is not an LGTM review outcome. It must not become an invented approv
 | Export | Read notes or a review without changing any lifecycle state. |
 | Mark a file reviewed or seen | Persist local comparison progress; use GitHub Viewed state for PR files. Do not resolve comments. |
 
-Reviewed-file marks apply to working, staged, branch, PR, and explicit directory reviews, not ordinary notes. Local marks persist across editor restarts through `GetFileReviews` and `SetFileReviewed`; PR marks use GitHub Viewed state through those methods. Local marks bind to both compared source identities. A change to either side clears the mark, including a hidden working or index file change.
+Reviewed-file marks apply to working, staged, branch, PR, and explicit directory reviews, not ordinary notes. Local marks persist across editor restarts through `GetFileReviews` and `SetFileReviewed`; PR marks use GitHub Viewed state through those methods. Local marks bind to both compared source identities. A changed saved comparison invalidates the mark. Workspace changes do not alter the open revision.
 
 ### Local comment lifecycle
 
@@ -269,7 +258,6 @@ stateDiagram-v2
     Draft --> Published: Complete a local review
 ```
 
-Each successful mutation saves immediately. There is no separate save RPC. Ordinary notes use an internal active session without a visible review-selection step. Explicit directory, working, staged, and branch reviews expose the session to the user.
 
 Local publication records completion inside LGTM. It does not post anything to GitHub. Completion keeps open threads and their replies rather than resolving them. A completed session stays immutable, while successor sessions can continue the shared conversation under the mutation contracts.
 
@@ -325,28 +313,20 @@ Resolution belongs to the whole thread, not an individual reply. Replies and edi
 
 Resolution and location validity are independent. An outdated thread can remain open or resolved. A commit or PR merge does not prove that its discussion is resolved.
 
-### Anchor mapping after content changes
+### Fixed locations across revisions
 
 ```mermaid
-flowchart TD
-    Original["Immutable original anchor and source evidence"] --> Resolver["LGTM Neovim adapter or DiffService"]
-    Displayed["Actual displayed comparison and content identity"] --> Resolver
-    Forge["Separate GitHub current and historical observations"] --> Resolver
-    Resolver --> Exact["Exact or confirmed relocated placement"]
-    Resolver --> Outdated["Outdated: content changed, deleted, or ambiguous"]
-    Resolver --> Orphaned["Orphaned: file deleted or unstaged source changed"]
-    Resolver --> Unknown["Unverified: source evidence unavailable"]
-    Exact --> Inline["UI displays inline for that source only"]
-    Outdated --> Fallback["Float discussion to the file header with original lines"]
-    Orphaned --> History["Keep discussion in the orphaned review or notes list"]
-    Unknown --> Unverified["Keep a labeled unverified discussion"]
+flowchart LR
+  Comment[Original snapshot, side, path and range] --> Backend[ReviewService]
+  Revision[Selected saved revision] --> Backend
+  Forge[Provider current coordinates and outdated status] --> Backend
+  Backend --> Current[Current display coordinates]
+  Backend --> History[Historical source navigation]
+  Current --> UI[UI renders the supplied location]
+  History --> UI
 ```
 
-Original anchors never move. A placement can change when the displayed content changes. CodeDiff supplies content and diff hunks, while LGTM owns anchor capture, hash handling, mapping, and stale-result rejection. DiffService provides equivalent mapping for future web clients. ReviewService preserves original evidence and forge observations without owning the diff view.
-
-Working, index, and non-Git anchors identify their actual saved bytes. A session commit cannot identify uncommitted text. For staged, committed, and note sources, confirmed line shifts and file moves update derived locations automatically. Unstaged Git anchors can become orphaned when their source changes. A lost selection floats to the file header with its original location and excerpt. Confirmed file deletion leaves an orphaned discussion. Matching restored content can reconnect it automatically. Original anchors and discussion identity remain intact throughout.
-
-GitHub current locations and outdated state remain separate from historical coordinates. Never substitute an original line and label it as current. A location confirmed for historical content does not change its GitHub outdated state. The [backend anchor contract](backend/reviews.md#anchor-ownership) defines the intended rules, source identities, client calling pattern, and acceptance flows.
+Comments retain their original source. No client or backend searches changed text or tracks filesystem moves to relocate comments. A historical local thread opens its retained revision. GitHub supplies provider current locations and outdated status; the backend applies those only to their observed PR commits. See the [fixed location contract](backend/reviews.md#fixed-comment-locations).
 
 ### Reviewed-file marks
 

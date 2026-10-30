@@ -1,5 +1,7 @@
 //! Injectable application services.
 mod auth;
+pub mod snapshot;
+pub use snapshot::SnapshotService;
 mod review;
 
 pub use auth::AuthService;

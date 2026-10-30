@@ -15,7 +15,7 @@ async function prepareDirectory(r: TestHarness) {
   const plans = join(r.workspace, '.difflab/plans/private-plan')
   await r.write('.gitignore', '.difflab/\n')
   await r.write('.difflab/plans/private-plan/PLAN.md', '# Plan\nFirst task\n')
-  const review = (await r.json(['session', 'start', '--notes', plans])).review
+  const review = (await r.json(['session', 'start', '--directory', plans])).review
   return { plans, review }
 }
 
@@ -25,7 +25,7 @@ async function prepareDirectoryDiscussion(r: TestHarness) {
     await r.json([
       'comments',
       'add',
-      '--notes',
+      '--directory',
       plans,
       '--file',
       'PLAN.md',
@@ -50,7 +50,7 @@ describe('When starting a local directory review', () => {
       await r.json([
         'comments',
         'add',
-        '--notes',
+        '--directory',
         plans,
         '--file',
         'PLAN.md',
@@ -64,7 +64,7 @@ describe('When starting a local directory review', () => {
       'comments',
       'edit',
       note.id,
-      '--notes',
+      '--directory',
       plans,
       '--body',
       'Clarify the acceptance test',
@@ -72,49 +72,11 @@ describe('When starting a local directory review', () => {
 
     // Assert
     expect(review.state).toBe('active')
-    expect(JSON.stringify(await r.json(['comments', 'list', '--notes', plans]))).toContain(
+    expect(JSON.stringify(await r.json(['comments', 'list', '--directory', plans]))).toContain(
       'Clarify the acceptance test',
     )
-    expect((await r.json(['session', 'export', '--notes', plans])).markdown).toContain(
+    expect((await r.json(['session', 'export', '--directory', plans])).markdown).toContain(
       'Clarify the acceptance test',
-    )
-  })
-})
-
-describe('When promoting local feedback', () => {
-  const fixture = useTestHarness('cli')
-  it('User can copy selected feedback to a review without modifying its source', async () => {
-    // Arrange
-    const { runtime: r } = fixture()
-    const { plans, note } = await prepareDirectoryDiscussion(r)
-    const target = join(r.workspace, 'review-target')
-
-    // Act
-    await r.write('review-target/PLAN.md', '# Target review\n')
-    const targetReview = (await r.json(['session', 'start', '--notes', target])).review
-    const promotion = await r.json([
-      'comments',
-      'promote',
-      '--notes',
-      plans,
-      '--target-session',
-      targetReview.id,
-      '--comment',
-      note.id,
-      '--file',
-      'PLAN.md',
-    ])
-
-    // Assert
-    expect(promotion.comments[0].body).toBe('Clarify the acceptance test')
-    const markdown = (await r.json(['session', 'export', '--notes', target])).markdown
-    for (const text of ['1. **[COMMENT]**', '`PLAN.md`', 'Clarify the acceptance test'])
-      expect(markdown).toContain(text)
-    expect(markdown).not.toContain(note.id)
-    expect((await r.json(['comments', 'list', '--notes', plans])).comments).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: note.id, body: 'Clarify the acceptance test' }),
-      ]),
     )
   })
 })
@@ -127,7 +89,7 @@ describe('When completing and resuming a local review', () => {
     const { plans, review } = await prepareDirectoryDiscussion(r)
     // Act
     await r.restart()
-    const resumedReview = await r.json(['session', 'start', '--notes', plans])
+    const resumedReview = await r.json(['session', 'start', '--directory', plans])
     const active = await r.json(['session', 'list', '--path', plans])
 
     // Assert
@@ -135,7 +97,7 @@ describe('When completing and resuming a local review', () => {
     expect(active.reviews.map((saved: Json) => saved.id)).toEqual([review.id])
 
     // Act
-    const completedReview = await r.json(['session', 'complete', '--notes', plans])
+    const completedReview = await r.json(['session', 'complete', '--directory', plans])
     const completed = await r.json(['session', 'list', '--completed', '--path', plans])
     const remaining = await r.json(['session', 'list', '--path', plans])
 
@@ -145,7 +107,7 @@ describe('When completing and resuming a local review', () => {
     expect(remaining.reviews).toEqual([])
 
     // Act
-    const successor = await r.json(['session', 'start', '--notes', plans])
+    const successor = await r.json(['session', 'start', '--directory', plans])
     const history = await r.json(['session', 'list', '--all', '--path', plans])
 
     // Assert
@@ -153,7 +115,7 @@ describe('When completing and resuming a local review', () => {
     expect(history.reviews.map((saved: Json) => saved.id)).toEqual(
       expect.arrayContaining([review.id, successor.review.id]),
     )
-    expect(JSON.stringify(await r.json(['comments', 'list', '--notes', plans]))).toContain(
+    expect(JSON.stringify(await r.json(['comments', 'list', '--directory', plans]))).toContain(
       'Clarify the acceptance test',
     )
   })
@@ -161,38 +123,21 @@ describe('When completing and resuming a local review', () => {
 
 describe('When a local review directory moves', () => {
   const fixture = useTestHarness('cli')
-  it('User can resume the same review at its new location', async () => {
+  it('User can resume and export the saved revision after the source moves', async () => {
     // Arrange
     const { runtime: r } = fixture()
-    const { plans, note } = await prepareDirectoryDiscussion(r)
-    const before = await r.json(['comments', 'list', '--notes', plans]),
-      active = (await r.json(['session', 'show', '--notes', plans])).review
-    const destination = join(r.workspace, '.difflab/plans/renamed')
+    const { plans, review } = await prepareDirectoryDiscussion(r)
+    await rename(plans, join(r.workspace, '.difflab/plans/renamed'))
+    await r.restart()
 
     // Act
-    await rename(plans, destination)
-    await r.json([
-      'session',
-      'refresh',
-      '--notes',
-      destination,
-      '--moved-from',
-      plans,
-      '--expected-version',
-      before.version,
-      '--request-key',
-      'directory-move',
-    ])
-    const resumedMovedReview = await r.json(['session', 'start', '--notes', destination])
+    const resumed = (await r.json(['session', 'show', '--review', review.id])).review
+    const exported = await r.json(['session', 'export', '--review', review.id])
 
     // Assert
-    expect(resumedMovedReview.review.id).toBe(active.id)
-    const moved = await r.json(['comments', 'list', '--notes', destination])
-    expect(moved.comments[0].id).toBe(note.id)
-    expect((await r.json(['session', 'export', '--notes', destination])).markdown).toContain(
-      'Clarify the acceptance test',
-    )
-    expect(await r.json(['comments', 'list', '--notes', destination])).toEqual(moved)
+    expect(resumed.id).toBe(review.id)
+    expect(resumed.snapshot).toEqual(review.snapshot)
+    expect(exported.markdown).toContain('Clarify the acceptance test')
   })
 })
 
@@ -300,9 +245,10 @@ describe('When staged changes become branch commits', () => {
     // Assert
     const original = await r.json(['comments', 'list']),
       anchor = original.threads.find((t: Json) => t.id === saved.threadId).anchor
-    expect(anchor.source.indexFile.blobOid).toBe(blob)
+    expect(anchor.source.commit.sha).toBeTruthy()
+    expect(anchor.snapshotId).toBeTruthy()
     expect(anchor.evidence.selectedText).toBe('selected')
-    expect(anchor.source.commit).toBeUndefined()
+    expect(anchor.source.indexFile).toBeUndefined()
 
     // Act
     await r.git(

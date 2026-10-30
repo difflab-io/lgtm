@@ -11,6 +11,7 @@ export default async function verifyDependencies() {
   const home = await mkdtemp(join(tmpdir(), 'lgtm-editor-preflight-'))
   const exec = promisify(execFile)
   const verify = `lua local ok, err = pcall(function()
+    assert(require('nui-components').create_renderer and require('nui.split'), 'NUI dependencies unavailable')
     assert(package.loaded['lgtm'], vim.v.errmsg ~= '' and vim.v.errmsg or 'LGTM initialization failed')
     assert(vim.v.errmsg == '', vim.v.errmsg)
     assert(require('codediff.core.diff').compute_diff({'before'}, {'after'}), 'Native diff failed')

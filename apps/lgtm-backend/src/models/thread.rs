@@ -83,6 +83,46 @@ impl Thread {
         })
     }
 
+    /// Select fixed source coordinates, or current coordinates supplied by the forge.
+    pub fn get_display_location(&self, snapshot: &super::Snapshot) -> Option<Anchor> {
+        if let Some(evidence) = &self.evidence {
+            if evidence.snapshot_id == Some(snapshot.id) {
+                return Some(self.anchor.clone());
+            }
+            let commit = match &evidence.source {
+                super::AnchorSource::Commit { sha, .. } => sha,
+                _ => return None,
+            };
+            let expected = match &self.anchor {
+                Anchor::Line { side, .. } if side == "old" => &snapshot.base_commit,
+                _ => &snapshot.head_commit,
+            };
+            if commit == expected {
+                return Some(self.anchor.clone());
+            }
+        }
+        let observed = self.forge_observation.as_ref()?;
+        if !observed.outdated
+            && observed.base == snapshot.base_commit
+            && observed.head == snapshot.head_commit
+        {
+            return observed.current.clone();
+        }
+        None
+    }
+
+    pub fn get_display_status(&self, snapshot: &super::Snapshot) -> &'static str {
+        if self.get_display_location(snapshot).is_some() {
+            return "exact";
+        }
+        if self.forge_observation.as_ref().is_some_and(|observation| {
+            observation.head == snapshot.head_commit && observation.outdated
+        }) {
+            return "outdated";
+        }
+        "historical"
+    }
+
     // RPC conversion ----------------------------------------------------------
 
     /// Convert the domain value and include its concurrency token.
@@ -108,6 +148,10 @@ impl Thread {
         let v = self;
         let mut original = m::Anchor::into_proto(v.anchor);
         if let Some(evidence) = v.evidence {
+            original.snapshot_id = evidence
+                .snapshot_id
+                .map(|id| id.to_string())
+                .unwrap_or_default();
             original.source = Some(m::AnchorSource::into_proto(evidence.source)).into();
             original.evidence = Some(p::AnchorEvidence {
                 selected_text: evidence.selected_text,

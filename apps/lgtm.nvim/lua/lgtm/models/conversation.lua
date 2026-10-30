@@ -1,0 +1,4 @@
+---@class lgtm.Conversation
+---@field version string
+---@field threads lgtm.Thread[]
+---@field comments lgtm.Comment[]

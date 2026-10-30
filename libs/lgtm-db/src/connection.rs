@@ -17,6 +17,8 @@ pub struct Database<C = DatabaseConnection> {
     pub identities: IdentityRepository<C>,
     /// Review session operations.
     pub sessions: SessionRepository<C>,
+    /// Immutable source history for sessions.
+    pub revisions: RevisionRepository<C>,
     /// Context identity and refresh operations.
     pub review_contexts: ReviewContextRepository<C>,
     /// Forge repository URLs and canonical workspace paths.
@@ -36,6 +38,7 @@ impl<C: ConnectionTrait + TransactionTrait> Database<C> {
         Self {
             identities: IdentityRepository::new(Arc::clone(&pool)),
             sessions: SessionRepository::new(Arc::clone(&pool)),
+            revisions: RevisionRepository::new(Arc::clone(&pool)),
             review_contexts: ReviewContextRepository::new(Arc::clone(&pool)),
             workspace: WorkspaceRepository::new(Arc::clone(&pool)),
             comments: CommentRepository::new(Arc::clone(&pool)),
@@ -121,6 +124,7 @@ impl Database<DatabaseTransaction> {
             pool,
             identities,
             sessions,
+            revisions,
             review_contexts,
             workspace,
             comments,
@@ -129,6 +133,7 @@ impl Database<DatabaseTransaction> {
         drop((
             identities,
             sessions,
+            revisions,
             review_contexts,
             workspace,
             comments,

@@ -179,3 +179,108 @@ async fn should_skip_nested_symlinks_and_allow_an_explicit_root_symlink() {
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn should_read_native_anchor_sources_without_reimplementing_saved_bytes_in_clients() {
+    use lgtm_backend::database::types::SourceKind;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let service = DiffService::new();
+    let location = root.to_str().unwrap();
+    assert!(
+        service
+            .get_source(location, "missing", SourceKind::LocalFile, None)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    std::fs::write(root.join("empty"), "").unwrap();
+    let empty = service
+        .get_source(location, "empty", SourceKind::LocalFile, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(empty.content, "");
+    assert_eq!(empty.source.content_hash(), AnchorSource::hash(b""));
+    assert!(
+        service
+            .get_source(location, "../outside", SourceKind::LocalFile, None)
+            .await
+            .is_err()
+    );
+    std::fs::write(root.join("binary"), [0, 255]).unwrap();
+    assert!(
+        service
+            .get_source(location, "binary", SourceKind::LocalFile, None)
+            .await
+            .is_err()
+    );
+    std::fs::write(root.join("invalid-utf8"), [255, 254]).unwrap();
+    assert!(
+        service
+            .get_source(location, "invalid-utf8", SourceKind::LocalFile, None)
+            .await
+            .is_err()
+    );
+
+    git(&root, &["init", "-q"]);
+    let path = "space [literal] ü.txt";
+    let original = "before\r\nselected ü\r\nafter";
+    std::fs::write(root.join(path), original).unwrap();
+    git(&root, &["add", "--", path]);
+    let head = commit(&root, "source fixture");
+    let oid = git(&root, &["rev-parse", &format!(":{path}")]);
+    let staged = service
+        .get_source(location, path, SourceKind::IndexFile, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(staged.content, original);
+    assert!(matches!(&staged.source, AnchorSource::IndexFile { blob_oid, .. } if blob_oid == &oid));
+    let preserved = service
+        .get_source(location, path, SourceKind::WorkingFile, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        preserved.source, staged.source,
+        "working bytes equal to the index use preservable index evidence"
+    );
+    std::fs::write(root.join(path), "unstaged source\n").unwrap();
+    let working = service
+        .get_source(location, path, SourceKind::WorkingFile, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(working.source, AnchorSource::WorkingFile { .. }));
+    assert_ne!(working.source.content_hash(), staged.source.content_hash());
+    let committed = service
+        .get_source(location, path, SourceKind::Commit, Some(&head))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(committed.content, original);
+    assert!(matches!(committed.source, AnchorSource::Commit { .. }));
+    assert!(
+        service
+            .get_source(location, "missing", SourceKind::IndexFile, None)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        service
+            .get_source(location, "missing", SourceKind::Commit, Some(&head))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        service
+            .get_source(location, path, SourceKind::IndexFile, Some(&head))
+            .await
+            .is_err()
+    );
+    assert_eq!(git(&root, &["rev-parse", "HEAD"]), head);
+    assert_eq!(git(&root, &["rev-parse", &format!(":{path}")]), oid);
+}

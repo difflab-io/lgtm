@@ -46,13 +46,13 @@ for (const profile of profiles) {
       await editor.choose('PR')
       await editor.command('Lgtm review')
       await editor.wait(
-        'require("lgtm.picker").last and not require("lgtm.picker").last.closed and vim.api.nvim_get_current_buf() == require("lgtm.picker").last.buf and vim.fn.mode():sub(1,1) == "i"',
+        'require("lgtm.ui.search").last and not require("lgtm.ui.search").last.closed and vim.api.nvim_get_current_buf() == require("lgtm.ui.search").last.buf and vim.fn.mode():sub(1,1) == "i"',
         'PR picker displayed',
       )
       const options = await editor.value('_G.e2e.last_select.items')
       const requestedInput = await editor.value('_G.e2e.last_input')
       await editor.keys(`#${github.number} `)
-      await editor.wait('#require("lgtm.picker").last.filtered == 1', 'branch PR listed')
+      await editor.wait('#require("lgtm.ui.search").last.filtered == 1', 'branch PR listed')
       const selectedAt = performance.now()
       await editor.keys('<CR>')
       const firstFile = await editor.ready()
@@ -77,7 +77,7 @@ for (const profile of profiles) {
       expect(await editor.text(state.panes.new.buf)).toContain('changed')
       expect(
         await editor.value(
-          'require("codediff.ui.lifecycle").get_panel_view(require("lgtm.context").current.tab) ~= nil',
+          'require("codediff.ui.lifecycle").get_panel_view(require("lgtm.services.state").current.tab) ~= nil',
         ),
       ).toBe(true)
     })
@@ -90,24 +90,24 @@ for (const profile of profiles) {
       // Act
       await editor.command('Lgtm prs')
       await editor.wait(
-        'require("lgtm.picker").last and #require("lgtm.picker").last.filtered >= 2 and vim.fn.mode():sub(1,1) == "i"',
+        'require("lgtm.ui.search").last and #require("lgtm.ui.search").last.filtered >= 2 and vim.fn.mode():sub(1,1) == "i"',
         'both branch PRs listed',
       )
-      const first = await editor.value('require("lgtm.picker").last.index')
+      const first = await editor.value('require("lgtm.ui.search").last.index')
       await editor.keys('<Down>')
-      const next = await editor.value('require("lgtm.picker").last.index')
+      const next = await editor.value('require("lgtm.ui.search").last.index')
       await editor.keys('<Up>')
-      const previous = await editor.value('require("lgtm.picker").last.index')
+      const previous = await editor.value('require("lgtm.ui.search").last.index')
       await editor.keys(`#${alternate.number} `)
-      await editor.wait('#require("lgtm.picker").last.filtered == 1', 'typed PR filter')
-      const selected = await editor.value('require("lgtm.picker").last.filtered[1].number')
+      await editor.wait('#require("lgtm.ui.search").last.filtered == 1', 'typed PR filter')
+      const selected = await editor.value('require("lgtm.ui.search").last.filtered[1].label')
       await editor.keys('<Esc>')
 
       // Assert
       expect(next).not.toBe(first)
       expect(previous).toBe(first)
-      expect(Number(selected)).toBe(alternate.number)
-      expect(await editor.value('require("lgtm.picker").last.closed')).toBe(true)
+      expect(selected).toContain(`#${alternate.number} `)
+      expect(await editor.value('require("lgtm.ui.search").last.closed')).toBe(true)
       expect(await editor.state()).toBeNull()
     })
   })
@@ -126,7 +126,7 @@ for (const profile of profiles) {
 
         // Act
         await editor.keys('c')
-        const composer = await editor.composer()
+        await editor.composer()
         await editor.body('Please explain this line')
         const savedAt = performance.now()
         await editor.keys('<C-s>')
@@ -144,7 +144,7 @@ for (const profile of profiles) {
 
         // Assert
         const state = await editor.comments(1)
-        await editor.wait(`not vim.api.nvim_win_is_valid(${composer.win})`, 'draft save confirmed')
+        await editor.wait('require("lgtm.ui.composer").last.closed', 'draft save confirmed')
         expect(await editor.value('vim.api.nvim_get_current_win()')).toBe(state!.panes.old.win)
         const marks = await editor.marks()
         const remote = await github.api(
@@ -269,14 +269,11 @@ for (const profile of profiles) {
 
       // Act
       await editor.popup('Top-level concern')
-      const modal = await editor.value('vim.api.nvim_win_get_config(0)')
+      const selected = await editor.value('require("lgtm.features.threads_pane").last.selected')
       const text = await editor.text()
 
       // Assert
-      expect(modal.relative).toBe('editor')
-      expect(Number(modal.row)).toBeGreaterThan(1)
-      expect(Number(modal.col)).toBeGreaterThan(1)
-      expect(JSON.stringify(modal.footer)).toContain('Top-level comment')
+      expect(selected.role).toBe('top-level comment')
       expect(text).toContain('Top-level concern')
       expect(text).toContain('TOP-LEVEL COMMENT')
     })
@@ -297,12 +294,13 @@ for (const profile of profiles) {
       await editor.comments(2)
       await editor.pane('new', 2)
       await editor.popup('First reply')
-      const replyModal = await editor.value('vim.api.nvim_win_get_config(0)')
+      const replySelection = await editor.value(
+        'require("lgtm.features.threads_pane").last.selected',
+      )
       const discussion = await editor.text()
       await editor.keys('e')
-      const title = await editor.value(
-        'vim.api.nvim_win_get_config(require("lgtm.composer").last.win).title',
-      )
+      await editor.composer()
+      const title = await editor.value('require("lgtm.ui.composer").last.title')
       await editor.compose('Edited reply')
       await editor.pane('new', 2)
       await editor.popup('Edited reply')
@@ -311,7 +309,7 @@ for (const profile of profiles) {
       const remaining = await editor.comments(1)
 
       // Assert
-      expect(JSON.stringify(replyModal.footer)).toContain('Reply')
+      expect(replySelection.role).toMatch(/^reply /)
       expect(discussion).toContain('Root concern')
       expect(discussion).toContain('First reply')
       expect(JSON.stringify(title)).toContain('reply')
@@ -328,13 +326,15 @@ for (const profile of profiles) {
       await editor.compose('Unpublished concern')
       await editor.comments(1)
       await editor.popup('Unpublished concern')
-      const footer = await editor.value('vim.api.nvim_win_get_config(0).footer')
+      const canResolve = await editor.value(
+        'require("lgtm.features.threads_pane").last.selected.can_resolve',
+      )
 
       // Act
       await editor.keys('x')
 
       // Assert
-      expect(JSON.stringify(footer)).not.toContain('x resolve')
+      expect(canResolve).toBe(false)
       expect((await editor.state())!.conversation.threads[0].state).toBe('open')
       expect(
         (await editor.notices()).some((notice) => /publish draft comments/i.test(notice.message)),
@@ -480,8 +480,93 @@ for (const profile of profiles) {
     })
   })
 
+  describe(
+    `When GitHub creates a pending review in the background [${profile}]`,
+    { tags: [profile] },
+    () => {
+      const fixture = usePrEditor(profile)
+
+      it('Adds feedback to the existing pending review without changing its original comment', async () => {
+        // Arrange
+        const { editor, github } = fixture()
+        await selectBranchPr(editor, github)
+        const route = `repos/${github.repository}/pulls/${github.number}/reviews`
+        const native = await github.api(route, 'POST', {
+          commit_id: github.head,
+          body: 'Native pending review summary',
+          comments: [
+            { path: github.path, line: 2, side: 'RIGHT', body: 'Feedback written on GitHub' },
+          ],
+        })
+        const original = await github.api<Json[]>(`${route}/${native.id}/comments`)
+        await editor.command('Lgtm refresh')
+        await editor.comments(1)
+
+        // Act
+        await editor.pane('new', 3)
+        await editor.keys('c')
+        await editor.compose('Feedback added from Neovim')
+        const state = (await editor.comments(2))!
+        const pending = await github.api(`${route}/${native.id}`)
+        const comments = await github.api<Json[]>(`${route}/${native.id}/comments`)
+
+        // Assert
+        expect(state.review.forgeReviewId).toBe(String(native.id))
+        expect(pending).toMatchObject({
+          id: native.id,
+          state: 'PENDING',
+          body: 'Native pending review summary',
+        })
+        expect(comments).toHaveLength(2)
+        expect(comments.find((comment) => comment.id === original[0].id)).toMatchObject({
+          body: original[0].body,
+        })
+        expect(JSON.stringify(await editor.marks())).toContain('Feedback written on GitHub')
+        expect(JSON.stringify(await editor.marks())).toContain('Feedback added from Neovim')
+      })
+    },
+  )
+
   describe(`When the PR changes during review [${profile}]`, { tags: [profile] }, () => {
     const fixture = usePrEditor(profile)
+
+    it('Saving a file comment after a push keeps its original snapshot and shows the synced card', async () => {
+      // Arrange
+      const { editor, github } = fixture()
+      await selectBranchPr(editor, github)
+      await editor.pane('new', 2)
+      await editor.command('Lgtm comment file')
+      const original = (await editor.state())!
+      await github.changeFiles({ [`${github.run}-other.txt`]: 'unrelated committed change\n' })
+
+      // Act
+      await editor.compose('Whole-file feedback survives a push')
+      await editor.wait(
+        `require("lgtm.services.state").current.head == "${github.head}" and require("lgtm.services.state").current.render_ready`,
+        'updated review ready',
+      )
+      await editor.show(github.path)
+      const saved = (await editor.comments(1))!
+      const pending = await github.api(
+        `repos/${github.repository}/pulls/${github.number}/reviews/${saved.review.forgeReviewId}/comments`,
+      )
+
+      // Assert
+      expect(saved.review.id).toBe(original.review.id)
+      expect(saved.conversation.threads[0].anchor).toMatchObject({
+        kind: 'file',
+        snapshotId: original.snapshot.id,
+      })
+      expect(saved.conversation.comments[0].forgeCommentId).toBeTruthy()
+      expect(pending).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            body: expect.stringContaining('Whole-file feedback survives a push'),
+          }),
+        ]),
+      )
+      expect(JSON.stringify(await editor.marks())).toContain('Whole-file feedback')
+    })
 
     it('Refresh displays the new commit and retains the pending review and comment card', async () => {
       // Arrange
@@ -491,12 +576,15 @@ for (const profile of profiles) {
       await editor.keys('c')
       await editor.compose('Keep this concern through pushes')
       const original = await editor.comments(1)
+      await editor.keys('c')
+      const composer = await editor.composer()
+      await editor.body('Unsent concern while the PR advances')
       await github.changeFiles({ [github.path]: github.headContent + 'new committed context\n' })
 
       // Act
       await editor.command('Lgtm refresh')
       await editor.wait(
-        `require("lgtm.context").current.head == "${github.head}" and require("lgtm.context").current.render_ready and not require("lgtm.context").current.initializing`,
+        `require("lgtm.services.state").current.head == "${github.head}" and require("lgtm.services.state").current.render_ready and not require("lgtm.services.state").current.initializing`,
         'new PR commit ready',
       )
       const refreshed = (await editor.state())!
@@ -508,6 +596,33 @@ for (const profile of profiles) {
       })
       expect(await editor.text(refreshed.panes.new.buf)).toContain('new committed context')
       expect(JSON.stringify(await editor.marks())).toContain('Keep this concern through pushes')
+      expect(await editor.composer()).toEqual(composer)
+      expect(await editor.text(composer.buf)).toBe('Unsent concern while the PR advances')
+
+      // Act
+      await editor.keys('<Esc>')
+      await editor.pane('new', 2)
+      await editor.keys('c')
+      await editor.compose('Feedback on the refreshed revision')
+      const continued = (await editor.comments(2))!
+      const remote = await github.api(
+        `repos/${github.repository}/pulls/${github.number}/reviews/${continued.review.forgeReviewId}/comments`,
+      )
+
+      // Assert
+      expect(continued.review.id).toBe(original!.review.id)
+      expect(continued.review.forgeReviewId).toBe(original!.review.forgeReviewId)
+      expect(
+        continued.conversation.threads.map((thread: Json) => thread.anchor.snapshotId),
+      ).toEqual(expect.arrayContaining([original!.snapshot.id, refreshed.snapshot.id]))
+      expect(remote).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            body: expect.stringContaining('Feedback on the refreshed revision'),
+            original_commit_id: github.head,
+          }),
+        ]),
+      )
     })
   })
 
@@ -519,11 +634,11 @@ for (const profile of profiles) {
       const { editor, runtime, github } = fixture()
       await editor.command('Lgtm prs')
       await editor.wait(
-        'require("lgtm.picker").last and not require("lgtm.picker").last.closed and vim.api.nvim_get_current_buf() == require("lgtm.picker").last.buf and vim.fn.mode():sub(1,1) == "i"',
+        'require("lgtm.ui.search").last and not require("lgtm.ui.search").last.closed and vim.api.nvim_get_current_buf() == require("lgtm.ui.search").last.buf and vim.fn.mode():sub(1,1) == "i"',
         'PR picker loaded',
       )
       await editor.keys(`#${github.number} `)
-      await editor.wait('#require("lgtm.picker").last.filtered == 1', 'branch PR selected')
+      await editor.wait('#require("lgtm.ui.search").last.filtered == 1', 'branch PR selected')
       const token = runtime.env.GH_TOKEN
       runtime.env.GH_TOKEN = 'invalid-e2e-token'
       await runtime.restart()
@@ -532,7 +647,7 @@ for (const profile of profiles) {
       // Act
       await editor.keys('<CR>')
       await editor.wait(
-        'require("lgtm.context").current and require("lgtm.context").current.load_error ~= nil',
+        'require("lgtm.services.state").current and require("lgtm.services.state").current.load_error ~= nil',
         'failed initial PR load reported',
       )
       runtime.env.GH_TOKEN = token
@@ -572,7 +687,7 @@ for (const profile of profiles) {
       // Act
       await editor.command('Lgtm refresh')
       await editor.wait(
-        `require("lgtm.context").current.head == "${github.head}" and not require("lgtm.context").current.initializing`,
+        `require("lgtm.services.state").current.head == "${github.head}" and not require("lgtm.services.state").current.initializing`,
         'outdated PR refreshed',
       )
       const state = await editor.loaded()
@@ -612,8 +727,8 @@ for (const profile of profiles) {
       // Act
       await editor.choose('comment')
       await editor.keys(' rs')
-      const composer = await editor.composer()
-      const title = await editor.value('vim.api.nvim_win_get_config(...).title', composer.win)
+      await editor.composer()
+      const title = await editor.value('require("lgtm.ui.composer").last.title')
       await editor.compose('Final editor message')
       const submitted = (await editor.state())!
       const remote = await github.api(
@@ -738,7 +853,7 @@ for (const profile of profiles) {
       // Act
       await editor.choose('request_changes')
       await editor.command('Lgtm submit')
-      const composer = await editor.composer()
+      await editor.composer()
       await editor.body('Retain this final message')
       await editor.keys('<C-s>')
       await waitFor(
@@ -748,8 +863,9 @@ for (const profile of profiles) {
         40_000,
       )
       const rejected = (await editor.state())!
-      const editable = await editor.value('vim.api.nvim_win_is_valid(...)', composer.win)
-      const retainedText = await editor.text(composer.buf)
+      const restored = await editor.composer()
+      const editable = await editor.value('vim.api.nvim_win_is_valid(...)', restored.win)
+      const retainedText = await editor.text(restored.buf)
       await editor.keys('q')
       await editor.choose('comment')
       await editor.command('Lgtm submit')
@@ -861,7 +977,7 @@ for (const profile of profiles) {
       await github.fetch(runtime, github.head)
       await editor.command('Lgtm refresh')
       await editor.wait(
-        `require("lgtm.context").current.head == "${github.head}" and require("lgtm.context").current.render_ready`,
+        `require("lgtm.services.state").current.head == "${github.head}" and require("lgtm.services.state").current.render_ready`,
         'updated review comparison',
       )
       await waitFor(
@@ -900,7 +1016,7 @@ for (const profile of profiles) {
       await editor.keys('c')
       await editor.compose('I have addressed this concern')
       await editor.wait(
-        'vim.iter(require("lgtm.context").current.conversation.comments):any(function(c) return c.body == "I have addressed this concern" and c.visibility == "draft" end)',
+        'vim.iter(require("lgtm.services.state").current.conversation.comments):any(function(c) return c.body == "I have addressed this concern" and c.visibility == "draft" end)',
         'draft response displayed',
       )
       const draft = (await editor.state())!
@@ -932,7 +1048,9 @@ for (const profile of profiles) {
       const { editor, github } = await openPublishedConcern()
       await editor.pane('new', 2)
       await editor.popup('Published concern from another reviewer')
-      const footer = await editor.value('vim.api.nvim_win_get_config(0).footer')
+      const canResolve = await editor.value(
+        'require("lgtm.features.threads_pane").last.selected.can_resolve',
+      )
 
       // Act
       await editor.keys('e')
@@ -956,7 +1074,7 @@ for (const profile of profiles) {
       })
 
       // Assert
-      expect(JSON.stringify(footer)).toContain('x resolve')
+      expect(canResolve).toBe(true)
       expect(notices.some((notice) => notice.message.includes('Only your own comments'))).toBe(true)
       expect(remote.data.node.isResolved).toBe(true)
       const cards = JSON.stringify(await editor.marks())

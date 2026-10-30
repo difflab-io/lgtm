@@ -1,5 +1,5 @@
 //! Content comparisons and selected-file reads. This service has no review database handle.
-use crate::extensions::gh;
+use crate::extensions::{gh, git};
 use crate::forge::ForgeClient;
 use crate::{
     error::{Error, Result, invalid},
@@ -10,27 +10,14 @@ use crate::{
         ReviewTarget,
     },
 };
+use gix::bstr::ByteSlice;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::{
-    collections::VecDeque,
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-};
-
-/// At most 32 immutable, selected remote blobs (1 MiB each), scoped to repository/path/commit.
-/// This is process-local validation evidence, not review persistence or a directory content cache.
-struct CachedSource {
-    repository_url: String,
-    path: String,
-    commit: String,
-    bytes: Arc<[u8]>,
-}
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Default)]
 pub struct DiffService {
     provider: Option<GithubClient>,
-    selected_sources: Arc<Mutex<VecDeque<CachedSource>>>,
 }
 
 impl DiffService {
@@ -44,251 +31,61 @@ impl DiffService {
     pub fn with_provider(provider: GithubClient) -> Self {
         Self {
             provider: Some(provider),
-            ..Self::default()
         }
     }
 
-    // Diffs and source placement ----------------------------------------------
-    /// Verify supplied PR evidence against immutable bytes, preferring associated local Git objects.
-    /// Previously served immutable bytes can be verified without another forge request.
-    pub async fn get_anchor_evidence(
-        &self,
-        paths: &[String],
-        target: ReviewTarget,
-        comparison: ReviewComparison,
-        anchor: &Anchor,
-        supplied: &crate::models::AnchorEvidence,
-    ) -> Result<crate::models::AnchorEvidence> {
-        use crate::models::AnchorEvidence;
-        let (
-            ReviewTarget::PullRequest {
-                repository_url,
-                number,
-            },
-            ReviewComparison::PullRequest {
-                base_commit,
-                head_commit,
-            },
-        ) = (target, comparison)
-        else {
-            return Err(invalid("PR source validation requires a PR comparison"));
-        };
-        let (path, range, old) = match anchor {
-            Anchor::Line {
-                path,
-                start,
-                end,
-                side,
-                ..
-            } => (path, Some((*start, *end)), side == "old"),
-            Anchor::File { path } => (
-                path,
-                None,
-                matches!(&supplied.source, AnchorSource::Commit {sha,..} if sha == &base_commit && sha != &head_commit),
-            ),
-            Anchor::General => return Err(invalid("Review-level feedback has no file source")),
-        };
-        let sha = if old { &base_commit } else { &head_commit };
-        let verify = |bytes: &[u8]| -> Result<AnchorEvidence> {
-            let source = AnchorSource::Commit {
-                sha: sha.clone(),
-                content_hash: AnchorSource::hash(bytes),
-            };
-            let actual = if let Some((start, end)) = range {
-                AnchorEvidence::capture(source, bytes, start, end)?
-            } else {
-                AnchorEvidence::capture_file(source, bytes)?
-            };
-            if actual != *supplied {
-                return Err(Error::Conflict("Reviewed source or selected evidence changed; retain the comment body and refresh".into()));
-            }
-            Ok(actual)
-        };
-        for root in paths {
-            let root = PathBuf::from(root);
-            let path = path.clone();
-            let sha = sha.clone();
-            let source = tokio::task::spawn_blocking(move || {
-                super::workspace::get_source(
-                    &root,
-                    &path,
-                    crate::database::types::SourceKind::Commit,
-                    Some(&sha),
-                )
-            })
-            .await
-            .map_err(|_| invalid("Local PR source read failed"))?;
-            if let Ok((_, bytes)) = source {
-                return verify(&bytes);
-            }
-        }
-        let cached = self
-            .selected_sources
-            .lock()
-            .map_err(|_| invalid("Selected-source cache is unavailable"))?
-            .iter()
-            .find(|source| {
-                source.repository_url == repository_url.as_str()
-                    && source.path == *path
-                    && source.commit == *sha
-            })
-            .map(|source| source.bytes.clone());
-        if let Some(bytes) = cached {
-            return verify(&bytes);
-        }
-        let repo = Repository::from_repository_url(&repository_url)?;
-        let (_, files) = self
-            .get_remote_workspace(&repo, number, Some(&base_commit), &head_commit, "", true)
-            .await?;
-        let selected = files
-            .iter()
-            .find(|(file, _)| &file.path == path || (old && &file.previous_path == path))
-            .map(|(file, _)| file.path.clone())
-            .ok_or_else(|| invalid("Anchor file is outside this PR comparison"))?;
-        let (_, files) = self
-            .get_remote_workspace(
-                &repo,
-                number,
-                Some(&base_commit),
-                &head_commit,
-                &selected,
-                false,
-            )
-            .await?;
-        let (file, old_content) = files
-            .into_iter()
-            .next()
-            .ok_or_else(|| invalid("Selected PR source is unavailable"))?;
-        if (old && file.status == "added") || (!old && file.status == "removed") {
-            return Err(invalid("Selected PR side has no file"));
-        }
-        verify(if old {
-            old_content.as_bytes()
-        } else {
-            file.content.as_bytes()
-        })
-    }
+    // Diffs and saved sources ----------------------------------------------
 
-    /// Resolve an unsent PR anchor against current bytes, without changing its original evidence.
-    /// Lost or ambiguous selections become file feedback; only confirmed renames change the path.
-    pub async fn get_posting_anchor(
+    /// Read one saved source without enumerating a diff or changing Git.
+    pub async fn get_source(
         &self,
-        paths: &[String],
-        target: ReviewTarget,
-        comparison: ReviewComparison,
-        anchor: &Anchor,
-        evidence: Option<&crate::models::AnchorEvidence>,
-        current_path: Option<&str>,
-    ) -> Result<Anchor> {
-        use crate::models::AnchorPlacement;
-        let ReviewComparison::PullRequest {
-            base_commit,
-            head_commit,
-        } = &comparison
-        else {
-            return Err(invalid("Draft placement requires a PR comparison"));
-        };
-        let (original, old) = match anchor {
-            Anchor::General => return Ok(anchor.clone()),
-            Anchor::File { path } => (path.as_str(), false),
-            Anchor::Line { path, side, .. } => (path.as_str(), side == "old"),
-        };
-        let original_commit = evidence.and_then(|e| match &e.source {
-            AnchorSource::Commit { sha, .. } => Some(sha.as_str()),
-            _ => None,
-        });
-        if matches!(anchor, Anchor::File { .. }) && original_commit.is_none() {
-            return Ok(Anchor::File {
-                path: current_path.unwrap_or(original).into(),
-            });
+        root: &str,
+        path: &str,
+        kind: crate::database::types::SourceKind,
+        commit: Option<&str>,
+    ) -> Result<Option<ContentSide>> {
+        use crate::database::types::SourceKind;
+        Anchor::File { path: path.into() }.validate()?;
+        if !Path::new(root).is_absolute() || (kind == SourceKind::Commit) != commit.is_some() {
+            return Err(invalid(
+                "Saved source requires an absolute root and a commit only for committed content",
+            ));
         }
-        let commit = if old { base_commit } else { head_commit };
-        if original_commit == Some(commit.as_str()) && current_path.is_none_or(|p| p == original) {
-            return Ok(anchor.clone());
-        }
-        let place = |path: &str, source: &AnchorSource, bytes: &[u8]| -> Result<Anchor> {
-            let content =
-                std::str::from_utf8(bytes).map_err(|_| invalid("Draft source is not UTF-8"))?;
-            match anchor.get_placement(evidence, path, Some(source), Some(content), true) {
-                AnchorPlacement::Exact { location, .. }
-                | AnchorPlacement::Relocated { location, .. } => Ok(location),
-                _ => Ok(Anchor::File { path: path.into() }),
-            }
-        };
-        for root in paths {
-            let mut path = current_path.unwrap_or(original).to_owned();
-            if let Some(previous) = original_commit {
-                let diff = DiffComparison {
-                    target: ReviewTarget::LocalGit {
-                        path: root.clone(),
-                        branch: None,
-                    },
-                    comparison: ReviewComparison::Branch {
-                        base_commit: previous.into(),
-                        head_commit: commit.clone(),
-                    },
-                    root: Some(root.clone()),
-                    observation_token: String::new(),
-                };
-                if let Ok(files) = self.get_metadata(&diff).await {
-                    if let Some(moved) = files
-                        .iter()
-                        .find(|f| f.status == "renamed" && f.previous_path == path)
-                    {
-                        path = moved.path.clone();
-                    }
-                    if files
-                        .iter()
-                        .any(|f| f.path == path && f.status == "deleted")
-                    {
-                        return Ok(Anchor::File { path });
-                    }
+        let root = PathBuf::from(root);
+        let path = path.to_owned();
+        let commit = commit.map(str::to_owned);
+        tokio::task::spawn_blocking(move || {
+            let present = match kind {
+                SourceKind::IndexFile | SourceKind::Commit => {
+                    super::workspace::get_source_presence(&root, &path, commit.as_deref())?
                 }
+                _ => match std::fs::symlink_metadata(root.join(&path)) {
+                    Ok(_) => true,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                    Err(error) => return Err(error.into()),
+                },
+            };
+            if !present {
+                return Ok(None);
             }
-            if matches!(anchor, Anchor::File { .. }) {
-                return Ok(Anchor::File { path });
+            let (mut source, bytes) =
+                super::workspace::get_source(&root, &path, kind, commit.as_deref())?;
+            if kind == SourceKind::WorkingFile
+                && let Ok((indexed, indexed_bytes)) =
+                    super::workspace::get_source(&root, &path, SourceKind::IndexFile, None)
+                && indexed_bytes == bytes
+            {
+                source = indexed;
             }
-            let (root, selected, sha) = (PathBuf::from(root), path.clone(), commit.clone());
-            let loaded = tokio::task::spawn_blocking(move || {
-                super::workspace::get_source(
-                    &root,
-                    &selected,
-                    crate::database::types::SourceKind::Commit,
-                    Some(&sha),
-                )
-            })
-            .await
-            .map_err(|_| invalid("Draft source read failed"))?;
-            if let Ok((source, bytes)) = loaded {
-                return place(&path, &source, &bytes);
-            }
-        }
-        let diff = self.get_diff(target, Some(comparison)).await?;
-        let files = self.get_files(&diff).await?;
-        let selected = current_path.unwrap_or(original);
-        let file = files
-            .iter()
-            .find(|f| f.path == selected || (f.status == "renamed" && f.previous_path == selected))
-            .ok_or_else(|| {
-                Error::Conflict(
-                    "Draft file is absent from the current PR; its original feedback is retained"
-                        .into(),
-                )
-            })?;
-        if matches!(anchor, Anchor::File { .. }) {
-            return Ok(Anchor::File {
-                path: file.path.clone(),
-            });
-        }
-        let loaded = self.get_file(&diff, &file.path).await?;
-        let source = if old { loaded.old } else { loaded.new };
-        if let Some(source) = source {
-            place(&source.path, &source.source, source.content.as_bytes())
-        } else {
-            Ok(Anchor::File {
-                path: file.path.clone(),
-            })
-        }
+            Ok(Some(ContentSide {
+                path,
+                source,
+                content: String::from_utf8(bytes)
+                    .map_err(|_| invalid("Selected source requires UTF-8 text"))?,
+            }))
+        })
+        .await
+        .map_err(|_| invalid("Selected source read failed"))?
     }
 
     pub async fn get_remote_workspace(
@@ -420,51 +217,6 @@ impl DiffService {
                 "PR head changed during content fetch".into(),
             ));
         }
-        // Store only complete selected-file observations after both PR guards succeeded.
-        if !metadata_only {
-            let mut cache = self
-                .selected_sources
-                .lock()
-                .map_err(|_| invalid("Selected-source cache is unavailable"))?;
-            for (file, old) in &output {
-                for (path, commit, bytes, absent) in [
-                    (
-                        if file.previous_path.is_empty() {
-                            &file.path
-                        } else {
-                            &file.previous_path
-                        },
-                        &pull.base,
-                        old.as_bytes(),
-                        file.status == "added",
-                    ),
-                    (
-                        &file.path,
-                        &pull.head,
-                        file.content.as_bytes(),
-                        file.status == "removed",
-                    ),
-                ] {
-                    if absent {
-                        continue;
-                    }
-                    cache.retain(|source| {
-                        !(source.repository_url == repo.repository_url
-                            && source.path == *path
-                            && source.commit == *commit)
-                    });
-                    cache.push_back(CachedSource {
-                        repository_url: repo.repository_url.clone(),
-                        path: path.clone(),
-                        commit: commit.clone(),
-                        bytes: Arc::from(bytes),
-                    });
-                    while cache.len() > 32 {
-                        cache.pop_front();
-                    }
-                }
-            }
-        }
         Ok((repo.repository_url.clone(), output))
     }
 
@@ -507,16 +259,9 @@ impl DiffService {
                         | ReviewComparison::Staged { .. }
                         | ReviewComparison::Branch { .. }),
                     ) => value,
-                    None => {
-                        let head = Self::get_git_bytes(
-                            Path::new(&root),
-                            &["rev-parse", "--verify", "HEAD^{commit}"],
-                        )
-                        .await?;
-                        ReviewComparison::Working {
-                            base_commit: String::from_utf8_lossy(&head).trim().into(),
-                        }
-                    }
+                    None => ReviewComparison::Working {
+                        base_commit: gix::open(&root)?.head_id()?.to_string(),
+                    },
                     _ => {
                         return Err(invalid(
                             "Local Git target requires working, staged, or branch content",
@@ -788,95 +533,131 @@ impl DiffService {
             .await
             .map_err(|_| invalid("Directory metadata read failed"))?;
         }
-        let mut args = vec!["diff", "--no-ext-diff", "--raw", "--no-abbrev", "-z", "-M"];
-        match &diff.comparison {
-            ReviewComparison::Working { base_commit } => args.push(base_commit),
-            ReviewComparison::Staged { base_commit } => {
-                args.push("--cached");
-                args.push(base_commit);
-            }
-            ReviewComparison::Branch {
-                base_commit,
-                head_commit,
-            } => {
-                args.push(base_commit);
-                args.push(head_commit);
-            }
-            _ => return Err(invalid("Unsupported local comparison")),
-        }
-        args.push("--");
-        let raw = Self::get_git_bytes(&root, &args).await?;
-        let mut parts = raw.split(|b| *b == 0).filter(|part| !part.is_empty());
-        let mut files = Vec::new();
-        while let Some(header) = parts.next() {
-            let header =
-                std::str::from_utf8(header).map_err(|_| invalid("Git metadata is not UTF-8"))?;
-            let fields: Vec<_> = header.split_whitespace().collect();
-            if fields.len() != 5 || !fields[0].starts_with(':') {
-                return Err(invalid("Incomplete Git file metadata"));
-            }
-            let first =
-                std::str::from_utf8(parts.next().ok_or_else(|| invalid("Git path missing"))?)
-                    .map_err(|_| invalid("Git path is not UTF-8"))?;
-            let (path, previous_path) = if fields[4].starts_with('R') || fields[4].starts_with('C')
-            {
-                (
-                    std::str::from_utf8(
-                        parts
-                            .next()
-                            .ok_or_else(|| invalid("Git destination path missing"))?,
-                    )
-                    .map_err(|_| invalid("Git path is not UTF-8"))?,
-                    first,
-                )
-            } else {
-                (first, "")
+        let comparison = diff.comparison.clone();
+        tokio::task::spawn_blocking(move || {
+            use gix::object::tree::diff::{Action, ChangeDetached};
+            let repo = gix::open(&root)?.with_object_memory();
+            let base = match &comparison {
+                ReviewComparison::Working { base_commit }
+                | ReviewComparison::Staged { base_commit }
+                | ReviewComparison::Branch { base_commit, .. } => base_commit,
+                _ => return Err(invalid("Unsupported local comparison")),
             };
-            Anchor::File { path: path.into() }.validate()?;
-            let status = match fields[4].as_bytes()[0] {
-                b'A' => "added",
-                b'D' => "deleted",
-                b'R' => "renamed",
-                b'C' => "copied",
-                b'T' => "type_changed",
-                b'U' => "unmerged",
-                _ => "modified",
+            let id = gix::ObjectId::from_hex(base.as_bytes())
+                .map_err(|_| invalid("Expected a full commit identity"))?;
+            let old = repo.find_commit(id)?.tree()?;
+            let new = match &comparison {
+                ReviewComparison::Branch { head_commit, .. } => repo
+                    .find_commit(
+                        gix::ObjectId::from_hex(head_commit.as_bytes())
+                            .map_err(|_| invalid("Expected a full commit identity"))?,
+                    )?
+                    .tree()?,
+                ReviewComparison::Staged { .. } => {
+                    repo.find_tree(git::write_index_tree(&repo, &repo)?)?
+                }
+                ReviewComparison::Working { .. } => repo.find_tree(git::write_files(
+                    &repo,
+                    &root,
+                    git::get_worktree_paths(&repo)?,
+                )?)?,
+                _ => return Err(invalid("Unsupported local comparison")),
             };
-            let stamp = if matches!(diff.comparison, ReviewComparison::Working { .. }) {
-                Self::get_file_stamp(&root.join(path))?
-            } else {
-                String::new()
-            };
-            files.push(DiffFile {
-                path: path.into(),
-                previous_path: previous_path.into(),
-                status: status.into(),
-                identity: format!("{}:{}:{stamp}", fields[2], fields[3]),
-            });
-            if files.len() > 5000 {
-                return Err(invalid("Diff exceeds 5000 files"));
-            }
-        }
-        if matches!(diff.comparison, ReviewComparison::Working { .. }) {
-            let untracked =
-                Self::get_git_bytes(&root, &["ls-files", "--others", "--exclude-standard", "-z"])
-                    .await?;
-            for path in untracked.split(|b| *b == 0).filter(|p| !p.is_empty()) {
-                let path =
-                    std::str::from_utf8(path).map_err(|_| invalid("Git path is not UTF-8"))?;
+            let mut changes = Vec::new();
+            old.changes()?.for_each_to_obtain_tree(&new, |change| {
+                changes.push(change.detach());
+                Ok(Action::Continue(()))
+            })?;
+            let null = gix::ObjectId::null(repo.object_hash());
+            let mut files = Vec::new();
+            for change in changes {
+                let (path, previous, status, old_id, new_id, mode) = match change {
+                    ChangeDetached::Addition {
+                        location,
+                        id,
+                        entry_mode,
+                        ..
+                    } => (location, Default::default(), "added", null, id, entry_mode),
+                    ChangeDetached::Deletion {
+                        location,
+                        id,
+                        entry_mode,
+                        ..
+                    } => (
+                        location,
+                        Default::default(),
+                        "deleted",
+                        id,
+                        null,
+                        entry_mode,
+                    ),
+                    ChangeDetached::Modification {
+                        location,
+                        previous_id,
+                        id,
+                        entry_mode,
+                        previous_entry_mode,
+                        ..
+                    } => (
+                        location,
+                        Default::default(),
+                        if entry_mode.kind() != previous_entry_mode.kind() {
+                            "type_changed"
+                        } else {
+                            "modified"
+                        },
+                        previous_id,
+                        id,
+                        entry_mode,
+                    ),
+                    ChangeDetached::Rewrite {
+                        source_location,
+                        source_id,
+                        location,
+                        id,
+                        copy,
+                        entry_mode,
+                        ..
+                    } => (
+                        location,
+                        source_location,
+                        if copy { "copied" } else { "renamed" },
+                        source_id,
+                        id,
+                        entry_mode,
+                    ),
+                };
+                if mode.is_tree() {
+                    continue;
+                }
+                let path = path
+                    .to_str()
+                    .map_err(|_| invalid("Git path is not UTF-8"))?
+                    .to_owned();
+                Anchor::File { path: path.clone() }.validate()?;
+                let stamp = if matches!(comparison, ReviewComparison::Working { .. }) {
+                    Self::get_file_stamp(&root.join(&path))?
+                } else {
+                    String::new()
+                };
                 files.push(DiffFile {
-                    path: path.into(),
-                    previous_path: String::new(),
-                    status: "added".into(),
-                    identity: Self::get_file_stamp(&root.join(path))?,
+                    path,
+                    previous_path: previous
+                        .to_str()
+                        .map_err(|_| invalid("Git path is not UTF-8"))?
+                        .to_owned(),
+                    status: status.into(),
+                    identity: format!("{old_id}:{new_id}:{stamp}"),
                 });
                 if files.len() > 5000 {
                     return Err(invalid("Diff exceeds 5000 files"));
                 }
             }
-        }
-        files.sort_by(|a, b| a.path.cmp(&b.path));
-        Ok(files)
+            files.sort_by(|a, b| a.path.cmp(&b.path));
+            Ok(files)
+        })
+        .await
+        .map_err(|_| invalid("Git comparison metadata read failed"))?
     }
 
     fn get_observation_token(diff: &DiffComparison, files: &[DiffFile]) -> Result<String> {
@@ -940,28 +721,5 @@ impl DiffService {
             });
         }
         Ok(())
-    }
-
-    async fn get_git_bytes(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
-        let output = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            tokio::process::Command::new("git")
-                .arg("--literal-pathspecs")
-                .arg("-C")
-                .arg(root)
-                .args(args)
-                .env("GIT_OPTIONAL_LOCKS", "0")
-                .kill_on_drop(true)
-                .output(),
-        )
-        .await
-        .map_err(|_| invalid("Git content metadata timed out"))??;
-        if !output.status.success() {
-            return Err(invalid("Git comparison metadata is unavailable"));
-        }
-        if output.stdout.len() > 16 * 1024 * 1024 {
-            return Err(invalid("Git metadata exceeds the bounded response limit"));
-        }
-        Ok(output.stdout)
     }
 }

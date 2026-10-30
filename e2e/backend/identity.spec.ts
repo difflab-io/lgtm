@@ -21,7 +21,7 @@ describe('When discovering the review API', () => {
       expect.arrayContaining([
         'review_targets',
         'feedback_scopes',
-        'anchor_evidence',
+        'review_snapshots',
         'diff_service',
         'rejected_submission_recovery',
       ]),

@@ -116,7 +116,14 @@ export class TestHarness {
   async response(method: string, input: Json, actor = this.actor) {
     const service = ['EnsureIdentity', 'GetCapabilities'].includes(method)
       ? 'IdentityService'
-      : ['GetDiff', 'GetFiles', 'GetFile'].includes(method)
+      : [
+            'GetDiff',
+            'GetFiles',
+            'GetFile',
+            'GetSource',
+            'CaptureAnchor',
+            'GetAnchorPlacements',
+          ].includes(method)
         ? 'DiffService'
         : 'ReviewService'
     const response = await fetch(`${this.endpoint}/lgtm.v1.${service}/${method}`, {

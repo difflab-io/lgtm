@@ -1,4 +1,9 @@
+-- State -----------------------------------------------------------------------
+
 local M = {}
+
+-- Methods ---------------------------------------------------------------------
+
 function M.setup()
   local prefix = require("lgtm.config").options.prefix
   local groups = {
@@ -6,62 +11,56 @@ function M.setup()
     {
       prefix .. "b",
       function()
-        require("lgtm.review").branch("branch")
+        require("lgtm.features.new_review_dialog").local_review("branch")
       end,
       desc = "Review branch",
     },
     {
       prefix .. "e",
       function()
-        require("lgtm.review").comment_action("e")
+        require("lgtm.app").comment_action("e")
       end,
       desc = "Edit comment",
     },
     {
       prefix .. "d",
       function()
-        require("lgtm.review").comment_action("dd")
+        require("lgtm.app").comment_action("dd")
       end,
       desc = "Delete comment",
     },
     {
       prefix .. "r",
       function()
-        require("lgtm.review").branch("working")
+        require("lgtm.features.new_review_dialog").local_review("working")
       end,
       desc = "Review working tree",
     },
     {
       prefix .. "p",
       function()
-        require("lgtm.sessions").prs()
+        require("lgtm.features.branch_pr_selector").open()
       end,
       desc = "Pull requests",
     },
     {
       prefix .. "S",
       function()
-        require("lgtm.sessions").select()
+        require("lgtm.features.session_selector").select()
       end,
       desc = "Resume session",
     },
     {
       prefix .. "D",
       function()
-        require("lgtm.review").directory()
+        require("lgtm.features.new_review_dialog").directory()
       end,
       desc = "Review directory",
     },
     {
-      prefix .. "n",
-      ":Lgtm note<CR>",
-      desc = "Add note",
-      mode = { "n", "x" },
-    },
-    {
       prefix .. "c",
       function()
-        require("lgtm.review").comment("line")
+        require("lgtm.app").comment("line")
       end,
       desc = "Add comment",
       mode = { "n", "x" },
@@ -69,70 +68,63 @@ function M.setup()
     {
       prefix .. "f",
       function()
-        require("lgtm.review").comment("file")
+        require("lgtm.app").comment("file")
       end,
       desc = "File comment",
     },
     {
       prefix .. "g",
       function()
-        require("lgtm.review").comment("general")
+        require("lgtm.app").comment("general")
       end,
       desc = "General comment",
     },
     {
       prefix .. "t",
       function()
-        require("lgtm.review").threads()
+        require("lgtm.features.threads_pane").open()
       end,
       desc = "All threads",
     },
     {
       prefix .. "F",
       function()
-        require("lgtm.review").files()
+        require("lgtm.app").files()
       end,
       desc = "Review files",
     },
     {
       prefix .. "m",
       function()
-        require("lgtm.review").reviewed()
+        require("lgtm.app").reviewed()
       end,
       desc = "Toggle file reviewed",
     },
     {
-      prefix .. "P",
-      function()
-        require("lgtm.notes").promote()
-      end,
-      desc = "Promote note",
-    },
-    {
       prefix .. "x",
       function()
-        require("lgtm.export").run(require("lgtm.context").current and "review" or "notes")
+        require("lgtm.app").export("review")
       end,
       desc = "Export review",
     },
     {
       prefix .. "s",
       function()
-        require("lgtm.review").submit()
+        require("lgtm.app").submit()
       end,
       desc = "Submit review",
     },
     {
       prefix .. "y",
       function()
-        require("lgtm.review").sync()
+        require("lgtm.app").sync()
       end,
       desc = "Sync GitHub drafts",
     },
     {
       prefix .. "q",
       function()
-        require("lgtm.review").close()
+        require("lgtm.app").close()
       end,
       desc = "Close review view",
     },

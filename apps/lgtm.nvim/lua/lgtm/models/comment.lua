@@ -1,0 +1,10 @@
+---@class lgtm.Comment
+---@field id string
+---@field threadId string
+---@field ownerId string
+---@field author table
+---@field body string
+---@field version string
+---@field position string|number
+---@field visibility string
+---@field originSessionId string?

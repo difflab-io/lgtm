@@ -1,0 +1,9 @@
+---@class lgtm.Draft
+---@field body string?
+---@field requestKey string Stable across retries of the same write.
+---@field expectedVersion string?
+---@field scope table?
+---@field anchor table?
+---@field outcome string?
+---@field fingerprint string?
+---@field uncertain boolean?

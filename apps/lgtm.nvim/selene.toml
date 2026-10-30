@@ -1,0 +1,12 @@
+std = "neovim"
+
+[lints]
+high_cyclomatic_complexity = "warn"
+# WhichKey specifications combine positional keys/callbacks with named metadata.
+mixed_table = "allow"
+unused_variable = "deny"
+shadowing = "deny"
+must_use = "deny"
+
+[config]
+high_cyclomatic_complexity = { maximum_complexity = 10 }

@@ -5,10 +5,10 @@
  */
 import { describe, it, expect } from 'vitest'
 import { randomUUID } from 'node:crypto'
-import { mkdir, rename, rm } from 'node:fs/promises'
+import { rename, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { useTestHarness } from '../common/fixtures.js'
-import { hash, type Json } from '../common/test-utils.js'
+import { type Json } from '../common/test-utils.js'
 import { line } from './anchors.js'
 import {
   prepareDirectory,
@@ -26,13 +26,13 @@ describe('When starting a local directory review', () => {
     async () => {
       // Arrange
       const { runtime } = fixture()
-      const { scope, bytes, review } = await prepareDirectory(runtime)
+      const { scope, review } = await prepareDirectory(runtime)
 
       // Act
       const root = (
         await runtime.rpc('AddComment', {
           scope,
-          anchor: line(bytes, 'PLAN.md'),
+          anchor: line(review.snapshot.id, 'PLAN.md'),
           body: 'Handle this case',
           expectedVersion: review.version,
           requestKey: randomUUID(),
@@ -77,139 +77,75 @@ describe('When starting a local directory review', () => {
 describe('When files change during a local review', () => {
   const fixture = useTestHarness('backend')
 
-  it('User feedback follows a confirmed file move while preserving its original anchor', async () => {
-    // Arrange
-    const { runtime } = fixture()
-    const { scope, plans, bytes, root } = await prepareDirectoryDiscussion(runtime)
-    const before = await runtime.rpc('GetConversation', { scope })
-    await mkdir(join(plans, 'nested'))
-    await rename(join(plans, 'PLAN.md'), join(plans, 'nested/PLAN.md'))
+  it.each(['rename', 'delete'] as const)(
+    'Saved source and discussions survive a file %s',
+    async (change) => {
+      // Arrange
+      const { runtime } = fixture()
+      const { scope, plans, review, root } = await prepareDirectoryDiscussion(runtime)
+      if (change === 'rename') await rename(join(plans, 'PLAN.md'), join(plans, 'MOVED.md'))
+      else await rm(join(plans, 'PLAN.md'))
 
-    // Act
-    await runtime.rpc('RefreshReview', {
-      scope,
-      expectedVersion: before.version,
-      requestKey: randomUUID(),
-      sourceChanges: [
-        {
-          moved: {
-            threadId: root.threadId,
-            previousPath: 'PLAN.md',
-            currentPath: 'nested/PLAN.md',
-            source: { localFile: { contentHash: hash(bytes) } },
-          },
-        },
-      ],
-    })
-    const selected = await runtime.rpc('GetConversation', { scope, filePaths: ['nested/PLAN.md'] })
-
-    // Assert
-    expect(selected.comments).toHaveLength(2)
-    expect(selected.threads[0]).toMatchObject({
-      id: root.threadId,
-      currentPath: 'nested/PLAN.md',
-      anchor: { path: 'PLAN.md' },
-    })
-  })
-
-  it('User feedback remains orphaned with its original selection when a file is deleted', async () => {
-    // Arrange
-    const { runtime } = fixture()
-    const { scope, plans, root } = await prepareDirectoryDiscussion(runtime)
-    const before = await runtime.rpc('GetConversation', { scope })
-    await rm(join(plans, 'PLAN.md'))
-
-    // Act
-    await runtime.rpc('RefreshReview', {
-      scope,
-      expectedVersion: before.version,
-      requestKey: randomUUID(),
-      sourceChanges: [{ deleted: { threadId: root.threadId, path: 'PLAN.md' } }],
-    })
-    const retained = await runtime.rpc('GetConversation', { scope })
-
-    // Assert
-    expect(retained.comments).toHaveLength(3)
-    expect(retained.threads.find((thread: Json) => thread.id === root.threadId)).toMatchObject({
-      orphanReason: 'file_deleted',
-      anchor: { evidence: { selectedText: 'selected' } },
-    })
-  })
-
-  it('Moving the review directory preserves its review identity and discussions', async () => {
-    // Arrange
-    const { runtime } = fixture()
-    const { scope, plans, review } = await prepareDirectoryDiscussion(runtime)
-    const before = await runtime.rpc('GetConversation', { scope })
-    const destination = join(runtime.workspace, '.difflab/plan/renamed')
-    await rename(plans, destination)
-
-    // Act
-    await runtime.rpc('RefreshReview', {
-      scope,
-      expectedVersion: before.version,
-      requestKey: randomUUID(),
-      sourceChanges: [{ locationMoved: { previousPath: plans, currentPath: destination } }],
-    })
-    await runtime.restart()
-    const resumed = await runtime.rpc('StartReview', {
-      target: { directory: { path: destination } },
-      requestKey: randomUUID(),
-    })
-
-    // Assert
-    expect(resumed.review.id).toBe(review.id)
-    expect(resumed.review.target.directory.path).toBe(destination)
-    expect((await runtime.rpc('GetConversation', { scope })).comments).toHaveLength(3)
-  })
-})
-
-describe('When promoting notes into a local review', () => {
-  const fixture = useTestHarness('backend')
-
-  it('User can copy selected notes into a review without losing their author or modifying the source', async () => {
-    // Arrange
-    const { runtime } = fixture()
-    const { scope, review } = await prepareDirectory(runtime)
-    const path = await runtime.write('standalone.md', 'saved\n')
-    const source = { notes: { path } }
-    const note = (
-      await runtime.rpc('AddComment', {
-        scope: source,
-        body: 'Promote this feedback',
-        expectedVersion: '0',
-        requestKey: randomUUID(),
+      // Act
+      const saved = (await runtime.rpc('GetReview', { reviewId: review.id })).review
+      const diff = (await runtime.rpc('GetDiff', { reviewId: review.id })).diff
+      const file = await runtime.rpc('GetFile', { diff, path: 'PLAN.md' })
+      const before = await runtime.rpc('GetConversation', { scope })
+      const refreshed = (
+        await runtime.rpc('RefreshReview', {
+          scope,
+          expectedVersion: before.version,
+          requestKey: randomUUID(),
+        })
+      ).review
+      const historical = (
+        await runtime.rpc('GetDiff', { reviewId: review.id, revisionId: review.snapshot.id })
+      ).diff
+      const discussion = await runtime.rpc('GetConversation', {
+        scope,
+        snapshotId: review.snapshot.id,
       })
-    ).comment
-    const before = await runtime.rpc('GetConversation', { scope: source })
-    const current = await runtime.rpc('GetConversation', { scope })
-    const request = {
-      source,
-      targetReviewId: review.id,
-      commentIds: [note.id],
-      anchors: [{ kind: 'file', path: 'two.md' }],
-      expectedSourceVersion: before.version,
-      expectedReviewVersion: current.version,
-      requestKey: randomUUID(),
-    }
+
+      // Assert
+      expect(saved.snapshot.id).toBe(review.snapshot.id)
+      expect(file.newSide.content).toContain('selected')
+      expect(refreshed.id).toBe(review.id)
+      expect(refreshed.snapshot.id).not.toBe(review.snapshot.id)
+      expect(
+        (await runtime.rpc('GetFile', { diff: historical, path: 'PLAN.md' })).newSide.content,
+      ).toContain('selected')
+      expect(discussion.comments).toHaveLength(3)
+      expect(discussion.threads.find((thread: Json) => thread.id === root.threadId)).toMatchObject({
+        anchor: { path: 'PLAN.md', snapshotId: review.snapshot.id },
+        displayLocation: { path: 'PLAN.md', start: '2' },
+      })
+    },
+  )
+
+  it('Moving the original directory cannot break resume, replies or export', async () => {
+    // Arrange
+    const { runtime } = fixture()
+    const { scope, plans, review, root } = await prepareDirectoryDiscussion(runtime)
+    await rename(plans, join(runtime.workspace, '.difflab/plan/renamed'))
+    await runtime.restart()
 
     // Act
-    const promoted = await runtime.rpc('PromoteNotes', request)
-    const replay = await runtime.rpc('PromoteNotes', request)
-    const target = await runtime.rpc('GetConversation', { scope })
-    const exported = await runtime.rpc('Export', { scope, commentIds: [promoted.comments[0].id] })
+    const saved = (await runtime.rpc('GetReview', { reviewId: review.id })).review
+    const conversation = await runtime.rpc('GetConversation', { scope })
+    const thread = conversation.threads.find((thread: Json) => thread.id === root.threadId)
+    await runtime.rpc('Reply', {
+      scope,
+      threadId: thread.id,
+      body: 'Reply after move',
+      expectedVersion: thread.version,
+      requestKey: randomUUID(),
+    })
+    const exported = await runtime.rpc('Export', { scope })
 
     // Assert
-    expect(promoted.comments[0].id).not.toBe(note.id)
-    expect(promoted.comments[0].author).toEqual(note.author)
-    expect(promoted.acceptedVersion).toBeTruthy()
-    expect(replay.comments[0].id).toBe(promoted.comments[0].id)
-    expect((await runtime.rpc('GetConversation', { scope: source })).comments[0]).toMatchObject({
-      id: note.id,
-      body: note.body,
-    })
-    expect(exported.markdown).toContain('Promote this feedback')
-    expect(await runtime.rpc('GetConversation', { scope })).toEqual(target)
+    expect(saved.snapshot).toEqual(review.snapshot)
+    expect(exported.markdown).toContain('Reply after move')
+    expect((await runtime.rpc('GetConversation', { scope })).comments).toHaveLength(4)
   })
 })
 
@@ -291,7 +227,7 @@ describe('When staged changes become branch commits', () => {
     )
   })
 
-  it('An unrelated checkout cannot update a saved branch review’s anchors', async () => {
+  it('An unrelated checkout cannot change saved source or comment locations', async () => {
     // Arrange
     const { runtime } = fixture()
     const { scope, path, root } = await prepareBranchDiscussion(runtime)
@@ -300,47 +236,32 @@ describe('When staged changes become branch commits', () => {
     await runtime.git('rm', '--', path)
 
     // Act
-    const rejected = await runtime.response('RefreshReview', {
-      scope,
-      expectedVersion: before.version,
-      requestKey: randomUUID(),
-      sourceChanges: [{ deleted: { threadId: root.threadId, path } }],
-    })
+    const saved = (await runtime.rpc('GetReview', { reviewId: scope.reviewId })).review
+    const diff = (await runtime.rpc('GetDiff', { reviewId: scope.reviewId })).diff
+    const source = await runtime.rpc('GetFile', { diff, path })
 
     // Assert
-    expect(rejected.status).toBeGreaterThanOrEqual(400)
-    expect(await runtime.rpc('GetConversation', { scope })).toEqual(before)
+    expect(source.oldSide.content).toContain('selected old')
+    expect(saved.id).toBe(scope.reviewId)
+    expect(
+      (await runtime.rpc('GetConversation', { scope })).threads.find(
+        (thread: Json) => thread.id === root.threadId,
+      ).anchor,
+    ).toEqual(before.threads.find((thread: Json) => thread.id === root.threadId).anchor)
   })
 })
 
 describe('When exporting local review feedback', () => {
   const fixture = useTestHarness('backend')
 
-  it('Export describes moved and deleted files, replies and final feedback without internal state', async () => {
+  it('Export preserves original source, replies and final feedback after workspace changes', async () => {
     // Arrange
     const { runtime } = fixture()
-    const { scope, path, next, root, fileComment, general, review, base } =
+    const { scope, path, root, fileComment, general, review, base } =
       await prepareBranchDiscussion(runtime)
     await rename(join(runtime.workspace, path), join(runtime.workspace, 'src/moved.md'))
     await rm(join(runtime.workspace, 'other.md'))
-    let current = await runtime.rpc('GetConversation', { scope })
-    await runtime.rpc('RefreshReview', {
-      scope,
-      expectedVersion: current.version,
-      requestKey: randomUUID(),
-      sourceChanges: [
-        {
-          moved: {
-            threadId: root.threadId,
-            previousPath: path,
-            currentPath: 'src/moved.md',
-            source: { workingFile: { contentHash: hash(next) } },
-          },
-        },
-        { deleted: { threadId: fileComment.threadId, path: 'other.md' } },
-      ],
-    })
-    current = await runtime.rpc('GetConversation', { scope })
+    const current = await runtime.rpc('GetConversation', { scope })
     await runtime.rpc('CompleteReview', {
       reviewId: scope.reviewId,
       expectedVersion: current.version,
@@ -359,12 +280,10 @@ describe('When exporting local review feedback', () => {
     expect(exported.markdown).toMatch(/^# Review feedback\n\n/)
     expect(exported.markdown.match(/\*\*\[COMMENT\]\*\*/g)).toHaveLength(3)
     for (const text of [
-      '`src/moved.md`',
       '``src/[x]`Ω.rs:~2``',
       'old (left) side',
       'Add a regression test for the timeout case.',
       'return recover(error);',
-      'File deleted.',
       '> selected old',
       '## Overall feedback\n\nPlease address these points before merging.',
     ])

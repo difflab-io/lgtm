@@ -10,35 +10,27 @@ lgtm down
 
 `up --port 0` chooses a free port. `up --foreground --no-open` runs in the terminal. `$LGTM_HOME` selects the runtime directory (default `~/.lgtm`), including PID/port/log files and `reviews.sqlite`. Set `LGTM_DATABASE_URL` to configure server storage. Client commands discover the daemon or use `LGTM_RPC_URL`, including `/rpc` for the bundled daemon and no prefix for the standalone backend.
 
-## Notes and ignored directory review
+## Ignored directory review
 
 Start the backend first. Set Git `user.name` and `user.email`, or `LGTM_NAME` and `LGTM_EMAIL`, for human attribution. Agents use `--as NAME --model MODEL --provider PROVIDER`; `--identity UUID` selects an existing actor. GitHub posting credentials are separate.
 
 ```sh
-lgtm session start --notes .difflab/plans/my-plan --json
-lgtm comments add --notes .difflab/plans/my-plan --file PLAN.md --line 12 --body 'Clarify the acceptance test' --json
-lgtm comments list --notes .difflab/plans/my-plan --json
-lgtm session export --notes .difflab/plans/my-plan --output review.md
-lgtm session complete --notes .difflab/plans/my-plan --json
+lgtm session start --directory .difflab/plans/my-plan --json
+lgtm comments add --directory .difflab/plans/my-plan --file PLAN.md --line 12 --body 'Clarify the acceptance test' --json
+lgtm comments list --directory .difflab/plans/my-plan --json
+lgtm session export --directory .difflab/plans/my-plan --output review.md
+lgtm session complete --directory .difflab/plans/my-plan --json
 ```
 
-Use `comments add --notes FILE --line N --body TEXT` for ordinary saved-file notes; no visible review is needed. Explicit directory roots include ignored and untracked files. A root may itself be a symlink, as `.difflab` commonly is. Nested symlinks cannot escape the selected physical root. Paths in comments are relative to that root. Local notes and reviews need no GitHub credentials or browser. Each comment is saved immediately; completion ends the active session while retaining its conversation. Starting again creates a successor session.
+Explicit directory roots include ignored and untracked files. The backend saves an immutable source revision, including when the selected root is a symlink. Nested symlinks do not expose files outside that root. Paths in comments are relative to the selected directory. Each comment saves immediately; completion retains the source and discussion. Starting again creates a successor session.
 
-Use `comments edit ID --body TEXT`, `comments delete ID`, `comments reply THREAD --body TEXT`, `comments resolve THREAD` and `comments reopen THREAD` with the same context and actor flags. `comments promote --notes PATH --target-session UUID --comment UUID --file TARGET_PATH` (or `--general`) explicitly copies selected notes to review drafts, preserving their source attribution. Export uses the shared backend Markdown formatter for notes, local reviews and GitHub conversations without changing their state.
+Use `comments edit ID --body TEXT`, `comments delete ID`, `comments reply THREAD --body TEXT`, `comments resolve THREAD` and `comments reopen THREAD` with the same context and actor flags. Export uses the backend Markdown formatter. Standalone file notes and promotion are removed; existing note records remain in the database.
 
-A confirmed file or directory move can be recorded after moving it on disk:
+`session refresh` captures another revision without changing the session ID. Resume a moved or deleted source with `session show --review UUID` and export it with `session export --review UUID`. Saved source lives under `$LGTM_HOME/snapshots/<repository-id>` and survives removal of the original checkout.
 
-```sh
-lgtm session refresh --notes /new/absolute/path --moved-from /old/absolute/path --json
-```
+## Find saved reviews
 
-The old location must be absent and the destination must exist. A copy is rejected. Review and thread IDs, replies, attribution, and original anchors remain intact. For exact retry from a script, retain `--expected-version VERSION --request-key KEY` with the original payload. Notes at a file path do not create a visible review; an explicit directory review resumes by its original review ID after a root move.
-
-Exports use numbered Markdown feedback, compact file/range locations, `~` for old-side lines, useful replies, original excerpts for lost locations, and optional overall feedback. They omit internal IDs and synchronization metadata. Local completion accepts `--body` for final feedback and has no GitHub outcome.
-
-### Find saved reviews
-
-Use `lgtm session list` to list active review attempts. Add `--completed` for completed attempts or `--all` for both. Filter local reviews with `--path DIRECTORY` or PR reviews with `--repo REPOSITORY_URL`. Ordinary file notes do not appear in this list.
+Use `lgtm session list` to list active review attempts. Add `--completed` for completed attempts or `--all` for both. Filter local reviews with `--path DIRECTORY` or PR reviews with `--repo REPOSITORY_URL`.
 
 ## Git and GitHub reviews
 

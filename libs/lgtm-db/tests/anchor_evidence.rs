@@ -229,38 +229,29 @@ async fn should_roll_back_path_changes_and_context_revision_on_failed_transactio
 async fn should_reject_two_contexts_claiming_the_same_current_notes_location() {
     for db in common::databases().await {
         let (id, _) = context(&db).await;
-        let first = db.review_contexts.get_by_id(&id).await.unwrap().unwrap();
+        let original = db.review_contexts.get_by_id(&id).await.unwrap().unwrap();
+        let mut first = original.clone();
+        first.id = Uuid::new_v4();
+        first.notes_path = Some("/notes/first-source".into());
+        first.current_notes_path = Some("/notes/archived-location".into());
+        db.review_contexts.insert(&first).await.unwrap();
         let mut second = first.clone();
         second.id = Uuid::new_v4();
         second.notes_path = Some("/notes/second-source".into());
         db.review_contexts.insert(&second).await.unwrap();
-        db.review_contexts
-            .set_notes_location(&first.id, "/notes/current")
-            .await
-            .unwrap();
-        assert!(
-            db.review_contexts
-                .set_notes_location(&second.id, "/notes/current")
-                .await
-                .is_err()
-        );
         assert_eq!(
             db.review_contexts
                 .get_by_id(&first.id)
                 .await
                 .unwrap()
-                .unwrap()
-                .current_notes_path
-                .as_deref(),
-            Some("/notes/current")
+                .unwrap(),
+            first
         );
         assert!(
             db.review_contexts
                 .get_by_id(&second.id)
                 .await
                 .unwrap()
-                .unwrap()
-                .current_notes_path
                 .is_none()
         );
         db.close().await;

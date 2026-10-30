@@ -25,6 +25,7 @@ service IdentityService {
 
 // Location only: general, file or line; side: old/new. Source identifies the saved bytes.
 message Anchor {
+  string snapshot_id = 10;
   string kind = 1;
   string path = 2;
   int64 start = 3;
@@ -57,6 +58,8 @@ message Comment {
 }
 
 message Thread {
+  Anchor display_location = 12;
+  string display_status = 13;
   string id = 1;
   Anchor anchor = 2;
   string state = 3;
@@ -132,28 +135,6 @@ message ExportResponse {
   string markdown = 1;
 }
 
-message PromoteNotesRequest {
-  reserved 1;
-  reserved "source_context_id";
-  reserved 2;
-  reserved "target_session_id";
-  repeated string comment_ids = 3;
-  string request_key = 4;
-  repeated Anchor anchors = 5;
-  ReviewScope source = 6;
-  string target_review_id = 7;
-  string expected_source_version = 8;
-  string expected_review_version = 9;
-}
-
-message CommentSyncFailure { string comment_id = 1; string message = 2; }
-
-message PromoteNotesResponse {
-  repeated Comment comments = 1;
-  string accepted_version = 2;
-  repeated CommentSyncFailure sync_errors = 3;
-}
-
 message ListPullRequestsRequest {
   string repository_url = 1;
   string query = 2;
@@ -201,7 +182,6 @@ service ReviewService {
   rpc DeleteComment(DeleteCommentRequest) returns (DeleteCommentResponse);
   rpc ResolveThread(ResolveThreadRequest) returns (ResolveThreadResponse);
   rpc Export(ExportRequest) returns (ExportResponse);
-  rpc PromoteNotes(PromoteNotesRequest) returns (PromoteNotesResponse);
   rpc ListPullRequests(ListPullRequestsRequest) returns (ListPullRequestsResponse);
   rpc SubmitReview(SubmitReviewRequest) returns (SubmitReviewResponse);
   rpc ReconcileSubmission(ReconcileSubmissionRequest) returns (ReconcileSubmissionResponse);
@@ -219,6 +199,7 @@ message GetCapabilitiesResponse {
 }
 
 message GetConversationRequest {
+  string snapshot_id = 20;
   reserved 1;
   reserved "context_id";
   optional bool include_drafts = 2;
@@ -364,6 +345,15 @@ message ForgeObservation {
   Anchor current = 4;
 }
 
+// Backend-owned immutable Git source. Existing commit identities are retained.
+message ReviewSnapshot {
+  string id = 1;
+  string repository_id = 2;
+  string root = 3;
+  string base_commit = 4;
+  string head_commit = 5;
+}
+
 message Review {
   string id = 1;
   ReviewTarget target = 2;
@@ -379,6 +369,8 @@ message Review {
   string forge_review_id = 12;
   string forge_state = 13;
   ReviewComparison observed_comparison = 14;
+  ReviewSnapshot snapshot = 30;
+  repeated ReviewSnapshot revisions = 31;
 }
 
 enum ResumePolicy {
@@ -416,30 +408,9 @@ message ListReviewsRequest {
 message ListReviewsResponse { repeated Review reviews = 1; string next_page_token = 2; }
 
 // Only confirmed client observations may change path association or orphan state.
-message PathMove { string thread_id = 1; string previous_path = 2; string current_path = 3; AnchorSource source = 4; }
-
-message FileDeletion { string thread_id = 1; string path = 2; }
-
-message WorkingSourceChange { string thread_id = 1; string path = 2; AnchorSource source = 3; }
-
-message FileRestoration { string thread_id = 1; string path = 2; AnchorSource source = 3; }
-
-message SourceChange {
-  oneof kind {
-    PathMove moved = 1;
-    FileDeletion deleted = 2;
-    WorkingSourceChange working_source_changed = 3;
-    FileRestoration restored = 4;
-    LocationMove location_moved = 5;
-  }
-}
-
-message LocationMove { string previous_path = 1; string current_path = 2; }
-
 message RefreshReviewRequest {
   ReviewScope scope = 1;
   string expected_version = 2;
-  repeated SourceChange source_changes = 3;
   string request_key = 4;
 }
 

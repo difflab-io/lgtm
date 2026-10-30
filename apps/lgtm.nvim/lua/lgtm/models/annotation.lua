@@ -1,0 +1,4 @@
+---@class lgtm.Annotation
+---@field status 'exact'|'outdated'
+---@field location table? Fixed file or line coordinates supplied by the backend.
+---@field reason string?

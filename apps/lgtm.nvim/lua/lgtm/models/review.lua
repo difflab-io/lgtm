@@ -1,0 +1,17 @@
+---@class lgtm.Review
+---@field snapshot lgtm.Snapshot?
+---@field revisions lgtm.Snapshot[]?
+---@field id string
+---@field version string
+---@field state 'active'|'completed'
+---@field target table Backend target union, retained without remapping.
+---@field comparison table Backend comparison union, retained without remapping.
+---@field submissionStatus string
+---@field body string?
+
+---@class lgtm.Snapshot
+---@field id string
+---@field repositoryId string
+---@field root string Backend-owned Git store
+---@field baseCommit string
+---@field headCommit string
