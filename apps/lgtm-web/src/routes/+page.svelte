@@ -1,16 +1,10 @@
 <script lang="ts">
-  import { sayHello } from '$lib/rpc'
-  import { onMount } from 'svelte'
+  import { getReviewDemo, reviewDemo } from '$lib/services/review'
 
-  let name = $state('World')
+  let name = $state<string>(reviewDemo.defaultName)
   let greeting = $state('')
   let error = $state('')
   let pending = $state(false)
-  let path = $state('')
-
-  onMount(() => {
-    path = new URL(window.location.href).searchParams.get('path') ?? ''
-  })
 
   async function submit(event: SubmitEvent) {
     event.preventDefault()
@@ -18,9 +12,10 @@
     greeting = ''
     error = ''
     try {
-      greeting = await sayHello(name, `${window.location.origin}/rpc`)
+      const review = await getReviewDemo(name, `${window.location.origin}/rpc`)
+      greeting = review.message
     } catch {
-      error = 'Could not reach the backend. Check that lgtm-backend is running.'
+      error = 'Could not reach the backend. Start LGTM and try again.'
     } finally {
       pending = false
     }
@@ -28,15 +23,13 @@
 </script>
 
 <svelte:head>
-  <title>LGTM Hello World</title>
-  <meta name="description" content="Say hello through the LGTM backend" />
+  <title>{reviewDemo.title}</title>
+  <meta name="description" content={reviewDemo.description} />
 </svelte:head>
 
 <main>
-  <h1>LGTM Hello World</h1>
-  {#if path}
-    <p>Review path: <code>{path}</code></p>
-  {/if}
+  <h1>{reviewDemo.title}</h1>
+  <p>{reviewDemo.description}</p>
   <form onsubmit={submit}>
     <label for="name">Your name</label>
     <input id="name" bind:value={name} />

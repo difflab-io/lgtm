@@ -50,10 +50,9 @@ export async function stop(child?: ChildProcess) {
   }
 }
 
-/** Own a real application process, isolated database/workspace and the clients used by one test journey. Failed runs retain evidence. */
+/** Own a real application process, isolated home/workspace and clients for one test journey. Failed runs retain evidence. */
 export class TestHarness {
   endpoint = ''
-  actor = ''
   rpcTimeoutMs = 40_000
   child?: ChildProcess
   env: NodeJS.ProcessEnv
@@ -99,7 +98,7 @@ export class TestHarness {
         else if (this.kind === 'cli')
           this.endpoint = `http://127.0.0.1:${(await readFile(join(this.home, 'server.port'), 'utf8')).trim()}/rpc`
         if (!this.endpoint) return false
-        const response = await this.response('GetCapabilities', {})
+        const response = await this.response('HelloReview', { name: 'E2E' })
         return response.status === 200
       },
       Boolean,
@@ -113,34 +112,23 @@ export class TestHarness {
     await this.launch()
   }
 
-  async response(method: string, input: Json, actor = this.actor) {
-    const service = ['EnsureIdentity', 'GetCapabilities'].includes(method)
-      ? 'IdentityService'
-      : ['GetDiff', 'GetFiles', 'GetFile'].includes(method)
-        ? 'DiffService'
-        : 'ReviewService'
-    const response = await fetch(`${this.endpoint}/lgtm.v1.${service}/${method}`, {
+  async response(method: string, input: Json) {
+    const response = await fetch(`${this.endpoint}/lgtm.v1.ReviewService/${method}`, {
       method: 'POST',
       signal: AbortSignal.timeout(this.rpcTimeoutMs),
       body: JSON.stringify(input),
       headers: {
         'Content-Type': 'application/json',
         'Connect-Protocol-Version': '1',
-        ...(actor ? { 'x-lgtm-identity': actor } : {}),
       },
     })
     return { status: response.status, body: (await response.json()) as Json }
   }
 
-  async rpc(method: string, input: Json = {}, actor = this.actor): Promise<Json> {
-    const { status, body } = await this.response(method, input, actor)
+  async rpc(method: string, input: Json = {}): Promise<Json> {
+    const { status, body } = await this.response(method, input)
     expect(status, `${method}: ${JSON.stringify(body)}`).toBe(200)
     return body
-  }
-
-  async identify(input: Json = { name: 'E2E reviewer', email: 'e2e@example.test' }) {
-    this.actor = (await this.rpc('EnsureIdentity', input, '')).actor.id
-    return this.actor
   }
 
   async cli(args: string[]) {
@@ -149,8 +137,6 @@ export class TestHarness {
       env: {
         ...this.env,
         LGTM_RPC_URL: this.endpoint,
-        LGTM_NAME: 'E2E reviewer',
-        LGTM_EMAIL: 'e2e@example.test',
       },
       timeout: 60_000,
     })

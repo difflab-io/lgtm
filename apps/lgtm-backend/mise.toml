@@ -21,7 +21,7 @@ description = "Remove build artifacts"
 run = "cargo clean"
 
 [tasks.test]
-description = "Run SQLite contracts and PostgreSQL contracts on Linux CI"
+description = "Run the library contracts"
 run = "mise run //:test-rust-project -- lgtm-backend"
 
 [tasks.lint]

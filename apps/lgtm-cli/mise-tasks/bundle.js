@@ -40,7 +40,6 @@ async function bundleRust(sourceDir, targetDir, crateRoot) {
     } else if (entry.name.endsWith('.rs')) {
       let content = (await readFile(source, 'utf8'))
         .replace(/\n\/\/ tests -+[\s\S]*$/, '\n')
-        .replace(/    #\[cfg\(test\)\]\n    pub\(crate\) fn connection\(&self\) -> &C \{\n        self\.pool\.as_ref\(\)\n    \}\n/, '')
         .replace(/\bcrate::/g, `${crateRoot}::`)
       if (entry.name === 'lib.rs' && crateRoot === 'crate::backend') {
         content = content.replace('pub use lgtm_db as database;', 'pub mod database;')

@@ -1,7 +1,11 @@
-# LGTM user guide
+# User guide
 
-Use the [CLI](../apps/lgtm-cli/README.md) for notes, local reviews, GitHub reviews and exports. It provides the current review interface. The browser review interface remains planned.
+LGTM currently provides a hello-review demonstration while its review model is rebuilt.
 
-The previous Neovim UI and business logic have been removed for a rewrite. Its commands, keymaps and backend integration are unavailable. The [plugin shell](../apps/lgtm.nvim/README.md) retains package loading, an inert setup hook and [editor help](../apps/lgtm.nvim/doc/lgtm.txt).
+Start the bundled application with `lgtm up`, or use `lgtm ui` to start/reuse it and open the browser. Submit a name in the page to receive a response from the backend. Use `lgtm ui --no-open` to print the URL without opening a browser, `lgtm status --json` to inspect the instance and `lgtm down` to stop it.
 
-The [E2E guide](../e2e/README.md) describes the retained editor fixtures, command execution and diagnostics for developing the replacement plugin.
+`lgtm review list` calls the same review RPC and returns labeled demo data. The `commit`, `push`, `review new`, `review close` and `comment` commands expose the proposed shape but return unimplemented errors without modifying the checkout or upstream forge. Reviews, comments and agent identities are not saved; old database files are unused and left intact.
+
+The Neovim plugin loads its pinned dependencies but has no review commands or review UI. See the [plugin setup guide](../apps/lgtm.nvim/README.md).
+
+For exact flags, JSON output and endpoint configuration, see [CLI usage](../apps/lgtm-cli/README.md). For development setup, see [development](development.md).

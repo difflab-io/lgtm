@@ -75,7 +75,7 @@ mod daemon {
 
         let page = client.get(&url).send().await.unwrap();
         assert_eq!(page.status(), 200);
-        assert!(page.text().await.unwrap().contains("LGTM Hello World"));
+        assert!(page.text().await.unwrap().contains("LGTM Hello Review"));
         for prefix in ["", "/rpc"] {
             let response = client
                 .post(format!("{url}{prefix}/lgtm.v1.GreeterService/SayHello"))
@@ -136,25 +136,19 @@ mod daemon {
         assert_eq!(discovery["rpc_url"], format!("{url}/rpc"));
         assert!(discovery.get("token").is_none());
 
-        let cwd = dir
-            .canonicalize()
-            .unwrap()
-            .join("review space & plus+ café #file");
-        std::fs::create_dir(&cwd).unwrap();
-        let review = Command::new(env!("CARGO_BIN_EXE_lgtm"))
-            .env("LGTM_HOME", dir)
-            .args(["review", "--no-open", "--as", "Tester <tester@example.com>"])
-            .current_dir(&cwd)
-            .output()
-            .unwrap();
-        assert!(review.status.success());
-        let review_url =
-            reqwest::Url::parse(String::from_utf8_lossy(&review.stdout).trim()).unwrap();
-        assert_eq!(review_url.origin().ascii_serialization(), url);
-        let query: Vec<_> = review_url.query_pairs().collect();
-        assert!(query.contains(&("path".into(), cwd.to_str().unwrap().into())));
-        assert!(!query.iter().any(|(key, _)| key == "session"));
-        assert_eq!(client.get(review_url).send().await.unwrap().status(), 200);
+        let ui = command(dir, &["ui", "--no-open", "--json"]);
+        assert!(ui.status.success());
+        let ui_output: serde_json::Value = serde_json::from_slice(&ui.stdout).unwrap();
+        assert_eq!(ui_output["ui_url"], url);
+        assert_eq!(
+            client
+                .get(ui_output["ui_url"].as_str().unwrap())
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            200
+        );
         assert!(command(dir, &["down"]).status.success());
         assert!(!dir.join("server.port").exists());
         let status = command(dir, &["status"]);
@@ -187,32 +181,17 @@ mod daemon {
     }
 
     #[test]
-    fn should_start_ready_review_server_for_current_directory() {
+    fn should_start_ready_ui_server_without_review_selectors() {
         let instance = Instance(tempfile::tempdir().unwrap());
         let dir = instance.0.path();
-        let review = command(
-            dir,
-            &[
-                "review",
-                "--port",
-                "0",
-                "--no-open",
-                "--as",
-                "Tester <tester@example.com>",
-            ],
-        );
+        let review = command(dir, &["ui", "--port", "0", "--no-open"]);
         assert!(
             review.status.success(),
             "{}",
             String::from_utf8_lossy(&review.stderr)
         );
         let url = reqwest::Url::parse(String::from_utf8_lossy(&review.stdout).trim()).unwrap();
-        let pairs = url.query_pairs().collect::<Vec<_>>();
-        assert!(pairs.contains(&(
-            "path".into(),
-            dir.canonicalize().unwrap().to_str().unwrap().into()
-        )));
-        assert!(!pairs.iter().any(|(key, _)| key == "session"));
+        assert!(url.query().is_none());
         let status = command(dir, &["status", "--json"]);
         let discovery: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
         assert_eq!(discovery["running"], true);

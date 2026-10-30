@@ -1,7 +1,7 @@
 import { beforeEach, afterEach } from 'vitest'
 import { TestHarness } from './test-harness.js'
 
-/** Own the backend process and database for one case. Consumers can add narrower fixtures. */
+/** Own the application process and workspace for one case. Consumers can add narrower fixtures. */
 export function useTestHarness(kind: 'backend' | 'cli', environment?: () => NodeJS.ProcessEnv) {
   let runtime: TestHarness | undefined
   beforeEach(async () => {

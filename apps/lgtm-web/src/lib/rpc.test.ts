@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { sayHello } from './rpc'
+import { getReviewDemo } from './services/review'
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url))
 let backend: ReturnType<typeof Bun.spawn> | undefined
@@ -18,7 +18,6 @@ beforeAll(async () => {
     env: {
       ...process.env,
       LGTM_HOME: home,
-      LGTM_DATABASE_URL: `sqlite://${join(home, 'reviews.sqlite')}?mode=rwc`,
       LGTM_BACKEND_ADDR: '127.0.0.1:0',
     },
     stderr: 'pipe',
@@ -64,16 +63,16 @@ afterAll(async () => {
   if (home) await rm(home, { recursive: true, force: true })
 })
 
-describe('generated gRPC-Web client against the Rust backend', () => {
-  test('returns a greeting from the server', async () => {
-    expect(await sayHello('Web', baseUrl)).toBe('Hello, Web!')
+describe('hello-review frontend service against the Rust backend', () => {
+  test('should_return_demo_data_with_the_real_review_greeting', async () => {
+    expect(await getReviewDemo('Web', baseUrl)).toEqual({ demo: true, message: 'Hello, Web!' })
   })
 
-  test('uses the server default for an empty name', async () => {
-    expect(await sayHello('', baseUrl)).toBe('Hello, World!')
+  test('should_use_the_server_default_for_an_empty_name', async () => {
+    expect((await getReviewDemo('', baseUrl)).message).toBe('Hello, World!')
   })
 
-  test('reports an unavailable backend', async () => {
-    await expect(sayHello('Web', 'http://127.0.0.1:0')).rejects.toThrow()
+  test('should_report_an_unavailable_backend_without_fake_success', async () => {
+    await expect(getReviewDemo('Web', 'http://127.0.0.1:0')).rejects.toThrow()
   })
 })

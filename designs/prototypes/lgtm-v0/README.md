@@ -1,10 +1,12 @@
-# LGTM v0 web review design
+# LGTM v0 web review design (historical)
+
+This prototype is a historical visual reference, not the current application or an implemented contract. The current app is a hello-review skeleton; see [current architecture](../../../docs/architecture/index.md).
 
 Open [index.html](index.html) in a browser. The prototype uses sample reviews and source files. Saves, closure, and GitHub submissions are simulated. Reloading resets the samples. Selecting a directory shows sample plans rather than reading the filesystem.
 
 The reference branch is `poc/standalone-web-and-nvim` at `6a23923e1b65f8c45cbafb55e2a2dc402b907462`. The format matches Difflab's `designs/prototypes/difflab-v0`. It uses pinned CDN imports for Tailwind CSS 4.3.3, Preline UI 5.0.0, and DOMPurify 3.4.16. Preline supplies the design-state dropdown. The HTML requires internet access and no build step. The snapshots are offline-viewable 1120 × 640 PNGs.
 
-The [core concepts PRD](../../../prd/0001-core-concepts/README.md) defines production requirements, including full Neovim parity and GitHub-only remote reviews. This prototype illustrates the web experience.
+The [core concepts PRD](../../../prd/0001-core-concepts/README.md) now describes future direction; the old production requirements illustrated by this prototype are retired.
 
 ## Screens and snapshots
 
@@ -44,7 +46,7 @@ The thread pane includes all files and review threads. Collapsed cards show only
 
 File comments appear in the file discussion and the thread pane. Line comments use the old or new side. Shift-clicking a second line selects a range. The composer supports writing, a basic preview, cancellation, and Command/Control Enter. An unmatched line becomes a file comment. A removed file leaves a review thread with its former location. The sample orphan state illustrates these fallbacks without computing matches.
 
-The author selector distinguishes Sam as a human and Codex as an agent. Each new comment and reply records that identity. Agent feedback on GitHub shows the separate posting account. Real identity persistence and synchronization remain production requirements.
+The author selector distinguishes Sam as a human and Codex as an agent. Each new comment and reply records that identity. Agent feedback on GitHub shows the separate posting account. Identity persistence and synchronization were goals of this historical prototype; neither exists in the current skeleton.
 
 Submit review offers an overall comment and Comment, Approve, or Request changes. Local reviews use Save review without an outcome selector. Saving keeps a session Active. Close review marks it complete and preserves its discussion. Closed sessions are readable, and New review starts further work.
 

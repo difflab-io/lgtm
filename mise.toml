@@ -73,10 +73,6 @@ run = "cargo publish -p lgtm-cli --locked"
 description = "Run the backend watcher and web development server together"
 depends = ["//apps/lgtm-backend:dev", "//apps/lgtm-web:dev"]
 
-[tasks."test:postgres"]
-description = "Run database and backend contracts on SQLite and PostgreSQL"
-run = "mise run //:with-postgres -- cargo test --locked -p lgtm-db -p lgtm-backend --all-features"
-
 [tasks."e2e:backend"]
 description = "Run backend E2E tests"
 usage = 'flag "--extended" help="Include extended tests"'
@@ -166,22 +162,5 @@ description = "Verify strict HTTP replay, UUID binding and mutation barriers wit
 run = "bun x vitest run e2e/common/github-cassette.test.ts"
 
 [tasks."e2e:record"]
-description = "Refresh genuine GitHub recordings for a suite and optional Vitest filter"
-run = '''
-#!/usr/bin/env bash
-set -euo pipefail
-suite=${1:?Use e2e:record -- backend|cli|nvim|all [Vitest filters]}
-shift
-export LGTM_E2E_GITHUB_MODE=record
-export LGTM_E2E_EXTENDED=true
-export LGTM_E2E_NVIM_PROFILES="${LGTM_E2E_NVIM_PROFILES:-required}"
-case "$suite" in
-  backend|cli|nvim) exec mise run "//e2e/$suite:test" -- "$@" ;;
-  all)
-    if [ "$#" -ne 0 ]; then echo "Select a suite to apply Vitest filters" >&2; exit 2; fi
-    # Record suites serially, with shared build dependencies, to avoid API bursts.
-    exec mise run --jobs 1 --continue-on-error //e2e/backend:test ::: //e2e/cli:test ::: //e2e/nvim:test
-    ;;
-  *) echo 'Suite must be backend, cli, nvim, or all' >&2; exit 2 ;;
-esac
-'''
+description = "Record provider journeys when replacement journeys are available"
+run = "bun run e2e/common/record.ts"
