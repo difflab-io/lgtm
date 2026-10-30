@@ -1,9 +1,99 @@
-# CLI server
+# CLI server — software architecture
 
-The server hosts embedded Svelte assets and the backend router on one loopback listener. `/rpc` serves browser RPC calls, root service paths support native clients, and `GET /health` reports the process ID used for daemon discovery.
+## Overview
 
-Startup creates runtime state and acquires PID ownership, binds the listener, builds the dummy DB/review service router and records the actual port. It does not open a database or initialize forge clients. Port `0` selects an available port.
+The server module serves embedded web assets and backend methods through one local HTTP listener.
 
-GET/HEAD requests serve embedded assets, with unknown assets returning 404. Shutdown marks backend health stopped, drains connections within the existing bound and clears the recorded port. The same backend implementation is used by the standalone server and bundled CLI.
+## Requirement
 
-See [daemon](daemon.md), [runtime store](store.md) and [server source](../../../apps/lgtm-cli/src/server.rs).
+### Functional
+
+- FR1: Serve the bundled UI and its static assets.
+- FR2: Route browser and native clients to the same backend.
+- FR3: Expose a health response with the server PID.
+- FR4: Record the actual listening port and clear it after shutdown.
+
+### Non-Functional
+
+- NFR1: Serve the installed application without a frontend development server.
+- NFR2: Limit connection draining to five seconds after a shutdown signal.
+
+## Design
+
+### Usage
+
+Call `serve` from an initialized Tokio runtime. Use port `0` to select an available port.
+
+```rust
+let store = Store::new()?;
+serve(0, &store, false).await?;
+```
+
+The call runs until shutdown or failure. Use `detached = true` only after daemon detachment. For foreground CLI use, run `lgtm up --foreground --no-open`.
+
+
+### Components and Responsibilities
+
+```mermaid
+flowchart TD
+    CLIENT["Browser or API client"] --> SERVER["One Axum listener"]
+    SERVER --> ASSETS["Embedded web assets"]
+    SERVER --> RPC["Backend router: /rpc and root methods"]
+    SERVER --> HEALTH["GET /health: process ID"]
+    SERVER --> STORE["Store: record listening port"]
+```
+
+- Axum owns the HTTP listener and request routing.
+- The generated asset table maps URLs to embedded bytes and content types.
+- `backend::router` provides hello-review, greeting and health services through the stateless dummy DB facade; startup does not open a database or create forge clients.
+- `Store` records the listening port and protects foreground ownership.
+- Tokio receives shutdown signals and bounds connection draining.
+- `tracing` records server startup and shutdown through the log module.
+
+### Data and Control Flow
+
+`serve` creates the runtime directory and establishes PID-file ownership. It binds the listener, builds the router, and records the assigned port. The CLI's readiness probe succeeds once the listener handles `/health`.
+
+Browser requests use `/rpc`. Native clients use root service paths. UI requests resolve through the embedded asset table.
+
+On SIGTERM or Ctrl-C, the server marks backend health as stopped and begins graceful shutdown. It waits up to five seconds for connections, then removes `server.port`.
+
+### Interfaces and Contracts
+
+`serve(port: u16, store: &Store, detached: bool) -> anyhow::Result<()>` runs until shutdown or a server error. Port `0` selects an available port. `detached = true` means `daemonize` already owns the PID-file lock.
+
+<!-- prettier-ignore -->
+| Route              | Response                         |
+| ------------------ | -------------------------------- |
+| `GET /health`      | JSON containing the process PID  |
+| `GET /`            | Embedded `index.html`            |
+| Asset GET or HEAD  | Asset content and content type   |
+| Unknown asset      | HTTP `404`                       |
+| `/rpc/*`           | Browser RPC calls                |
+| Root service paths | Native gRPC and Connect requests |
+
+Query parameters do not change asset lookup or grant filesystem access. The hello-review page does not select a checkout.
+
+## Implementation
+
+### Static assets
+
+The CLI build script generates `assets.rs` in Cargo's output directory. Each entry uses `include_bytes!` and a detected content type. Responses use `Cache-Control: no-cache`.
+
+### Backend routing
+
+Axum mounts a copy of the backend service at `/rpc`. Its fallback serves GET/HEAD assets and forwards other requests to the backend service. There is no separate UI process or backend process in the installed application.
+
+### Process ownership and shutdown
+
+Foreground mode obtains a lock on the same `server.pid` file that `daemonize` uses in background mode. This prevents a foreground server from overwriting a running daemon's port file.
+
+A one-shot notification starts the bounded drain after the signal handler begins shutdown. Graceful exit removes the port file. An abrupt process termination can leave files behind, so discovery also probes the server.
+
+## References
+
+- [Server implementation](../../../apps/lgtm-cli/src/server.rs).
+- [Asset build script](../../../apps/lgtm-cli/build.rs).
+- [Lifecycle tests](../../../apps/lgtm-cli/tests/daemon.rs).
+- [Shared application architecture](../index.md).
+- [Store module](store.md).

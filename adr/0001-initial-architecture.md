@@ -6,8 +6,6 @@
 
 Technical Story: [Code and document review PRD](../prd/0001-core-concepts/README.md)
 
-## Current implementation status
-
 As of the 2026-10-29 reset, LGTM is a hello-review skeleton with CLI and Svelte clients; review persistence and forge integration are removed, and the Neovim package remains a dependency-loading shell. The decision below records the original rationale rather than the current feature set; see the [current architecture](../docs/architecture/index.md).
 
 ## Context and Problem Statement

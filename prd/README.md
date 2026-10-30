@@ -6,4 +6,4 @@ Start from [template.md](template.md). Give each PRD a numbered directory (`NNNN
 
 | PRD                                                 | Status | Summary                                                                            |
 | --------------------------------------------------- | ------ | ---------------------------------------------------------------------------------- |
-| [0001: Core concepts](0001-core-concepts/README.md) | Draft  | Future application-owned collaboration and explicit forge publication; implementation requirements retired. |
+| [0001: Core concepts](0001-core-concepts/README.md) | Draft  | Local code and document review, GitHub PRs, agent identity, and web/Neovim parity. |
