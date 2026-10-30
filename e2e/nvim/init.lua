@@ -1,7 +1,7 @@
 -- Runtime setup only. TypeScript owns scenarios, assertions, input and lifecycle.
 local root, suite = vim.env.LGTM_REPO_ROOT, vim.env.LGTM_REPO_ROOT .. "/e2e/nvim"
 vim.opt.runtimepath:prepend(root .. "/apps/lgtm.nvim")
-for _, dependency in ipairs({ "codediff.nvim", "which-key.nvim", "nvim-notify" }) do
+for _, dependency in ipairs({ "nui.nvim", "nui-components.nvim", "codediff.nvim", "which-key.nvim", "nvim-notify" }) do
   vim.opt.runtimepath:append(suite .. "/.cache/" .. dependency)
 end
 vim.o.columns, vim.o.lines, vim.o.swapfile, vim.o.shadafile = 120, 40, false, "NONE"

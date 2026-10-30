@@ -10,6 +10,9 @@ Retained dependency pins:
 
 | Plugin | Revision |
 | --- | --- |
+| `grapp-dev/nui-components.nvim` | `1654dd709f13874089eefc80d82e0eb667f7fdfb` |
+| `MunifTanjim/nui.nvim` | `10fc361835c856ba4233ef5ea135b919bf3dce97` |
+| `mirlge/kak.nvim` (optional) | `b299d2689429b48afe48b1b294a6046487dacb6b` |
 | `esmuellert/codediff.nvim` | `09d9ebef2cc5a5c04db7a349cd6c61bdf84ecc8e` |
 | `folke/which-key.nvim` | `3aab2147e74890957785941f0c1ad87d0a44c15a` |
 | `rcarriga/nvim-notify` | `8701bece920b38ea289b457f902e2ad184131a5d` |
@@ -18,24 +21,16 @@ The shell's setup hook does not use these dependencies yet. E2E setup loads them
 
 ### lazy.nvim
 
+The repository's root [`lazy.lua`](../../lazy.lua) declares the pinned dependencies and configures the plugin runtime path. Both install commands read the same spec. Keep lazy.nvim package loading enabled with `"lazy"` in `pkg.sources`.
+
 ```lua
 {
   "difflab-io/lgtm",
-  lazy = false,
-  dependencies = {
-    { "esmuellert/codediff.nvim", commit = "09d9ebef2cc5a5c04db7a349cd6c61bdf84ecc8e", opts = {} },
-    { "folke/which-key.nvim", commit = "3aab2147e74890957785941f0c1ad87d0a44c15a", opts = {} },
-    { "rcarriga/nvim-notify", commit = "8701bece920b38ea289b457f902e2ad184131a5d", opts = {} },
-  },
-  config = function(plugin)
-    vim.opt.runtimepath:append(plugin.dir .. "/apps/lgtm.nvim")
-    require("lgtm").setup()
-    vim.cmd("runtime plugin/lgtm.lua")
-  end,
+  opts = {},
 }
 ```
 
-For development, replace the repository field with `dir = "/absolute/path/to/lgtm"`. If `dir` points directly to `apps/lgtm.nvim`, use `main = "lgtm", opts = {}` and omit the callback instead.
+For development, replace the repository field with `dir = "/absolute/path/to/lgtm"`, pointing to the repository root. The package spec includes Kak as an optional dependency: it preserves the pin when Kak is installed in your configuration, without enabling its keybindings for other users. NuiComponents uses NUI; both dependencies remain available for the rewrite. E2E installation also retains pinned lazy.nvim and Plenary for package-manager fixtures.
 
 ### Native Git packages
 
@@ -81,7 +76,7 @@ premise run nvim:lint
 premise run nvim:format:check
 ```
 
-The [Neovim E2E shell](../../e2e/nvim) retains isolated editor processes, MessagePack control, fixture composition, diagnostics and package installation checks. It uses the shared CLI/backend runtime fixture, so E2E tasks still build the CLI. The required editor profile installs and loads the three pinned dependencies above; the optional `kak` profile also loads pinned Kak keybindings.
+The [Neovim E2E shell](../../e2e/nvim) retains isolated editor processes, MessagePack control, fixture composition, diagnostics and package installation checks. It uses the shared CLI/backend runtime fixture, so E2E tasks still build the CLI. The required editor profile installs the pinned dependencies and loads CodeDiff, WhichKey, nvim-notify and NuiComponents/NUI; the optional `kak` profile also loads pinned Kak keybindings.
 
 ```sh
 premise run e2e:nvim

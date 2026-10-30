@@ -7,7 +7,7 @@
 - Keep database entities private; expose actual SeaORM models and the repositories required by backend workflows. Shared SeaORM entity types belong in `libs/lgtm-db/src/entities/common.rs`.
 
 - [Proposed] Preserve the Neovim development/release plugin installation tasks when resetting plugin features.
-- [Proposed] Preserve pinned Neovim dependencies in plugin installation and E2E setup when resetting plugin features.
+- Preserve pinned Neovim dependencies in the root `lazy.lua` plugin package spec, source-switch installer and E2E setup, including NuiComponents/NUI and optional Kak, when resetting plugin features.
 
 ## Docs
 

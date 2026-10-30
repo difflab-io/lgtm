@@ -62,7 +62,7 @@ e2e/
 └── tsconfig.json
 ```
 
-The required editor profile loads the plugin shell with pinned CodeDiff, WhichKey and nvim-notify dependencies retained for the rewrite. The optional `kak` profile adds pinned Kak keybindings. Runs use only the required profile by default. Set `LGTM_E2E_NVIM_PROFILES=required,kak` to include Kak, or `kak` to run it alone. Lua contains editor runtime setup. TypeScript owns scenarios, command execution, input, assertions and process lifecycle. The shared runtime still starts a real CLI/backend with a fresh database, while the plugin shell makes no backend calls.
+The required editor profile loads the plugin shell with pinned NuiComponents/NUI, CodeDiff, WhichKey and nvim-notify dependencies retained for the rewrite. The optional `kak` profile adds pinned Kak keybindings. Runs use only the required profile by default. Set `LGTM_E2E_NVIM_PROFILES=required,kak` to include Kak, or `kak` to run it alone. Lua contains editor runtime setup. TypeScript owns scenarios, command execution, input, assertions and process lifecycle. The shared runtime still starts a real CLI/backend with a fresh database, while the plugin shell makes no backend calls.
 
 `common/` owns processes, credentials, GitHub resources and test configuration. Backend fixtures construct API states. Neovim fixtures perform editor actions. Large feature setups live beside their spec as `*.fixtures.ts`. Small setups used by one file stay private in that file. Tests keep the actions and assertions that describe the behavior under test.
 
@@ -163,4 +163,4 @@ Premise removes generic publication credentials such as `GH_TOKEN` from task env
 
 Private Rust unit tests, database integration tests and the plugin's Lua load checks remain in their existing app and library locations.
 
-Neovim runs a global preflight before fixture setup. It starts each selected profile, verifies shell loading and startup errors, and computes a native CodeDiff diff. Missing modules fail the suite once, with the startup error. The installer fetches pinned CodeDiff, WhichKey and nvim-notify dependencies, plus Kak when selected. It always checks out the selected revision, including on a fresh clone whose default HEAD already matches the pin.
+Neovim runs a global preflight before fixture setup. It starts each selected profile, verifies shell loading and startup errors, and computes a native CodeDiff diff. Missing modules fail the suite once, with the startup error. The installer fetches pinned NuiComponents/NUI, CodeDiff, WhichKey and nvim-notify dependencies, plus Kak when selected. It also retains lazy.nvim and Plenary for package-manager fixtures. It always checks out the selected revision, including on a fresh clone whose default HEAD already matches the pin.

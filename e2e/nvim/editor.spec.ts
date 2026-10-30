@@ -149,3 +149,71 @@ describe(
     })
   },
 )
+
+for (const profile of profiles) {
+  describe(
+    `When installing through lazy.nvim package metadata [${profile}]`,
+    { tags: ['e2e', 'nvim', profile] },
+    () => {
+      it('Loads the shell and its dependencies from the plugin package', async () => {
+        // Arrange
+        const home = await mkdtemp(join(tmpdir(), 'lgtm-lazy-package-'))
+        try {
+          const env = isolatedEnv(home)
+          const init = join(home, 'init.lua')
+          await writeFile(
+            init,
+            `
+          vim.opt.runtimepath:prepend(${JSON.stringify(join(ROOT, 'e2e/nvim/.cache/lazy.nvim'))})
+          local spec = {{dir=${JSON.stringify(ROOT)},name="lgtm",opts={}}}
+          if ${profile === 'kak'} then table.insert(spec, {"mirlge/kak.nvim"}) end
+          require("lazy").setup(spec, {
+            root=${JSON.stringify(join(ROOT, 'e2e/nvim/.cache'))},
+            lockfile=${JSON.stringify(join(home, 'lazy-lock.json'))},
+            install={missing=false}, checker={enabled=false},
+            change_detection={enabled=false}, rocks={enabled=false},
+            pkg={sources={"lazy"}},
+          })
+        `,
+          )
+          const verify = join(home, 'verify.lua')
+          await writeFile(
+            verify,
+            `
+          assert(vim.g.loaded_lgtm and package.loaded.lgtm, "Plugin package failed to load")
+          assert(vim.fn.exists(":Lgtm") == 0, "Feature commands were restored")
+          assert(vim.v.errmsg == "", vim.v.errmsg)
+          assert(require("nui-components") and require("nui.popup"))
+          assert(require("codediff") and require("which-key") and require("notify"))
+          local plugins = require("lazy.core.config").plugins
+          assert((plugins["kak.nvim"] ~= nil) == ${profile === 'kak'}, "Optional Kak selection changed")
+        `,
+          )
+
+          // Act
+          const result = await command(
+            'nvim',
+            [
+              '--headless',
+              '-u',
+              init,
+              '-i',
+              'NONE',
+              '-c',
+              `lua local ok, err = pcall(dofile, ${JSON.stringify(verify)}); if not ok then vim.api.nvim_err_writeln(tostring(err)); vim.cmd("cquit 1") end`,
+              '-c',
+              'qa!',
+            ],
+            { env, cwd: home },
+          )
+
+          // Assert
+          expect(result.code, result.stderr).toBe(0)
+          expect(result.stderr).not.toContain('Error detected')
+        } finally {
+          await rm(home, { recursive: true, force: true })
+        }
+      })
+    },
+  )
+}
