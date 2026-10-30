@@ -108,12 +108,27 @@ describe(
         const readme = await readFile(join(ROOT, 'apps/lgtm.nvim/README.md'), 'utf8')
         const setup = readme.split('### Native Git packages')[1].match(/```lua\n([\s\S]*?)```/)![1]
         const init = join(home, 'init.lua')
-        await writeFile(init, setup)
+        const dependencies = [
+          'codediff.nvim',
+          'which-key.nvim',
+          'nvim-notify',
+          'nui.nvim',
+          'nui-components.nvim',
+        ]
+          .map(
+            (name) =>
+              `vim.opt.runtimepath:append(${JSON.stringify(join(ROOT, 'e2e/nvim/.cache', name))})`,
+          )
+          .join('\n')
+        await writeFile(init, dependencies + '\n' + setup)
         const verify = join(home, 'verify.lua')
         await writeFile(
           verify,
           `
         assert(vim.g.loaded_lgtm, "LGTM runtime entry missing")
+        for _, name in ipairs({"codediff", "which-key", "notify", "nui-components", "nui.popup"}) do
+          assert(package.loaded[name], "Plugin setup did not require " .. name)
+        end
         assert(vim.fn.exists(":Lgtm") == 0, "Unexpected feature command")
         assert(vim.v.errmsg == "", vim.v.errmsg)
         assert(debug.getinfo(require("lgtm").setup).source:find(${JSON.stringify(root)}, 1, true), "Loaded another installation")
@@ -152,27 +167,33 @@ describe(
 
 for (const profile of profiles) {
   describe(
-    `When installing through lazy.nvim package metadata [${profile}]`,
+    `When installing the plugin with lazy.nvim [${profile}]`,
     { tags: ['e2e', 'nvim', profile] },
     () => {
-      it('Loads the shell and its dependencies from the plugin package', async () => {
+      it('Loads the shell and its dependencies using the documented plugin spec', async () => {
         // Arrange
         const home = await mkdtemp(join(tmpdir(), 'lgtm-lazy-package-'))
         try {
           const env = isolatedEnv(home)
           const init = join(home, 'init.lua')
+          const readme = await readFile(join(ROOT, 'apps/lgtm.nvim/README.md'), 'utf8')
+          const setup = readme.split('### lazy.nvim')[1].match(/```lua\n([\s\S]*?)```/)![1]
           await writeFile(
             init,
             `
           vim.opt.runtimepath:prepend(${JSON.stringify(join(ROOT, 'e2e/nvim/.cache/lazy.nvim'))})
-          local spec = {{dir=${JSON.stringify(ROOT)},name="lgtm",opts={}}}
+          local plugin = ${setup}
+          plugin[1] = nil
+          plugin.dir = ${JSON.stringify(ROOT)}
+          plugin.name = "lgtm"
+          local spec = {plugin}
           if ${profile === 'kak'} then table.insert(spec, {"mirlge/kak.nvim"}) end
           require("lazy").setup(spec, {
             root=${JSON.stringify(join(ROOT, 'e2e/nvim/.cache'))},
             lockfile=${JSON.stringify(join(home, 'lazy-lock.json'))},
             install={missing=false}, checker={enabled=false},
             change_detection={enabled=false}, rocks={enabled=false},
-            pkg={sources={"lazy"}},
+            pkg={enabled=false},
           })
         `,
           )

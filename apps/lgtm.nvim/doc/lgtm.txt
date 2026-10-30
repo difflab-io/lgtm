@@ -13,8 +13,9 @@ Add apps/lgtm.nvim from the repository to 'runtimepath', then run: >lua
     require("lgtm").setup()
     vim.cmd("runtime plugin/lgtm.lua")
 <
-setup() and setup({}) are inert. Previous options have no effect.
-The shell requires no other plugins or running backend.
+setup() and setup({}) load CodeDiff, WhichKey, nvim-notify and
+NuiComponents/NUI. Kak is loaded when available. Previous feature options
+have no effect. The shell does not need a running backend.
 
 DEVELOPMENT                                                  *lgtm-development*
 

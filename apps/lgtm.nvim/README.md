@@ -1,6 +1,6 @@
 # lgtm.nvim
 
-The Neovim plugin is a shell for a future rewrite. Its previous UI, review workflows and backend transport have been removed. It currently provides a loadable package, an inert setup hook and editor help. There are no LGTM commands or keymaps. Pinned editor dependencies remain in plugin installation and E2E setup for the rewrite.
+The Neovim plugin is a shell for a future rewrite. Its previous UI, review workflows and backend transport have been removed. It currently provides a loadable package, a setup hook that loads dependencies and editor help. There are no LGTM commands or keymaps. Pinned editor dependencies remain in plugin installation and E2E setup for the rewrite.
 
 ## Setup
 
@@ -17,24 +17,50 @@ Retained dependency pins:
 | `folke/which-key.nvim` | `3aab2147e74890957785941f0c1ad87d0a44c15a` |
 | `rcarriga/nvim-notify` | `8701bece920b38ea289b457f902e2ad184131a5d` |
 
-The shell's setup hook does not use these dependencies yet. E2E setup loads them to keep the editor environment ready for the rewrite. CodeDiff also needs its native library; allow its download or follow its source-build instructions.
+The shell's setup hook requires CodeDiff, WhichKey, nvim-notify and NuiComponents/NUI. It also loads Kak when available, without configuring its keybindings. CodeDiff also needs its native library; allow its download or follow its source-build instructions.
 
 ### lazy.nvim
 
-The repository's root [`lazy.lua`](../../lazy.lua) declares the pinned dependencies and configures the plugin runtime path. Both install commands read the same spec. Keep lazy.nvim package loading enabled with `"lazy"` in `pkg.sources`.
+Keep the dependency declarations in your plugin spec:
 
 ```lua
 {
   "difflab-io/lgtm",
-  opts = {},
+  lazy = false,
+  dependencies = {
+    { "mirlge/kak.nvim", commit = "b299d2689429b48afe48b1b294a6046487dacb6b", optional = true },
+    {
+      "grapp-dev/nui-components.nvim",
+      commit = "1654dd709f13874089eefc80d82e0eb667f7fdfb",
+      dependencies = {
+        { "MunifTanjim/nui.nvim", commit = "10fc361835c856ba4233ef5ea135b919bf3dce97" },
+      },
+    },
+    {
+      "esmuellert/codediff.nvim",
+      commit = "09d9ebef2cc5a5c04db7a349cd6c61bdf84ecc8e",
+      opts = {},
+    },
+    {
+      "folke/which-key.nvim",
+      commit = "3aab2147e74890957785941f0c1ad87d0a44c15a",
+      opts = {},
+    },
+    { "rcarriga/nvim-notify", commit = "8701bece920b38ea289b457f902e2ad184131a5d", opts = {} },
+  },
+  config = function(plugin, opts)
+    vim.opt.runtimepath:append(plugin.dir .. "/apps/lgtm.nvim")
+    require("lgtm").setup(opts)
+    vim.cmd("runtime plugin/lgtm.lua")
+  end,
 }
 ```
 
-For development, replace the repository field with `dir = "/absolute/path/to/lgtm"`, pointing to the repository root. The package spec includes Kak as an optional dependency: it preserves the pin when Kak is installed in your configuration, without enabling its keybindings for other users. NuiComponents uses NUI; both dependencies remain available for the rewrite. E2E installation also retains pinned lazy.nvim and Plenary for package-manager fixtures.
+For development, replace the repository field with `dir = "/absolute/path/to/lgtm"`. If `dir` points directly to `apps/lgtm.nvim`, retain the dependencies, use `main = "lgtm", opts = {}` and omit the callback. Kak remains optional and uses your existing keybinding configuration.
 
 ### Native Git packages
 
-Clone LGTM into a native package directory:
+Install the required dependencies listed above, then clone LGTM into a native package directory:
 
 ```sh
 git clone --depth 1 https://github.com/difflab-io/lgtm.git ~/.local/share/nvim/site/pack/plugins/start/lgtm
@@ -53,7 +79,7 @@ Change `root` for a custom package directory. Run `:helptags ALL` after manual i
 
 ## Setup contract
 
-`require("lgtm").setup()` and `setup({})` do nothing. Previous feature options no longer have an effect. The `:Lgtm` command and `:checkhealth lgtm` integration are unavailable while the plugin is rewritten.
+`require("lgtm").setup()` and `setup({})` load the retained dependencies without opening LGTM UI, registering commands or calling the backend. Previous feature options no longer have an effect. The `:Lgtm` command and `:checkhealth lgtm` integration are unavailable while the plugin is rewritten.
 
 ## Development
 

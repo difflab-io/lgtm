@@ -1,5 +1,14 @@
 local root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h")
 vim.opt.runtimepath:prepend(root)
+for _, dependency in ipairs({
+  "codediff.nvim",
+  "which-key.nvim",
+  "nvim-notify",
+  "nui.nvim",
+  "nui-components.nvim",
+}) do
+  vim.opt.runtimepath:append(root .. "/../../e2e/nvim/.cache/" .. dependency)
+end
 
 -- tests -----------------------------------------------------------------------
 local function should_load_plugin_shell()
