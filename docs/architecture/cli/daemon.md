@@ -9,7 +9,7 @@ The daemon module starts, discovers, and stops the single process that serves th
 ### Functional
 
 - FR1: Start the server when no healthy instance exists.
-- FR2: Reuse a healthy server for repeated or concurrent startup requests.
+- FR2: Reuse a healthy server for repeated startup requests and prevent duplicate servers through PID-file locking.
 - FR3: Report the PID and UI/API URLs.
 - FR4: Stop the identified server with SIGTERM.
 
@@ -17,7 +17,7 @@ The daemon module starts, discovers, and stops the single process that serves th
 
 - NFR1: Use the embedded `daemonize` library without a separate daemon tool.
 - NFR2: Match the stored PID to the server's health response before signaling it.
-- NFR3: Return startup and shutdown failures with a log file location.
+- NFR3: Return launch errors with captured output and readiness/shutdown failures with a log file location.
 
 ## Design
 
@@ -39,7 +39,7 @@ down(&store).await?;
 
 ```mermaid
 flowchart TD
-    CALL["up / down / status"] --> PROBE["Probe recorded PID and /health"]
+    CALL["up / ui / down / status"] --> PROBE["Probe recorded PID and /health"]
     PROBE --> STORE["Store: PID, port, log paths"]
     CALL --> START["daemonize: background server"]
     CALL --> STOP["SIGTERM: stop identified server"]
@@ -51,15 +51,15 @@ flowchart TD
 - `log::output` opens the file for daemon output.
 - The HTTP client probes `/health` to identify a ready server.
 - `nix` sends SIGTERM to the identified process on Unix.
-- `ui::open` opens the base UI URL after `up` succeeds.
+- `ui::open` opens the base UI URL after `up` or `ui` succeeds.
 
 ### Data and Control Flow
 
 `ensure_running` first probes the recorded instance. If it is healthy, the function returns it. Otherwise, it launches the same executable with `serve --daemonize` and polls for readiness.
 
-The library's PID-file lock prevents duplicate servers. Concurrent callers can both discover the winning instance after their startup attempts. There is no separate startup lock.
+The library's PID-file lock prevents duplicate servers. Concurrent launches compete for that lock; an unsuccessful launch returns its captured error before readiness polling. There is no separate startup lock.
 
-`down` probes the instance, sends SIGTERM, and waits for the server to remove `server.port`. `status` only reads files and probes the server.
+`down` probes the instance, sends SIGTERM, and waits for the server to remove `server.port`. `status` only reads files and probes the server. The `ui` command also uses `ensure_running`; it prints the URL and opens the browser unless `--no-open` is supplied, with structured URL output for `--json`.
 
 ### Interfaces and Contracts
 
@@ -94,7 +94,7 @@ Each HTTP probe has a one-second timeout and bypasses proxy configuration. Readi
 
 `detach` sets the working directory to the store and the Unix creation mask to `077`. It passes `server.pid` to `daemonize` and appends stdout and stderr to `server.log`.
 
-The caller captures the launch command's output. A losing concurrent startup can still succeed when the winning server becomes ready. If startup fails, the error includes the captured output and log location.
+The caller captures the launch command's output. If detachment fails, the error includes captured stderr. If the launched server never becomes ready, the error includes stderr and the log location.
 
 ### Shutdown
 

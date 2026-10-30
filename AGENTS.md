@@ -11,6 +11,7 @@
 
 ## Docs
 
+- [Proposed] Preserve existing documentation template headings and structure; update valid content and use `NA/WIP` for sections whose implementation was removed.
 - Use soft wraps for documentation prose. Keep each paragraph on one source line and let the editor wrap it for display. Do not add manual line breaks between sentences or at a fixed column width. Preserve structural line breaks in lists, tables, code, and Mermaid diagrams.
 - Embed architecture diagrams as inline Mermaid fences so MmdToImg can preview the source in Neovim. Keep diagram source in the Markdown page, without separate diagram directories or tracked preview images.
 

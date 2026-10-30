@@ -12,18 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let address: SocketAddr = std::env::var("LGTM_BACKEND_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:8080".to_owned())
         .parse()?;
-    let database_url = std::env::var("LGTM_DATABASE_URL").unwrap_or_else(|_| {
-        let home = std::env::var("LGTM_HOME").unwrap_or_else(|_| {
-            format!(
-                "{}/.lgtm",
-                std::env::var("HOME").unwrap_or_else(|_| ".".into())
-            )
-        });
-        let _ = std::fs::create_dir_all(&home);
-        format!("sqlite://{home}/reviews.sqlite?mode=rwc")
-    });
-    let database = lgtm_backend::database::Database::connect(&database_url).await?;
-    let (router, health) = lgtm_backend::router_with_database(database);
+    let (router, health) = lgtm_backend::router();
     let server = Server::bind(address).await?;
     eprintln!("LGTM backend listening on http://{}", server.local_addr()?);
     server

@@ -23,12 +23,16 @@ enum Command {
     Down,
     /// Show whether the server is running.
     Status,
-    /// Open the current directory in the web interface.
+    /// Capture work in LGTM storage (not implemented yet).
+    Commit(commands::commit::CommitArgs),
+    /// Publish work (not implemented yet).
+    Push(commands::push::PushArgs),
+    /// Manage reviews; list currently demonstrates the hello-review RPC.
     Review(commands::review::ReviewArgs),
-    /// Manage review attempts and list saved reviews.
-    Session(commands::session::SessionArgs),
-    /// Add, edit and manage feedback through the backend.
-    Comments(commands::comments::CommentsArgs),
+    /// Add feedback (not implemented yet).
+    Comment(commands::comment::CommentArgs),
+    /// Start or reuse the application and open its browser interface.
+    Ui(commands::ui::UiArgs),
     #[command(hide = true)]
     Serve {
         #[arg(long, default_value_t = 8080)]
@@ -72,7 +76,7 @@ fn main() {
         if json_output {
             println!(
                 "{}",
-                serde_json::json!({"error":{"code":"command_failed","message":error.to_string()}})
+                serde_json::json!({"error":{"code":if error.is::<commands::NotImplemented>() { "not_implemented" } else { "command_failed" },"message":error.to_string()}})
             );
         } else {
             eprintln!("{error:#}");
@@ -101,8 +105,10 @@ fn run() -> anyhow::Result<()> {
         Command::Down => "down",
         Command::Status => "status",
         Command::Review(_) => "review",
-        Command::Session(_) => "session",
-        Command::Comments(_) => "comments",
+        Command::Commit(_) => "commit",
+        Command::Push(_) => "push",
+        Command::Comment(_) => "comment",
+        Command::Ui(_) => "ui",
         Command::Serve { .. } => "serve",
     };
     tokio::runtime::Runtime::new()?.block_on(
@@ -115,8 +121,10 @@ fn run() -> anyhow::Result<()> {
                 Command::Down => daemon::down(&store).await,
                 Command::Status => daemon::status(&store, cli.json).await,
                 Command::Review(args) => commands::review::run(args, &store, cli.json).await,
-                Command::Session(args) => commands::session::run(args, &store, cli.json).await,
-                Command::Comments(args) => commands::comments::run(args, &store, cli.json).await,
+                Command::Commit(args) => commands::commit::run(args),
+                Command::Push(args) => commands::push::run(args),
+                Command::Comment(args) => commands::comment::run(args),
+                Command::Ui(args) => commands::ui::run(args, &store, cli.json).await,
                 Command::Serve { port, daemonize } => server::serve(port, &store, daemonize).await,
             }
         }

@@ -1,56 +1,33 @@
-//! Shared CLI argument models; no persistence, RPC transport or forge access.
+//! Shared arguments and outcomes for the future local-forge commands.
 use clap::{Args, ValueEnum};
-use std::path::PathBuf;
 
-/// Git content selection within the shared local branch conversation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-pub enum ReviewMode {
-    Working,
-    Staged,
-    Branch,
+#[derive(Args, Debug)]
+pub struct LocalArgs {
+    /// Keep work within LGTM-managed storage (not implemented yet).
+    #[arg(long)]
+    pub local: bool,
 }
 
-#[derive(Args, Clone, Debug, Default)]
-pub struct ContextArgs {
-    #[arg(long,conflicts_with_all=["branch","notes"])]
-    pub pr: Option<String>,
-    #[arg(long, conflicts_with = "notes")]
-    pub branch: Option<String>,
-    /// Git comparison used by session start or machine-mode review.
-    #[arg(long, value_enum, conflicts_with_all = ["pr", "notes"])]
-    pub mode: Option<ReviewMode>,
-    /// Base branch for --mode branch (defaults to main).
-    #[arg(long, requires = "mode")]
-    pub base: Option<String>,
-    #[arg(long,num_args=0..=1,default_missing_value=".")]
-    pub notes: Option<PathBuf>,
-    #[arg(long)]
-    pub path: Option<PathBuf>,
-    #[arg(long)]
-    pub repo: Option<String>,
-    /// Forge hostname for --pr and shorthand repository names.
-    #[arg(long, default_value = "github.com")]
-    pub host: String,
-}
-#[derive(Args, Clone, Debug, Default)]
+#[derive(Args, Debug)]
 pub struct ActorArgs {
-    #[arg(long = "as", conflicts_with = "identity")]
-    pub as_name: Option<String>,
-    #[arg(long, requires = "as_name")]
-    pub model: Option<String>,
-    #[arg(long, requires = "model")]
-    pub provider: Option<String>,
-    #[arg(long)]
-    pub identity: Option<String>,
+    /// Attribute the operation to a named agent (not implemented yet).
+    #[arg(long = "as", value_parser = parse_nonempty)]
+    pub agent_name: Option<String>,
 }
 
-/// Optional guards for replaying the same reviewed mutation from a shell.
-#[derive(Args, Default)]
-pub struct MutationArgs {
-    /// Version returned by the conversation or selected object.
-    #[arg(long)]
-    pub(crate) expected_version: Option<String>,
-    /// Reuse only with the exact original payload and expected version.
-    #[arg(long, requires = "expected_version")]
-    pub(crate) request_key: Option<String>,
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum ReviewOutcome {
+    Comment,
+    Reject,
+    Approve,
+    Request,
+}
+
+pub fn parse_nonempty(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        Err("Expected nonempty text".into())
+    } else {
+        Ok(value.into())
+    }
 }

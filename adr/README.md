@@ -8,10 +8,7 @@ Records follow the [MADR](https://adr.github.io/madr/) format. Start from [templ
 
 ## Future topics
 
-These topics need discussion before a decision is recorded:
-
-- Local/remote sync: synchronizing local SQLite data with a remote service backed by PostgreSQL.
-- Desktop app database migrations: upgrading installed local databases across app versions, including interrupted upgrades and recovery.
+Future decisions must define managed Git storage, review ownership, explicit forge publication and remote instance access; the current hello-review skeleton has no SQL persistence or synchronization contract.
 
 ## References
 

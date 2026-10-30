@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,6 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { RecordedGithubDriver } from './github-recording.js'
 import { LiveGithubDriver } from './github-driver.js'
 import { CassetteReplay, type Cassette, type Exchange } from './github-cassette.js'
+import { command, ROOT } from './test-harness.js'
 
 // fixtures --------------------------------------------------------------------
 
@@ -169,6 +170,48 @@ describe('When replaying recorded GitHub requests', () => {
 })
 
 describe('When refreshing a recording', () => {
+  it('should_redact_private_user_fields_and_replay_the_saved_HTTP_snapshot', async () => {
+    // Arrange
+    const directory = await mkdtemp(join(tmpdir(), 'lgtm-recording-'))
+    const file = join(directory, 'journey.json')
+    const secret = 'unit-test-private-credential'
+    const live = await LiveGithubDriver.start({ GH_TOKEN: secret })
+    const driver = await RecordedGithubDriver.start(file, 'selected', cassette().fixture, live)
+    const originalFetch = globalThis.fetch
+    const upstream = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      if (String(input) === 'https://api.github.com/user')
+        return Promise.resolve(
+          new Response(JSON.stringify({ login: 'reviewer', email: 'private@example.test' }), {
+            headers: { 'content-type': 'application/json' },
+          }),
+        )
+      return originalFetch(input, init)
+    })
+    try {
+      // Act
+      const recorded = await driver.api('user', 'GET', undefined, driver.env)
+      await driver.finish(true)
+      const serialized = await readFile(file, 'utf8')
+      const replay = await RecordedGithubDriver.start(file, 'selected')
+      try {
+        const response = await replay.api('user', 'GET', undefined, replay.env)
+        await replay.finish(true)
+
+        // Assert
+        expect(recorded).toEqual({ login: 'reviewer', email: 'private@example.test' })
+        expect(response).toEqual({ login: 'reviewer' })
+        expect(serialized).not.toContain(secret)
+        expect(serialized).not.toContain('private@example.test')
+      } finally {
+        await replay.dispose()
+      }
+    } finally {
+      upstream.mockRestore()
+      await driver.dispose()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it('should_replace_only_selected_journeys_and_preserve_concurrent_sibling_updates', async () => {
     // Arrange
     const directory = await mkdtemp(join(tmpdir(), 'lgtm-recording-'))
@@ -287,6 +330,28 @@ describe('When refreshing a recording', () => {
     } finally {
       await driver.dispose()
       await rm(directory, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('When loading historical replay fixtures', () => {
+  it('should_reconstruct_the_recorded_Git_repository_without_application_RPCs', async () => {
+    // Arrange
+    const file = join(ROOT, 'e2e/recordings/nvim/pr-review.json')
+    const recordings = JSON.parse(await readFile(file, 'utf8')) as Record<string, Cassette>
+    const [journey, saved] = Object.entries(recordings).find(([, entry]) => entry.gitBundle)!
+    const replay = await RecordedGithubDriver.start(file, journey)
+    try {
+      // Act
+      await replay.prepareGit([])
+      const head = await command('git', ['ls-remote', replay.gitSource])
+
+      // Assert
+      expect(replay.cassette.version).toBe(1)
+      expect(head.code, head.stderr).toBe(0)
+      expect(head.stdout).toContain(saved.fixture.head)
+    } finally {
+      await replay.dispose()
     }
   })
 })

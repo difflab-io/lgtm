@@ -1,34 +1,55 @@
-//! Review command arguments and RPC callbacks.
-use super::{client_for_actor, location, print_result, start};
 use crate::{
-    models::{ActorArgs, ContextArgs},
+    commands::NotImplemented,
+    models::{LocalArgs, ReviewOutcome, parse_nonempty},
+    rpc_client::Client,
     store::Store,
 };
-use anyhow::Result;
-use clap::Args;
+use clap::{Args, Subcommand};
 
-// Command ---------------------------------------------------------------------
+#[derive(Subcommand)]
+pub enum ReviewCommand {
+    /// Call the backend hello-review demonstration; no reviews are persisted.
+    List(LocalArgs),
+    /// Create a review (not implemented yet).
+    New(LocalArgs),
+    /// Close a review (not implemented yet).
+    Close {
+        #[arg(value_parser = parse_nonempty)]
+        review_id: String,
+        #[arg(long = "with", value_enum)]
+        outcome: ReviewOutcome,
+        #[arg(long)]
+        body: Option<String>,
+    },
+}
 
 #[derive(Args)]
 pub struct ReviewArgs {
-    #[command(flatten)]
-    pub context: ContextArgs,
-    #[command(flatten)]
-    pub actor: ActorArgs,
-    #[arg(long, default_value_t = 8080)]
-    pub port: u16,
-    #[arg(long)]
-    pub no_open: bool,
+    #[command(subcommand)]
+    pub command: ReviewCommand,
 }
 
-// Callbacks -------------------------------------------------------------------
-
-/// Machine mode starts a review through the same public contract used by editor clients.
-pub async fn run(args: ReviewArgs, store: &Store, json_output: bool) -> Result<()> {
-    if !json_output {
-        let path = location(&args.context)?;
-        return crate::ui::open_review(&path, None, None, args.port, !args.no_open, store).await;
+pub async fn run(args: ReviewArgs, store: &Store, json: bool) -> anyhow::Result<()> {
+    match args.command {
+        ReviewCommand::List(_) => {
+            let response = Client::new(store)?.get_hello("CLI").await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"demo": true, "message": response.message})
+                );
+            } else {
+                println!("Demo review: {} (no saved reviews)", response.message);
+            }
+            Ok(())
+        }
+        ReviewCommand::New(_) => Err(NotImplemented {
+            operation: "review new",
+        }
+        .into()),
+        ReviewCommand::Close { .. } => Err(NotImplemented {
+            operation: "review close",
+        }
+        .into()),
     }
-    let client = client_for_actor(store, &args.actor).await?;
-    print_result(&start(&client, &args.context).await?, true)
 }

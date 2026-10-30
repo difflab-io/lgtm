@@ -45,7 +45,7 @@ flowchart TD
 
 - Axum owns the HTTP listener and request routing.
 - The generated asset table maps URLs to embedded bytes and content types.
-- `backend::router_with_database` provides review, diff, identity, greeting and health services over the shared database.
+- `backend::router` provides hello-review, greeting and health services through the stateless dummy DB facade; startup does not open a database or create forge clients.
 - `Store` records the listening port and protects foreground ownership.
 - Tokio receives shutdown signals and bounds connection draining.
 - `tracing` records server startup and shutdown through the log module.
@@ -72,7 +72,7 @@ On SIGTERM or Ctrl-C, the server marks backend health as stopped and begins grac
 | `/rpc/*`           | Browser RPC calls                |
 | Root service paths | Native gRPC and Connect requests |
 
-The `path` query parameter reaches the frontend without changing asset lookup. The server does not interpret it as a filesystem request.
+Query parameters do not change asset lookup or grant filesystem access. The hello-review page does not select a checkout.
 
 ## Implementation
 

@@ -6,6 +6,8 @@
 
 Technical Story: [Code and document review PRD](../prd/0001-core-concepts/README.md)
 
+As of the 2026-10-29 reset, LGTM is a hello-review skeleton with CLI and Svelte clients; review persistence and forge integration are removed, and the Neovim package remains a dependency-loading shell. The decision below records the original rationale rather than the current feature set; see the [current architecture](../docs/architecture/index.md).
+
 ## Context and Problem Statement
 
 `lgtm` is intended to be a review tool which is meant to address the code review bottleneck which is being caused by agents pumping out code faster than people normally can. In addition to this, the code has some rough edges. For instance, while LLM code can be exhaustively guarded (some may even say over-engineered), it can suffer from readability and organization issues. For now we'll side step concerns of architectural correctness. The point is there's a lot more review to do, and the result is a lot of folks are giving up on review altogether.
