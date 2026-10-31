@@ -156,12 +156,14 @@ The installed CLI serves backend RPCs and embedded frontend assets in one proces
 ## References
 
 - [Neovim user guide](../user-guide.md).
+- [Forge architecture](forge/index.md).
 - [Backend architecture](backend/index.md).
 - [Review RPC architecture](backend/reviews.md).
 - [Database architecture](db/index.md).
 - [CLI architecture](cli/index.md).
 - [Editor setup and usage](../../apps/lgtm.nvim/README.md).
 - [Development guide](../development.md).
-- [Architecture decision](../../adr/0001-initial-architecture.md).
+- [Architecture decision](../../adr/0001-initial-architecture/ADR.md).
+- [ADR 0002: Core Concepts and CLI Design](../../adr/0002-cli-design/ADR.md).
 - [Product requirements](../../prd/0001-core-concepts/README.md).
 - [Design prototype](../../designs/prototypes/lgtm-v0/README.md).
