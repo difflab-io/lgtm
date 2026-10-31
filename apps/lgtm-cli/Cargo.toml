@@ -13,7 +13,16 @@ license = "Apache-2.0"
 name = "lgtm"
 path = "src/main.rs"
 
+[features]
+default = ["sqlite"]
+sqlite = ["sea-orm/sqlx-sqlite", "sea-orm-migration/sqlx-sqlite"]
+postgres = ["sea-orm/sqlx-postgres", "sea-orm-migration/sqlx-postgres"]
+
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+sea-orm = { version = "=2.0.4", default-features = false, features = ["macros", "runtime-tokio-rustls", "with-uuid", "with-chrono", "with-json"] }
+sea-orm-migration = { version = "=2.0.4", default-features = false, features = ["runtime-tokio-rustls", "with-uuid", "with-chrono", "with-json"] }
+uuid = { version = "1", features = ["v4", "serde"] }
 thiserror = "2"
 anyhow = "1.0.104"
 clap = { version = "4.6.6", features = ["derive"] }
