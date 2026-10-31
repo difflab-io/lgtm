@@ -22,6 +22,8 @@ pub struct CommentAnchor {
 }
 
 impl CommentAnchor {
+    // Public ------------------------------------------------------------------
+
     /// Construct and validate a new comment anchor at its initial commit.
     pub fn new(
         file_path: &str,
@@ -142,21 +144,6 @@ impl Comment {
     }
 }
 
-/// Append the AI agent disclosure footer if the author is an `Agent` and the body does not already include it.
-pub fn format_body_with_disclosure(body: &str, author: &Identity) -> String {
-    let trimmed = body.trim();
-    if let Some(footer) = author.agent_disclosure_footer() {
-        if trimmed.contains(&footer) {
-            return trimmed.to_owned();
-        }
-        if trimmed.is_empty() {
-            return footer;
-        }
-        return format!("{trimmed}\n\n{footer}");
-    }
-    trimmed.to_owned()
-}
-
 impl From<CommentAnchor> for CommentAnchorDetail {
     fn from(anchor: CommentAnchor) -> Self {
         Self {
@@ -189,6 +176,21 @@ impl From<Comment> for CommentDetail {
             ..Default::default()
         }
     }
+}
+
+/// Append the AI agent disclosure footer if the author is an `Agent` and the body does not already include it.
+pub fn format_body_with_disclosure(body: &str, author: &Identity) -> String {
+    let trimmed = body.trim();
+    if let Some(footer) = author.agent_disclosure_footer() {
+        if trimmed.contains(&footer) {
+            return trimmed.to_owned();
+        }
+        if trimmed.is_empty() {
+            return footer;
+        }
+        return format!("{trimmed}\n\n{footer}");
+    }
+    trimmed.to_owned()
 }
 
 // tests -----------------------------------------------------------------------

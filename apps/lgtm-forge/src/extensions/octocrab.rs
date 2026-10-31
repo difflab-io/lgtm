@@ -274,6 +274,11 @@ pub async fn create_draft_comment(
         "body": input.body,
         "commit_id": input.commit_sha,
     });
+    if let Ok(review_id_num) = review_id.parse::<u64>() {
+        payload["pull_request_review_id"] = Value::Number(review_id_num.into());
+    } else {
+        payload["pull_request_review_id"] = Value::String(review_id.clone());
+    }
     if let Some(path) = &input.file_path {
         payload["path"] = Value::String(path.clone());
     }

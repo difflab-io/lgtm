@@ -109,6 +109,14 @@ pub fn ensure_bare_repo(repo_dir: &Path) -> Result<()> {
 /// Synchronize objects from `source_git_dir` into `target_repo_dir` so `commit_sha` and its trees/blobs are readable in `target_repo_dir`.
 pub fn fetch_objects(source_git_dir: &str, target_repo_dir: &Path, commit_sha: &str) -> Result<()> {
     ensure_bare_repo(target_repo_dir)?;
+    let oid = gix::ObjectId::from_hex(commit_sha.trim().as_bytes())
+        .map_err(|err| Error::Invalid(format!("invalid commit_sha '{commit_sha}': {err}")))?;
+    if let Ok(existing_repo) = gix::open(target_repo_dir)
+        && existing_repo.find_object(oid).is_ok()
+    {
+        return Ok(());
+    }
+
     let (source_git_path, _, _) = resolve_git_paths(source_git_dir)?;
     let source_objects = source_git_path.join("objects");
     let target_objects = target_repo_dir.join("objects");
@@ -116,8 +124,6 @@ pub fn fetch_objects(source_git_dir: &str, target_repo_dir: &Path, commit_sha: &
 
     let target_repo = gix::open(target_repo_dir)
         .map_err(|err| Error::Git(format!("failed to open target repo: {err}")))?;
-    let oid = gix::ObjectId::from_hex(commit_sha.trim().as_bytes())
-        .map_err(|err| Error::Invalid(format!("invalid commit_sha '{commit_sha}': {err}")))?;
     target_repo.find_object(oid).map_err(|err| {
         Error::NotFound(format!(
             "commit '{commit_sha}' was not found after object sync: {err}"
@@ -135,21 +141,7 @@ pub fn stage_paths(git_dir_or_worktree: &str, paths: &[String]) -> Result<Vec<St
 
     let repo = gix::open(&git_dir_path)
         .map_err(|err| Error::Git(format!("failed to open checkout repository: {err}")))?;
-    for rel_path in &expanded {
-        let full_path = worktree_dir.join(rel_path);
-        if full_path.is_file() {
-            let bytes = std::fs::read(&full_path).map_err(|err| {
-                Error::Git(format!("failed to read '{}': {err}", full_path.display()))
-            })?;
-            let blob_id = repo
-                .write_blob(&bytes)
-                .map_err(|err| Error::Git(format!("failed to write blob: {err}")))?
-                .detach();
-            staged.insert(rel_path.clone(), Some(blob_id.to_hex().to_string()));
-        } else {
-            staged.insert(rel_path.clone(), None);
-        }
-    }
+    stage_worktree_blobs(&repo, &worktree_dir, &expanded, &mut staged)?;
     write_staged_manifest(&manifest_path, &staged)?;
     Ok(expanded)
 }
@@ -170,21 +162,7 @@ pub fn stage_worktree_to_index(
     let manifest_path = snapshot_stage_manifest_path(target_repo_dir, branch);
     let mut staged = read_staged_manifest(&manifest_path)?;
 
-    for rel_path in &expanded {
-        let full_path = ctx.worktree_dir.join(rel_path);
-        if full_path.is_file() {
-            let bytes = std::fs::read(&full_path).map_err(|err| {
-                Error::Git(format!("failed to read '{}': {err}", full_path.display()))
-            })?;
-            let blob_id = snapshot_repo
-                .write_blob(&bytes)
-                .map_err(|err| Error::Git(format!("failed to write snapshot blob: {err}")))?
-                .detach();
-            staged.insert(rel_path.clone(), Some(blob_id.to_hex().to_string()));
-        } else {
-            staged.insert(rel_path.clone(), None);
-        }
-    }
+    stage_worktree_blobs(&snapshot_repo, &ctx.worktree_dir, &expanded, &mut staged)?;
     write_staged_manifest(&manifest_path, &staged)?;
     Ok(expanded)
 }
@@ -204,19 +182,7 @@ pub fn create_commit(
     let mut staged = read_staged_manifest(&manifest_path)?;
     if staged.is_empty() {
         let worktree_files = collect_worktree_paths(&worktree_dir, &[".".to_owned()])?;
-        for rel_path in worktree_files {
-            let full_path = worktree_dir.join(&rel_path);
-            if full_path.is_file() {
-                let bytes = std::fs::read(&full_path).map_err(|err| {
-                    Error::Git(format!("failed to read '{}': {err}", full_path.display()))
-                })?;
-                let blob_id = repo
-                    .write_blob(&bytes)
-                    .map_err(|err| Error::Git(format!("failed to write blob: {err}")))?
-                    .detach();
-                staged.insert(rel_path, Some(blob_id.to_hex().to_string()));
-            }
-        }
+        stage_worktree_blobs(&repo, &worktree_dir, &worktree_files, &mut staged)?;
     }
 
     let parent_oid = gix::ObjectId::from_hex(ctx.head_sha.as_bytes())
@@ -263,19 +229,12 @@ pub fn create_commit_on_ref(
     let mut staged = read_staged_manifest(&manifest_path)?;
     if staged.is_empty() {
         let worktree_files = collect_worktree_paths(&ctx.worktree_dir, &[".".to_owned()])?;
-        for rel_path in worktree_files {
-            let full_path = ctx.worktree_dir.join(&rel_path);
-            if full_path.is_file() {
-                let bytes = std::fs::read(&full_path).map_err(|err| {
-                    Error::Git(format!("failed to read '{}': {err}", full_path.display()))
-                })?;
-                let blob_id = snapshot_repo
-                    .write_blob(&bytes)
-                    .map_err(|err| Error::Git(format!("failed to write snapshot blob: {err}")))?
-                    .detach();
-                staged.insert(rel_path, Some(blob_id.to_hex().to_string()));
-            }
-        }
+        stage_worktree_blobs(
+            &snapshot_repo,
+            &ctx.worktree_dir,
+            &worktree_files,
+            &mut staged,
+        )?;
     }
 
     let mut tree_entries = read_commit_flat_tree(&snapshot_repo, parent_oid)?;
@@ -543,6 +502,7 @@ pub fn get_inline_diff_hunks(
         let window_end = anchor.line.saturating_add(3);
 
         let mut lines = Vec::new();
+        let mut new_line_cursor: u32 = 1;
         for change in diff.iter_all_changes() {
             let content = change
                 .value()
@@ -552,6 +512,7 @@ pub fn get_inline_diff_hunks(
                 ChangeTag::Equal => {
                     if let Some(new_idx) = change.new_index() {
                         let line_num = u32::try_from(new_idx + 1).unwrap_or(1);
+                        new_line_cursor = line_num.saturating_add(1);
                         if line_num >= window_start && line_num <= window_end {
                             lines.push(DiffLine {
                                 kind: DiffLineKind::Context,
@@ -564,6 +525,7 @@ pub fn get_inline_diff_hunks(
                 ChangeTag::Insert => {
                     if let Some(new_idx) = change.new_index() {
                         let line_num = u32::try_from(new_idx + 1).unwrap_or(1);
+                        new_line_cursor = line_num.saturating_add(1);
                         if line_num >= window_start && line_num <= window_end {
                             lines.push(DiffLine {
                                 kind: DiffLineKind::Added,
@@ -576,7 +538,7 @@ pub fn get_inline_diff_hunks(
                 ChangeTag::Delete => {
                     if let Some(old_idx) = change.old_index() {
                         let line_num = u32::try_from(old_idx + 1).unwrap_or(1);
-                        if line_num >= window_start && line_num <= window_end {
+                        if new_line_cursor >= window_start && new_line_cursor <= window_end {
                             lines.push(DiffLine {
                                 kind: DiffLineKind::Removed,
                                 line_number: line_num,
@@ -928,6 +890,30 @@ fn read_blob_string(repo: &gix::Repository, blob_oid: gix::ObjectId) -> Result<S
         .find_object(blob_oid)
         .map_err(|err| Error::Git(format!("failed to find blob '{blob_oid}': {err}")))?;
     Ok(String::from_utf8_lossy(&object.data).into_owned())
+}
+
+fn stage_worktree_blobs(
+    repo: &gix::Repository,
+    worktree_dir: &Path,
+    paths: &[String],
+    staged: &mut BTreeMap<String, Option<String>>,
+) -> Result<()> {
+    for rel_path in paths {
+        let full_path = worktree_dir.join(rel_path);
+        if full_path.is_file() {
+            let bytes = std::fs::read(&full_path).map_err(|err| {
+                Error::Git(format!("failed to read '{}': {err}", full_path.display()))
+            })?;
+            let blob_id = repo
+                .write_blob(&bytes)
+                .map_err(|err| Error::Git(format!("failed to write blob: {err}")))?
+                .detach();
+            staged.insert(rel_path.clone(), Some(blob_id.to_hex().to_string()));
+        } else {
+            staged.insert(rel_path.clone(), None);
+        }
+    }
+    Ok(())
 }
 
 fn apply_staged_entries(

@@ -293,7 +293,10 @@ async fn setup_database(temp_dir: &TempDir) -> Database {
     if let Ok(pg_url) = std::env::var("LGTM_TEST_POSTGRES_URL")
         && !pg_url.trim().is_empty()
     {
-        return Database::connect(&pg_url)
+        let schema = format!("test_{}", uuid::Uuid::new_v4().simple());
+        let sep = if pg_url.contains('?') { '&' } else { '?' };
+        let isolated_url = format!("{pg_url}{sep}options=-c%20search_path%3D{schema},public");
+        return Database::connect(&isolated_url)
             .await
             .expect("connect test postgres");
     }

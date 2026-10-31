@@ -30,6 +30,8 @@ pub struct ReviewApi {
 }
 
 impl ReviewApi {
+    // Public ------------------------------------------------------------------
+
     /// Construct a `ReviewApi` backed by `database` and default snapshot/forge adapters.
     pub fn new(database: Database) -> Self {
         Self {

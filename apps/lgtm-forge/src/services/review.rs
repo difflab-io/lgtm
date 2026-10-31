@@ -589,40 +589,23 @@ impl ReviewService {
     pub async fn update_comment(&self, input: UpdateCommentInput) -> Result<Comment> {
         let ctx = gitoxide::get_repo_context(&input.git_dir)?;
         let actor = self.resolve_actor(&ctx, input.as_agent.as_deref()).await?;
-        let existing = self
-            .database
-            .comments
-            .get_comment_by_number(i64::try_from(input.comment_number).unwrap_or(-1))
-            .await?
-            .ok_or_else(|| {
-                Error::NotFound(format!("comment C{} not found", input.comment_number))
-            })?;
-        let db_review = self
-            .database
-            .reviews
-            .get_review(existing.review_id)
-            .await?
-            .ok_or_else(|| Error::NotFound("owning review not found".to_owned()))?;
-        let review = Review::from_db(db_review)?;
-        if review.context.is_local() != input.local {
-            return Err(Error::Invalid(format!(
-                "comment C{} belongs to a {} review; pass matching --local flag",
-                input.comment_number,
-                if review.context.is_local() {
-                    "local"
-                } else {
-                    "remote"
-                }
-            )));
-        }
+        let (existing, review) = self
+            .load_comment_and_review(input.comment_number, input.local)
+            .await?;
 
-        if let Some(new_line) = input.line {
+        if input.line.is_some() || input.start_line.is_some() {
             let file_path = input
                 .file_path
                 .as_deref()
                 .or(existing.file_path.as_deref())
                 .ok_or_else(|| {
                     Error::Invalid("updating --line requires a file-anchored comment".to_owned())
+                })?;
+            let new_line = input
+                .line
+                .or_else(|| existing.line.and_then(|value| u32::try_from(value).ok()))
+                .ok_or_else(|| {
+                    Error::Invalid("updating anchor requires a valid target line".to_owned())
                 })?;
             let start_line = input.start_line.or_else(|| {
                 existing
@@ -702,29 +685,7 @@ impl ReviewService {
     ) -> Result<u64> {
         let ctx = gitoxide::get_repo_context(git_dir)?;
         let _actor = self.resolve_actor(&ctx, as_agent).await?;
-        let existing = self
-            .database
-            .comments
-            .get_comment_by_number(i64::try_from(comment_number).unwrap_or(-1))
-            .await?
-            .ok_or_else(|| Error::NotFound(format!("comment C{comment_number} not found")))?;
-        let db_review = self
-            .database
-            .reviews
-            .get_review(existing.review_id)
-            .await?
-            .ok_or_else(|| Error::NotFound("owning review not found".to_owned()))?;
-        let review = Review::from_db(db_review)?;
-        if review.context.is_local() != local {
-            return Err(Error::Invalid(format!(
-                "comment C{comment_number} belongs to a {} review; pass matching --local flag",
-                if review.context.is_local() {
-                    "local"
-                } else {
-                    "remote"
-                }
-            )));
-        }
+        let (existing, review) = self.load_comment_and_review(comment_number, local).await?;
 
         if let Ok((repository_url, _, _)) = review.context.require_forge_backed()
             && let Some(forge_id) = &existing.forge_id
@@ -862,6 +823,37 @@ impl ReviewService {
             })
     }
 
+    async fn load_comment_and_review(
+        &self,
+        comment_number: u64,
+        local: bool,
+    ) -> Result<(crate::database::Comment, Review)> {
+        let existing = self
+            .database
+            .comments
+            .get_comment_by_number(i64::try_from(comment_number).unwrap_or(-1))
+            .await?
+            .ok_or_else(|| Error::NotFound(format!("comment C{comment_number} not found")))?;
+        let db_review = self
+            .database
+            .reviews
+            .get_review(existing.review_id)
+            .await?
+            .ok_or_else(|| Error::NotFound("owning review not found".to_owned()))?;
+        let review = Review::from_db(db_review)?;
+        if review.context.is_local() != local {
+            return Err(Error::Invalid(format!(
+                "comment C{comment_number} belongs to a {} review; pass matching --local flag",
+                if review.context.is_local() {
+                    "local"
+                } else {
+                    "remote"
+                }
+            )));
+        }
+        Ok((existing, review))
+    }
+
     async fn flush_unsynced_drafts(&self, review: &Review, actor: &Identity) -> Result<()> {
         let (repository_url, pr_number, _) = review.context.require_forge_backed()?;
         let unsynced = self
@@ -880,18 +872,20 @@ impl ReviewService {
             .await?;
 
         for row in unsynced {
-            let reply_to_number = self.resolve_reply_to_number(row.reply_to_id).await?;
-            let reply_to_forge_id = if let Some(parent_id) = row.reply_to_id {
-                self.database
+            let (reply_to_number, reply_to_forge_id) = if let Some(parent_id) = row.reply_to_id {
+                let parent = self
+                    .database
                     .comments
                     .get_comment(parent_id)
                     .await?
-                    .and_then(|p| p.forge_id)
+                    .ok_or_else(|| {
+                        Error::NotFound(format!("parent comment {parent_id} not found"))
+                    })?;
+                (u64::try_from(parent.number).ok(), parent.forge_id)
             } else {
-                None
+                (None, None)
             };
-            let author = self.load_identity(row.author_id).await?;
-            let domain_comment = Comment::from_db(row.clone(), author, reply_to_number)?;
+            let domain_comment = Comment::from_db(row.clone(), actor.clone(), reply_to_number)?;
             let export_body = domain_comment.format_export_body();
             let receipt = self
                 .forge
@@ -1148,15 +1142,23 @@ impl ReviewService {
         new_head_sha: &str,
     ) -> Result<BTreeMap<String, String>> {
         let mut retained = BTreeMap::new();
+        let mut changed_by_sha: HashMap<String, HashSet<String>> = HashMap::new();
         for (file_path, viewed_sha) in &review.reviewed_files {
             if viewed_sha == new_head_sha {
                 retained.insert(file_path.clone(), viewed_sha.clone());
                 continue;
             }
-            let changed = self
-                .snapshots
-                .get_changed_files(git_dir, viewed_sha, new_head_sha)?;
-            if !changed.iter().any(|p| p == file_path) {
+            let changed_set = if let Some(cached) = changed_by_sha.get(viewed_sha) {
+                cached
+            } else {
+                let changed =
+                    self.snapshots
+                        .get_changed_files(git_dir, viewed_sha, new_head_sha)?;
+                changed_by_sha
+                    .entry(viewed_sha.clone())
+                    .or_insert_with(|| changed.into_iter().collect())
+            };
+            if !changed_set.contains(file_path) {
                 retained.insert(file_path.clone(), viewed_sha.clone());
             }
         }
