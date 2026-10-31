@@ -2,15 +2,1067 @@
 // @generated from file lgtm/v1/review.proto (package lgtm.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file lgtm/v1/review.proto.
  */
 export const file_lgtm_v1_review: GenFile = /*@__PURE__*/
-  fileDesc("ChRsZ3RtL3YxL3Jldmlldy5wcm90bxIHbGd0bS52MSIiChJIZWxsb1Jldmlld1JlcXVlc3QSDAoEbmFtZRgBIAEoCSImChNIZWxsb1Jldmlld1Jlc3BvbnNlEg8KB21lc3NhZ2UYASABKAkyWQoNUmV2aWV3U2VydmljZRJICgtIZWxsb1JldmlldxIbLmxndG0udjEuSGVsbG9SZXZpZXdSZXF1ZXN0GhwubGd0bS52MS5IZWxsb1Jldmlld1Jlc3BvbnNlYgZwcm90bzM");
+  fileDesc("ChRsZ3RtL3YxL3Jldmlldy5wcm90bxIHbGd0bS52MSLDAQoPSWRlbnRpdHlTdW1tYXJ5EgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDAoEa2luZBgDIAEoCRISCgVlbWFpbBgEIAEoCUgAiAEBEhgKC2ZvcmdlX2xvZ2luGAUgASgJSAGIAQESFQoIcHJvdmlkZXIYBiABKAlIAogBARISCgVtb2RlbBgHIAEoCUgDiAEBQggKBl9lbWFpbEIOCgxfZm9yZ2VfbG9naW5CCwoJX3Byb3ZpZGVyQggKBl9tb2RlbCKnAwoNUmV2aWV3U3VtbWFyeRIKCgJpZBgBIAEoCRIOCgZudW1iZXIYAiABKAQSDAoEbmFtZRgDIAEoCRINCgVsb2NhbBgEIAEoCBIPCgdnaXRfZGlyGAUgASgJEg4KBmJyYW5jaBgGIAEoCRIbCg5yZXBvc2l0b3J5X3VybBgHIAEoCUgAiAEBEhYKCXByX251bWJlchgIIAEoBEgBiAEBEhUKCGZvcmdlX2lkGAkgASgJSAKIAQESJQoGc3RhdHVzGAogASgOMhUubGd0bS52MS5SZXZpZXdTdGF0dXMSEAoIYmFzZV9zaGEYCyABKAkSEAoIaGVhZF9zaGEYDCABKAkSQQoOcmV2aWV3ZWRfZmlsZXMYDSADKAsyKS5sZ3RtLnYxLlJldmlld1N1bW1hcnkuUmV2aWV3ZWRGaWxlc0VudHJ5GjQKElJldmlld2VkRmlsZXNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBQhEKD19yZXBvc2l0b3J5X3VybEIMCgpfcHJfbnVtYmVyQgsKCV9mb3JnZV9pZCKkAgoOU2Vzc2lvblN1bW1hcnkSCgoCaWQYASABKAkSEQoJcmV2aWV3X2lkGAIgASgJEg4KBm51bWJlchgDIAEoBBIoCgZhdXRob3IYBCABKAsyGC5sZ3RtLnYxLklkZW50aXR5U3VtbWFyeRIkCgVzdGF0ZRgFIAEoDjIVLmxndG0udjEuU2Vzc2lvblN0YXRlEicKB291dGNvbWUYBiABKA4yFi5sZ3RtLnYxLlJldmlld091dGNvbWUSEQoEYm9keRgHIAEoCUgAiAEBEhUKCGZvcmdlX2lkGAggASgJSAGIAQESGQoMcHVibGlzaGVkX2F0GAkgASgJSAKIAQFCBwoFX2JvZHlCCwoJX2ZvcmdlX2lkQg8KDV9wdWJsaXNoZWRfYXQi4AEKE0NvbW1lbnRBbmNob3JEZXRhaWwSEQoJZmlsZV9wYXRoGAEgASgJEhcKCnN0YXJ0X2xpbmUYAiABKA1IAIgBARIMCgRsaW5lGAMgASgNEhIKCmNvbW1pdF9zaGEYBCABKAkSIAoTb3JpZ2luYWxfc3RhcnRfbGluZRgFIAEoDUgBiAEBEhUKDW9yaWdpbmFsX2xpbmUYBiABKA0SGwoTb3JpZ2luYWxfY29tbWl0X3NoYRgHIAEoCUINCgtfc3RhcnRfbGluZUIWChRfb3JpZ2luYWxfc3RhcnRfbGluZSLCAgoNQ29tbWVudERldGFpbBIKCgJpZBgBIAEoCRIOCgZudW1iZXIYAiABKAQSEQoJcmV2aWV3X2lkGAMgASgJEhIKCnNlc3Npb25faWQYBCABKAkSKAoGYXV0aG9yGAUgASgLMhgubGd0bS52MS5JZGVudGl0eVN1bW1hcnkSHAoPcmVwbHlfdG9fbnVtYmVyGAYgASgESACIAQESMQoGYW5jaG9yGAcgASgLMhwubGd0bS52MS5Db21tZW50QW5jaG9yRGV0YWlsSAGIAQESDAoEYm9keRgIIAEoCRIQCghyZXNvbHZlZBgJIAEoCBIQCghvdXRkYXRlZBgKIAEoCBIVCghmb3JnZV9pZBgLIAEoCUgCiAEBQhIKEF9yZXBseV90b19udW1iZXJCCQoHX2FuY2hvckILCglfZm9yZ2VfaWQiWwoORGlmZkxpbmVEZXRhaWwSIwoEa2luZBgBIAEoDjIVLmxndG0udjEuRGlmZkxpbmVLaW5kEhMKC2xpbmVfbnVtYmVyGAIgASgNEg8KB2NvbnRlbnQYAyABKAkicwoORGlmZkh1bmtEZXRhaWwSEQoJZmlsZV9wYXRoGAEgASgJEhIKCmNvbW1pdF9zaGEYAiABKAkSEgoKc3RhcnRfbGluZRgDIAEoDRImCgVsaW5lcxgEIAMoCzIXLmxndG0udjEuRGlmZkxpbmVEZXRhaWwiOwoKQWRkUmVxdWVzdBIPCgdnaXRfZGlyGAEgASgJEg0KBXBhdGhzGAIgAygJEg0KBWxvY2FsGAMgASgIIjIKC0FkZFJlc3BvbnNlEhQKDHN0YWdlZF9wYXRocxgBIAMoCRINCgVsb2NhbBgCIAEoCCJ1Cg1Db21taXRSZXF1ZXN0Eg8KB2dpdF9kaXIYASABKAkSFAoHbWVzc2FnZRgCIAEoCUgAiAEBEhUKCGFzX2FnZW50GAMgASgJSAGIAQESDQoFbG9jYWwYBCABKAhCCgoIX21lc3NhZ2VCCwoJX2FzX2FnZW50Im0KDkNvbW1pdFJlc3BvbnNlEhIKCmNvbW1pdF9zaGEYASABKAkSDgoGYnJhbmNoGAIgASgJEigKBmF1dGhvchgDIAEoCzIYLmxndG0udjEuSWRlbnRpdHlTdW1tYXJ5Eg0KBWxvY2FsGAQgASgIIi0KC1B1c2hSZXF1ZXN0Eg8KB2dpdF9kaXIYASABKAkSDQoFbG9jYWwYAiABKAgiVwoMUHVzaFJlc3BvbnNlEg4KBmJyYW5jaBgBIAEoCRIQCghoZWFkX3NoYRgCIAEoCRIWCg5yZXBvc2l0b3J5X3VybBgDIAEoCRINCgVsb2NhbBgEIAEoCCJBChJMaXN0UmV2aWV3c1JlcXVlc3QSDwoHZ2l0X2RpchgBIAEoCRINCgVsb2NhbBgCIAEoCBILCgNhbGwYAyABKAgiPgoTTGlzdFJldmlld3NSZXNwb25zZRInCgdyZXZpZXdzGAEgAygLMhYubGd0bS52MS5SZXZpZXdTdW1tYXJ5IjUKE0NyZWF0ZVJldmlld1JlcXVlc3QSDwoHZ2l0X2RpchgBIAEoCRINCgVsb2NhbBgCIAEoCCJoChRDcmVhdGVSZXZpZXdSZXNwb25zZRImCgZyZXZpZXcYASABKAsyFi5sZ3RtLnYxLlJldmlld1N1bW1hcnkSKAoHc2Vzc2lvbhgCIAEoCzIXLmxndG0udjEuU2Vzc2lvblN1bW1hcnkiWgoUUmVmcmVzaFJldmlld1JlcXVlc3QSDwoHZ2l0X2RpchgBIAEoCRIVCghzZWxlY3RvchgCIAEoCUgAiAEBEg0KBWxvY2FsGAMgASgIQgsKCV9zZWxlY3RvciJYChVSZWZyZXNoUmV2aWV3UmVzcG9uc2USJgoGcmV2aWV3GAEgASgLMhYubGd0bS52MS5SZXZpZXdTdW1tYXJ5EhcKD3VwZGF0ZWRfYW5jaG9ycxgCIAEoDSKVAQoRU2hvd1Jldmlld1JlcXVlc3QSDwoHZ2l0X2RpchgBIAEoCRIVCghzZWxlY3RvchgCIAEoCUgAiAEBEg0KBWxvY2FsGAMgASgIEigKCGdyb3VwX2J5GAQgASgOMhYubGd0bS52MS5SZXZpZXdHcm91cEJ5EhIKCnVucmVzb2x2ZWQYBSABKAhCCwoJX3NlbGVjdG9yIr4BChJTaG93UmV2aWV3UmVzcG9uc2USJgoGcmV2aWV3GAEgASgLMhYubGd0bS52MS5SZXZpZXdTdW1tYXJ5EikKCHNlc3Npb25zGAIgAygLMhcubGd0bS52MS5TZXNzaW9uU3VtbWFyeRIoCghjb21tZW50cxgDIAMoCzIWLmxndG0udjEuQ29tbWVudERldGFpbBIrCgpkaWZmX2h1bmtzGAQgAygLMhcubGd0bS52MS5EaWZmSHVua0RldGFpbCLGAQoSQ2xvc2VSZXZpZXdSZXF1ZXN0Eg8KB2dpdF9kaXIYASABKAkSFQoIc2VsZWN0b3IYAiABKAlIAIgBARINCgVsb2NhbBgDIAEoCBIsCgx3aXRoX291dGNvbWUYBCABKA4yFi5sZ3RtLnYxLlJldmlld091dGNvbWUSEQoEYm9keRgFIAEoCUgBiAEBEhUKCGFzX2FnZW50GAYgASgJSAKIAQFCCwoJX3NlbGVjdG9yQgcKBV9ib2R5QgsKCV9hc19hZ2VudCJnChNDbG9zZVJldmlld1Jlc3BvbnNlEiYKBnJldmlldxgBIAEoCzIWLmxndG0udjEuUmV2aWV3U3VtbWFyeRIoCgdzZXNzaW9uGAIgASgLMhcubGd0bS52MS5TZXNzaW9uU3VtbWFyeSKoAgoUQ3JlYXRlQ29tbWVudFJlcXVlc3QSDwoHZ2l0X2RpchgBIAEoCRIcCg9yZXZpZXdfc2VsZWN0b3IYAiABKAlIAIgBARIMCgRib2R5GAMgASgJEhYKCWZpbGVfcGF0aBgEIAEoCUgBiAEBEhcKCnN0YXJ0X2xpbmUYBSABKA1IAogBARIRCgRsaW5lGAYgASgNSAOIAQESFQoIcmVwbHlfdG8YByABKARIBIgBARINCgVsb2NhbBgIIAEoCBIVCghhc19hZ2VudBgJIAEoCUgFiAEBQhIKEF9yZXZpZXdfc2VsZWN0b3JCDAoKX2ZpbGVfcGF0aEINCgtfc3RhcnRfbGluZUIHCgVfbGluZUILCglfcmVwbHlfdG9CCwoJX2FzX2FnZW50IkAKFUNyZWF0ZUNvbW1lbnRSZXNwb25zZRInCgdjb21tZW50GAEgASgLMhYubGd0bS52MS5Db21tZW50RGV0YWlsIpwCChRVcGRhdGVDb21tZW50UmVxdWVzdBIPCgdnaXRfZGlyGAEgASgJEhYKDmNvbW1lbnRfbnVtYmVyGAIgASgEEhEKBGJvZHkYAyABKAlIAIgBARIWCglmaWxlX3BhdGgYBCABKAlIAYgBARIXCgpzdGFydF9saW5lGAUgASgNSAKIAQESEQoEbGluZRgGIAEoDUgDiAEBEhUKCHJlc29sdmVkGAcgASgISASIAQESDQoFbG9jYWwYCCABKAgSFQoIYXNfYWdlbnQYCSABKAlIBYgBAUIHCgVfYm9keUIMCgpfZmlsZV9wYXRoQg0KC19zdGFydF9saW5lQgcKBV9saW5lQgsKCV9yZXNvbHZlZEILCglfYXNfYWdlbnQiQAoVVXBkYXRlQ29tbWVudFJlc3BvbnNlEicKB2NvbW1lbnQYASABKAsyFi5sZ3RtLnYxLkNvbW1lbnREZXRhaWwicgoURGVsZXRlQ29tbWVudFJlcXVlc3QSDwoHZ2l0X2RpchgBIAEoCRIWCg5jb21tZW50X251bWJlchgCIAEoBBINCgVsb2NhbBgDIAEoCBIVCghhc19hZ2VudBgEIAEoCUgAiAEBQgsKCV9hc19hZ2VudCIvChVEZWxldGVDb21tZW50UmVzcG9uc2USFgoOZGVsZXRlZF9udW1iZXIYASABKAQijQEKFlNldEZpbGVSZXZpZXdlZFJlcXVlc3QSDwoHZ2l0X2RpchgBIAEoCRIcCg9yZXZpZXdfc2VsZWN0b3IYAiABKAlIAIgBARIRCglmaWxlX3BhdGgYAyABKAkSDgoGdmlld2VkGAQgASgIEg0KBWxvY2FsGAUgASgIQhIKEF9yZXZpZXdfc2VsZWN0b3IiUAoXU2V0RmlsZVJldmlld2VkUmVzcG9uc2USEQoJZmlsZV9wYXRoGAEgASgJEg4KBnZpZXdlZBgCIAEoCBISCgpjb21taXRfc2hhGAMgASgJIiIKEkhlbGxvUmV2aWV3UmVxdWVzdBIMCgRuYW1lGAEgASgJIiYKE0hlbGxvUmV2aWV3UmVzcG9uc2USDwoHbWVzc2FnZRgBIAEoCSp5CgxSZXZpZXdTdGF0dXMSHQoZUkVWSUVXX1NUQVRVU19VTlNQRUNJRklFRBAAEhYKElJFVklFV19TVEFUVVNfT1BFThABEhgKFFJFVklFV19TVEFUVVNfQ0xPU0VEEAISGAoUUkVWSUVXX1NUQVRVU19NRVJHRUQQAyqeAQoNUmV2aWV3T3V0Y29tZRIeChpSRVZJRVdfT1VUQ09NRV9VTlNQRUNJRklFRBAAEhoKFlJFVklFV19PVVRDT01FX0NPTU1FTlQQARIZChVSRVZJRVdfT1VUQ09NRV9SRUpFQ1QQAhIaChZSRVZJRVdfT1VUQ09NRV9BUFBST1ZFEAMSGgoWUkVWSUVXX09VVENPTUVfUkVRVUVTVBAEKmcKDVJldmlld0dyb3VwQnkSHwobUkVWSUVXX0dST1VQX0JZX1VOU1BFQ0lGSUVEEAASGAoUUkVWSUVXX0dST1VQX0JZX0ZJTEUQARIbChdSRVZJRVdfR1JPVVBfQllfU0VTU0lPThACKmMKDFNlc3Npb25TdGF0ZRIdChlTRVNTSU9OX1NUQVRFX1VOU1BFQ0lGSUVEEAASFwoTU0VTU0lPTl9TVEFURV9EUkFGVBABEhsKF1NFU1NJT05fU1RBVEVfUFVCTElTSEVEEAIqgAEKDERpZmZMaW5lS2luZBIeChpESUZGX0xJTkVfS0lORF9VTlNQRUNJRklFRBAAEhoKFkRJRkZfTElORV9LSU5EX0NPTlRFWFQQARIYChRESUZGX0xJTkVfS0lORF9BRERFRBACEhoKFkRJRkZfTElORV9LSU5EX1JFTU9WRUQQAzK5BwoNUmV2aWV3U2VydmljZRIwCgNBZGQSEy5sZ3RtLnYxLkFkZFJlcXVlc3QaFC5sZ3RtLnYxLkFkZFJlc3BvbnNlEjkKBkNvbW1pdBIWLmxndG0udjEuQ29tbWl0UmVxdWVzdBoXLmxndG0udjEuQ29tbWl0UmVzcG9uc2USMwoEUHVzaBIULmxndG0udjEuUHVzaFJlcXVlc3QaFS5sZ3RtLnYxLlB1c2hSZXNwb25zZRJICgtMaXN0UmV2aWV3cxIbLmxndG0udjEuTGlzdFJldmlld3NSZXF1ZXN0GhwubGd0bS52MS5MaXN0UmV2aWV3c1Jlc3BvbnNlEksKDENyZWF0ZVJldmlldxIcLmxndG0udjEuQ3JlYXRlUmV2aWV3UmVxdWVzdBodLmxndG0udjEuQ3JlYXRlUmV2aWV3UmVzcG9uc2USTgoNUmVmcmVzaFJldmlldxIdLmxndG0udjEuUmVmcmVzaFJldmlld1JlcXVlc3QaHi5sZ3RtLnYxLlJlZnJlc2hSZXZpZXdSZXNwb25zZRJFCgpTaG93UmV2aWV3EhoubGd0bS52MS5TaG93UmV2aWV3UmVxdWVzdBobLmxndG0udjEuU2hvd1Jldmlld1Jlc3BvbnNlEkgKC0Nsb3NlUmV2aWV3EhsubGd0bS52MS5DbG9zZVJldmlld1JlcXVlc3QaHC5sZ3RtLnYxLkNsb3NlUmV2aWV3UmVzcG9uc2USTgoNQ3JlYXRlQ29tbWVudBIdLmxndG0udjEuQ3JlYXRlQ29tbWVudFJlcXVlc3QaHi5sZ3RtLnYxLkNyZWF0ZUNvbW1lbnRSZXNwb25zZRJOCg1VcGRhdGVDb21tZW50Eh0ubGd0bS52MS5VcGRhdGVDb21tZW50UmVxdWVzdBoeLmxndG0udjEuVXBkYXRlQ29tbWVudFJlc3BvbnNlEk4KDURlbGV0ZUNvbW1lbnQSHS5sZ3RtLnYxLkRlbGV0ZUNvbW1lbnRSZXF1ZXN0Gh4ubGd0bS52MS5EZWxldGVDb21tZW50UmVzcG9uc2USVAoPU2V0RmlsZVJldmlld2VkEh8ubGd0bS52MS5TZXRGaWxlUmV2aWV3ZWRSZXF1ZXN0GiAubGd0bS52MS5TZXRGaWxlUmV2aWV3ZWRSZXNwb25zZRJICgtIZWxsb1JldmlldxIbLmxndG0udjEuSGVsbG9SZXZpZXdSZXF1ZXN0GhwubGd0bS52MS5IZWxsb1Jldmlld1Jlc3BvbnNlYgZwcm90bzM");
+
+/**
+ * @generated from message lgtm.v1.IdentitySummary
+ */
+export type IdentitySummary = Message<"lgtm.v1.IdentitySummary"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string kind = 3;
+   */
+  kind: string;
+
+  /**
+   * @generated from field: optional string email = 4;
+   */
+  email?: string | undefined;
+
+  /**
+   * @generated from field: optional string forge_login = 5;
+   */
+  forgeLogin?: string | undefined;
+
+  /**
+   * @generated from field: optional string provider = 6;
+   */
+  provider?: string | undefined;
+
+  /**
+   * @generated from field: optional string model = 7;
+   */
+  model?: string | undefined;
+};
+
+/**
+ * Describes the message lgtm.v1.IdentitySummary.
+ * Use `create(IdentitySummarySchema)` to create a new message.
+ */
+export const IdentitySummarySchema: GenMessage<IdentitySummary> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 0);
+
+/**
+ * @generated from message lgtm.v1.ReviewSummary
+ */
+export type ReviewSummary = Message<"lgtm.v1.ReviewSummary"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: uint64 number = 2;
+   */
+  number: bigint;
+
+  /**
+   * @generated from field: string name = 3;
+   */
+  name: string;
+
+  /**
+   * @generated from field: bool local = 4;
+   */
+  local: boolean;
+
+  /**
+   * @generated from field: string git_dir = 5;
+   */
+  gitDir: string;
+
+  /**
+   * @generated from field: string branch = 6;
+   */
+  branch: string;
+
+  /**
+   * @generated from field: optional string repository_url = 7;
+   */
+  repositoryUrl?: string | undefined;
+
+  /**
+   * @generated from field: optional uint64 pr_number = 8;
+   */
+  prNumber?: bigint | undefined;
+
+  /**
+   * @generated from field: optional string forge_id = 9;
+   */
+  forgeId?: string | undefined;
+
+  /**
+   * @generated from field: lgtm.v1.ReviewStatus status = 10;
+   */
+  status: ReviewStatus;
+
+  /**
+   * @generated from field: string base_sha = 11;
+   */
+  baseSha: string;
+
+  /**
+   * @generated from field: string head_sha = 12;
+   */
+  headSha: string;
+
+  /**
+   * @generated from field: map<string, string> reviewed_files = 13;
+   */
+  reviewedFiles: { [key: string]: string };
+};
+
+/**
+ * Describes the message lgtm.v1.ReviewSummary.
+ * Use `create(ReviewSummarySchema)` to create a new message.
+ */
+export const ReviewSummarySchema: GenMessage<ReviewSummary> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 1);
+
+/**
+ * @generated from message lgtm.v1.SessionSummary
+ */
+export type SessionSummary = Message<"lgtm.v1.SessionSummary"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string review_id = 2;
+   */
+  reviewId: string;
+
+  /**
+   * @generated from field: uint64 number = 3;
+   */
+  number: bigint;
+
+  /**
+   * @generated from field: lgtm.v1.IdentitySummary author = 4;
+   */
+  author?: IdentitySummary | undefined;
+
+  /**
+   * @generated from field: lgtm.v1.SessionState state = 5;
+   */
+  state: SessionState;
+
+  /**
+   * @generated from field: lgtm.v1.ReviewOutcome outcome = 6;
+   */
+  outcome: ReviewOutcome;
+
+  /**
+   * @generated from field: optional string body = 7;
+   */
+  body?: string | undefined;
+
+  /**
+   * @generated from field: optional string forge_id = 8;
+   */
+  forgeId?: string | undefined;
+
+  /**
+   * @generated from field: optional string published_at = 9;
+   */
+  publishedAt?: string | undefined;
+};
+
+/**
+ * Describes the message lgtm.v1.SessionSummary.
+ * Use `create(SessionSummarySchema)` to create a new message.
+ */
+export const SessionSummarySchema: GenMessage<SessionSummary> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 2);
+
+/**
+ * @generated from message lgtm.v1.CommentAnchorDetail
+ */
+export type CommentAnchorDetail = Message<"lgtm.v1.CommentAnchorDetail"> & {
+  /**
+   * @generated from field: string file_path = 1;
+   */
+  filePath: string;
+
+  /**
+   * @generated from field: optional uint32 start_line = 2;
+   */
+  startLine?: number | undefined;
+
+  /**
+   * @generated from field: uint32 line = 3;
+   */
+  line: number;
+
+  /**
+   * @generated from field: string commit_sha = 4;
+   */
+  commitSha: string;
+
+  /**
+   * @generated from field: optional uint32 original_start_line = 5;
+   */
+  originalStartLine?: number | undefined;
+
+  /**
+   * @generated from field: uint32 original_line = 6;
+   */
+  originalLine: number;
+
+  /**
+   * @generated from field: string original_commit_sha = 7;
+   */
+  originalCommitSha: string;
+};
+
+/**
+ * Describes the message lgtm.v1.CommentAnchorDetail.
+ * Use `create(CommentAnchorDetailSchema)` to create a new message.
+ */
+export const CommentAnchorDetailSchema: GenMessage<CommentAnchorDetail> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 3);
+
+/**
+ * @generated from message lgtm.v1.CommentDetail
+ */
+export type CommentDetail = Message<"lgtm.v1.CommentDetail"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: uint64 number = 2;
+   */
+  number: bigint;
+
+  /**
+   * @generated from field: string review_id = 3;
+   */
+  reviewId: string;
+
+  /**
+   * @generated from field: string session_id = 4;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: lgtm.v1.IdentitySummary author = 5;
+   */
+  author?: IdentitySummary | undefined;
+
+  /**
+   * @generated from field: optional uint64 reply_to_number = 6;
+   */
+  replyToNumber?: bigint | undefined;
+
+  /**
+   * @generated from field: optional lgtm.v1.CommentAnchorDetail anchor = 7;
+   */
+  anchor?: CommentAnchorDetail | undefined;
+
+  /**
+   * @generated from field: string body = 8;
+   */
+  body: string;
+
+  /**
+   * @generated from field: bool resolved = 9;
+   */
+  resolved: boolean;
+
+  /**
+   * @generated from field: bool outdated = 10;
+   */
+  outdated: boolean;
+
+  /**
+   * @generated from field: optional string forge_id = 11;
+   */
+  forgeId?: string | undefined;
+};
+
+/**
+ * Describes the message lgtm.v1.CommentDetail.
+ * Use `create(CommentDetailSchema)` to create a new message.
+ */
+export const CommentDetailSchema: GenMessage<CommentDetail> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 4);
+
+/**
+ * @generated from message lgtm.v1.DiffLineDetail
+ */
+export type DiffLineDetail = Message<"lgtm.v1.DiffLineDetail"> & {
+  /**
+   * @generated from field: lgtm.v1.DiffLineKind kind = 1;
+   */
+  kind: DiffLineKind;
+
+  /**
+   * @generated from field: uint32 line_number = 2;
+   */
+  lineNumber: number;
+
+  /**
+   * @generated from field: string content = 3;
+   */
+  content: string;
+};
+
+/**
+ * Describes the message lgtm.v1.DiffLineDetail.
+ * Use `create(DiffLineDetailSchema)` to create a new message.
+ */
+export const DiffLineDetailSchema: GenMessage<DiffLineDetail> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 5);
+
+/**
+ * @generated from message lgtm.v1.DiffHunkDetail
+ */
+export type DiffHunkDetail = Message<"lgtm.v1.DiffHunkDetail"> & {
+  /**
+   * @generated from field: string file_path = 1;
+   */
+  filePath: string;
+
+  /**
+   * @generated from field: string commit_sha = 2;
+   */
+  commitSha: string;
+
+  /**
+   * @generated from field: uint32 start_line = 3;
+   */
+  startLine: number;
+
+  /**
+   * @generated from field: repeated lgtm.v1.DiffLineDetail lines = 4;
+   */
+  lines: DiffLineDetail[];
+};
+
+/**
+ * Describes the message lgtm.v1.DiffHunkDetail.
+ * Use `create(DiffHunkDetailSchema)` to create a new message.
+ */
+export const DiffHunkDetailSchema: GenMessage<DiffHunkDetail> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 6);
+
+/**
+ * @generated from message lgtm.v1.AddRequest
+ */
+export type AddRequest = Message<"lgtm.v1.AddRequest"> & {
+  /**
+   * @generated from field: string git_dir = 1;
+   */
+  gitDir: string;
+
+  /**
+   * @generated from field: repeated string paths = 2;
+   */
+  paths: string[];
+
+  /**
+   * @generated from field: bool local = 3;
+   */
+  local: boolean;
+};
+
+/**
+ * Describes the message lgtm.v1.AddRequest.
+ * Use `create(AddRequestSchema)` to create a new message.
+ */
+export const AddRequestSchema: GenMessage<AddRequest> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 7);
+
+/**
+ * @generated from message lgtm.v1.AddResponse
+ */
+export type AddResponse = Message<"lgtm.v1.AddResponse"> & {
+  /**
+   * @generated from field: repeated string staged_paths = 1;
+   */
+  stagedPaths: string[];
+
+  /**
+   * @generated from field: bool local = 2;
+   */
+  local: boolean;
+};
+
+/**
+ * Describes the message lgtm.v1.AddResponse.
+ * Use `create(AddResponseSchema)` to create a new message.
+ */
+export const AddResponseSchema: GenMessage<AddResponse> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 8);
+
+/**
+ * @generated from message lgtm.v1.CommitRequest
+ */
+export type CommitRequest = Message<"lgtm.v1.CommitRequest"> & {
+  /**
+   * @generated from field: string git_dir = 1;
+   */
+  gitDir: string;
+
+  /**
+   * @generated from field: optional string message = 2;
+   */
+  message?: string | undefined;
+
+  /**
+   * @generated from field: optional string as_agent = 3;
+   */
+  asAgent?: string | undefined;
+
+  /**
+   * @generated from field: bool local = 4;
+   */
+  local: boolean;
+};
+
+/**
+ * Describes the message lgtm.v1.CommitRequest.
+ * Use `create(CommitRequestSchema)` to create a new message.
+ */
+export const CommitRequestSchema: GenMessage<CommitRequest> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 9);
+
+/**
+ * @generated from message lgtm.v1.CommitResponse
+ */
+export type CommitResponse = Message<"lgtm.v1.CommitResponse"> & {
+  /**
+   * @generated from field: string commit_sha = 1;
+   */
+  commitSha: string;
+
+  /**
+   * @generated from field: string branch = 2;
+   */
+  branch: string;
+
+  /**
+   * @generated from field: lgtm.v1.IdentitySummary author = 3;
+   */
+  author?: IdentitySummary | undefined;
+
+  /**
+   * @generated from field: bool local = 4;
+   */
+  local: boolean;
+};
+
+/**
+ * Describes the message lgtm.v1.CommitResponse.
+ * Use `create(CommitResponseSchema)` to create a new message.
+ */
+export const CommitResponseSchema: GenMessage<CommitResponse> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 10);
+
+/**
+ * @generated from message lgtm.v1.PushRequest
+ */
+export type PushRequest = Message<"lgtm.v1.PushRequest"> & {
+  /**
+   * @generated from field: string git_dir = 1;
+   */
+  gitDir: string;
+
+  /**
+   * @generated from field: bool local = 2;
+   */
+  local: boolean;
+};
+
+/**
+ * Describes the message lgtm.v1.PushRequest.
+ * Use `create(PushRequestSchema)` to create a new message.
+ */
+export const PushRequestSchema: GenMessage<PushRequest> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 11);
+
+/**
+ * @generated from message lgtm.v1.PushResponse
+ */
+export type PushResponse = Message<"lgtm.v1.PushResponse"> & {
+  /**
+   * @generated from field: string branch = 1;
+   */
+  branch: string;
+
+  /**
+   * @generated from field: string head_sha = 2;
+   */
+  headSha: string;
+
+  /**
+   * @generated from field: string repository_url = 3;
+   */
+  repositoryUrl: string;
+
+  /**
+   * @generated from field: bool local = 4;
+   */
+  local: boolean;
+};
+
+/**
+ * Describes the message lgtm.v1.PushResponse.
+ * Use `create(PushResponseSchema)` to create a new message.
+ */
+export const PushResponseSchema: GenMessage<PushResponse> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 12);
+
+/**
+ * @generated from message lgtm.v1.ListReviewsRequest
+ */
+export type ListReviewsRequest = Message<"lgtm.v1.ListReviewsRequest"> & {
+  /**
+   * @generated from field: string git_dir = 1;
+   */
+  gitDir: string;
+
+  /**
+   * @generated from field: bool local = 2;
+   */
+  local: boolean;
+
+  /**
+   * @generated from field: bool all = 3;
+   */
+  all: boolean;
+};
+
+/**
+ * Describes the message lgtm.v1.ListReviewsRequest.
+ * Use `create(ListReviewsRequestSchema)` to create a new message.
+ */
+export const ListReviewsRequestSchema: GenMessage<ListReviewsRequest> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 13);
+
+/**
+ * @generated from message lgtm.v1.ListReviewsResponse
+ */
+export type ListReviewsResponse = Message<"lgtm.v1.ListReviewsResponse"> & {
+  /**
+   * @generated from field: repeated lgtm.v1.ReviewSummary reviews = 1;
+   */
+  reviews: ReviewSummary[];
+};
+
+/**
+ * Describes the message lgtm.v1.ListReviewsResponse.
+ * Use `create(ListReviewsResponseSchema)` to create a new message.
+ */
+export const ListReviewsResponseSchema: GenMessage<ListReviewsResponse> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 14);
+
+/**
+ * @generated from message lgtm.v1.CreateReviewRequest
+ */
+export type CreateReviewRequest = Message<"lgtm.v1.CreateReviewRequest"> & {
+  /**
+   * @generated from field: string git_dir = 1;
+   */
+  gitDir: string;
+
+  /**
+   * @generated from field: bool local = 2;
+   */
+  local: boolean;
+};
+
+/**
+ * Describes the message lgtm.v1.CreateReviewRequest.
+ * Use `create(CreateReviewRequestSchema)` to create a new message.
+ */
+export const CreateReviewRequestSchema: GenMessage<CreateReviewRequest> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 15);
+
+/**
+ * @generated from message lgtm.v1.CreateReviewResponse
+ */
+export type CreateReviewResponse = Message<"lgtm.v1.CreateReviewResponse"> & {
+  /**
+   * @generated from field: lgtm.v1.ReviewSummary review = 1;
+   */
+  review?: ReviewSummary | undefined;
+
+  /**
+   * @generated from field: lgtm.v1.SessionSummary session = 2;
+   */
+  session?: SessionSummary | undefined;
+};
+
+/**
+ * Describes the message lgtm.v1.CreateReviewResponse.
+ * Use `create(CreateReviewResponseSchema)` to create a new message.
+ */
+export const CreateReviewResponseSchema: GenMessage<CreateReviewResponse> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 16);
+
+/**
+ * @generated from message lgtm.v1.RefreshReviewRequest
+ */
+export type RefreshReviewRequest = Message<"lgtm.v1.RefreshReviewRequest"> & {
+  /**
+   * @generated from field: string git_dir = 1;
+   */
+  gitDir: string;
+
+  /**
+   * @generated from field: optional string selector = 2;
+   */
+  selector?: string | undefined;
+
+  /**
+   * @generated from field: bool local = 3;
+   */
+  local: boolean;
+};
+
+/**
+ * Describes the message lgtm.v1.RefreshReviewRequest.
+ * Use `create(RefreshReviewRequestSchema)` to create a new message.
+ */
+export const RefreshReviewRequestSchema: GenMessage<RefreshReviewRequest> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 17);
+
+/**
+ * @generated from message lgtm.v1.RefreshReviewResponse
+ */
+export type RefreshReviewResponse = Message<"lgtm.v1.RefreshReviewResponse"> & {
+  /**
+   * @generated from field: lgtm.v1.ReviewSummary review = 1;
+   */
+  review?: ReviewSummary | undefined;
+
+  /**
+   * @generated from field: uint32 updated_anchors = 2;
+   */
+  updatedAnchors: number;
+};
+
+/**
+ * Describes the message lgtm.v1.RefreshReviewResponse.
+ * Use `create(RefreshReviewResponseSchema)` to create a new message.
+ */
+export const RefreshReviewResponseSchema: GenMessage<RefreshReviewResponse> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 18);
+
+/**
+ * @generated from message lgtm.v1.ShowReviewRequest
+ */
+export type ShowReviewRequest = Message<"lgtm.v1.ShowReviewRequest"> & {
+  /**
+   * @generated from field: string git_dir = 1;
+   */
+  gitDir: string;
+
+  /**
+   * @generated from field: optional string selector = 2;
+   */
+  selector?: string | undefined;
+
+  /**
+   * @generated from field: bool local = 3;
+   */
+  local: boolean;
+
+  /**
+   * @generated from field: lgtm.v1.ReviewGroupBy group_by = 4;
+   */
+  groupBy: ReviewGroupBy;
+
+  /**
+   * @generated from field: bool unresolved = 5;
+   */
+  unresolved: boolean;
+};
+
+/**
+ * Describes the message lgtm.v1.ShowReviewRequest.
+ * Use `create(ShowReviewRequestSchema)` to create a new message.
+ */
+export const ShowReviewRequestSchema: GenMessage<ShowReviewRequest> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 19);
+
+/**
+ * @generated from message lgtm.v1.ShowReviewResponse
+ */
+export type ShowReviewResponse = Message<"lgtm.v1.ShowReviewResponse"> & {
+  /**
+   * @generated from field: lgtm.v1.ReviewSummary review = 1;
+   */
+  review?: ReviewSummary | undefined;
+
+  /**
+   * @generated from field: repeated lgtm.v1.SessionSummary sessions = 2;
+   */
+  sessions: SessionSummary[];
+
+  /**
+   * @generated from field: repeated lgtm.v1.CommentDetail comments = 3;
+   */
+  comments: CommentDetail[];
+
+  /**
+   * @generated from field: repeated lgtm.v1.DiffHunkDetail diff_hunks = 4;
+   */
+  diffHunks: DiffHunkDetail[];
+};
+
+/**
+ * Describes the message lgtm.v1.ShowReviewResponse.
+ * Use `create(ShowReviewResponseSchema)` to create a new message.
+ */
+export const ShowReviewResponseSchema: GenMessage<ShowReviewResponse> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 20);
+
+/**
+ * @generated from message lgtm.v1.CloseReviewRequest
+ */
+export type CloseReviewRequest = Message<"lgtm.v1.CloseReviewRequest"> & {
+  /**
+   * @generated from field: string git_dir = 1;
+   */
+  gitDir: string;
+
+  /**
+   * @generated from field: optional string selector = 2;
+   */
+  selector?: string | undefined;
+
+  /**
+   * @generated from field: bool local = 3;
+   */
+  local: boolean;
+
+  /**
+   * @generated from field: lgtm.v1.ReviewOutcome with_outcome = 4;
+   */
+  withOutcome: ReviewOutcome;
+
+  /**
+   * @generated from field: optional string body = 5;
+   */
+  body?: string | undefined;
+
+  /**
+   * @generated from field: optional string as_agent = 6;
+   */
+  asAgent?: string | undefined;
+};
+
+/**
+ * Describes the message lgtm.v1.CloseReviewRequest.
+ * Use `create(CloseReviewRequestSchema)` to create a new message.
+ */
+export const CloseReviewRequestSchema: GenMessage<CloseReviewRequest> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 21);
+
+/**
+ * @generated from message lgtm.v1.CloseReviewResponse
+ */
+export type CloseReviewResponse = Message<"lgtm.v1.CloseReviewResponse"> & {
+  /**
+   * @generated from field: lgtm.v1.ReviewSummary review = 1;
+   */
+  review?: ReviewSummary | undefined;
+
+  /**
+   * @generated from field: lgtm.v1.SessionSummary session = 2;
+   */
+  session?: SessionSummary | undefined;
+};
+
+/**
+ * Describes the message lgtm.v1.CloseReviewResponse.
+ * Use `create(CloseReviewResponseSchema)` to create a new message.
+ */
+export const CloseReviewResponseSchema: GenMessage<CloseReviewResponse> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 22);
+
+/**
+ * @generated from message lgtm.v1.CreateCommentRequest
+ */
+export type CreateCommentRequest = Message<"lgtm.v1.CreateCommentRequest"> & {
+  /**
+   * @generated from field: string git_dir = 1;
+   */
+  gitDir: string;
+
+  /**
+   * @generated from field: optional string review_selector = 2;
+   */
+  reviewSelector?: string | undefined;
+
+  /**
+   * @generated from field: string body = 3;
+   */
+  body: string;
+
+  /**
+   * @generated from field: optional string file_path = 4;
+   */
+  filePath?: string | undefined;
+
+  /**
+   * @generated from field: optional uint32 start_line = 5;
+   */
+  startLine?: number | undefined;
+
+  /**
+   * @generated from field: optional uint32 line = 6;
+   */
+  line?: number | undefined;
+
+  /**
+   * @generated from field: optional uint64 reply_to = 7;
+   */
+  replyTo?: bigint | undefined;
+
+  /**
+   * @generated from field: bool local = 8;
+   */
+  local: boolean;
+
+  /**
+   * @generated from field: optional string as_agent = 9;
+   */
+  asAgent?: string | undefined;
+};
+
+/**
+ * Describes the message lgtm.v1.CreateCommentRequest.
+ * Use `create(CreateCommentRequestSchema)` to create a new message.
+ */
+export const CreateCommentRequestSchema: GenMessage<CreateCommentRequest> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 23);
+
+/**
+ * @generated from message lgtm.v1.CreateCommentResponse
+ */
+export type CreateCommentResponse = Message<"lgtm.v1.CreateCommentResponse"> & {
+  /**
+   * @generated from field: lgtm.v1.CommentDetail comment = 1;
+   */
+  comment?: CommentDetail | undefined;
+};
+
+/**
+ * Describes the message lgtm.v1.CreateCommentResponse.
+ * Use `create(CreateCommentResponseSchema)` to create a new message.
+ */
+export const CreateCommentResponseSchema: GenMessage<CreateCommentResponse> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 24);
+
+/**
+ * @generated from message lgtm.v1.UpdateCommentRequest
+ */
+export type UpdateCommentRequest = Message<"lgtm.v1.UpdateCommentRequest"> & {
+  /**
+   * @generated from field: string git_dir = 1;
+   */
+  gitDir: string;
+
+  /**
+   * @generated from field: uint64 comment_number = 2;
+   */
+  commentNumber: bigint;
+
+  /**
+   * @generated from field: optional string body = 3;
+   */
+  body?: string | undefined;
+
+  /**
+   * @generated from field: optional string file_path = 4;
+   */
+  filePath?: string | undefined;
+
+  /**
+   * @generated from field: optional uint32 start_line = 5;
+   */
+  startLine?: number | undefined;
+
+  /**
+   * @generated from field: optional uint32 line = 6;
+   */
+  line?: number | undefined;
+
+  /**
+   * @generated from field: optional bool resolved = 7;
+   */
+  resolved?: boolean | undefined;
+
+  /**
+   * @generated from field: bool local = 8;
+   */
+  local: boolean;
+
+  /**
+   * @generated from field: optional string as_agent = 9;
+   */
+  asAgent?: string | undefined;
+};
+
+/**
+ * Describes the message lgtm.v1.UpdateCommentRequest.
+ * Use `create(UpdateCommentRequestSchema)` to create a new message.
+ */
+export const UpdateCommentRequestSchema: GenMessage<UpdateCommentRequest> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 25);
+
+/**
+ * @generated from message lgtm.v1.UpdateCommentResponse
+ */
+export type UpdateCommentResponse = Message<"lgtm.v1.UpdateCommentResponse"> & {
+  /**
+   * @generated from field: lgtm.v1.CommentDetail comment = 1;
+   */
+  comment?: CommentDetail | undefined;
+};
+
+/**
+ * Describes the message lgtm.v1.UpdateCommentResponse.
+ * Use `create(UpdateCommentResponseSchema)` to create a new message.
+ */
+export const UpdateCommentResponseSchema: GenMessage<UpdateCommentResponse> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 26);
+
+/**
+ * @generated from message lgtm.v1.DeleteCommentRequest
+ */
+export type DeleteCommentRequest = Message<"lgtm.v1.DeleteCommentRequest"> & {
+  /**
+   * @generated from field: string git_dir = 1;
+   */
+  gitDir: string;
+
+  /**
+   * @generated from field: uint64 comment_number = 2;
+   */
+  commentNumber: bigint;
+
+  /**
+   * @generated from field: bool local = 3;
+   */
+  local: boolean;
+
+  /**
+   * @generated from field: optional string as_agent = 4;
+   */
+  asAgent?: string | undefined;
+};
+
+/**
+ * Describes the message lgtm.v1.DeleteCommentRequest.
+ * Use `create(DeleteCommentRequestSchema)` to create a new message.
+ */
+export const DeleteCommentRequestSchema: GenMessage<DeleteCommentRequest> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 27);
+
+/**
+ * @generated from message lgtm.v1.DeleteCommentResponse
+ */
+export type DeleteCommentResponse = Message<"lgtm.v1.DeleteCommentResponse"> & {
+  /**
+   * @generated from field: uint64 deleted_number = 1;
+   */
+  deletedNumber: bigint;
+};
+
+/**
+ * Describes the message lgtm.v1.DeleteCommentResponse.
+ * Use `create(DeleteCommentResponseSchema)` to create a new message.
+ */
+export const DeleteCommentResponseSchema: GenMessage<DeleteCommentResponse> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 28);
+
+/**
+ * @generated from message lgtm.v1.SetFileReviewedRequest
+ */
+export type SetFileReviewedRequest = Message<"lgtm.v1.SetFileReviewedRequest"> & {
+  /**
+   * @generated from field: string git_dir = 1;
+   */
+  gitDir: string;
+
+  /**
+   * @generated from field: optional string review_selector = 2;
+   */
+  reviewSelector?: string | undefined;
+
+  /**
+   * @generated from field: string file_path = 3;
+   */
+  filePath: string;
+
+  /**
+   * @generated from field: bool viewed = 4;
+   */
+  viewed: boolean;
+
+  /**
+   * @generated from field: bool local = 5;
+   */
+  local: boolean;
+};
+
+/**
+ * Describes the message lgtm.v1.SetFileReviewedRequest.
+ * Use `create(SetFileReviewedRequestSchema)` to create a new message.
+ */
+export const SetFileReviewedRequestSchema: GenMessage<SetFileReviewedRequest> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 29);
+
+/**
+ * @generated from message lgtm.v1.SetFileReviewedResponse
+ */
+export type SetFileReviewedResponse = Message<"lgtm.v1.SetFileReviewedResponse"> & {
+  /**
+   * @generated from field: string file_path = 1;
+   */
+  filePath: string;
+
+  /**
+   * @generated from field: bool viewed = 2;
+   */
+  viewed: boolean;
+
+  /**
+   * @generated from field: string commit_sha = 3;
+   */
+  commitSha: string;
+};
+
+/**
+ * Describes the message lgtm.v1.SetFileReviewedResponse.
+ * Use `create(SetFileReviewedResponseSchema)` to create a new message.
+ */
+export const SetFileReviewedResponseSchema: GenMessage<SetFileReviewedResponse> = /*@__PURE__*/
+  messageDesc(file_lgtm_v1_review, 30);
 
 /**
  * @generated from message lgtm.v1.HelloReviewRequest
@@ -27,7 +1079,7 @@ export type HelloReviewRequest = Message<"lgtm.v1.HelloReviewRequest"> & {
  * Use `create(HelloReviewRequestSchema)` to create a new message.
  */
 export const HelloReviewRequestSchema: GenMessage<HelloReviewRequest> = /*@__PURE__*/
-  messageDesc(file_lgtm_v1_review, 0);
+  messageDesc(file_lgtm_v1_review, 31);
 
 /**
  * @generated from message lgtm.v1.HelloReviewResponse
@@ -44,14 +1096,260 @@ export type HelloReviewResponse = Message<"lgtm.v1.HelloReviewResponse"> & {
  * Use `create(HelloReviewResponseSchema)` to create a new message.
  */
 export const HelloReviewResponseSchema: GenMessage<HelloReviewResponse> = /*@__PURE__*/
-  messageDesc(file_lgtm_v1_review, 1);
+  messageDesc(file_lgtm_v1_review, 32);
 
 /**
- * Demonstration review API shared by the CLI and web frontend.
+ * @generated from enum lgtm.v1.ReviewStatus
+ */
+export enum ReviewStatus {
+  /**
+   * @generated from enum value: REVIEW_STATUS_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: REVIEW_STATUS_OPEN = 1;
+   */
+  OPEN = 1,
+
+  /**
+   * @generated from enum value: REVIEW_STATUS_CLOSED = 2;
+   */
+  CLOSED = 2,
+
+  /**
+   * @generated from enum value: REVIEW_STATUS_MERGED = 3;
+   */
+  MERGED = 3,
+}
+
+/**
+ * Describes the enum lgtm.v1.ReviewStatus.
+ */
+export const ReviewStatusSchema: GenEnum<ReviewStatus> = /*@__PURE__*/
+  enumDesc(file_lgtm_v1_review, 0);
+
+/**
+ * @generated from enum lgtm.v1.ReviewOutcome
+ */
+export enum ReviewOutcome {
+  /**
+   * @generated from enum value: REVIEW_OUTCOME_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: REVIEW_OUTCOME_COMMENT = 1;
+   */
+  COMMENT = 1,
+
+  /**
+   * @generated from enum value: REVIEW_OUTCOME_REJECT = 2;
+   */
+  REJECT = 2,
+
+  /**
+   * @generated from enum value: REVIEW_OUTCOME_APPROVE = 3;
+   */
+  APPROVE = 3,
+
+  /**
+   * @generated from enum value: REVIEW_OUTCOME_REQUEST = 4;
+   */
+  REQUEST = 4,
+}
+
+/**
+ * Describes the enum lgtm.v1.ReviewOutcome.
+ */
+export const ReviewOutcomeSchema: GenEnum<ReviewOutcome> = /*@__PURE__*/
+  enumDesc(file_lgtm_v1_review, 1);
+
+/**
+ * @generated from enum lgtm.v1.ReviewGroupBy
+ */
+export enum ReviewGroupBy {
+  /**
+   * @generated from enum value: REVIEW_GROUP_BY_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: REVIEW_GROUP_BY_FILE = 1;
+   */
+  FILE = 1,
+
+  /**
+   * @generated from enum value: REVIEW_GROUP_BY_SESSION = 2;
+   */
+  SESSION = 2,
+}
+
+/**
+ * Describes the enum lgtm.v1.ReviewGroupBy.
+ */
+export const ReviewGroupBySchema: GenEnum<ReviewGroupBy> = /*@__PURE__*/
+  enumDesc(file_lgtm_v1_review, 2);
+
+/**
+ * @generated from enum lgtm.v1.SessionState
+ */
+export enum SessionState {
+  /**
+   * @generated from enum value: SESSION_STATE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: SESSION_STATE_DRAFT = 1;
+   */
+  DRAFT = 1,
+
+  /**
+   * @generated from enum value: SESSION_STATE_PUBLISHED = 2;
+   */
+  PUBLISHED = 2,
+}
+
+/**
+ * Describes the enum lgtm.v1.SessionState.
+ */
+export const SessionStateSchema: GenEnum<SessionState> = /*@__PURE__*/
+  enumDesc(file_lgtm_v1_review, 3);
+
+/**
+ * @generated from enum lgtm.v1.DiffLineKind
+ */
+export enum DiffLineKind {
+  /**
+   * @generated from enum value: DIFF_LINE_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: DIFF_LINE_KIND_CONTEXT = 1;
+   */
+  CONTEXT = 1,
+
+  /**
+   * @generated from enum value: DIFF_LINE_KIND_ADDED = 2;
+   */
+  ADDED = 2,
+
+  /**
+   * @generated from enum value: DIFF_LINE_KIND_REMOVED = 3;
+   */
+  REMOVED = 3,
+}
+
+/**
+ * Describes the enum lgtm.v1.DiffLineKind.
+ */
+export const DiffLineKindSchema: GenEnum<DiffLineKind> = /*@__PURE__*/
+  enumDesc(file_lgtm_v1_review, 4);
+
+/**
+ * Code review and pull request synchronization service shared by the CLI and web frontend.
  *
  * @generated from service lgtm.v1.ReviewService
  */
 export const ReviewService: GenService<{
+  /**
+   * @generated from rpc lgtm.v1.ReviewService.Add
+   */
+  add: {
+    methodKind: "unary";
+    input: typeof AddRequestSchema;
+    output: typeof AddResponseSchema;
+  },
+  /**
+   * @generated from rpc lgtm.v1.ReviewService.Commit
+   */
+  commit: {
+    methodKind: "unary";
+    input: typeof CommitRequestSchema;
+    output: typeof CommitResponseSchema;
+  },
+  /**
+   * @generated from rpc lgtm.v1.ReviewService.Push
+   */
+  push: {
+    methodKind: "unary";
+    input: typeof PushRequestSchema;
+    output: typeof PushResponseSchema;
+  },
+  /**
+   * @generated from rpc lgtm.v1.ReviewService.ListReviews
+   */
+  listReviews: {
+    methodKind: "unary";
+    input: typeof ListReviewsRequestSchema;
+    output: typeof ListReviewsResponseSchema;
+  },
+  /**
+   * @generated from rpc lgtm.v1.ReviewService.CreateReview
+   */
+  createReview: {
+    methodKind: "unary";
+    input: typeof CreateReviewRequestSchema;
+    output: typeof CreateReviewResponseSchema;
+  },
+  /**
+   * @generated from rpc lgtm.v1.ReviewService.RefreshReview
+   */
+  refreshReview: {
+    methodKind: "unary";
+    input: typeof RefreshReviewRequestSchema;
+    output: typeof RefreshReviewResponseSchema;
+  },
+  /**
+   * @generated from rpc lgtm.v1.ReviewService.ShowReview
+   */
+  showReview: {
+    methodKind: "unary";
+    input: typeof ShowReviewRequestSchema;
+    output: typeof ShowReviewResponseSchema;
+  },
+  /**
+   * @generated from rpc lgtm.v1.ReviewService.CloseReview
+   */
+  closeReview: {
+    methodKind: "unary";
+    input: typeof CloseReviewRequestSchema;
+    output: typeof CloseReviewResponseSchema;
+  },
+  /**
+   * @generated from rpc lgtm.v1.ReviewService.CreateComment
+   */
+  createComment: {
+    methodKind: "unary";
+    input: typeof CreateCommentRequestSchema;
+    output: typeof CreateCommentResponseSchema;
+  },
+  /**
+   * @generated from rpc lgtm.v1.ReviewService.UpdateComment
+   */
+  updateComment: {
+    methodKind: "unary";
+    input: typeof UpdateCommentRequestSchema;
+    output: typeof UpdateCommentResponseSchema;
+  },
+  /**
+   * @generated from rpc lgtm.v1.ReviewService.DeleteComment
+   */
+  deleteComment: {
+    methodKind: "unary";
+    input: typeof DeleteCommentRequestSchema;
+    output: typeof DeleteCommentResponseSchema;
+  },
+  /**
+   * @generated from rpc lgtm.v1.ReviewService.SetFileReviewed
+   */
+  setFileReviewed: {
+    methodKind: "unary";
+    input: typeof SetFileReviewedRequestSchema;
+    output: typeof SetFileReviewedResponseSchema;
+  },
   /**
    * @generated from rpc lgtm.v1.ReviewService.HelloReview
    */

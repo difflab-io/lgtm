@@ -8,7 +8,7 @@ monorepo_root = true
 LC_ALL = "{% if os() == 'macos' %}en_US.UTF-8{% else %}C.UTF-8{% endif %}"
 
 [monorepo]
-config_roots = ["apps/*", "libs/*", "e2e/backend", "e2e/cli", "e2e/nvim"]
+config_roots = ["apps/*", "libs/*", "e2e/forge", "e2e/cli", "e2e/nvim"]
 
 [tools]
 buf = "1.73.0"
@@ -49,7 +49,7 @@ alias = "dev:cli"
 run = "cargo run -p lgtm-cli --bin lgtm --"
 
 [tasks."dev:backend"]
-run = "mise run //apps/lgtm-backend:dev"
+run = "mise run //apps/lgtm-forge:dev"
 
 [tasks."dev:web"]
 run = "mise run //apps/lgtm-web:dev"
@@ -71,12 +71,13 @@ run = "cargo publish -p lgtm-cli --locked"
 
 [tasks.dev]
 description = "Run the backend watcher and web development server together"
-depends = ["//apps/lgtm-backend:dev", "//apps/lgtm-web:dev"]
+depends = ["//apps/lgtm-forge:dev", "//apps/lgtm-web:dev"]
 
-[tasks."e2e:backend"]
-description = "Run backend E2E tests"
+[tasks."e2e:forge"]
+description = "Run forge E2E tests"
+alias = "e2e:backend"
 usage = 'flag "--extended" help="Include extended tests"'
-run = 'LGTM_E2E_EXTENDED="${usage_extended:-false}" mise run //e2e/backend:test'
+run = 'LGTM_E2E_EXTENDED="${usage_extended:-false}" mise run //e2e/forge:test'
 
 [tasks."e2e:cli"]
 description = "Run cli E2E tests"
@@ -102,7 +103,7 @@ export LGTM_E2E_EXTENDED="${usage_extended:-false}"
 if [ "$LGTM_E2E_EXTENDED" = true ]; then
   export LGTM_E2E_NVIM_PROFILES="${LGTM_E2E_NVIM_PROFILES:-required,kak}"
 fi
-mise run --continue-on-error //:e2e:fixtures:test ::: //e2e/backend:test ::: //e2e/cli:test ::: //e2e/nvim:test
+mise run --continue-on-error //:e2e:fixtures:test ::: //e2e/forge:test ::: //e2e/cli:test ::: //e2e/nvim:test
 '''
 
 [tasks."nvim:lint"]
@@ -126,16 +127,16 @@ depends = ["//apps/lgtm.nvim:format:check"]
 depends = ["//apps/lgtm.nvim:test"]
 
 [tasks."e2e:format"]
-run = "bun x prettier --write 'e2e/{common,backend,cli,nvim}/**/*.ts' e2e/tsconfig.json"
+run = "bun x prettier --write 'e2e/{common,forge,cli,nvim}/**/*.ts' e2e/tsconfig.json"
 
 [tasks."e2e:format:check"]
-run = "bun x prettier --check 'e2e/{common,backend,cli,nvim}/**/*.ts' e2e/tsconfig.json"
+run = "bun x prettier --check 'e2e/{common,forge,cli,nvim}/**/*.ts' e2e/tsconfig.json"
 
 [tasks."e2e:typecheck"]
 run = "bun x tsc -p e2e/tsconfig.json"
 
 [tasks."e2e:lint"]
-run = "bun x eslint e2e/common e2e/backend e2e/cli e2e/nvim"
+run = "bun x eslint e2e/common e2e/forge e2e/cli e2e/nvim"
 
 [tasks."e2e:nvim:run"]
 description = "Run editor journeys against existing binaries without rebuilding"
@@ -143,19 +144,20 @@ run = "bun x vitest run --config e2e/nvim/vitest.config.ts"
 
 [tasks."e2e:list"]
 description = "List local BDD journeys without running them"
-depends = ["//e2e/backend:list", "//e2e/cli:list", "//e2e/nvim:list"]
+depends = ["//e2e/forge:list", "//e2e/cli:list", "//e2e/nvim:list"]
 
-[tasks."e2e:backend:run"]
-description = "Run backend journeys against existing binaries without rebuilding"
-run = "bun x vitest run --config e2e/backend/vitest.config.ts"
+[tasks."e2e:forge:run"]
+description = "Run forge journeys against existing binaries without rebuilding"
+alias = "e2e:backend:run"
+run = "bun x vitest run --config e2e/forge/vitest.config.ts"
 
 [tasks."e2e:cli:run"]
 description = "Run CLI journeys against existing binaries without rebuilding"
 run = "bun x vitest run --config e2e/cli/vitest.config.ts"
 
 [tasks."e2e:smoke"]
-description = "Run representative E2E flows across backend, CLI and Neovim"
-run = "mise run --continue-on-error //e2e/backend:smoke ::: //e2e/cli:smoke ::: //e2e/nvim:smoke"
+description = "Run representative E2E flows across forge, CLI and Neovim"
+run = "mise run --continue-on-error //e2e/forge:smoke ::: //e2e/cli:smoke ::: //e2e/nvim:smoke"
 
 [tasks."e2e:fixtures:test"]
 description = "Verify strict HTTP replay, UUID binding and mutation barriers without GitHub"

@@ -32,12 +32,17 @@ lgtm review list --json
 ## Git and GitHub reviews
 
 ```text
+lgtm add <paths>... [--local]
 lgtm commit [--as <agent-name>] [--local] [-m <message>]
 lgtm push [--local]
-lgtm review list [--local]
+lgtm review list [--local] [--all]
 lgtm review new [--local]
-lgtm review close <review-id> --with <comment|reject|approve|request> [--body <text>]
-lgtm comment <body> [--review <review-id>] [--local] [--as <agent-name>]
+lgtm review refresh [<review-id-or-name>] [--local]
+lgtm review show [<review-id-or-name>] [--local] [--group-by <file|session>] [--unresolved]
+lgtm review close [<review-id-or-name>] --with <comment|reject|approve|request> [--body <text>]
+lgtm comment new <body> [--review <review-id-or-name>] [--file <path>] [--line <line>] [--reply-to <comment-id>] [--local] [--as <agent-name>]
+lgtm comment update <comment-id> [--body <text>] [--file <path>] [--line <line>] [--local] [--as <agent-name>]
+lgtm comment delete <comment-id> [--local] [--as <agent-name>]
 ```
 
 Apart from the list demonstration, these commands return a clear unimplemented error and a nonzero exit status. They do not create commits, push branches, save reviews or publish comments, with or without `--local`. The intended local boundary leaves checkout files, index, HEAD, refs and the upstream forge untouched. This reset does not yet implement LGTM-managed Git storage or isolated agent workspaces.

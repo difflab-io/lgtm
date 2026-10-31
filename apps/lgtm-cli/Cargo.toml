@@ -13,23 +13,38 @@ license = "Apache-2.0"
 name = "lgtm"
 path = "src/main.rs"
 
+[features]
+default = ["sqlite"]
+sqlite = ["sea-orm/sqlx-sqlite", "sea-orm-migration/sqlx-sqlite"]
+postgres = ["sea-orm/sqlx-postgres", "sea-orm-migration/sqlx-postgres"]
+
 [dependencies]
-thiserror = "2"
 anyhow = "1.0.104"
-clap = { version = "4.6.6", features = ["derive"] }
+async-trait = "0.1"
 axum = { version = "0.8", features = ["http2"] }
 buffa = { version = "0.9", features = ["json"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+clap = { version = "4.6.6", features = ["derive"] }
 connectrpc = { version = "0.9.1", default-features = false, features = ["server", "json", "axum", "client"] }
 connectrpc-health = { version = "0.9.0", default-features = false }
 dirs = "6"
 fs2 = "0.4"
+gix = { version = "0.70", default-features = false, features = ["basic", "index", "worktree-mutation"] }
+octocrab = { version = "0.44", default-features = false, features = ["default-client", "rustls", "rustls-ring"] }
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
+sea-orm = { version = "=2.0.4", default-features = false, features = ["macros", "runtime-tokio-rustls", "with-uuid", "with-chrono", "with-json"] }
+sea-orm-migration = { version = "=2.0.4", default-features = false, features = ["runtime-tokio-rustls", "with-uuid", "with-chrono", "with-json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
+similar = "2"
+thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "process"] }
 tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
 webbrowser = "1"
 
 [target.'cfg(unix)'.dependencies]

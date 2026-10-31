@@ -1,13 +1,13 @@
 #!/usr/bin/env bun
 //MISE description="Bundle the private backend and web UI into the publishable CLI"
-//MISE depends=["//apps/lgtm-backend:build", "//apps/lgtm-web:build"]
+//MISE depends=["//apps/lgtm-forge:build", "//apps/lgtm-web:build"]
 
 import { cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 const cli = process.cwd()
 const root = resolve(cli, '../..')
-const result = Bun.spawnSync(['cargo', 'build', '-p', 'lgtm-backend', '--message-format=json'], {
+const result = Bun.spawnSync(['cargo', 'build', '-p', 'lgtm-forge', '--message-format=json'], {
   cwd: root,
   stdout: 'pipe',
   stderr: 'inherit',
@@ -20,7 +20,7 @@ const messages = result.stdout
   .map((line) => JSON.parse(line))
 const generated = messages.find(
   (message) =>
-    message.reason === 'build-script-executed' && message.package_id.includes('lgtm-backend'),
+    message.reason === 'build-script-executed' && message.package_id.includes('lgtm-forge'),
 )?.out_dir
 if (!generated) throw new Error('Backend did not report generated Protobuf output')
 
@@ -48,7 +48,7 @@ async function bundleRust(sourceDir, targetDir, crateRoot) {
     }
   }
 }
-await bundleRust(join(root, 'apps/lgtm-backend/src'), join(stage, 'backend'), 'crate::backend')
+await bundleRust(join(root, 'apps/lgtm-forge/src'), join(stage, 'backend'), 'crate::backend')
 await bundleRust(join(root, 'libs/lgtm-db/src'), join(stage, 'backend/database'), 'crate::backend::database')
 const formatted = Bun.spawnSync(
   ['rustfmt', '--edition', '2024', join(stage, 'backend/mod.rs')],
@@ -61,7 +61,7 @@ await cp(join(root, 'apps/lgtm-web/build'), join(stage, 'web'), { recursive: tru
 await readFile(join(stage, 'web/index.html'))
 await writeFile(
   join(stage, 'README.md'),
-  'Generated from lgtm-backend and lgtm-web by the CLI bundle task.\n',
+  'Generated from lgtm-forge and lgtm-web by the CLI bundle task.\n',
 )
 await rm(join(cli, 'bundle'), { recursive: true, force: true })
 await rename(stage, join(cli, 'bundle'))

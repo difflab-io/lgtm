@@ -23,6 +23,8 @@ enum Command {
     Down,
     /// Show whether the server is running.
     Status,
+    /// Stage paths for LGTM storage (not implemented yet).
+    Add(commands::add::AddArgs),
     /// Capture work in LGTM storage (not implemented yet).
     Commit(commands::commit::CommitArgs),
     /// Publish work (not implemented yet).
@@ -104,6 +106,7 @@ fn run() -> anyhow::Result<()> {
         Command::Up(_) => "up",
         Command::Down => "down",
         Command::Status => "status",
+        Command::Add(_) => "add",
         Command::Review(_) => "review",
         Command::Commit(_) => "commit",
         Command::Push(_) => "push",
@@ -120,6 +123,7 @@ fn run() -> anyhow::Result<()> {
                 Command::Up(options) => daemon::up(options.port, !options.no_open, &store).await,
                 Command::Down => daemon::down(&store).await,
                 Command::Status => daemon::status(&store, cli.json).await,
+                Command::Add(args) => commands::add::run(args),
                 Command::Review(args) => commands::review::run(args, &store, cli.json).await,
                 Command::Commit(args) => commands::commit::run(args),
                 Command::Push(args) => commands::push::run(args),

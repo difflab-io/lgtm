@@ -6,7 +6,7 @@ The active TypeScript/Vitest suites check the hello-review skeleton, CLI command
 
 | Suite | Behavior | Command |
 | --- | --- | --- |
-| Backend | Real hello-review RPC, name normalization, removed RPC rejection and existing DB file preservation | `premise run e2e:backend` |
+| Forge | Real hello-review RPC, name normalization, removed RPC rejection and existing DB file preservation | `premise run e2e:forge` |
 | CLI | Real hello-review demo, command parsing, harmless unimplemented operations, UI/daemon serving and shutdown | `premise run e2e:cli` |
 | Neovim | Shell loading, Lua/Ex/key control, diagnostics and package-manager setup | `premise run e2e:nvim` |
 | Replay infrastructure | Strict HTTP snapshots, UUID binding, ordered mutation barriers, recording safety and retained Git reconstruction | `premise run e2e:fixtures:test` |
@@ -28,7 +28,7 @@ e2e/
 │   ├── pr.fixtures.ts            # Reusable future provider journey setup
 │   ├── record.ts                 # Guard until recordable journeys return
 │   └── test-harness.ts            # Real application processes, RPC, CLI and Git
-├── backend/hello-review.spec.ts
+├── forge/hello-review.spec.ts
 ├── cli/
 │   ├── commands.spec.ts
 │   └── daemon.spec.ts
@@ -59,7 +59,7 @@ premise run e2e:format:check
 Suite tasks build their required binaries; after building, use the `:run` tasks for narrower checks:
 
 ```sh
-premise run e2e:backend:run -- hello-review.spec.ts
+premise run e2e:forge:run -- hello-review.spec.ts
 premise run e2e:cli:run -- commands.spec.ts
 premise run e2e:nvim:run -- editor.spec.ts --tags-filter=required
 ```
@@ -89,7 +89,7 @@ Editor preflight checks dependency loading and a native CodeDiff operation; the 
 The `e2e:record` entry point remains, but it currently exits with a clear “no recordable journeys” message before credentials or remote writes because no provider journey is active:
 
 ```sh
-premise run e2e:record -- backend
+premise run e2e:record -- forge
 ```
 
 When replacement provider journeys are added, compose `common/pr.fixtures.ts` with the shared runtime and re-enable this entry point for eligible suites; do not repurpose historical cassettes as hello-review fixtures.

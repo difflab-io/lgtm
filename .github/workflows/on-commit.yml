@@ -49,7 +49,7 @@ jobs:
   single:
     needs: plan
     if: needs.plan.outputs.mode == 'single'
-    runs-on: ${{ needs.plan.outputs.runner }}
+    runs-on: ${{ (needs.plan.outputs.runner == 'macos-14' && 'macos-latest') || needs.plan.outputs.runner }}
     permissions:
       contents: read
     steps:
@@ -81,7 +81,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
-    runs-on: ${{ matrix.runner || needs.plan.outputs.runner }}
+    runs-on: ${{ (matrix.runner == 'macos-14' && 'macos-latest') || matrix.runner || (needs.plan.outputs.runner == 'macos-14' && 'macos-latest') || needs.plan.outputs.runner }}
     permissions:
       contents: read
     steps:
