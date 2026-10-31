@@ -12,6 +12,7 @@ export function suiteConfig(
         ...[
           'e2e',
           'smoke',
+          'forge',
           'backend',
           'cli',
           'nvim',

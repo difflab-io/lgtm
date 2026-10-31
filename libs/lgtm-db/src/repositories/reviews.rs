@@ -426,6 +426,7 @@ impl<C: ConnectionTrait> ReviewsRepository<C> {
         Ok(candidate)
     }
 
+    // TODO: Move shared branch sanitization and git naming helpers into general git utilities outside lgtm-db so lgtm-forge can reuse them.
     fn sanitize_branch(branch: &str) -> String {
         let mut sanitized = String::with_capacity(branch.len());
         let mut prev_dash = false;

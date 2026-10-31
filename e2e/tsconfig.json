@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "resolveJsonModule": true
   },
-  "include": ["common/**/*.ts", "backend/**/*.ts", "cli/**/*.ts", "nvim/**/*.ts"]
+  "include": ["common/**/*.ts", "forge/**/*.ts", "cli/**/*.ts", "nvim/**/*.ts"]
 }

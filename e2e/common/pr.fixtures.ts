@@ -6,7 +6,7 @@ import { useTestHarness } from './fixtures.js'
 import { ROOT } from './test-harness.js'
 
 /** Live groups share run-owned resources; each replay/record cassette covers one whole test. */
-export function usePrFixture(kind: 'backend' | 'cli') {
+export function usePrFixture(kind: 'forge' | 'backend' | 'cli') {
   let github: GithubFixture | undefined
   const fixtures: GithubFixture[] = []
   let merged = false

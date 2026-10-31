@@ -1,0 +1,28 @@
+[tasks.test]
+depends = ["//apps/lgtm-forge:build"]
+description = "Readable TypeScript forge E2E journeys"
+dir = "{{config_root}}/../.."
+run = "bun x vitest run --config e2e/forge/vitest.config.ts"
+
+[tasks.lint]
+dir = "{{config_root}}/../.."
+run = "bun x eslint e2e/forge e2e/common"
+
+[tasks.format]
+dir = "{{config_root}}/../.."
+run = "bun x prettier --write e2e/forge/**/*.ts e2e/common/**/*.ts"
+
+[tasks."format:check"]
+dir = "{{config_root}}/../.."
+run = "bun x prettier --check e2e/forge/**/*.ts e2e/common/**/*.ts"
+
+[tasks.list]
+description = "List the forge BDD journeys without running them"
+dir = "{{config_root}}/../.."
+run = "bun x vitest list --config e2e/forge/vitest.config.ts"
+
+[tasks.smoke]
+depends = ["//apps/lgtm-forge:build"]
+description = "Run representative forge E2E flows for local iteration"
+dir = "{{config_root}}/../.."
+run = "bun x vitest run --config e2e/forge/vitest.config.ts --tags-filter=smoke --hideSkippedTests"

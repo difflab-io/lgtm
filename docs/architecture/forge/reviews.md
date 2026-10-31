@@ -178,6 +178,6 @@ Integration/E2E checks cover name normalization, real CLI/browser RPC calls and 
 
 ## References
 
-- [Backend](index.md).
-- [Dummy DB](../db/index.md).
+- [Forge](index.md).
+- [Database](../db/index.md).
 - [CLI usage](../../../apps/lgtm-cli/README.md).

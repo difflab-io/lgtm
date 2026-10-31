@@ -58,7 +58,7 @@ NA/WIP. The skeleton has no persisted review or diff API.
 
 ### Interfaces and Contracts
 
-`ReviewService.HelloReview` accepts a name and returns `Hello, {name}!`, trimming whitespace and defaulting an empty name to `World`. The CLI labels list output as demo data; unsupported domain commands fail explicitly. See [review contract](backend/reviews.md) and [CLI contracts](cli/index.md#interfaces-and-contracts).
+`ReviewService.HelloReview` accepts a name and returns `Hello, {name}!`, trimming whitespace and defaulting an empty name to `World`. The CLI labels list output as demo data; unsupported domain commands fail explicitly. See [review contract](forge/reviews.md) and [CLI contracts](cli/index.md#interfaces-and-contracts).
 
 ## Implementation
 
@@ -157,8 +157,7 @@ The installed CLI serves backend RPCs and embedded frontend assets in one proces
 
 - [Neovim user guide](../user-guide.md).
 - [Forge architecture](forge/index.md).
-- [Backend architecture](backend/index.md).
-- [Review RPC architecture](backend/reviews.md).
+- [Review RPC architecture](forge/reviews.md).
 - [Database architecture](db/index.md).
 - [CLI architecture](cli/index.md).
 - [Editor setup and usage](../../apps/lgtm.nvim/README.md).

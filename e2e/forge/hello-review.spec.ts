@@ -1,6 +1,6 @@
 /**
  * @module-tag e2e
- * @module-tag backend
+ * @module-tag forge
  */
 import { describe, it, expect } from 'vitest'
 import { readdir, writeFile, readFile } from 'node:fs/promises'
@@ -8,10 +8,10 @@ import { join } from 'node:path'
 import { useTestHarness } from '../common/fixtures.js'
 
 describe(
-  'When calling the hello-review backend',
-  { tags: ['e2e', 'backend', 'hello-review'] },
+  'When calling the hello-review forge service',
+  { tags: ['e2e', 'forge', 'hello-review'] },
   () => {
-    const fixture = useTestHarness('backend')
+    const fixture = useTestHarness('forge')
 
     it('should_return_a_greeting_for_the_supplied_name', { tags: ['smoke'] }, async () => {
       // Arrange

@@ -5,6 +5,7 @@
 - Keep backend domain models in `apps/lgtm-forge/src/models/`, services in `src/services/`, and application errors in `src/error.rs`.
 - Put general helpers in `src/utils.rs`. Keep forge import contracts in `src/forge/models.rs` and review export behavior with its domain model. Domain models represent application entities.
 - Keep database entities private; expose actual SeaORM models and the repositories required by backend workflows. Shared SeaORM entity types belong in `libs/lgtm-db/src/entities/common.rs`.
+- [Proposed] Name architecture documentation and E2E suite directories for `lgtm-forge` as `forge` (`docs/architecture/forge/` and `e2e/forge/`) rather than `backend`.
 
 - [Proposed] Preserve the Neovim development/release plugin installation tasks when resetting plugin features.
 - Preserve pinned Neovim dependencies in the existing plugin setup, source-switch installer and E2E setup, including NuiComponents/NUI and optional Kak, when resetting plugin features.

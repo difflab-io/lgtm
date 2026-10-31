@@ -61,7 +61,7 @@ export class TestHarness {
     readonly directory: string,
     readonly home: string,
     readonly workspace: string,
-    readonly kind: 'backend' | 'cli',
+    readonly kind: 'forge' | 'backend' | 'cli',
   ) {
     this.env = isolatedEnv(home)
     this.env.GIT_CEILING_DIRECTORIES = directory
@@ -181,7 +181,7 @@ export class TestHarness {
     else await rm(this.directory, { recursive: true, force: true })
   }
 
-  static async create(kind: 'backend' | 'cli' = 'backend', env: NodeJS.ProcessEnv = {}) {
+  static async create(kind: 'forge' | 'backend' | 'cli' = 'forge', env: NodeJS.ProcessEnv = {}) {
     const parent = join(ROOT, 'target/e2e', kind)
     await mkdir(parent, { recursive: true })
     const directory = await mkdtemp(join(parent, 'journey-'))

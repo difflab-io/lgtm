@@ -2,7 +2,7 @@
 
 ## Overview
 
-`lgtm-forge` is the application and RPC server behind the LGTM CLI and web interface. It acts as both a local review forge backed by a `gitoxide`-managed Git snapshot repository in `~/.lgtm/snapshots/$repoSlug` and a near real-time proxy to GitHub pull requests via `octocrab`, syncing remote draft sessions and comments immediately while persisting reviews, sessions, comments, and human or agent identities in `lgtm-db`.
+`lgtm-forge` is the application and RPC server behind the LGTM CLI and web interface. It acts as both a local review engine backed by `SnapshotStore` (managing `~/.lgtm/snapshots/$repoSlug` through general local Git operations in `extensions::gitoxide`) and a near real-time pull request proxy through the `RemoteForge` trait (`GitHubForge` backed by `extensions::octocrab` today, extensible to GitLab and other forges), syncing remote draft sessions and comments immediately while persisting reviews, sessions, comments, and human or agent identities in `lgtm-db`.
 
 ## Requirement
 
@@ -227,11 +227,13 @@ client
 ### Components and Responsibilities
 
 - `rpc/review.rs`: Connect RPC handlers that establish request tracing spans, decode Protobuf requests, call `ReviewService`, and convert domain models into Protobuf responses.
-- `services/review.rs` (`ReviewService`): Orchestrates workflows across `lgtm-db`, `extensions::gitoxide`, and `extensions::octocrab`.
+- `services/review.rs` (`ReviewService`): Orchestrates workflows across `lgtm-db`, `SnapshotStore`, `extensions::gitoxide`, and the `RemoteForge` facade.
 - `models/`: Domain entities (`Review`, `ReviewContext`, `Session`, `Comment`, `Identity`, `DiffHunk`) that own validation, `from_*` / `into_*` conversions, and agent disclosure formatting.
-- `forge/models.rs`: Import contracts for remote GitHub pull requests, reviews, and review comments.
-- `extensions/gitoxide.rs`: Stateless adapter around `gix` that manages `~/.lgtm/snapshots/$repoSlug`, creates shadow tree/commit objects from the working tree, extracts inline unified diff hunks, and maps line anchors across commits.
-- `extensions/octocrab.rs`: Stateless adapter around `octocrab` that fetches GitHub PRs, review threads, and comments, and submits PR review batches and comment mutations.
+- `snapshots.rs` (`SnapshotStore`): Concrete local snapshot manager that owns the `~/.lgtm/snapshots/$repoSlug` layout and `refs/lgtm/snapshots/<branch>` lifecycle, delegating general Git object, index, diff, and line-remapping operations to `extensions::gitoxide`.
+- `forge/mod.rs` and `forge/github.rs` (`RemoteForge`, `GitHubForge`): Provider-agnostic remote forge trait and GitHub implementation (wrapping `extensions::octocrab`, extensible to GitLab and dummy test doubles) for pulling PR/MR bundles, syncing draft comments, toggling viewed-file states, and submitting reviews.
+- `forge/models.rs`: Provider-neutral import/export contracts for remote pull requests, review sessions, and review comments.
+- `extensions/gitoxide.rs`: General, stateless adapter around `gix` for inspecting and manipulating any local Git repository (reading repo context, staging paths, creating commits, pushing branches, computing unified diff hunks, and remapping line anchors across commits).
+- `extensions/octocrab.rs`: Stateless adapter around `octocrab` that executes GitHub REST and GraphQL requests for pull requests, review threads, comments, and viewed-file mutations.
 - `lgtm-db`: Transactional persistence for `identities`, `reviews`, `sessions`, and `comments`.
 
 ```mermaid
@@ -240,10 +242,13 @@ flowchart TD
     RPC --> SERVICE["services::ReviewService"]
     SERVICE --> MODELS["models::* (Review, Session, Comment, Identity, DiffHunk)"]
     SERVICE --> DB["lgtm-db (SQLite / PostgreSQL)"]
+    SERVICE --> SNAPSHOT_STORE["snapshots::SnapshotStore"]
     SERVICE --> GITOXIDE["extensions::gitoxide"]
-    SERVICE --> OCTOCRAB["extensions::octocrab"]
-    GITOXIDE --> SNAPSHOT["Local Snapshot Repo (~/.lgtm/snapshots/$repoSlug)"]
+    SERVICE --> REMOTE_FORGE["forge::RemoteForge (GitHubForge / GitLabForge)"]
+    SNAPSHOT_STORE --> GITOXIDE
+    SNAPSHOT_STORE --> SNAPSHOT["Local Snapshot Repo (~/.lgtm/snapshots/$repoSlug)"]
     GITOXIDE --> CHECKOUT["Working Checkout (.git & worktree)"]
+    REMOTE_FORGE --> OCTOCRAB["extensions::octocrab"]
     OCTOCRAB --> GITHUB["GitHub API (PRs, Reviews, Comments)"]
 ```
 
@@ -251,251 +256,269 @@ flowchart TD
 
 #### Local staging and shadow commit (`Add --local`, `Commit --local`)
 
-When `local = true`, `lgtm-forge` reads the requested worktree paths from `git_dir` and writes blobs, a shadow index, and a shadow commit directly into `~/.lgtm/snapshots/$repoSlug` (`refs/lgtm/snapshots/<branch>`) via `extensions::gitoxide`, leaving the working checkout untouched.
+When `local = true`, `lgtm-forge` delegates to `SnapshotStore`, which reads the requested worktree paths from `git_dir` and writes blobs, a shadow index, and a shadow commit directly into `~/.lgtm/snapshots/$repoSlug` (`refs/lgtm/snapshots/<branch>`) via `extensions::gitoxide`, leaving the working checkout untouched.
 
 ```mermaid
 sequenceDiagram
     actor Caller as CLI (add / commit --local)
-    participant Forge as lgtm-forge (ReviewService)
+    participant Service as lgtm-forge (ReviewService)
+    participant SnapStore as snapshots::SnapshotStore
     participant Gix as extensions::gitoxide
     participant Checkout as Working Checkout (.git)
     participant Snapshot as Snapshot Repo (~/.lgtm/snapshots/$repoSlug)
     participant DB as lgtm-db
 
-    Caller->>Forge: Add(git_dir, paths, local=true)
-    Forge->>Gix: stage_snapshot_paths(git_dir, snapshot_dir, paths)
+    Caller->>Service: Add(git_dir, paths, local=true)
+    Service->>SnapStore: stage_paths(git_dir, paths)
+    SnapStore->>Gix: stage_worktree_to_index(git_dir, snapshot_dir, paths)
     Gix->>Checkout: Read working tree files (read-only)
     Gix->>Snapshot: Write blobs & update shadow index
-    Forge-->>Caller: AddResponse (staged paths)
+    Service-->>Caller: AddResponse (staged paths)
 
-    Caller->>Forge: Commit(git_dir, message, as_agent, local=true)
+    Caller->>Service: Commit(git_dir, message, as_agent, local=true)
     opt as_agent is present
-        Forge->>DB: identities().upsert_agent(...)
+        Service->>DB: identities.upsert_agent(...)
     end
-    Forge->>Gix: create_shadow_commit(git_dir, snapshot_dir, message, author)
+    Service->>SnapStore: commit(git_dir, message, author)
+    SnapStore->>Gix: create_commit_on_ref(snapshot_dir, refs/lgtm/snapshots/<branch>, message, author)
     Gix->>Snapshot: Write tree & commit to refs/lgtm/snapshots/<branch>
-    Forge-->>Caller: CommitResponse (shadow head_sha)
+    Service-->>Caller: CommitResponse (shadow head_sha)
 ```
 
 #### Remote-tracked staging, commit, and push (`Add`, `Commit`, `Push`)
 
-When `local = false`, `lgtm-forge` stages and commits in the working checkout (recording `--as <agent-name>` in `lgtm-db` and commit trailers when specified), mirrors the committed branch tip into `~/.lgtm/snapshots/$repoSlug`, and pushes committed history to the remote repository on `Push`.
+When `local = false`, `lgtm-forge` stages and commits in the working checkout via `extensions::gitoxide` (recording `--as <agent-name>` in `lgtm-db` and commit trailers when specified), mirrors the committed branch tip into `SnapshotStore` (`~/.lgtm/snapshots/$repoSlug`), and pushes committed history to the remote repository on `Push`.
 
 ```mermaid
 sequenceDiagram
     actor Caller as CLI (add / commit / push)
-    participant Forge as lgtm-forge (ReviewService)
+    participant Service as lgtm-forge (ReviewService)
+    participant SnapStore as snapshots::SnapshotStore
     participant Gix as extensions::gitoxide
     participant Checkout as Working Checkout (.git)
     participant Snapshot as Snapshot Repo (~/.lgtm/snapshots/$repoSlug)
     participant DB as lgtm-db
-    participant GH as Remote Git (GitHub)
+    participant GH as Remote Git (Origin)
 
-    Caller->>Forge: Add(git_dir, paths, local=false)
-    Forge->>Gix: stage_checkout_paths(git_dir, paths)
+    Caller->>Service: Add(git_dir, paths, local=false)
+    Service->>Gix: stage_paths(git_dir, paths)
     Gix->>Checkout: Update .git/index
-    Forge-->>Caller: AddResponse
+    Service-->>Caller: AddResponse
 
-    Caller->>Forge: Commit(git_dir, message, as_agent, local=false)
+    Caller->>Service: Commit(git_dir, message, as_agent, local=false)
     opt as_agent is present
-        Forge->>DB: identities().upsert_agent(...)
+        Service->>DB: identities.upsert_agent(...)
     end
-    Forge->>Gix: commit_checkout_and_mirror(git_dir, snapshot_dir, message, author)
+    Service->>Gix: create_commit(git_dir, message, author)
     Gix->>Checkout: Create commit on current branch
+    Service->>SnapStore: mirror_branch_commit(git_dir, commit_sha)
+    SnapStore->>Gix: fetch_objects(git_dir, snapshot_dir, commit_sha)
     Gix->>Snapshot: Mirror branch commit to refs/lgtm/heads/<branch>
-    Forge-->>Caller: CommitResponse (commit_sha)
+    Service-->>Caller: CommitResponse (commit_sha)
 
-    Caller->>Forge: Push(git_dir, local=false)
-    Forge->>Gix: push_branch(git_dir, branch)
+    Caller->>Service: Push(git_dir, local=false)
+    Service->>Gix: push_branch(git_dir, branch)
     Gix->>GH: Push committed history to origin/<branch>
-    Forge-->>Caller: PushResponse
+    Service-->>Caller: PushResponse
 ```
 
 #### Creating and refreshing a local review (`CreateReview --local`, `RefreshReview --local`)
 
-For a `Local` review, `lgtm-forge` snapshots any pending worktree changes into `~/.lgtm/snapshots/$repoSlug` and records `base_sha` (branch base) and `head_sha` (shadow commit) in `lgtm-db`. When new worktree changes or shadow commits happen mid-flight during an open review, `RefreshReview` diffs `old_head_sha..new_head_sha` via `extensions::gitoxide::recompute_anchors`, shifts surviving line numbers to `new_head_sha`, and marks overwritten anchors `outdated = true` while preserving their `original_line` and `original_commit_sha`.
+For a `Local` review, `lgtm-forge` uses `SnapshotStore` to snapshot any pending worktree changes into `~/.lgtm/snapshots/$repoSlug` and records `base_sha` (branch base) and `head_sha` (shadow commit) in `lgtm-db`. When new worktree changes or shadow commits happen mid-flight during an open review, `RefreshReview` diffs `old_head_sha..new_head_sha` in `SnapshotStore` via `extensions::gitoxide::recompute_anchors`, shifts surviving line numbers to `new_head_sha`, and marks overwritten anchors `outdated = true` while preserving their `original_line` and `original_commit_sha`.
 
 ```mermaid
 sequenceDiagram
     actor Caller as CLI (review new / refresh --local)
-    participant Forge as lgtm-forge (ReviewService)
+    participant Service as lgtm-forge (ReviewService)
+    participant SnapStore as snapshots::SnapshotStore
     participant Gix as extensions::gitoxide
     participant Snapshot as Snapshot Repo (~/.lgtm/snapshots/$repoSlug)
     participant DB as lgtm-db
 
-    Caller->>Forge: CreateReview / RefreshReview (local=true)
-    Forge->>Gix: ensure_snapshot(git_dir, snapshot_dir)
+    Caller->>Service: CreateReview / RefreshReview (local=true)
+    Service->>SnapStore: ensure_snapshot(git_dir)
+    SnapStore->>Gix: snapshot_worktree(git_dir, snapshot_dir)
     Gix->>Snapshot: Snapshot unstaged/staged changes -> (base_sha, new_head_sha)
     alt New local review (CreateReview)
-        Forge->>DB: transaction: create_local_review + get_or_create_draft_session
+        Service->>DB: transaction: create_local_review + get_or_create_draft_session
     else Mid-flight changes on existing review (RefreshReview)
-        Forge->>DB: comments().get_comments_by_review(review.id, false)
-        Forge->>Gix: recompute_anchors(snapshot_dir, old_head_sha, new_head_sha, comments)
+        Service->>DB: comments.get_comments_by_review(review.id, viewer_id)
+        Service->>SnapStore: recompute_anchors(git_dir, old_head_sha, new_head_sha, comments)
+        SnapStore->>Gix: recompute_anchors(snapshot_dir, old_head_sha, new_head_sha, comments)
         Gix->>Snapshot: Diff old_head_sha..new_head_sha (shift unchanged lines, mark edited lines outdated)
-        Gix-->>Forge: Vec<CommentAnchorUpdate>
-        Forge->>DB: transaction: update_review_commits(new_head_sha) + update_comment_anchors
+        Gix-->>Service: Vec<CommentAnchorShift>
+        Service->>DB: transaction: update_review_commits(new_head_sha) + update_comment_anchors
     end
-    Forge-->>Caller: Review summary (with updated_anchors count)
+    Service-->>Caller: Review summary (with updated_anchors count)
 ```
 
 #### Creating and refreshing a forge-backed review (`CreateReview`, `RefreshReview`)
 
-For a `ForgeBacked` review, `lgtm-forge` first pushes any unsynced local draft comments (`forge_id IS NULL`) to GitHub, then pulls the latest PR commits, published and pending draft review sessions, and remote anchor states into `lgtm-db`, and mirrors the new commit objects into `~/.lgtm/snapshots/$repoSlug`. When new commits have been pushed to the PR mid-flight while a draft session is still open, `lgtm-forge` remaps open draft comments onto the new `head_sha` and syncs their updated positions to the pending review on GitHub.
+For a `ForgeBacked` review, `lgtm-forge` first pushes any unsynced local draft comments (`forge_id IS NULL`) through the `RemoteForge` trait (`GitHubForge` backed by `extensions::octocrab`), then pulls the latest PR commits, published and pending draft review sessions, and remote anchor states into `lgtm-db`, and mirrors the new commit objects into `SnapshotStore` (`~/.lgtm/snapshots/$repoSlug`). When new commits have been pushed to the PR mid-flight while a draft session is still open, `lgtm-forge` remaps open draft comments onto the new `head_sha` via `SnapshotStore` and syncs their updated positions to the pending review through `RemoteForge`.
 
 ```mermaid
 sequenceDiagram
     actor Caller as CLI (review new / refresh)
-    participant Forge as lgtm-forge (ReviewService)
+    participant Service as lgtm-forge (ReviewService)
     participant DB as lgtm-db
-    participant Octo as extensions::octocrab (GitHub)
+    participant Remote as forge::RemoteForge (GitHubForge)
+    participant SnapStore as snapshots::SnapshotStore
     participant Gix as extensions::gitoxide
     participant Snapshot as Snapshot Repo (~/.lgtm/snapshots/$repoSlug)
 
-    Caller->>Forge: CreateReview / RefreshReview (local=false)
+    Caller->>Service: CreateReview / RefreshReview (local=false)
     opt Existing review has unsynced draft comments (forge_id IS NULL)
-        Forge->>DB: comments().get_unsynced_comments_by_review(review.id)
-        Forge->>Octo: sync_pending_draft_comments(repository_url, pr_number, unsynced_comments)
-        Octo-->>Forge: Synced forge_ids
-        Forge->>DB: Record session & comment forge_ids
+        Service->>DB: comments.get_unsynced_comments_by_review(review.id, author_id)
+        Service->>Remote: sync_pending_draft_comments(repository_url, pr_number, unsynced_comments)
+        Remote-->>Service: Synced forge_ids
+        Service->>DB: Record session & comment forge_ids
     end
-    Forge->>Octo: get_pull_request_bundle(repository_url, branch_or_pr)
-    Octo-->>Forge: PullRequest (new_head_sha) + RemoteReviews + RemoteComments
-    Forge->>Gix: mirror_checkout_commits(git_dir, snapshot_dir, new_head_sha)
+    Service->>Remote: get_pull_request_bundle(repository_url, branch_or_pr)
+    Remote-->>Service: PullRequest (new_head_sha) + RemoteReviews + RemoteComments
+    Service->>SnapStore: mirror_checkout_commits(git_dir, new_head_sha)
+    SnapStore->>Gix: fetch_objects(git_dir, snapshot_dir, new_head_sha)
     Gix->>Snapshot: Ensure base_sha & new_head_sha objects exist locally
     opt PR head_sha advanced mid-flight (old_head_sha != new_head_sha)
-        Forge->>Gix: recompute_anchors(snapshot_dir, old_head_sha, new_head_sha, draft_comments)
-        Gix-->>Forge: Shifted or outdated draft comment anchors
-        Forge->>Octo: update_remote_draft_anchors(repository_url, pr_number, shifted_drafts)
+        Service->>SnapStore: recompute_anchors(git_dir, old_head_sha, new_head_sha, draft_comments)
+        SnapStore->>Gix: recompute_anchors(snapshot_dir, old_head_sha, new_head_sha, draft_comments)
+        Gix-->>Service: Shifted or outdated draft comment anchors
+        Service->>Remote: update_remote_draft_anchors(repository_url, pr_number, shifted_drafts)
     end
-    Forge->>DB: transaction: upsert_forge_review + upsert_forge_sessions + upsert_forge_comments + update_comment_anchors
-    Forge-->>Caller: Review summary (with updated_anchors count)
+    Service->>DB: transaction: upsert_forge_review + upsert_forge_session + upsert_forge_comment + update_comment_anchors
+    Service-->>Caller: Review summary (with updated_anchors count)
 ```
 
 #### Showing a review with inline diff hunks (`ShowReview`)
 
-`ShowReview` loads the review, its sessions, and its comments from `lgtm-db`, then extracts inline unified diff hunks (`DiffHunk`) around each comment anchor from `~/.lgtm/snapshots/$repoSlug` via `extensions::gitoxide`.
+`ShowReview` loads the review, its sessions, and its comments from `lgtm-db`, then extracts inline unified diff hunks (`DiffHunk`) around each comment anchor from `SnapshotStore` (`~/.lgtm/snapshots/$repoSlug`) via `extensions::gitoxide`.
 
 ```mermaid
 sequenceDiagram
     actor Caller as CLI (review show)
-    participant Forge as lgtm-forge (ReviewService)
+    participant Service as lgtm-forge (ReviewService)
     participant DB as lgtm-db
+    participant SnapStore as snapshots::SnapshotStore
     participant Gix as extensions::gitoxide
     participant Snapshot as Snapshot Repo (~/.lgtm/snapshots/$repoSlug)
 
-    Caller->>Forge: ShowReview(selector, local, group_by, unresolved_only)
-    Forge->>DB: reviews().get_review_by_selector / get_latest_review_by_branch
-    Forge->>DB: sessions().get_sessions_by_review(review.id)
-    Forge->>DB: comments().get_comments_by_review(review.id, unresolved_only)
-    Forge->>Gix: get_inline_diff_hunks(snapshot_dir, base_sha, head_sha, anchor_locations)
+    Caller->>Service: ShowReview(selector, local, group_by, unresolved_only)
+    Service->>DB: reviews.get_review_by_selector / get_latest_review_by_branch
+    Service->>DB: sessions.get_sessions_by_review(review.id)
+    Service->>DB: comments.get_comments_by_review(review.id, viewer_id)
+    Service->>SnapStore: get_inline_diff_hunks(git_dir, base_sha, head_sha, anchor_locations)
+    SnapStore->>Gix: get_inline_diff_hunks(snapshot_dir, base_sha, head_sha, anchor_locations)
     Gix->>Snapshot: Compute unified inline diff lines around each comment anchor
-    Gix-->>Forge: Vec<DiffHunk>
-    Forge-->>Caller: ShowReviewResponse (Review, Sessions, Comments, DiffHunks)
+    Gix-->>Service: Vec<DiffHunk>
+    Service-->>Caller: ShowReviewResponse (Review, Sessions, Comments, DiffHunks)
 ```
 
 #### Marking and unmarking files as viewed (`SetFileReviewed`)
 
-`SetFileReviewed` records or removes `file_path -> head_sha` in `review.reviewed_files` in `lgtm-db`, and when the review is `ForgeBacked`, syncs the viewed state in near real-time to GitHub (`markFileAsViewed` / `unmarkFileAsViewed`) via `extensions::octocrab`. During `RefreshReview`, any file modified between its recorded `commit_sha` and `new_head_sha` is automatically pruned from `review.reviewed_files`.
+`SetFileReviewed` records or removes `file_path -> head_sha` in `review.reviewed_files` in `lgtm-db`, and when the review is `ForgeBacked`, syncs the viewed state in near real-time to the remote forge via `RemoteForge::set_remote_file_viewed`. During `RefreshReview`, any file modified between its recorded `commit_sha` and `new_head_sha` is automatically pruned from `review.reviewed_files`.
 
 ```mermaid
 sequenceDiagram
     actor Caller as Desktop / Web / Neovim Client
-    participant Forge as lgtm-forge (ReviewService)
+    participant Service as lgtm-forge (ReviewService)
     participant DB as lgtm-db
-    participant Octo as extensions::octocrab (GitHub)
+    participant Remote as forge::RemoteForge (GitHubForge)
 
-    Caller->>Forge: SetFileReviewed(review_selector, file_path, viewed, local)
-    Forge->>DB: reviews.get_review_by_selector / get_latest_review_by_branch
+    Caller->>Service: SetFileReviewed(review_selector, file_path, viewed, local)
+    Service->>DB: reviews.get_review_by_selector / get_latest_review_by_branch
     alt viewed == true
-        Forge->>DB: reviews.mark_file_reviewed(review.id, file_path, review.head_sha)
+        Service->>DB: reviews.mark_file_reviewed(review.id, file_path, review.head_sha)
     else viewed == false
-        Forge->>DB: reviews.unmark_file_reviewed(review.id, file_path)
+        Service->>DB: reviews.unmark_file_reviewed(review.id, file_path)
     end
     opt ReviewKind::ForgeBacked (local == false)
-        Forge->>Octo: set_remote_file_viewed(repository_url, pr_forge_id, file_path, viewed)
-        Octo-->>Forge: Synced viewerViewedState on GitHub
+        Service->>Remote: set_remote_file_viewed(repository_url, pr_forge_id, file_path, viewed)
+        Remote-->>Service: Synced viewerViewedState on remote forge
     end
-    Forge-->>Caller: SetFileReviewedResponse (file_path, viewed, commit_sha)
+    Service-->>Caller: SetFileReviewedResponse (file_path, viewed, commit_sha)
 ```
 
 #### Drafting, updating, and deleting local comments (`CreateComment --local`, `UpdateComment --local`, `DeleteComment --local`)
 
-In local mode (`--local`), creating, updating, or deleting a comment resolves the caller's `Human` or `Agent` identity (`--as`), validates any unified diff line anchor against `~/.lgtm/snapshots/$repoSlug`, and mutates the open `Draft` session in `lgtm-db` without contacting any remote forge.
+In local mode (`--local`), creating, updating, or deleting a comment resolves the caller's `Human` or `Agent` identity (`--as`), validates any unified diff line anchor against `SnapshotStore` (`~/.lgtm/snapshots/$repoSlug`), and mutates the open `Draft` session in `lgtm-db` without contacting any remote forge.
 
 ```mermaid
 sequenceDiagram
     actor Caller as CLI (comment new / update / delete --local)
-    participant Forge as lgtm-forge (ReviewService)
+    participant Service as lgtm-forge (ReviewService)
+    participant SnapStore as snapshots::SnapshotStore
     participant Gix as extensions::gitoxide
     participant Snapshot as Snapshot Repo (~/.lgtm/snapshots/$repoSlug)
     participant DB as lgtm-db
 
     alt Create local comment (lgtm comment new --local)
-        Caller->>Forge: CreateComment(review, body, file_path, line, reply_to, as_agent, local=true)
-        Forge->>DB: Resolve Local Review + Identity (Human or Agent)
+        Caller->>Service: CreateComment(review, body, file_path, line, reply_to, as_agent, local=true)
+        Service->>DB: Resolve Local Review + Identity (Human or Agent)
         opt New root comment on file_path + line
-            Forge->>Gix: validate_diff_line(snapshot_dir, base_sha, head_sha, file_path, line)
+            Service->>SnapStore: validate_diff_line(git_dir, base_sha, head_sha, file_path, line)
+            SnapStore->>Gix: validate_diff_line(snapshot_dir, base_sha, head_sha, file_path, line)
             Gix->>Snapshot: Verify line exists in unified diff
         end
-        Forge->>DB: transaction: get_or_create_draft_session + create_comment
-        DB-->>Forge: Comment (Draft)
-        Forge-->>Caller: CommentResponse
+        Service->>DB: transaction: get_or_create_draft_session + create_comment
+        DB-->>Service: Comment (Draft)
+        Service-->>Caller: CommentResponse
     else Update local comment (lgtm comment update --local)
-        Caller->>Forge: UpdateComment(comment_number, body, file_path, line, as_agent, local=true)
-        Forge->>DB: comments().update_comment(comment_number, patch)
-        DB-->>Forge: Comment
-        Forge-->>Caller: CommentResponse
+        Caller->>Service: UpdateComment(comment_number, body, file_path, line, as_agent, local=true)
+        Service->>DB: comments.update_comment(comment.id, patch)
+        DB-->>Service: Comment
+        Service-->>Caller: CommentResponse
     else Delete local comment (lgtm comment delete --local)
-        Caller->>Forge: DeleteComment(comment_number, as_agent, local=true)
-        Forge->>DB: comments().delete_comment(comment_number)
-        DB-->>Forge: deleted_number
-        Forge-->>Caller: DeleteCommentResponse
+        Caller->>Service: DeleteComment(comment_number, as_agent, local=true)
+        Service->>DB: comments.delete_comment(comment.id)
+        DB-->>Service: deleted_number
+        Service-->>Caller: DeleteCommentResponse
     end
 ```
 
 #### Drafting, updating, and deleting remote comments (`CreateComment`, `UpdateComment`, `DeleteComment`)
 
-For a `ForgeBacked` review, `lgtm-forge` saves draft comments in `lgtm-db` first so work is never lost on a network failure, then syncs the change in near real-time to the pending review on GitHub via `extensions::octocrab` and records the resulting `forge_id` in `lgtm-db`.
+For a `ForgeBacked` review, `lgtm-forge` saves draft comments in `lgtm-db` first so work is never lost on a network failure, then syncs the change in near real-time to the pending review on the remote forge via `RemoteForge` (`GitHubForge` backed by `extensions::octocrab`) and records the resulting `forge_id` in `lgtm-db`.
 
 ```mermaid
 sequenceDiagram
     actor Caller as CLI (comment new / update / delete)
-    participant Forge as lgtm-forge (ReviewService)
+    participant Service as lgtm-forge (ReviewService)
+    participant SnapStore as snapshots::SnapshotStore
     participant Gix as extensions::gitoxide
     participant Snapshot as Snapshot Repo (~/.lgtm/snapshots/$repoSlug)
     participant DB as lgtm-db
-    participant Octo as extensions::octocrab (GitHub)
+    participant Remote as forge::RemoteForge (GitHubForge)
 
     alt Create remote draft comment (lgtm comment new)
-        Caller->>Forge: CreateComment(review, body, file_path, line, reply_to, as_agent, local=false)
-        Forge->>DB: Resolve ForgeBacked Review + Identity (Human or Agent)
-        Forge->>Gix: validate_diff_line(snapshot_dir, base_sha, head_sha, file_path, line)
+        Caller->>Service: CreateComment(review, body, file_path, line, reply_to, as_agent, local=false)
+        Service->>DB: Resolve ForgeBacked Review + Identity (Human or Agent)
+        Service->>SnapStore: validate_diff_line(git_dir, base_sha, head_sha, file_path, line)
+        SnapStore->>Gix: validate_diff_line(snapshot_dir, base_sha, head_sha, file_path, line)
         Gix->>Snapshot: Verify line exists in unified diff
-        Forge->>DB: transaction: get_or_create_draft_session + create_comment(forge_id=None)
-        DB-->>Forge: Comment (saved locally)
-        Forge->>Forge: Format agent disclosure footer if author.kind == Agent
-        Forge->>Octo: create_remote_draft_comment(repository_url, pr_number, pending_review_id, anchor, body)
-        Octo-->>Forge: (pending_review_forge_id, comment_forge_id)
-        Forge->>DB: Record session & comment forge_id
-        Forge-->>Caller: CommentResponse
+        Service->>DB: transaction: get_or_create_draft_session + create_comment(forge_id=None)
+        DB-->>Service: Comment (saved locally)
+        Service->>Service: Format agent disclosure footer if author.kind == Agent
+        Service->>Remote: create_remote_draft_comment(repository_url, pr_number, pending_review_id, anchor, body)
+        Remote-->>Service: (pending_review_forge_id, comment_forge_id)
+        Service->>DB: Record session & comment forge_id
+        Service-->>Caller: CommentResponse
     else Update remote comment (lgtm comment update)
-        Caller->>Forge: UpdateComment(comment_number, body, file_path, line, as_agent, local=false)
-        Forge->>DB: comments().update_comment(comment_number, patch)
-        DB-->>Forge: Comment (updated locally)
-        Forge->>Forge: Format agent disclosure footer if author.kind == Agent
-        Forge->>Octo: update_remote_comment(repository_url, comment.forge_id, body, anchor)
-        Octo-->>Forge: Updated remote comment
-        Forge-->>Caller: CommentResponse
+        Caller->>Service: UpdateComment(comment_number, body, file_path, line, as_agent, local=false)
+        Service->>DB: comments.update_comment(comment.id, patch)
+        DB-->>Service: Comment (updated locally)
+        Service->>Service: Format agent disclosure footer if author.kind == Agent
+        Service->>Remote: update_remote_comment(repository_url, comment.forge_id, body, anchor)
+        Remote-->>Service: Updated remote comment
+        Service-->>Caller: CommentResponse
     else Delete remote comment (lgtm comment delete)
-        Caller->>Forge: DeleteComment(comment_number, as_agent, local=false)
-        Forge->>DB: comments().get_comment_by_number(comment_number)
+        Caller->>Service: DeleteComment(comment_number, as_agent, local=false)
+        Service->>DB: comments.get_comment_by_number(comment_number)
         opt Comment already synced (forge_id is Some)
-            Forge->>Octo: delete_remote_comment(repository_url, comment.forge_id)
-            Octo-->>Forge: Deleted on GitHub
+            Service->>Remote: delete_remote_comment(repository_url, comment.forge_id)
+            Remote-->>Service: Deleted on remote forge
         end
-        Forge->>DB: comments().delete_comment(comment_number)
-        DB-->>Forge: deleted_number
-        Forge-->>Caller: DeleteCommentResponse
+        Service->>DB: comments.delete_comment(comment.id)
+        DB-->>Service: deleted_number
+        Service-->>Caller: DeleteCommentResponse
     end
 ```
 
@@ -506,40 +529,40 @@ When `CloseReview` is called on a `Local` review, `lgtm-forge` transitions the c
 ```mermaid
 sequenceDiagram
     actor Caller as CLI (review close --local)
-    participant Forge as lgtm-forge (ReviewService)
+    participant Service as lgtm-forge (ReviewService)
     participant DB as lgtm-db
 
-    Caller->>Forge: CloseReview(selector, outcome, body, local=true)
-    Forge->>DB: Load Local Review + active Draft Session + draft Comments
-    Forge->>DB: transaction: publish_session(session.id, outcome, body, None)
-    DB-->>Forge: Published Session
-    Forge-->>Caller: CloseReviewResponse
+    Caller->>Service: CloseReview(selector, outcome, body, local=true)
+    Service->>DB: Load Local Review + active Draft Session + draft Comments
+    Service->>DB: transaction: publish_session(session.id, outcome, body, None)
+    DB-->>Service: Published Session
+    Service-->>Caller: CloseReviewResponse
 ```
 
 #### Closing a forge-backed review session (`CloseReview`)
 
-When `CloseReview` is called on a `ForgeBacked` review, `lgtm-forge` first flushes any unsynced draft comments (`forge_id IS NULL`) to the pending review on GitHub so no comment gets stuck locally, formats any agent disclosure footer on the top-level session `body`, submits the pending review (`Comment`, `Approve`, or `RequestChanges`) via `extensions::octocrab`, and marks the session `Published` in `lgtm-db`.
+When `CloseReview` is called on a `ForgeBacked` review, `lgtm-forge` first flushes any unsynced draft comments (`forge_id IS NULL`) to the pending review on the remote forge via `RemoteForge` so no comment gets stuck locally, formats any agent disclosure footer on the top-level session `body`, submits the pending review (`Comment`, `Approve`, or `RequestChanges`) via `RemoteForge::submit_pending_review`, and marks the session `Published` in `lgtm-db`.
 
 ```mermaid
 sequenceDiagram
     actor Caller as CLI (review close)
-    participant Forge as lgtm-forge (ReviewService)
+    participant Service as lgtm-forge (ReviewService)
     participant DB as lgtm-db
-    participant Octo as extensions::octocrab (GitHub)
+    participant Remote as forge::RemoteForge (GitHubForge)
 
-    Caller->>Forge: CloseReview(selector, outcome, body, local=false)
-    Forge->>DB: Load ForgeBacked Review + active Draft Session + draft Comments + Author Identities
+    Caller->>Service: CloseReview(selector, outcome, body, local=false)
+    Service->>DB: Load ForgeBacked Review + active Draft Session + draft Comments + Author Identities
     opt Session has unsynced draft comments (forge_id IS NULL)
-        Forge->>Octo: sync_pending_draft_comments(repository_url, pr_number, unsynced_comments)
-        Octo-->>Forge: Synced session & comment forge_ids
-        Forge->>DB: Record session & comment forge_ids
+        Service->>Remote: sync_pending_draft_comments(repository_url, pr_number, unsynced_comments)
+        Remote-->>Service: Synced session & comment forge_ids
+        Service->>DB: Record session & comment forge_ids
     end
-    Forge->>Forge: Format agent disclosure footer on session body if author.kind == Agent
-    Forge->>Octo: submit_pending_review(repository_url, pr_number, session.forge_id, outcome, body)
-    Octo-->>Forge: RemoteReviewReceipt (review_forge_id)
-    Forge->>DB: transaction: publish_session(session.id, outcome, body, review_forge_id)
-    DB-->>Forge: Published Session
-    Forge-->>Caller: CloseReviewResponse
+    Service->>Service: Format agent disclosure footer on session body if author.kind == Agent
+    Service->>Remote: submit_pending_review(repository_url, pr_number, session.forge_id, outcome, body)
+    Remote-->>Service: ForgeReviewReceipt (review_forge_id)
+    Service->>DB: transaction: publish_session(session.id, outcome, body, review_forge_id)
+    DB-->>Service: Published Session
+    Service-->>Caller: CloseReviewResponse
 ```
 
 ### Interfaces and Contracts
@@ -584,25 +607,48 @@ sequenceDiagram
 
 `ReviewService` (`apps/lgtm-forge/src/services/review.rs`) exposes async domain methods corresponding to each RPC (`add_paths`, `commit_changes`, `push_changes`, `get_reviews`, `create_review`, `refresh_review`, `get_review_detail`, `close_review`, `create_comment`, `update_comment`, `delete_comment`, `set_file_reviewed`, and `get_hello`).
 
-Stateless adapters in `apps/lgtm-forge/src/extensions/` encapsulate external libraries:
+Between `ReviewService` and the low-level SDK extensions sit two focused domain boundaries:
 
-- `extensions::gitoxide`:
+- `snapshots::SnapshotStore` (concrete struct in `apps/lgtm-forge/src/snapshots.rs` owning `~/.lgtm/snapshots/$repoSlug` and `refs/lgtm/snapshots/<branch>`, delegating general Git operations to `extensions::gitoxide`):
+  - `stage_paths(&self, git_dir, paths) -> Result<Vec<String>, ForgeError>`
+  - `commit(&self, git_dir, message, author) -> Result<String, ForgeError>`
+  - `ensure_snapshot(&self, git_dir) -> Result<(String, String), ForgeError>`
+  - `mirror_checkout_commits(&self, git_dir, head_sha) -> Result<(), ForgeError>`
+  - `get_inline_diff_hunks(&self, git_dir, base_sha, head_sha, anchors) -> Result<Vec<DiffHunk>, ForgeError>`
+  - `get_changed_files(&self, git_dir, old_sha, new_sha) -> Result<Vec<String>, ForgeError>`
+  - `validate_diff_line(&self, git_dir, base_sha, head_sha, file_path, line) -> Result<(), ForgeError>`
+  - `recompute_anchors(&self, git_dir, old_head_sha, new_head_sha, comments) -> Result<Vec<CommentAnchorShift>, ForgeError>`
+- `forge::RemoteForge` (trait in `apps/lgtm-forge/src/forge/mod.rs` implemented by `GitHubForge` in `src/forge/github.rs` via `extensions::octocrab`, extensible to `GitLabForge`, and replaceable with `DummyForge` in integration tests):
+  - `get_pull_request_bundle(&self, repository_url, branch_or_pr) -> Result<ForgePullRequestBundle, ForgeError>`
+  - `create_pending_review(&self, repository_url, pr_number, head_sha) -> Result<String, ForgeError>`
+  - `create_remote_draft_comment(&self, repository_url, pr_number, pending_review_id, anchor, body) -> Result<ForgeDraftCommentReceipt, ForgeError>`
+  - `update_remote_comment(&self, repository_url, forge_id, body, anchor) -> Result<(), ForgeError>`
+  - `delete_remote_comment(&self, repository_url, forge_id) -> Result<(), ForgeError>`
+  - `set_remote_file_viewed(&self, repository_url, pr_forge_id, file_path, viewed) -> Result<(), ForgeError>`
+  - `submit_pending_review(&self, repository_url, pr_number, pending_review_id, outcome, body) -> Result<ForgeReviewReceipt, ForgeError>`
+
+Stateless adapters in `apps/lgtm-forge/src/extensions/` encapsulate external libraries directly:
+
+- `extensions::gitoxide` (general operations on any local Git repository):
   - `get_repo_context(git_dir) -> Result<RepoContext, ForgeError>`
-  - `stage_snapshot_paths(git_dir, snapshot_dir, paths) -> Result<Vec<String>, ForgeError>`
-  - `create_shadow_commit(git_dir, snapshot_dir, message, author) -> Result<String, ForgeError>`
-  - `commit_checkout_and_mirror(git_dir, snapshot_dir, message, author) -> Result<String, ForgeError>`
-  - `push_branch(git_dir, snapshot_dir, branch, local) -> Result<String, ForgeError>`
-  - `get_inline_diff_hunks(snapshot_dir, base_sha, head_sha, anchors) -> Result<Vec<DiffHunk>, ForgeError>`
-  - `get_changed_files(snapshot_dir, old_sha, new_sha) -> Result<Vec<String>, ForgeError>`
-  - `recompute_anchors(snapshot_dir, old_head_sha, new_head_sha, comments) -> Result<Vec<CommentAnchorUpdate>, ForgeError>`
-- `extensions::octocrab`:
-  - `get_pull_request_bundle(repository_url, branch_or_pr) -> Result<ForgePullRequestBundle, ForgeError>`
-  - `create_pending_review(repository_url, pr_number, head_sha) -> Result<String, ForgeError>`
-  - `create_remote_draft_comment(repository_url, pr_number, pending_review_id, anchor, body) -> Result<ForgeDraftCommentReceipt, ForgeError>`
-  - `update_remote_comment(repository_url, forge_id, body, anchor) -> Result<(), ForgeError>`
-  - `delete_remote_comment(repository_url, forge_id) -> Result<(), ForgeError>`
-  - `set_remote_file_viewed(repository_url, pr_forge_id, file_path, viewed) -> Result<(), ForgeError>`
-  - `submit_pending_review(repository_url, pr_number, pending_review_id, outcome, body) -> Result<ForgeReviewReceipt, ForgeError>`
+  - `stage_paths(git_dir, paths) -> Result<Vec<String>, ForgeError>`
+  - `stage_worktree_to_index(git_dir, target_repo_dir, paths) -> Result<Vec<String>, ForgeError>`
+  - `create_commit(git_dir, message, author) -> Result<String, ForgeError>`
+  - `create_commit_on_ref(repo_dir, ref_name, message, author) -> Result<String, ForgeError>`
+  - `fetch_objects(source_git_dir, target_repo_dir, commit_sha) -> Result<(), ForgeError>`
+  - `push_branch(git_dir, branch) -> Result<String, ForgeError>`
+  - `get_inline_diff_hunks(repo_dir, base_sha, head_sha, anchors) -> Result<Vec<DiffHunk>, ForgeError>`
+  - `get_changed_files(repo_dir, old_sha, new_sha) -> Result<Vec<String>, ForgeError>`
+  - `validate_diff_line(repo_dir, base_sha, head_sha, file_path, line) -> Result<(), ForgeError>`
+  - `recompute_anchors(repo_dir, old_head_sha, new_head_sha, comments) -> Result<Vec<CommentAnchorShift>, ForgeError>`
+- `extensions::octocrab` (stateless GitHub REST/GraphQL client helpers):
+  - `fetch_pull_request_bundle(client, owner, repo, branch_or_pr) -> Result<ForgePullRequestBundle, ForgeError>`
+  - `create_pending_review(client, owner, repo, pr_number, head_sha) -> Result<String, ForgeError>`
+  - `create_draft_comment(client, owner, repo, pr_number, pending_review_id, anchor, body) -> Result<ForgeDraftCommentReceipt, ForgeError>`
+  - `update_comment(client, owner, repo, forge_id, body, anchor) -> Result<(), ForgeError>`
+  - `delete_comment(client, owner, repo, forge_id) -> Result<(), ForgeError>`
+  - `set_file_viewed(client, pr_node_id, file_path, viewed) -> Result<(), ForgeError>`
+  - `submit_review(client, owner, repo, pr_number, pending_review_id, outcome, body) -> Result<ForgeReviewReceipt, ForgeError>`
 
 ## Implementation
 
@@ -619,13 +665,15 @@ apps/lgtm-forge/
 │   ├── lib.rs
 │   ├── main.rs                    Standalone server entry point
 │   ├── error.rs                   Application error types and Connect status mapping
+│   ├── snapshots.rs               SnapshotStore managing ~/.lgtm/snapshots/$repoSlug via extensions::gitoxide
 │   ├── utils.rs                   Repository slug and path helpers
 │   ├── extensions/
 │   │   ├── mod.rs
-│   │   ├── gitoxide.rs            gix snapshot repository and unified diff adapter
-│   │   └── octocrab.rs            GitHub PR, review, and comment adapter
+│   │   ├── gitoxide.rs            General stateless gix local Git and unified diff adapter
+│   │   └── octocrab.rs            Stateless GitHub REST and GraphQL adapter
 │   ├── forge/
-│   │   ├── mod.rs
+│   │   ├── mod.rs                 RemoteForge trait for remote PR/MR providers
+│   │   ├── github.rs              GitHubForge implementation backed by extensions::octocrab
 │   │   └── models.rs              Remote forge import/export contracts
 │   ├── models/
 │   │   ├── mod.rs
@@ -642,13 +690,13 @@ apps/lgtm-forge/
 │       └── review.rs              Connect RPC transport handlers
 └── tests/
     ├── common/
-    │   └── mod.rs                 Test fixtures for SQLite/PostgreSQL, gitoxide, and dummy GitHub
+    │   └── mod.rs                 Test fixtures for SQLite/PostgreSQL, SnapshotStore, and DummyForge
     └── review_service.rs          Integration tests for local and forge-backed lifecycles
 ```
 
 ### Snapshot repository isolation
 
-Each local checkout maps deterministically to `~/.lgtm/snapshots/$repoSlug` (derived from the canonicalized `git_dir`). `extensions::gitoxide` initializes a bare Git repository at that path and fetches or mirrors objects from `git_dir` without modifying `.git/index`, `HEAD`, or remote refs in the user's working tree during `--local` operations.
+Each local checkout maps deterministically to `~/.lgtm/snapshots/$repoSlug` (derived from the canonicalized `git_dir`). `SnapshotStore` initializes a bare Git repository at that path and delegates to `extensions::gitoxide` to fetch or mirror objects from `git_dir` without modifying `.git/index`, `HEAD`, or remote refs in the user's working tree during `--local` operations.
 
 ## References
 

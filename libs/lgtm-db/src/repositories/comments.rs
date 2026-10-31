@@ -428,6 +428,7 @@ impl<C: ConnectionTrait> CommentsRepository<C> {
         Ok(())
     }
 
+    // TODO: Move shared anchor and git validation into general git utilities outside lgtm-db so lgtm-forge can reuse it.
     fn validate_anchor(
         file_path: Option<&str>,
         start_line: Option<i32>,
