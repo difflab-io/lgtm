@@ -6,6 +6,7 @@ use crate::{
         session::{self, ActiveModel, Column, Entity, Model as Session},
     },
     error::{DbError, Result},
+    repositories::{normalize_optional, require_non_empty},
 };
 use chrono::{DateTime, Utc};
 use sea_orm::{
@@ -73,7 +74,7 @@ impl<C: ConnectionTrait> SessionsRepository<C> {
         author_id: Uuid,
         body: Option<String>,
     ) -> Result<Session> {
-        let normalized_body = Self::normalize_optional(body);
+        let normalized_body = normalize_optional(body);
         if let Some(existing) = self.get_draft_session(review_id, author_id).await? {
             if let Some(next_body) = normalized_body
                 && existing.body.as_deref() != Some(next_body.as_str())
@@ -140,8 +141,8 @@ impl<C: ConnectionTrait> SessionsRepository<C> {
         }
 
         let now = Utc::now();
-        let next_body = Self::normalize_optional(body).or(existing.body.clone());
-        let next_forge_id = Self::normalize_optional(forge_id).or(existing.forge_id.clone());
+        let next_body = normalize_optional(body).or(existing.body.clone());
+        let next_forge_id = normalize_optional(forge_id).or(existing.forge_id.clone());
 
         let mut active: ActiveModel = existing.into();
         active.state = Set(SessionState::Published);
@@ -158,10 +159,7 @@ impl<C: ConnectionTrait> SessionsRepository<C> {
 
     /// Insert or update a remote forge session keyed by `(review_id, forge_id)`.
     pub async fn upsert_forge_session(&self, input: UpsertForgeSession) -> Result<Session> {
-        let forge_id = input.forge_id.trim();
-        if forge_id.is_empty() {
-            return Err(DbError::invalid_input("session forge_id must not be empty"));
-        }
+        let forge_id = require_non_empty("session forge_id", &input.forge_id)?;
 
         let now = Utc::now();
         let (outcome, published_at) = match input.state {
@@ -180,7 +178,7 @@ impl<C: ConnectionTrait> SessionsRepository<C> {
                 (Some(outcome), Some(input.published_at.unwrap_or(now)))
             }
         };
-        let body = Self::normalize_optional(input.body);
+        let body = normalize_optional(input.body);
 
         let existing = if let Some(by_forge) = Entity::find()
             .filter(Column::ReviewId.eq(input.review_id))
@@ -240,11 +238,5 @@ impl<C: ConnectionTrait> SessionsRepository<C> {
             .one(self.pool.as_ref())
             .await?;
         Ok(latest.map_or(1, |row| row.number + 1))
-    }
-
-    fn normalize_optional(value: Option<String>) -> Option<String> {
-        value
-            .map(|text| text.trim().to_owned())
-            .filter(|text| !text.is_empty())
     }
 }

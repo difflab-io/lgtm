@@ -20,6 +20,11 @@ pub async fn setup_db() -> TestDb {
     let url = std::env::var("LGTM_TEST_POSTGRES_URL")
         .ok()
         .filter(|value| !value.trim().is_empty())
+        .map(|base_url| {
+            let schema = format!("test_{}", uuid::Uuid::new_v4().simple());
+            let separator = if base_url.contains('?') { '&' } else { '?' };
+            format!("{base_url}{separator}options=-c%20search_path%3D{schema}")
+        })
         .unwrap_or_else(|| format!("sqlite://{}?mode=rwc", db_path.display()));
     let db = Database::connect(&url)
         .await

@@ -165,6 +165,11 @@ mod when_identity_fields_or_discriminator_rules_are_violated {
         let ctx = setup_db().await;
 
         // Act
+        let blank_name = ctx
+            .db
+            .identities
+            .upsert_agent("   ", "anthropic", "claude-sonnet-4-5")
+            .await;
         let blank_provider = ctx
             .db
             .identities
@@ -177,6 +182,7 @@ mod when_identity_fields_or_discriminator_rules_are_violated {
             .await;
 
         // Assert
+        assert!(matches!(blank_name, Err(DbError::InvalidInput(_))));
         assert!(matches!(blank_provider, Err(DbError::InvalidInput(_))));
         assert!(matches!(blank_model, Err(DbError::InvalidInput(_))));
     }

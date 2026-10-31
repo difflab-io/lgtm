@@ -6,6 +6,7 @@ use crate::{
         review::{self, ActiveModel, Column, Entity, Model as Review},
     },
     error::{DbError, Result},
+    repositories::{normalize_optional, require_non_empty},
 };
 use chrono::Utc;
 use sea_orm::{
@@ -188,10 +189,10 @@ impl<C: ConnectionTrait> ReviewsRepository<C> {
 
     /// Create a new local branch review with the next sequential repo-scoped `number`.
     pub async fn create_local_review(&self, input: NewLocalReview) -> Result<Review> {
-        let git_dir = Self::require_non_empty("git_dir", &input.git_dir)?;
-        let branch = Self::require_non_empty("branch", &input.branch)?;
-        let base_sha = Self::require_non_empty("base_sha", &input.base_sha)?;
-        let head_sha = Self::require_non_empty("head_sha", &input.head_sha)?;
+        let git_dir = require_non_empty("git_dir", &input.git_dir)?;
+        let branch = require_non_empty("branch", &input.branch)?;
+        let base_sha = require_non_empty("base_sha", &input.base_sha)?;
+        let head_sha = require_non_empty("head_sha", &input.head_sha)?;
 
         let number = self.next_review_number(git_dir).await?;
         let name = format!("R{}-{}", number, Self::sanitize_branch(branch));
@@ -222,9 +223,9 @@ impl<C: ConnectionTrait> ReviewsRepository<C> {
 
     /// Create or update a forge-backed pull request review keyed by `(git_dir, repository_url, pr_number)`.
     pub async fn upsert_forge_review(&self, input: UpsertForgeReview) -> Result<Review> {
-        let git_dir = Self::require_non_empty("git_dir", &input.git_dir)?;
-        let branch = Self::require_non_empty("branch", &input.branch)?;
-        let repository_url = Self::require_non_empty("repository_url", &input.repository_url)?;
+        let git_dir = require_non_empty("git_dir", &input.git_dir)?;
+        let branch = require_non_empty("branch", &input.branch)?;
+        let repository_url = require_non_empty("repository_url", &input.repository_url)?;
         if !(repository_url.starts_with("https://") || repository_url.starts_with("http://")) {
             return Err(DbError::invalid_input(
                 "repository_url must start with https:// or http://",
@@ -235,14 +236,9 @@ impl<C: ConnectionTrait> ReviewsRepository<C> {
                 "pr_number must be a positive integer",
             ));
         }
-        let base_sha = Self::require_non_empty("base_sha", &input.base_sha)?;
-        let head_sha = Self::require_non_empty("head_sha", &input.head_sha)?;
-        let forge_id = input
-            .forge_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned);
+        let base_sha = require_non_empty("base_sha", &input.base_sha)?;
+        let head_sha = require_non_empty("head_sha", &input.head_sha)?;
+        let forge_id = normalize_optional(input.forge_id);
         let now = Utc::now();
 
         if let Some(existing) = Entity::find()
@@ -312,8 +308,8 @@ impl<C: ConnectionTrait> ReviewsRepository<C> {
         base_sha: &str,
         head_sha: &str,
     ) -> Result<Review> {
-        let base_sha = Self::require_non_empty("base_sha", base_sha)?;
-        let head_sha = Self::require_non_empty("head_sha", head_sha)?;
+        let base_sha = require_non_empty("base_sha", base_sha)?;
+        let head_sha = require_non_empty("head_sha", head_sha)?;
         let existing = self.require_review(id).await?;
         let mut active: ActiveModel = existing.into();
         active.base_sha = Set(base_sha.to_owned());
@@ -344,8 +340,8 @@ impl<C: ConnectionTrait> ReviewsRepository<C> {
         file_path: &str,
         commit_sha: &str,
     ) -> Result<Review> {
-        let file_path = Self::require_non_empty("file_path", file_path)?;
-        let commit_sha = Self::require_non_empty("commit_sha", commit_sha)?;
+        let file_path = require_non_empty("file_path", file_path)?;
+        let commit_sha = require_non_empty("commit_sha", commit_sha)?;
         let existing = self.require_review(id).await?;
         let mut map = existing.get_reviewed_files_map();
         map.insert(file_path.to_owned(), commit_sha.to_owned());
@@ -354,7 +350,7 @@ impl<C: ConnectionTrait> ReviewsRepository<C> {
 
     /// Remove `file_path` from the `reviewed_files` map of a review.
     pub async fn unmark_file_reviewed(&self, id: Uuid, file_path: &str) -> Result<Review> {
-        let file_path = Self::require_non_empty("file_path", file_path)?;
+        let file_path = require_non_empty("file_path", file_path)?;
         let existing = self.require_review(id).await?;
         let mut map = existing.get_reviewed_files_map();
         map.remove(file_path);
@@ -368,8 +364,8 @@ impl<C: ConnectionTrait> ReviewsRepository<C> {
         reviewed_files: BTreeMap<String, String>,
     ) -> Result<Review> {
         for (path, sha) in &reviewed_files {
-            Self::require_non_empty("reviewed_files path", path)?;
-            Self::require_non_empty("reviewed_files commit_sha", sha)?;
+            require_non_empty("reviewed_files path", path)?;
+            require_non_empty("reviewed_files commit_sha", sha)?;
         }
         let existing = self.require_review(id).await?;
         self.save_reviewed_files(existing, reviewed_files).await
@@ -450,13 +446,5 @@ impl<C: ConnectionTrait> ReviewsRepository<C> {
         } else {
             sanitized
         }
-    }
-
-    fn require_non_empty<'a>(field: &'static str, value: &'a str) -> Result<&'a str> {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            return Err(DbError::invalid_input(format!("{field} must not be empty")));
-        }
-        Ok(trimmed)
     }
 }

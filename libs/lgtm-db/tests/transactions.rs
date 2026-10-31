@@ -157,12 +157,27 @@ mod when_executing_multi_repository_workflows_inside_a_transaction {
 
         // Act
         tx.rollback().await.expect("rollback transaction");
+        let tx_dropped = ctx.db.begin().await.expect("begin dropped transaction");
+        let dropped_human = tx_dropped
+            .identities
+            .upsert_human("dropped-user", "dropped@example.com", None)
+            .await
+            .expect("upsert human in dropped tx");
+        drop(tx_dropped);
 
         // Assert
         assert!(
             ctx.db
                 .identities
                 .get_identity(human.id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            ctx.db
+                .identities
+                .get_identity(dropped_human.id)
                 .await
                 .unwrap()
                 .is_none()

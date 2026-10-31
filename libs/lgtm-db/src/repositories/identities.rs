@@ -6,6 +6,7 @@ use crate::{
         identity::{self, ActiveModel, Column, Entity, Model as Identity},
     },
     error::{DbError, Result},
+    repositories::{normalize_optional, require_non_empty},
 };
 use chrono::Utc;
 use sea_orm::{
@@ -64,12 +65,9 @@ impl<C: ConnectionTrait> IdentitiesRepository<C> {
         email: &str,
         forge_login: Option<&str>,
     ) -> Result<Identity> {
-        let name = Self::require_non_empty("identity name", name)?;
-        let email = Self::require_non_empty("human email", email)?;
-        let forge_login = forge_login
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned);
+        let name = require_non_empty("identity name", name)?;
+        let email = require_non_empty("human email", email)?;
+        let forge_login = normalize_optional(forge_login.map(str::to_owned));
         let now = Utc::now();
 
         if let Some(existing) = self.get_identity_by_name(name).await? {
@@ -108,9 +106,9 @@ impl<C: ConnectionTrait> IdentitiesRepository<C> {
 
     /// Create or update an AI agent identity by unique `name`.
     pub async fn upsert_agent(&self, name: &str, provider: &str, model: &str) -> Result<Identity> {
-        let name = Self::require_non_empty("identity name", name)?;
-        let provider = Self::require_non_empty("agent provider", provider)?;
-        let model = Self::require_non_empty("agent model", model)?;
+        let name = require_non_empty("identity name", name)?;
+        let provider = require_non_empty("agent provider", provider)?;
+        let model = require_non_empty("agent model", model)?;
         let now = Utc::now();
 
         if let Some(existing) = self.get_identity_by_name(name).await? {
@@ -145,15 +143,5 @@ impl<C: ConnectionTrait> IdentitiesRepository<C> {
             .insert(self.pool.as_ref())
             .await
             .map_err(DbError::from_db_err)
-    }
-
-    // Private -----------------------------------------------------------------
-
-    fn require_non_empty<'a>(field: &'static str, value: &'a str) -> Result<&'a str> {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            return Err(DbError::invalid_input(format!("{field} must not be empty")));
-        }
-        Ok(trimmed)
     }
 }

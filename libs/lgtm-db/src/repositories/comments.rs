@@ -7,6 +7,7 @@ use crate::{
         session,
     },
     error::{DbError, Result},
+    repositories::{normalize_optional, require_non_empty},
 };
 use chrono::Utc;
 use sea_orm::{
@@ -189,9 +190,9 @@ impl<C: ConnectionTrait> CommentsRepository<C> {
 
     /// Create a new comment, validating single-level reply threading and copying initial coordinates into `original_*`.
     pub async fn create_comment(&self, input: NewComment) -> Result<Comment> {
-        let body = Self::require_non_empty("comment body", &input.body)?;
-        let file_path = Self::normalize_optional(input.file_path);
-        let commit_sha = Self::normalize_optional(input.commit_sha);
+        let body = require_non_empty("comment body", &input.body)?;
+        let file_path = normalize_optional(input.file_path);
+        let commit_sha = normalize_optional(input.commit_sha);
         Self::validate_anchor(file_path.as_deref(), input.start_line, input.line)?;
         self.validate_session_review(input.session_id, input.review_id)
             .await?;
@@ -234,7 +235,7 @@ impl<C: ConnectionTrait> CommentsRepository<C> {
         let mut active: ActiveModel = existing.into();
 
         if let Some(body) = patch.body {
-            let trimmed = Self::require_non_empty("comment body", &body)?;
+            let trimmed = require_non_empty("comment body", &body)?;
             active.body = Set(trimmed.to_owned());
         }
         if let Some(resolved) = patch.resolved {
@@ -244,7 +245,7 @@ impl<C: ConnectionTrait> CommentsRepository<C> {
             active.outdated = Set(outdated);
         }
         if let Some(forge_id) = patch.forge_id {
-            let trimmed = Self::require_non_empty("comment forge_id", &forge_id)?;
+            let trimmed = require_non_empty("comment forge_id", &forge_id)?;
             active.forge_id = Set(Some(trimmed.to_owned()));
         }
         active.updated_at = Set(Utc::now());
@@ -261,7 +262,7 @@ impl<C: ConnectionTrait> CommentsRepository<C> {
         for shift in shifts {
             let existing = self.require_comment(shift.comment_id).await?;
             Self::validate_anchor(existing.file_path.as_deref(), shift.start_line, shift.line)?;
-            let commit_sha = Self::normalize_optional(shift.commit_sha.clone());
+            let commit_sha = normalize_optional(shift.commit_sha.clone());
             let mut active: ActiveModel = existing.into();
             active.start_line = Set(shift.start_line);
             active.line = Set(shift.line);
@@ -278,11 +279,11 @@ impl<C: ConnectionTrait> CommentsRepository<C> {
 
     /// Insert or update a remote forge comment keyed by `(review_id, forge_id)`.
     pub async fn upsert_forge_comment(&self, input: UpsertForgeComment) -> Result<Comment> {
-        let forge_id = Self::require_non_empty("comment forge_id", &input.forge_id)?;
-        let body = Self::require_non_empty("comment body", &input.body)?;
-        let file_path = Self::normalize_optional(input.file_path);
-        let commit_sha = Self::normalize_optional(input.commit_sha);
-        let original_commit_sha = Self::normalize_optional(input.original_commit_sha);
+        let forge_id = require_non_empty("comment forge_id", &input.forge_id)?;
+        let body = require_non_empty("comment body", &input.body)?;
+        let file_path = normalize_optional(input.file_path);
+        let commit_sha = normalize_optional(input.commit_sha);
+        let original_commit_sha = normalize_optional(input.original_commit_sha);
         Self::validate_anchor(file_path.as_deref(), input.start_line, input.line)?;
         self.validate_session_review(input.session_id, input.review_id)
             .await?;
@@ -458,19 +459,5 @@ impl<C: ConnectionTrait> CommentsRepository<C> {
             }
         }
         Ok(())
-    }
-
-    fn normalize_optional(value: Option<String>) -> Option<String> {
-        value
-            .map(|text| text.trim().to_owned())
-            .filter(|text| !text.is_empty())
-    }
-
-    fn require_non_empty<'a>(field: &'static str, value: &'a str) -> Result<&'a str> {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            return Err(DbError::invalid_input(format!("{field} must not be empty")));
-        }
-        Ok(trimmed)
     }
 }

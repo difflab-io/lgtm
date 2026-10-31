@@ -31,17 +31,6 @@ pub struct Database<C = DatabaseConnection> {
 pub type Transaction = Database<DatabaseTransaction>;
 
 impl<C: ConnectionTrait> Database<C> {
-    fn from_connection(connection: C) -> Self {
-        let pool = Arc::new(connection);
-        Self {
-            identities: IdentitiesRepository::new(Arc::clone(&pool)),
-            reviews: ReviewsRepository::new(Arc::clone(&pool)),
-            sessions: SessionsRepository::new(Arc::clone(&pool)),
-            comments: CommentsRepository::new(Arc::clone(&pool)),
-            pool,
-        }
-    }
-
     // Public ------------------------------------------------------------------
 
     /// Begin an atomic database transaction (or a nested savepoint when called on a `Transaction`).
@@ -54,6 +43,19 @@ impl<C: ConnectionTrait> Database<C> {
             tx.execute_unprepared("PRAGMA foreign_keys = ON;").await?;
         }
         Ok(Database::from_connection(tx))
+    }
+
+    // Private -----------------------------------------------------------------
+
+    fn from_connection(connection: C) -> Self {
+        let pool = Arc::new(connection);
+        Self {
+            identities: IdentitiesRepository::new(Arc::clone(&pool)),
+            reviews: ReviewsRepository::new(Arc::clone(&pool)),
+            sessions: SessionsRepository::new(Arc::clone(&pool)),
+            comments: CommentsRepository::new(Arc::clone(&pool)),
+            pool,
+        }
     }
 }
 
@@ -115,6 +117,24 @@ impl Database<DatabaseConnection> {
 
         let pool = sea_orm::Database::connect(options).await?;
         if is_sqlite && let Err(err) = pool.execute_unprepared("PRAGMA foreign_keys = ON;").await {
+            let _ = pool.close().await;
+            return Err(DbError::from(err));
+        }
+        if is_postgres
+            && let Some(schema) = url
+                .split("search_path%3D")
+                .nth(1)
+                .map(|rest| rest.split('&').next().unwrap_or_default())
+                .filter(|name| {
+                    !name.is_empty()
+                        && name
+                            .chars()
+                            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+                })
+            && let Err(err) = pool
+                .execute_unprepared(&format!("CREATE SCHEMA IF NOT EXISTS {schema};"))
+                .await
+        {
             let _ = pool.close().await;
             return Err(DbError::from(err));
         }
