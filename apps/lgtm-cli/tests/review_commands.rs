@@ -7,7 +7,7 @@ mod review_commands {
     };
     use tempfile::TempDir;
 
-    // fixtures --------------------------------------------------------------------
+    // fixtures ----------------------------------------------------------------
 
     struct CliWorkspace {
         _temp: TempDir,
@@ -40,6 +40,8 @@ mod review_commands {
                 repo,
             }
         }
+
+        // Private -------------------------------------------------------------
 
         fn lgtm(&self, args: &[&str]) -> Output {
             Command::new(env!("CARGO_BIN_EXE_lgtm"))
@@ -94,7 +96,7 @@ mod review_commands {
         }
     }
 
-    // tests -----------------------------------------------------------------------
+    // tests -------------------------------------------------------------------
 
     #[test]
     fn should_run_local_add_commit_review_comment_refresh_show_and_close_end_to_end() {

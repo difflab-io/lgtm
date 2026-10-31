@@ -182,7 +182,7 @@ impl ReviewService {
             let (sha, _) = gitoxide::push_branch(&ctx.git_dir, &ctx.branch)?;
             sha
         } else {
-            let payload = gitoxide::read_head_commit_payload(&ctx.git_dir)?;
+            let payload = gitoxide::get_head_commit_payload(&ctx.git_dir)?;
             if let Some(pushed_sha) = self
                 .forge
                 .push_branch(&repository_url, &ctx.branch, &payload)

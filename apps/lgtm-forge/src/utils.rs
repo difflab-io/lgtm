@@ -9,15 +9,7 @@ use crate::error::{Error, Result};
 
 /// Resolve the default root directory (`~/.lgtm/snapshots` or `$LGTM_HOME/snapshots`) for local snapshot repositories.
 pub fn default_snapshots_root() -> PathBuf {
-    if let Ok(home) = std::env::var("LGTM_HOME")
-        && !home.trim().is_empty()
-    {
-        return PathBuf::from(home).join("snapshots");
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".lgtm")
-        .join("snapshots")
+    default_lgtm_home().join("snapshots")
 }
 
 /// Resolve the default database URL (`LGTM_DATABASE_URL`, `DATABASE_URL`, or `sqlite://$LGTM_HOME/lgtm.db?mode=rwc`).
@@ -29,15 +21,7 @@ pub fn default_database_url() -> Result<String> {
             return Ok(url.trim().to_owned());
         }
     }
-    let lgtm_home = if let Ok(home) = std::env::var("LGTM_HOME")
-        && !home.trim().is_empty()
-    {
-        PathBuf::from(home.trim())
-    } else {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".lgtm")
-    };
+    let lgtm_home = default_lgtm_home();
     std::fs::create_dir_all(&lgtm_home).map_err(|err| {
         Error::Invalid(format!(
             "failed to create LGTM home directory '{}': {err}",
@@ -46,6 +30,17 @@ pub fn default_database_url() -> Result<String> {
     })?;
     let db_path = lgtm_home.join("lgtm.db");
     Ok(format!("sqlite://{}?mode=rwc", db_path.display()))
+}
+
+fn default_lgtm_home() -> PathBuf {
+    if let Ok(home) = std::env::var("LGTM_HOME")
+        && !home.trim().is_empty()
+    {
+        return PathBuf::from(home.trim());
+    }
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".lgtm")
 }
 
 /// Normalize a working tree or `.git` path to the canonical `.git` directory string and worktree root.

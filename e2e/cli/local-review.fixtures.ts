@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { TestHarness } from '../common/test-harness.js'
 
-export const INITIAL_LIB_RS = [
+const INITIAL_LIB_RS = [
   'pub fn alpha() -> i32 {',
   '    1',
   '}',

@@ -1,6 +1,6 @@
 //! Stateless `octocrab` adapter for GitHub REST and GraphQL pull request, review, comment, and viewed-file APIs.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::OnceLock};
 
 use chrono::{DateTime, TimeZone, Utc};
 use octocrab::Octocrab;
@@ -34,14 +34,7 @@ pub fn build_client(token: Option<&str>, api_base_url: Option<&str>) -> Result<O
             if std::env::var("LGTM_GITHUB_TEST_MODE").as_deref() == Ok("1") {
                 return None;
             }
-            std::process::Command::new("gh")
-                .args(["auth", "token"])
-                .output()
-                .ok()
-                .filter(|out| out.status.success())
-                .and_then(|out| String::from_utf8(out.stdout).ok())
-                .map(|s| s.trim().to_owned())
-                .filter(|s| !s.is_empty())
+            cached_gh_cli_token()
         });
     if let Some(tok) = resolved_token {
         builder = builder.personal_token(tok);
@@ -616,4 +609,20 @@ async fn resolve_pr_number(
                 "no pull request found on '{owner}/{repo}' for '{trimmed}'"
             ))
         })
+}
+
+fn cached_gh_cli_token() -> Option<String> {
+    static GH_CLI_TOKEN: OnceLock<Option<String>> = OnceLock::new();
+    GH_CLI_TOKEN
+        .get_or_init(|| {
+            std::process::Command::new("gh")
+                .args(["auth", "token"])
+                .output()
+                .ok()
+                .filter(|out| out.status.success())
+                .and_then(|out| String::from_utf8(out.stdout).ok())
+                .map(|s| s.trim().to_owned())
+                .filter(|s| !s.is_empty())
+        })
+        .clone()
 }

@@ -369,7 +369,7 @@ pub fn is_local_remote(git_dir_or_worktree: &str) -> Result<bool> {
 }
 
 /// Read the current HEAD commit metadata and file changes relative to its first parent.
-pub fn read_head_commit_payload(git_dir_or_worktree: &str) -> Result<HeadCommitPayload> {
+pub fn get_head_commit_payload(git_dir_or_worktree: &str) -> Result<HeadCommitPayload> {
     let ctx = get_repo_context(git_dir_or_worktree)?;
     let (git_dir_path, _, _) = resolve_git_paths(git_dir_or_worktree)?;
     let repo = gix::open(&git_dir_path)
@@ -971,31 +971,20 @@ fn write_commit_object(
         time: gix::date::Time::new(timestamp, 0),
     };
     let full_message = if let Some(footer) = author.agent_disclosure_footer() {
-        format!("{message}\n\n{footer}\n")
+        format!("{message}\n\n{footer}")
     } else {
-        format!("{message}\n")
+        message.trim_end_matches('\n').to_owned()
     };
     let commit = Commit {
-        tree: tree_oid,
-        parents: parents.clone().into(),
-        author: sig.clone(),
-        committer: sig.clone(),
-        encoding: None,
-        message: full_message.clone().into(),
-        extra_headers: Vec::new(),
-    };
-    let _ = repo.write_object(&commit);
-
-    let trimmed_commit = Commit {
         tree: tree_oid,
         parents: parents.into(),
         author: sig.clone(),
         committer: sig,
         encoding: None,
-        message: full_message.trim_end_matches('\n').into(),
+        message: full_message.into(),
         extra_headers: Vec::new(),
     };
-    repo.write_object(&trimmed_commit)
+    repo.write_object(&commit)
         .map(|id| id.detach())
         .map_err(|err| Error::Git(format!("failed to write commit object: {err}")))
 }

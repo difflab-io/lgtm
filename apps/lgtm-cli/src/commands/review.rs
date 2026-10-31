@@ -341,7 +341,7 @@ fn render_review_show(
             }
 
             let mut current_file: Option<&str> = None;
-            for (root_idx, root) in roots.iter().enumerate() {
+            for root in roots {
                 let file_label = root
                     .anchor
                     .as_option()
@@ -361,7 +361,7 @@ fn render_review_show(
                     if let Some(hunk) = hunk_by_root_num
                         .get(&root.number)
                         .copied()
-                        .or_else(|| find_matching_hunk(diff_hunks, anchor, root_idx))
+                        .or_else(|| find_matching_hunk(diff_hunks, anchor))
                     {
                         out.push_str(&format_hunk_lines(hunk));
                         out.push('\n');
@@ -432,7 +432,7 @@ fn render_review_show(
                             && let Some(hunk) = hunk_by_root_num
                                 .get(&comment.number)
                                 .copied()
-                                .or_else(|| find_matching_hunk(diff_hunks, anchor, usize::MAX))
+                                .or_else(|| find_matching_hunk(diff_hunks, anchor))
                         {
                             out.push_str(&format_hunk_lines(hunk));
                             out.push('\n');
@@ -459,16 +459,17 @@ fn render_review_show(
     out
 }
 
-fn format_section_banner(title: &str) -> String {
-    let prefix = format!("══ {title} ");
+fn format_banner(prefix: &str, glyph: char) -> String {
     let pad = 72usize.saturating_sub(prefix.chars().count());
-    format!("{prefix}{}", "═".repeat(pad.max(3)))
+    format!("{prefix}{}", glyph.to_string().repeat(pad.max(3)))
+}
+
+fn format_section_banner(title: &str) -> String {
+    format_banner(&format!("══ {title} "), '═')
 }
 
 fn format_sub_banner(title: &str) -> String {
-    let prefix = format!("── {title} ");
-    let pad = 72usize.saturating_sub(prefix.chars().count());
-    format!("{prefix}{}", "─".repeat(pad.max(3)))
+    format_banner(&format!("── {title} "), '─')
 }
 
 fn format_line_range(anchor: &CommentAnchorDetail) -> String {
@@ -509,14 +510,7 @@ fn format_session_anchor_header(anchor: &CommentAnchorDetail, root: &CommentDeta
 fn find_matching_hunk<'a>(
     diff_hunks: &'a [DiffHunkDetail],
     anchor: &CommentAnchorDetail,
-    fallback_idx: usize,
 ) -> Option<&'a DiffHunkDetail> {
-    if let Some(hunk) = diff_hunks
-        .get(fallback_idx)
-        .filter(|h| h.file_path == anchor.file_path)
-    {
-        return Some(hunk);
-    }
     diff_hunks.iter().find(|h| {
         h.file_path == anchor.file_path
             && h.lines
