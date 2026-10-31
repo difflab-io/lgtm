@@ -3,14 +3,14 @@ use connectrpc::{
     Protocol, Server,
     client::{ClientConfig, HttpClient},
 };
-use lgtm_backend::proto::lgtm::v1::{HelloReviewRequest, ReviewServiceClient};
+use lgtm_forge::proto::lgtm::v1::{HelloReviewRequest, ReviewServiceClient};
 
 // tests -----------------------------------------------------------------------
 
 #[tokio::test]
 async fn should_return_normalized_review_greeting_over_connect_and_grpc() {
     // Arrange
-    let (router, _) = lgtm_backend::router();
+    let (router, _) = lgtm_forge::router();
     let bound = Server::bind("127.0.0.1:0").await.unwrap();
     let address = bound.local_addr().unwrap();
     let (stop, stopped) = tokio::sync::oneshot::channel();

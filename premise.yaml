@@ -26,13 +26,13 @@ workspace:
               check_platforms: [linux]
           answers:
             name: lgtm-web
-        - name: lgtm-backend
+        - name: lgtm-forge
           template: cloudvoyant/premise-cargo:premise-rust-lib
-          path: apps/lgtm-backend
+          path: apps/lgtm-forge
           ci:
               check_platforms: [linux]
           answers:
-            name: lgtm-backend
+            name: lgtm-forge
         - name: lgtm-db
           template: cloudvoyant/premise-cargo:premise-rust-lib
           path: libs/lgtm-db

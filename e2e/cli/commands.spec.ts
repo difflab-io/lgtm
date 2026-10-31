@@ -47,10 +47,15 @@ describe('When using the CLI skeleton', { tags: ['e2e', 'cli', 'commands'] }, ()
       status,
     }
     const commands = [
+      ['add', 'file.txt'],
       ['commit', '--as', 'Agent', '-m', 'snapshot'],
       ['push'],
       ['review', 'new'],
-      ['comment', 'Concern', '--as', 'Agent'],
+      ['review', 'refresh'],
+      ['review', 'show', '--group-by', 'session', '--unresolved'],
+      ['comment', 'new', 'Concern', '--file', 'file.txt', '--line', '1', '--as', 'Agent'],
+      ['comment', 'update', '1', '--body', 'Updated', '--line', '2', '--as', 'Agent'],
+      ['comment', 'delete', '1', '--as', 'Agent'],
     ]
 
     // Act
@@ -60,7 +65,7 @@ describe('When using the CLI skeleton', { tags: ['e2e', 'cli', 'commands'] }, ()
       results.push(await runtime.cli([...command, '--local', '--json']))
     }
     for (const outcome of ['comment', 'reject', 'approve', 'request'])
-      results.push(await runtime.cli(['review', 'close', 'demo', '--with', outcome, '--json']))
+      results.push(await runtime.cli(['review', 'close', '--with', outcome, '--json']))
 
     // Assert
     for (const result of results) {
@@ -87,7 +92,7 @@ describe('When using the CLI skeleton', { tags: ['e2e', 'cli', 'commands'] }, ()
 
     // Assert
     expect(help.code).toBe(0)
-    for (const name of ['commit', 'push', 'review', 'comment', 'ui', 'up', 'down', 'status'])
+    for (const name of ['add', 'commit', 'push', 'review', 'comment', 'ui', 'up', 'down', 'status'])
       expect(help.stdout).toContain(name)
     expect(removedSession.code).not.toBe(0)
     expect(removedComments.code).not.toBe(0)

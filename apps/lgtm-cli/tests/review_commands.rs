@@ -9,11 +9,37 @@ fn should_reject_unimplemented_operations_without_starting_the_daemon() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("unused home");
     for args in [
+        vec!["add", "src/main.rs", "--local"],
         vec!["commit", "--local", "--as", "Agent", "-m", "snapshot"],
         vec!["push", "--local"],
         vec!["review", "new", "--local"],
-        vec!["review", "close", "review-id", "--with", "approve"],
-        vec!["comment", "Feedback", "--local", "--as", "Agent"],
+        vec!["review", "refresh", "--local"],
+        vec![
+            "review",
+            "show",
+            "--local",
+            "--group-by",
+            "session",
+            "--unresolved",
+        ],
+        vec!["review", "close", "--local", "--with", "approve"],
+        vec![
+            "comment",
+            "new",
+            "Feedback",
+            "--file",
+            "src/main.rs",
+            "--line",
+            "42",
+            "--local",
+            "--as",
+            "Agent",
+        ],
+        vec![
+            "comment", "update", "101", "--body", "Updated", "--line", "45", "--local", "--as",
+            "Agent",
+        ],
+        vec!["comment", "delete", "101", "--local", "--as", "Agent"],
     ] {
         // Act
         let response = Command::new(env!("CARGO_BIN_EXE_lgtm"))

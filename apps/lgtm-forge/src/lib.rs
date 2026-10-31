@@ -39,7 +39,7 @@ impl GreeterService for Greeter {
 
 /// Construct the RPC router with the stateless demonstration data source.
 pub fn router() -> (Router, Arc<StaticChecker>) {
-    router_with_database(database::Database)
+    router_with_database(database::Database::default())
 }
 
 /// Construct a router sharing one data source across application services.

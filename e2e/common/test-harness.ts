@@ -79,7 +79,7 @@ export class TestHarness {
     await rm(join(this.home, 'server.port'), { force: true })
     this.log = ''
     const args = this.kind === 'cli' ? ['up', '--foreground', '--no-open', '--port', '0'] : []
-    this.child = spawn(binary(this.kind === 'cli' ? 'lgtm' : 'lgtm-backend'), args, {
+    this.child = spawn(binary(this.kind === 'cli' ? 'lgtm' : 'lgtm-forge'), args, {
       cwd: this.workspace,
       env: { ...this.env, LGTM_BACKEND_ADDR: '127.0.0.1:0' },
       stdio: ['ignore', 'pipe', 'pipe'],

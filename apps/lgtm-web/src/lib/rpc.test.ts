@@ -13,7 +13,7 @@ let baseUrl: string
 // Mise builds the backend before this suite; compilation has no test-hook deadline.
 beforeAll(async () => {
   home = await mkdtemp(join(tmpdir(), 'lgtm-web-rpc-'))
-  backend = Bun.spawn([join(root, 'target/debug/lgtm-backend')], {
+  backend = Bun.spawn([join(root, 'target/debug/lgtm-forge')], {
     cwd: root,
     env: {
       ...process.env,

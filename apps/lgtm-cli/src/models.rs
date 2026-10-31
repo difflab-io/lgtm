@@ -23,6 +23,12 @@ pub enum ReviewOutcome {
     Request,
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum ReviewGroupBy {
+    File,
+    Session,
+}
+
 pub fn parse_nonempty(value: &str) -> Result<String, String> {
     let value = value.trim();
     if value.is_empty() {
