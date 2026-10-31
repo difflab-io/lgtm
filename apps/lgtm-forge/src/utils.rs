@@ -20,6 +20,34 @@ pub fn default_snapshots_root() -> PathBuf {
         .join("snapshots")
 }
 
+/// Resolve the default database URL (`LGTM_DATABASE_URL`, `DATABASE_URL`, or `sqlite://$LGTM_HOME/lgtm.db?mode=rwc`).
+pub fn default_database_url() -> Result<String> {
+    for var in ["LGTM_DATABASE_URL", "DATABASE_URL"] {
+        if let Ok(url) = std::env::var(var)
+            && !url.trim().is_empty()
+        {
+            return Ok(url.trim().to_owned());
+        }
+    }
+    let lgtm_home = if let Ok(home) = std::env::var("LGTM_HOME")
+        && !home.trim().is_empty()
+    {
+        PathBuf::from(home.trim())
+    } else {
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".lgtm")
+    };
+    std::fs::create_dir_all(&lgtm_home).map_err(|err| {
+        Error::Invalid(format!(
+            "failed to create LGTM home directory '{}': {err}",
+            lgtm_home.display()
+        ))
+    })?;
+    let db_path = lgtm_home.join("lgtm.db");
+    Ok(format!("sqlite://{}?mode=rwc", db_path.display()))
+}
+
 /// Normalize a working tree or `.git` path to the canonical `.git` directory string and worktree root.
 pub fn resolve_git_paths(git_dir_or_worktree: &str) -> Result<(PathBuf, PathBuf, String)> {
     let trimmed = git_dir_or_worktree.trim();

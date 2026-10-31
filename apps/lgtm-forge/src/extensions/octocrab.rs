@@ -2,12 +2,13 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use octocrab::Octocrab;
 use serde_json::{Value, json};
 
 use crate::{
     error::{Error, Result},
+    extensions::gitoxide::HeadCommitPayload,
     forge::models::{
         ForgeCommentUpdate, ForgeDraftCommentInput, ForgeDraftCommentReceipt, ForgePullRequest,
         ForgePullRequestBundle, ForgeReviewComment, ForgeReviewReceipt, ForgeReviewSession,
@@ -26,19 +27,173 @@ pub fn build_client(token: Option<&str>, api_base_url: Option<&str>) -> Result<O
             std::env::var("GITHUB_TOKEN")
                 .or_else(|_| std::env::var("GH_TOKEN"))
                 .ok()
-                .filter(|t| !t.trim().is_empty())
+                .map(|t| t.trim().to_owned())
+                .filter(|t| !t.is_empty())
+        })
+        .or_else(|| {
+            if std::env::var("LGTM_GITHUB_TEST_MODE").as_deref() == Ok("1") {
+                return None;
+            }
+            std::process::Command::new("gh")
+                .args(["auth", "token"])
+                .output()
+                .ok()
+                .filter(|out| out.status.success())
+                .and_then(|out| String::from_utf8(out.stdout).ok())
+                .map(|s| s.trim().to_owned())
+                .filter(|s| !s.is_empty())
         });
     if let Some(tok) = resolved_token {
         builder = builder.personal_token(tok);
     }
-    if let Some(base) = api_base_url.filter(|u| !u.trim().is_empty()) {
+    let resolved_base = api_base_url
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+        .map(str::to_owned)
+        .or_else(|| {
+            std::env::var("LGTM_GITHUB_TEST_API_URL")
+                .or_else(|_| std::env::var("GITHUB_API_URL"))
+                .ok()
+                .map(|u| u.trim().to_owned())
+                .filter(|u| !u.is_empty())
+        });
+    if let Some(base) = resolved_base {
         builder = builder
-            .base_uri(base)
+            .base_uri(&base)
             .map_err(|err| Error::Forge(format!("invalid GitHub API base URI '{base}': {err}")))?;
     }
     builder
         .build()
         .map_err(|err| Error::Forge(format!("failed to initialize octocrab client: {err}")))
+}
+
+/// Push a committed head tree and commit to `refs/heads/<branch>` on GitHub via the Git Data API.
+pub async fn push_commit_to_branch(
+    client: &Octocrab,
+    owner: &str,
+    repo: &str,
+    branch: &str,
+    payload: &HeadCommitPayload,
+) -> Result<String> {
+    let parent_route = format!("/repos/{owner}/{repo}/git/commits/{}", payload.parent_sha);
+    let parent_json: Value = client.get(parent_route, None::<&()>).await.map_err(|err| {
+        Error::Forge(format!(
+            "failed to read parent commit '{}': {err}",
+            payload.parent_sha
+        ))
+    })?;
+    let base_tree_sha = parent_json
+        .pointer("/tree/sha")
+        .and_then(Value::as_str)
+        .ok_or_else(|| Error::Forge("parent commit response missing tree.sha".to_owned()))?;
+
+    let mut tree_entries = Vec::new();
+    for (path, maybe_content) in &payload.changed_files {
+        match maybe_content {
+            Some(content) => {
+                tree_entries.push(json!({
+                    "path": path,
+                    "mode": "100644",
+                    "type": "blob",
+                    "content": content,
+                }));
+            }
+            None => {
+                tree_entries.push(json!({
+                    "path": path,
+                    "mode": "100644",
+                    "type": "blob",
+                    "sha": Value::Null,
+                }));
+            }
+        }
+    }
+
+    let new_tree_sha = if tree_entries.is_empty() {
+        base_tree_sha.to_owned()
+    } else {
+        let tree_route = format!("/repos/{owner}/{repo}/git/trees");
+        let tree_json: Value = client
+            .post(
+                tree_route,
+                Some(&json!({
+                    "base_tree": base_tree_sha,
+                    "tree": tree_entries,
+                })),
+            )
+            .await
+            .map_err(|err| Error::Forge(format!("failed to create remote Git tree: {err}")))?;
+        tree_json
+            .get("sha")
+            .and_then(Value::as_str)
+            .ok_or_else(|| Error::Forge("remote tree response missing sha".to_owned()))?
+            .to_owned()
+    };
+
+    let date_str = Utc
+        .timestamp_opt(payload.timestamp, 0)
+        .single()
+        .unwrap_or_else(Utc::now)
+        .format("%Y-%m-%dT%H:%M:%SZ")
+        .to_string();
+    let commit_route = format!("/repos/{owner}/{repo}/git/commits");
+    let commit_json: Value = client
+        .post(
+            commit_route,
+            Some(&json!({
+                "message": payload.message.trim_end_matches('\n'),
+                "tree": new_tree_sha,
+                "parents": [payload.parent_sha],
+                "author": {
+                    "name": payload.author_name,
+                    "email": payload.author_email,
+                    "date": date_str,
+                },
+                "committer": {
+                    "name": payload.author_name,
+                    "email": payload.author_email,
+                    "date": date_str,
+                },
+            })),
+        )
+        .await
+        .map_err(|err| Error::Forge(format!("failed to create remote Git commit: {err}")))?;
+    let commit_sha = commit_json
+        .get("sha")
+        .and_then(Value::as_str)
+        .ok_or_else(|| Error::Forge("remote commit response missing sha".to_owned()))?
+        .to_owned();
+
+    let ref_route = format!("/repos/{owner}/{repo}/git/refs/heads/{branch}");
+    let _: Value = client
+        .patch(
+            ref_route,
+            Some(&json!({
+                "sha": commit_sha,
+                "force": true,
+            })),
+        )
+        .await
+        .map_err(|err| Error::Forge(format!("failed to update remote ref '{branch}': {err}")))?;
+
+    let pulls_route = format!("/repos/{owner}/{repo}/pulls?head={owner}:{branch}&state=all");
+    for _ in 0..20 {
+        if let Ok(prs) = client
+            .get::<Vec<Value>, _, _>(&pulls_route, None::<&()>)
+            .await
+            && (prs.is_empty()
+                || prs
+                    .first()
+                    .and_then(|pr| pr.pointer("/head/sha"))
+                    .and_then(Value::as_str)
+                    == Some(commit_sha.as_str()))
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+
+    Ok(commit_sha)
 }
 
 /// Fetch a pull request bundle (metadata, review sessions, comments, and viewed-file states) from GitHub.
@@ -256,7 +411,7 @@ pub async fn create_pending_review(
     Ok(review_id)
 }
 
-/// Create a remote draft comment on a pull request (ensuring a pending review exists first).
+/// Create a remote draft comment on a pull request.
 pub async fn create_draft_comment(
     client: &Octocrab,
     owner: &str,
@@ -265,45 +420,59 @@ pub async fn create_draft_comment(
     pending_review_id: Option<&str>,
     input: &ForgeDraftCommentInput,
 ) -> Result<ForgeDraftCommentReceipt> {
-    let review_id = match pending_review_id.filter(|s| !s.trim().is_empty()) {
-        Some(existing) => existing.to_owned(),
-        None => create_pending_review(client, owner, repo, pr_number, &input.commit_sha).await?,
-    };
-    let route = format!("/repos/{owner}/{repo}/pulls/{pr_number}/comments");
-    let mut payload = json!({
-        "body": input.body,
-        "commit_id": input.commit_sha,
-    });
-    if let Ok(review_id_num) = review_id.parse::<u64>() {
-        payload["pull_request_review_id"] = Value::Number(review_id_num.into());
-    } else {
-        payload["pull_request_review_id"] = Value::String(review_id.clone());
-    }
-    if let Some(path) = &input.file_path {
-        payload["path"] = Value::String(path.clone());
-    }
-    if let Some(line) = input.line {
-        payload["line"] = Value::Number(line.into());
-        payload["side"] = Value::String("RIGHT".to_owned());
-    }
-    if let Some(start_line) = input.start_line {
-        payload["start_line"] = Value::Number(start_line.into());
-        payload["start_side"] = Value::String("RIGHT".to_owned());
-    }
-    if let Some(reply_to) = &input.reply_to_forge_id
-        && let Ok(reply_id) = reply_to.parse::<u64>()
+    let response: Value = if let Some(reply_to) = input
+        .reply_to_forge_id
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
     {
-        payload["in_reply_to"] = Value::Number(reply_id.into());
-    }
+        let route = format!("/repos/{owner}/{repo}/pulls/{pr_number}/comments/{reply_to}/replies");
+        client
+            .post(route, Some(&json!({ "body": input.body })))
+            .await
+            .map_err(|err| Error::Forge(format!("failed to create remote reply: {err}")))?
+    } else if let Some(path) = &input.file_path {
+        let route = format!("/repos/{owner}/{repo}/pulls/{pr_number}/comments");
+        let mut payload = json!({
+            "body": input.body,
+            "commit_id": input.commit_sha,
+            "path": path,
+        });
+        if let Some(line) = input.line {
+            payload["line"] = Value::Number(line.into());
+            payload["side"] = Value::String("RIGHT".to_owned());
+        }
+        if let Some(start_line) = input.start_line
+            && input.line.is_none_or(|end| start_line < end)
+        {
+            payload["start_line"] = Value::Number(start_line.into());
+            payload["start_side"] = Value::String("RIGHT".to_owned());
+        }
+        client
+            .post(route, Some(&payload))
+            .await
+            .map_err(|err| Error::Forge(format!("failed to create remote comment: {err}")))?
+    } else {
+        let route = format!("/repos/{owner}/{repo}/issues/{pr_number}/comments");
+        client
+            .post(route, Some(&json!({ "body": input.body })))
+            .await
+            .map_err(|err| Error::Forge(format!("failed to create remote comment: {err}")))?
+    };
 
-    let response: Value = client
-        .post(route, Some(&payload))
-        .await
-        .map_err(|err| Error::Forge(format!("failed to create remote comment: {err}")))?;
     let comment_forge_id = response
         .get("id")
         .map(|v| v.to_string().trim_matches('"').to_owned())
         .ok_or_else(|| Error::Forge("GitHub comment response did not include 'id'".to_owned()))?;
+    let review_id = pending_review_id
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_owned)
+        .or_else(|| {
+            response
+                .get("pull_request_review_id")
+                .map(|v| v.to_string().trim_matches('"').to_owned())
+                .filter(|v| v != "null" && !v.is_empty())
+        })
+        .unwrap_or_else(|| format!("pending-{pr_number}"));
 
     Ok(ForgeDraftCommentReceipt {
         pending_review_forge_id: review_id,
@@ -376,7 +545,7 @@ pub async fn submit_review(
     owner: &str,
     repo: &str,
     pr_number: u64,
-    pending_review_id: Option<&str>,
+    _pending_review_id: Option<&str>,
     outcome: ReviewOutcome,
     body: Option<&str>,
 ) -> Result<ForgeReviewReceipt> {
@@ -386,28 +555,19 @@ pub async fn submit_review(
         ReviewOutcome::Comment => "COMMENT",
     };
 
-    let response: Value =
-        if let Some(review_id) = pending_review_id.filter(|s| !s.trim().is_empty()) {
-            let route =
-                format!("/repos/{owner}/{repo}/pulls/{pr_number}/reviews/{review_id}/events");
-            let mut payload = json!({ "event": event });
-            if let Some(text) = body {
-                payload["body"] = Value::String(text.to_owned());
-            }
-            client.post(route, Some(&payload)).await.map_err(|err| {
-                Error::Forge(format!("failed to submit review '{review_id}': {err}"))
-            })?
-        } else {
-            let route = format!("/repos/{owner}/{repo}/pulls/{pr_number}/reviews");
-            let mut payload = json!({ "event": event });
-            if let Some(text) = body {
-                payload["body"] = Value::String(text.to_owned());
-            }
-            client
-                .post(route, Some(&payload))
-                .await
-                .map_err(|err| Error::Forge(format!("failed to submit review: {err}")))?
-        };
+    let route = format!("/repos/{owner}/{repo}/pulls/{pr_number}/reviews");
+    let review_body = body
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Reviewed via LGTM");
+    let payload = json!({
+        "event": event,
+        "body": review_body,
+    });
+    let response: Value = client
+        .post(route, Some(&payload))
+        .await
+        .map_err(|err| Error::Forge(format!("failed to submit review: {err}")))?;
 
     let review_forge_id = response
         .get("id")

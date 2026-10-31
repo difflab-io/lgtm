@@ -9,11 +9,21 @@ pub use models::{
     ForgePullRequestBundle, ForgeReviewComment, ForgeReviewReceipt, ForgeReviewSession,
 };
 
-use crate::{error::Result, models::ReviewOutcome};
+use crate::{error::Result, extensions::gitoxide::HeadCommitPayload, models::ReviewOutcome};
 
 /// Provider-agnostic interface for synchronizing pull/merge requests, pending reviews, comments, and viewed-file states with a remote forge.
 #[async_trait::async_trait]
 pub trait RemoteForge: Send + Sync {
+    /// Push a committed head tree and commit to `refs/heads/<branch>` on the remote forge when supported via API.
+    async fn push_branch(
+        &self,
+        _repository_url: &str,
+        _branch: &str,
+        _payload: &HeadCommitPayload,
+    ) -> Result<Option<String>> {
+        Ok(None)
+    }
+
     /// Pull the latest pull request metadata, review sessions, and comments for `branch_or_pr`.
     async fn get_pull_request_bundle(
         &self,

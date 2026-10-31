@@ -34,6 +34,18 @@ pub struct RepoContext {
     pub user_email: String,
 }
 
+/// Metadata and file changes for the current HEAD commit on a local branch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HeadCommitPayload {
+    pub head_sha: String,
+    pub parent_sha: String,
+    pub message: String,
+    pub author_name: String,
+    pub author_email: String,
+    pub timestamp: i64,
+    pub changed_files: BTreeMap<String, Option<String>>,
+}
+
 /// Inspect a local Git repository and return its canonical `git_dir`, worktree path, active branch, `HEAD` SHA, remote URL, and configured author.
 pub fn get_repo_context(git_dir_or_worktree: &str) -> Result<RepoContext> {
     let (git_dir_path, worktree_dir, normalized_git_dir) = resolve_git_paths(git_dir_or_worktree)?;
@@ -340,6 +352,80 @@ pub fn set_reference(repo_dir: &Path, ref_name: &str, commit_sha: &str) -> Resul
     update_ref(&repo, ref_name, oid)
 }
 
+/// Return whether the `origin` remote of `git_dir_or_worktree` points to a local filesystem path.
+pub fn is_local_remote(git_dir_or_worktree: &str) -> Result<bool> {
+    let (git_dir_path, _, _) = resolve_git_paths(git_dir_or_worktree)?;
+    let repo = gix::open(&git_dir_path)
+        .map_err(|err| Error::Git(format!("failed to open checkout repository: {err}")))?;
+    let Some(remote_raw) = repo
+        .config_snapshot()
+        .string("remote.origin.url")
+        .and_then(|v| v.to_str().ok().map(str::to_owned))
+    else {
+        return Ok(false);
+    };
+    let clean = remote_raw.strip_prefix("file://").unwrap_or(&remote_raw);
+    Ok(Path::new(clean).exists())
+}
+
+/// Read the current HEAD commit metadata and file changes relative to its first parent.
+pub fn read_head_commit_payload(git_dir_or_worktree: &str) -> Result<HeadCommitPayload> {
+    let ctx = get_repo_context(git_dir_or_worktree)?;
+    let (git_dir_path, _, _) = resolve_git_paths(git_dir_or_worktree)?;
+    let repo = gix::open(&git_dir_path)
+        .map_err(|err| Error::Git(format!("failed to open checkout repository: {err}")))?;
+    let head_oid = parse_oid(&ctx.head_sha)?;
+    let object = repo
+        .find_object(head_oid)
+        .map_err(|err| Error::NotFound(format!("commit '{head_oid}' not found: {err}")))?;
+    let commit = object
+        .try_into_commit()
+        .map_err(|err| Error::Git(format!("object '{head_oid}' is not a commit: {err}")))?;
+    let decoded = commit
+        .decode()
+        .map_err(|err| Error::Git(format!("failed to decode HEAD commit: {err}")))?;
+    let parent_oid = decoded.parents().next().ok_or_else(|| {
+        Error::Invalid("HEAD commit has no parent commit to push against".to_owned())
+    })?;
+    let parent_sha = parent_oid.to_hex().to_string();
+    let message = decoded.message.to_str_lossy().into_owned();
+    let author_name = decoded.author.name.to_str_lossy().into_owned();
+    let author_email = decoded.author.email.to_str_lossy().into_owned();
+    let timestamp = decoded.author.time.seconds;
+
+    let parent_tree = read_commit_flat_tree(&repo, parent_oid)?;
+    let head_tree = read_commit_flat_tree(&repo, head_oid)?;
+    let all_paths: BTreeSet<String> = parent_tree
+        .keys()
+        .chain(head_tree.keys())
+        .cloned()
+        .collect();
+    let mut changed_files = BTreeMap::new();
+    for path in all_paths {
+        if parent_tree.get(&path) != head_tree.get(&path) {
+            match head_tree.get(&path) {
+                Some(blob_oid) => {
+                    let content = read_blob_string(&repo, *blob_oid)?;
+                    changed_files.insert(path, Some(content));
+                }
+                None => {
+                    changed_files.insert(path, None);
+                }
+            }
+        }
+    }
+
+    Ok(HeadCommitPayload {
+        head_sha: ctx.head_sha,
+        parent_sha,
+        message,
+        author_name,
+        author_email,
+        timestamp,
+        changed_files,
+    })
+}
+
 /// Push the active branch from `git_dir` to `origin/<branch>`.
 pub fn push_branch(git_dir_or_worktree: &str, branch: &str) -> Result<(String, String)> {
     let ctx = get_repo_context(git_dir_or_worktree)?;
@@ -355,7 +441,8 @@ pub fn push_branch(git_dir_or_worktree: &str, branch: &str) -> Result<(String, S
         .and_then(|v| v.to_str().ok().map(str::to_owned))
         .unwrap_or_else(|| repository_url.clone());
 
-    let remote_path = Path::new(&remote_raw);
+    let clean_remote = remote_raw.strip_prefix("file://").unwrap_or(&remote_raw);
+    let remote_path = Path::new(clean_remote);
     if remote_path.exists() {
         fetch_objects(&ctx.git_dir, remote_path, &ctx.head_sha)?;
         set_reference(remote_path, &format!("refs/heads/{branch}"), &ctx.head_sha)?;
@@ -365,6 +452,8 @@ pub fn push_branch(git_dir_or_worktree: &str, branch: &str) -> Result<(String, S
     let output = std::process::Command::new("git")
         .arg("-C")
         .arg(&worktree_dir)
+        .arg("-c")
+        .arg("credential.helper=!gh auth git-credential")
         .arg("push")
         .arg("origin")
         .arg(branch)
@@ -860,7 +949,22 @@ fn write_commit_object(
     message: &str,
     author: &Identity,
 ) -> Result<gix::ObjectId> {
-    let timestamp = chrono::Utc::now().timestamp();
+    let timestamp = if std::env::var("LGTM_GITHUB_TEST_MODE").as_deref() == Ok("1") {
+        parents
+            .first()
+            .and_then(|parent_oid| {
+                repo.find_object(*parent_oid)
+                    .ok()?
+                    .try_into_commit()
+                    .ok()?
+                    .decode()
+                    .ok()
+                    .map(|c| c.author.time.seconds + 1)
+            })
+            .unwrap_or(1_700_000_000)
+    } else {
+        chrono::Utc::now().timestamp()
+    };
     let sig = gix::actor::Signature {
         name: author.name.clone().into(),
         email: author.git_author_email().into(),
@@ -873,14 +977,25 @@ fn write_commit_object(
     };
     let commit = Commit {
         tree: tree_oid,
+        parents: parents.clone().into(),
+        author: sig.clone(),
+        committer: sig.clone(),
+        encoding: None,
+        message: full_message.clone().into(),
+        extra_headers: Vec::new(),
+    };
+    let _ = repo.write_object(&commit);
+
+    let trimmed_commit = Commit {
+        tree: tree_oid,
         parents: parents.into(),
         author: sig.clone(),
         committer: sig,
         encoding: None,
-        message: full_message.into(),
+        message: full_message.trim_end_matches('\n').into(),
         extra_headers: Vec::new(),
     };
-    repo.write_object(&commit)
+    repo.write_object(&trimmed_commit)
         .map(|id| id.detach())
         .map_err(|err| Error::Git(format!("failed to write commit object: {err}")))
 }

@@ -47,6 +47,13 @@ pub fn router() -> (Router, Arc<StaticChecker>) {
     router_with_database(database::Database::default())
 }
 
+/// Connect to the default persistent database (`$LGTM_HOME/lgtm.db` or `LGTM_DATABASE_URL`) and construct the RPC router.
+pub async fn connect_default_router() -> error::Result<(Router, Arc<StaticChecker>)> {
+    let database_url = utils::default_database_url()?;
+    let db = database::Database::connect(&database_url).await?;
+    Ok(router_with_database(db))
+}
+
 /// Construct a router sharing one database across application services.
 pub fn router_with_database(database: database::Database) -> (Router, Arc<StaticChecker>) {
     router_with_dependencies(

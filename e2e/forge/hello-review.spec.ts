@@ -24,7 +24,7 @@ describe(
       expect(reply).toEqual({ message: 'Hello, Backend!' })
     })
 
-    it('should_normalize_empty_and_padded_names_without_creating_a_database', async () => {
+    it('should_normalize_empty_and_padded_names_without_touching_legacy_reviews_sqlite', async () => {
       // Arrange
       const { runtime } = fixture()
       const oldDatabase = join(runtime.home, 'reviews.sqlite')
@@ -39,9 +39,9 @@ describe(
       expect(empty.message).toBe('Hello, World!')
       expect(padded.message).toBe('Hello, Zoë!')
       expect(await readFile(oldDatabase, 'utf8')).toBe('existing database stays untouched')
-      expect((await readdir(runtime.home)).filter((name) => /sqlite|\.db$/.test(name))).toEqual([
-        'reviews.sqlite',
-      ])
+      const dbFiles = (await readdir(runtime.home)).filter((name) => /sqlite|\.db$/.test(name))
+      expect(dbFiles).toContain('reviews.sqlite')
+      expect(dbFiles).toContain('lgtm.db')
     })
 
     it('should_reject_removed_review_methods_instead_of_running_old_workflows', async () => {

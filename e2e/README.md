@@ -7,7 +7,7 @@ The active TypeScript/Vitest suites check the hello-review skeleton, CLI command
 | Suite | Behavior | Command |
 | --- | --- | --- |
 | Forge | Real hello-review RPC, name normalization, removed RPC rejection and existing DB file preservation | `premise run e2e:forge` |
-| CLI | Real hello-review demo, command parsing, harmless unimplemented operations, UI/daemon serving and shutdown | `premise run e2e:cli` |
+| CLI | Command parsing, local snapshot review lifecycle (`--local`), remote GitHub PR review lifecycle, local/remote diff output parity, UI/daemon serving and shutdown | `premise run e2e:cli` |
 | Neovim | Shell loading, Lua/Ex/key control, diagnostics and package-manager setup | `premise run e2e:nvim` |
 | Replay infrastructure | Strict HTTP snapshots, UUID binding, ordered mutation barriers, recording safety and retained Git reconstruction | `premise run e2e:fixtures:test` |
 
@@ -31,9 +31,13 @@ e2e/
 ├── forge/hello-review.spec.ts
 ├── cli/
 │   ├── commands.spec.ts
-│   └── daemon.spec.ts
+│   ├── daemon.spec.ts
+│   ├── local-review.fixtures.ts
+│   ├── local-review.spec.ts
+│   ├── pr-review.fixtures.ts
+│   └── pr-review.spec.ts
 ├── nvim/                         # Retained editor setup, profiles, pins and shell tests
-└── recordings/                   # Historical cassettes, including captured Git bundles
+└── recordings/                   # Recorded cassettes, including captured Git bundles
 ```
 
 `github-cassette.ts` keeps exact request matching and consistent runtime UUID bindings; reads may reuse past observations, while future responses remain unavailable until the corresponding recorded write matches.
@@ -86,10 +90,10 @@ Editor preflight checks dependency loading and a native CodeDiff operation; the 
 
 ## Record, replay and live validation
 
-The `e2e:record` entry point remains, but it currently exits with a clear “no recordable journeys” message before credentials or remote writes because no provider journey is active:
+The `e2e:record` entry point runs Vitest with `LGTM_E2E_GITHUB_MODE=record` for active provider suites (`cli`, `forge` or `all`):
 
 ```sh
-premise run e2e:record -- forge
+premise run e2e:record -- cli
 ```
 
 When replacement provider journeys are added, compose `common/pr.fixtures.ts` with the shared runtime and re-enable this entry point for eligible suites; do not repurpose historical cassettes as hello-review fixtures.
