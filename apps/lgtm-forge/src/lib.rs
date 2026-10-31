@@ -1,14 +1,19 @@
-//! Reusable LGTM backend with hello-review, greeting and health RPC services.
+//! Reusable LGTM backend library and Connect RPC server.
 
 pub use lgtm_db as database;
 pub mod error;
+pub mod extensions;
+pub mod forge;
 pub mod models;
 pub mod rpc;
 pub mod services;
+pub mod snapshots;
+pub mod utils;
+
+use std::sync::Arc;
 
 use connectrpc::{Encodable, RequestContext, Response, Router, ServiceRequest, ServiceResult};
 use connectrpc_health::{StaticChecker, install_static};
-use std::sync::Arc;
 
 /// Message types, service traits, and clients generated from the shared schema.
 pub mod proto {
@@ -37,17 +42,34 @@ impl GreeterService for Greeter {
     }
 }
 
-/// Construct the RPC router with the stateless demonstration data source.
+/// Construct the RPC router with default database, snapshot store, and GitHub forge adapters.
 pub fn router() -> (Router, Arc<StaticChecker>) {
     router_with_database(database::Database::default())
 }
 
-/// Construct a router sharing one data source across application services.
+/// Construct a router sharing one database across application services.
 pub fn router_with_database(database: database::Database) -> (Router, Arc<StaticChecker>) {
+    router_with_dependencies(
+        database,
+        snapshots::SnapshotStore::default(),
+        Arc::new(forge::GitHubForge::new()),
+    )
+}
+
+/// Construct a router with explicit database, snapshot store, and remote forge dependencies.
+pub fn router_with_dependencies(
+    database: database::Database,
+    snapshots: snapshots::SnapshotStore,
+    remote_forge: Arc<dyn forge::RemoteForge>,
+) -> (Router, Arc<StaticChecker>) {
     install_static(
         Router::new()
             .add_service(Arc::new(Greeter))
-            .add_service(Arc::new(rpc::ReviewApi::new(database))),
+            .add_service(Arc::new(rpc::ReviewApi::with_dependencies(
+                database,
+                snapshots,
+                remote_forge,
+            ))),
         [
             GREETER_SERVICE_SERVICE_NAME,
             proto::lgtm::v1::REVIEW_SERVICE_SERVICE_NAME,

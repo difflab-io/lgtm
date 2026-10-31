@@ -2,9 +2,284 @@ syntax = "proto3";
 
 package lgtm.v1;
 
-// Demonstration review API shared by the CLI and web frontend.
+// Code review and pull request synchronization service shared by the CLI and web frontend.
 service ReviewService {
+  rpc Add(AddRequest) returns (AddResponse);
+  rpc Commit(CommitRequest) returns (CommitResponse);
+  rpc Push(PushRequest) returns (PushResponse);
+  rpc ListReviews(ListReviewsRequest) returns (ListReviewsResponse);
+  rpc CreateReview(CreateReviewRequest) returns (CreateReviewResponse);
+  rpc RefreshReview(RefreshReviewRequest) returns (RefreshReviewResponse);
+  rpc ShowReview(ShowReviewRequest) returns (ShowReviewResponse);
+  rpc CloseReview(CloseReviewRequest) returns (CloseReviewResponse);
+  rpc CreateComment(CreateCommentRequest) returns (CreateCommentResponse);
+  rpc UpdateComment(UpdateCommentRequest) returns (UpdateCommentResponse);
+  rpc DeleteComment(DeleteCommentRequest) returns (DeleteCommentResponse);
+  rpc SetFileReviewed(SetFileReviewedRequest) returns (SetFileReviewedResponse);
   rpc HelloReview(HelloReviewRequest) returns (HelloReviewResponse);
+}
+
+enum ReviewStatus {
+  REVIEW_STATUS_UNSPECIFIED = 0;
+  REVIEW_STATUS_OPEN = 1;
+  REVIEW_STATUS_CLOSED = 2;
+  REVIEW_STATUS_MERGED = 3;
+}
+
+enum ReviewOutcome {
+  REVIEW_OUTCOME_UNSPECIFIED = 0;
+  REVIEW_OUTCOME_COMMENT = 1;
+  REVIEW_OUTCOME_REJECT = 2;
+  REVIEW_OUTCOME_APPROVE = 3;
+  REVIEW_OUTCOME_REQUEST = 4;
+}
+
+enum ReviewGroupBy {
+  REVIEW_GROUP_BY_UNSPECIFIED = 0;
+  REVIEW_GROUP_BY_FILE = 1;
+  REVIEW_GROUP_BY_SESSION = 2;
+}
+
+enum SessionState {
+  SESSION_STATE_UNSPECIFIED = 0;
+  SESSION_STATE_DRAFT = 1;
+  SESSION_STATE_PUBLISHED = 2;
+}
+
+enum DiffLineKind {
+  DIFF_LINE_KIND_UNSPECIFIED = 0;
+  DIFF_LINE_KIND_CONTEXT = 1;
+  DIFF_LINE_KIND_ADDED = 2;
+  DIFF_LINE_KIND_REMOVED = 3;
+}
+
+message IdentitySummary {
+  string id = 1;
+  string name = 2;
+  string kind = 3;
+  optional string email = 4;
+  optional string forge_login = 5;
+  optional string provider = 6;
+  optional string model = 7;
+}
+
+message ReviewSummary {
+  string id = 1;
+  uint64 number = 2;
+  string name = 3;
+  bool local = 4;
+  string git_dir = 5;
+  string branch = 6;
+  optional string repository_url = 7;
+  optional uint64 pr_number = 8;
+  optional string forge_id = 9;
+  ReviewStatus status = 10;
+  string base_sha = 11;
+  string head_sha = 12;
+  map<string, string> reviewed_files = 13;
+}
+
+message SessionSummary {
+  string id = 1;
+  string review_id = 2;
+  uint64 number = 3;
+  IdentitySummary author = 4;
+  SessionState state = 5;
+  ReviewOutcome outcome = 6;
+  optional string body = 7;
+  optional string forge_id = 8;
+  optional string published_at = 9;
+}
+
+message CommentAnchorDetail {
+  string file_path = 1;
+  optional uint32 start_line = 2;
+  uint32 line = 3;
+  string commit_sha = 4;
+  optional uint32 original_start_line = 5;
+  uint32 original_line = 6;
+  string original_commit_sha = 7;
+}
+
+message CommentDetail {
+  string id = 1;
+  uint64 number = 2;
+  string review_id = 3;
+  string session_id = 4;
+  IdentitySummary author = 5;
+  optional uint64 reply_to_number = 6;
+  optional CommentAnchorDetail anchor = 7;
+  string body = 8;
+  bool resolved = 9;
+  bool outdated = 10;
+  optional string forge_id = 11;
+}
+
+message DiffLineDetail {
+  DiffLineKind kind = 1;
+  uint32 line_number = 2;
+  string content = 3;
+}
+
+message DiffHunkDetail {
+  string file_path = 1;
+  string commit_sha = 2;
+  uint32 start_line = 3;
+  repeated DiffLineDetail lines = 4;
+}
+
+message AddRequest {
+  string git_dir = 1;
+  repeated string paths = 2;
+  bool local = 3;
+}
+
+message AddResponse {
+  repeated string staged_paths = 1;
+  bool local = 2;
+}
+
+message CommitRequest {
+  string git_dir = 1;
+  optional string message = 2;
+  optional string as_agent = 3;
+  bool local = 4;
+}
+
+message CommitResponse {
+  string commit_sha = 1;
+  string branch = 2;
+  IdentitySummary author = 3;
+  bool local = 4;
+}
+
+message PushRequest {
+  string git_dir = 1;
+  bool local = 2;
+}
+
+message PushResponse {
+  string branch = 1;
+  string head_sha = 2;
+  string repository_url = 3;
+  bool local = 4;
+}
+
+message ListReviewsRequest {
+  string git_dir = 1;
+  bool local = 2;
+  bool all = 3;
+}
+
+message ListReviewsResponse {
+  repeated ReviewSummary reviews = 1;
+}
+
+message CreateReviewRequest {
+  string git_dir = 1;
+  bool local = 2;
+}
+
+message CreateReviewResponse {
+  ReviewSummary review = 1;
+  SessionSummary session = 2;
+}
+
+message RefreshReviewRequest {
+  string git_dir = 1;
+  optional string selector = 2;
+  bool local = 3;
+}
+
+message RefreshReviewResponse {
+  ReviewSummary review = 1;
+  uint32 updated_anchors = 2;
+}
+
+message ShowReviewRequest {
+  string git_dir = 1;
+  optional string selector = 2;
+  bool local = 3;
+  ReviewGroupBy group_by = 4;
+  bool unresolved = 5;
+}
+
+message ShowReviewResponse {
+  ReviewSummary review = 1;
+  repeated SessionSummary sessions = 2;
+  repeated CommentDetail comments = 3;
+  repeated DiffHunkDetail diff_hunks = 4;
+}
+
+message CloseReviewRequest {
+  string git_dir = 1;
+  optional string selector = 2;
+  bool local = 3;
+  ReviewOutcome with_outcome = 4;
+  optional string body = 5;
+  optional string as_agent = 6;
+}
+
+message CloseReviewResponse {
+  ReviewSummary review = 1;
+  SessionSummary session = 2;
+}
+
+message CreateCommentRequest {
+  string git_dir = 1;
+  optional string review_selector = 2;
+  string body = 3;
+  optional string file_path = 4;
+  optional uint32 start_line = 5;
+  optional uint32 line = 6;
+  optional uint64 reply_to = 7;
+  bool local = 8;
+  optional string as_agent = 9;
+}
+
+message CreateCommentResponse {
+  CommentDetail comment = 1;
+}
+
+message UpdateCommentRequest {
+  string git_dir = 1;
+  uint64 comment_number = 2;
+  optional string body = 3;
+  optional string file_path = 4;
+  optional uint32 start_line = 5;
+  optional uint32 line = 6;
+  optional bool resolved = 7;
+  bool local = 8;
+  optional string as_agent = 9;
+}
+
+message UpdateCommentResponse {
+  CommentDetail comment = 1;
+}
+
+message DeleteCommentRequest {
+  string git_dir = 1;
+  uint64 comment_number = 2;
+  bool local = 3;
+  optional string as_agent = 4;
+}
+
+message DeleteCommentResponse {
+  uint64 deleted_number = 1;
+}
+
+message SetFileReviewedRequest {
+  string git_dir = 1;
+  optional string review_selector = 2;
+  string file_path = 3;
+  bool viewed = 4;
+  bool local = 5;
+}
+
+message SetFileReviewedResponse {
+  string file_path = 1;
+  bool viewed = 2;
+  string commit_sha = 3;
 }
 
 message HelloReviewRequest {
