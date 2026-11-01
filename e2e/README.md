@@ -73,7 +73,7 @@ Run focused cases during development and reserve the full suite for final valida
 
 Native Vitest `describe` groups identify `When ...` states, and `it` cases assert observable results with Arrange/Act/Assert sections; shared lifecycle hooks own application processes and temporary workspaces under `target/e2e/`.
 
-Successful runs remove temporary state; failed runs retain workspaces and process logs, and editor failures also include screen/window diagnostics.
+Successful runs remove temporary state; failed runs retain workspaces and process logs, and editor failures also include screen/window diagnostics. Each CLI E2E case also writes its full `lgtm` command transcript (`$ lgtm ...`, exit code, `stdout`, and `stderr`) to `e2e/outputs/<suite>/<spec>/<test>.log` (git-ignored) for inspection after both passing and failing runs.
 
 The CLI safety case uses a temporary checkout and bare upstream to verify that unimplemented commands leave file bytes, index, HEAD, refs and upstream refs unchanged.
 

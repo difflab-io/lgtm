@@ -1,10 +1,30 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { appendFileSync } from 'node:fs'
 import { once } from 'node:events'
-import { join, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { expect } from 'vitest'
 import { isolatedEnv, waitFor, type Json } from './test-utils.js'
+
+export interface TestTaskMeta {
+  filepath: string
+  name: string
+  fullName: string
+}
+
+function formatCliArg(arg: string): string {
+  return /[\s"']/.test(arg) ? JSON.stringify(arg) : arg
+}
+
+function formatCliOutput(text: string, isJson: boolean): string {
+  const trimmed = text.trimEnd()
+  if (!isJson || !trimmed) return trimmed
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2)
+  } catch {
+    return trimmed
+  }
+}
 
 export const ROOT = resolve(import.meta.dirname, '../..')
 export const binary = (name: string) =>
@@ -57,6 +77,7 @@ export class TestHarness {
   child?: ChildProcess
   env: NodeJS.ProcessEnv
   log = ''
+  cliOutputPath?: string
   private constructor(
     readonly directory: string,
     readonly home: string,
@@ -132,7 +153,7 @@ export class TestHarness {
   }
 
   async cli(args: string[]) {
-    return command(binary('lgtm'), args, {
+    const result = await command(binary('lgtm'), args, {
       cwd: this.workspace,
       env: {
         ...this.env,
@@ -140,6 +161,25 @@ export class TestHarness {
       },
       timeout: 60_000,
     })
+    const isJson = args.includes('--json')
+    const sections = [
+      '',
+      '================================================================================',
+      `$ lgtm ${args.map(formatCliArg).join(' ')}`,
+      `[exit ${result.code ?? 'null'}]`,
+    ]
+    if (result.stdout) {
+      sections.push('--- stdout ---', formatCliOutput(result.stdout, isJson))
+    }
+    if (result.stderr) {
+      sections.push('--- stderr ---', result.stderr.trimEnd())
+    }
+    const entry = `${sections.join('\n')}\n`
+    await appendFile(join(this.directory, 'cli.log'), entry)
+    if (this.cliOutputPath) {
+      await appendFile(this.cliOutputPath, entry)
+    }
+    return result
   }
 
   async json(args: string[]): Promise<Json> {
@@ -181,7 +221,11 @@ export class TestHarness {
     else await rm(this.directory, { recursive: true, force: true })
   }
 
-  static async create(kind: 'forge' | 'backend' | 'cli' = 'forge', env: NodeJS.ProcessEnv = {}) {
+  static async create(
+    kind: 'forge' | 'backend' | 'cli' = 'forge',
+    env: NodeJS.ProcessEnv = {},
+    task?: TestTaskMeta,
+  ) {
     const parent = join(ROOT, 'target/e2e', kind)
     await mkdir(parent, { recursive: true })
     const directory = await mkdtemp(join(parent, 'journey-'))
@@ -191,6 +235,18 @@ export class TestHarness {
     await mkdir(workspace)
     const runtime = new TestHarness(directory, home, workspace, kind)
     Object.assign(runtime.env, env)
+    if (kind === 'cli' && task) {
+      const relSpec = relative(join(ROOT, 'e2e'), task.filepath)
+        .replaceAll('\\', '/')
+        .replace(/\.spec\.ts$/, '')
+      const slug = task.name.replace(/[^a-zA-Z0-9_-]+/g, '_')
+      runtime.cliOutputPath = join(ROOT, 'e2e/outputs', relSpec, `${slug}.log`)
+      await mkdir(dirname(runtime.cliOutputPath), { recursive: true })
+      await writeFile(
+        runtime.cliOutputPath,
+        `# Test: ${task.fullName}\n# Spec: e2e/${relSpec}.spec.ts\n`,
+      )
+    }
     try {
       await runtime.launch()
       return runtime

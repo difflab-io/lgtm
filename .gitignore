@@ -52,3 +52,6 @@ dist/
 
 # Generated Neovim help index
 /apps/lgtm.nvim/doc/tags
+
+# Generated E2E CLI outputs
+/e2e/outputs/
