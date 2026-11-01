@@ -34,6 +34,7 @@ e2e/
 │   ├── daemon.spec.ts
 │   ├── local-review.fixtures.ts
 │   ├── local-review.spec.ts
+│   ├── parity.spec.ts
 │   ├── pr-review.fixtures.ts
 │   └── pr-review.spec.ts
 ├── nvim/                         # Retained editor setup, profiles, pins and shell tests

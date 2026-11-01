@@ -11,16 +11,3 @@ export async function setupPrCheckout(runtime: TestHarness, github: GithubFixtur
     initialHead: github.head,
   }
 }
-
-export function normalizeDiffAndThreadsOutput(stdout: string): string {
-  return stdout
-    .trim()
-    .split('\n')
-    .slice(2)
-    .join('\n')
-    .replace(/\[\d+\]/g, '[#]')
-    .replace(/reply to #\d+/g, 'reply to #N')
-    .replace(/session #\d+/gi, (match) =>
-      match.startsWith('Session') ? 'Session #S' : 'session #S',
-    )
-}
