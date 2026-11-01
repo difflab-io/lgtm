@@ -40,8 +40,12 @@ describe(
         const pushed = await runtime.json(['push'])
         const created = await runtime.json(['review', 'new'])
         const listed = await runtime.json(['review', 'list'])
+        const listedText = await runtime.cli(['review', 'list'])
+        const shownText = await runtime.cli(['review', 'show'])
 
         // Assert
+        expect(listedText.code).toBe(0)
+        expect(shownText.code).toBe(0)
         expect(added).toEqual({
           staged_paths: [filePath],
           local: false,
@@ -123,6 +127,7 @@ describe(
         'true',
       ])
 
+      const shownBeforeDelete = await runtime.cli(['review', 'show'])
       const remoteCommentsBeforeDelete = await github.api<Json[]>(
         `repos/${github.repository}/pulls/${prNumber}/comments?per_page=100`,
       )
@@ -133,11 +138,14 @@ describe(
         '--as',
         'anthropic/claude-sonnet-4-5',
       ])
+      const shownAfterDelete = await runtime.cli(['review', 'show'])
       const remoteCommentsAfterDelete = await github.api<Json[]>(
         `repos/${github.repository}/pulls/${prNumber}/comments?per_page=100`,
       )
 
       // Assert
+      expect(shownBeforeDelete.code).toBe(0)
+      expect(shownAfterDelete.code).toBe(0)
       expect(humanComment.comment).toMatchObject({
         number: humanNum,
         body: 'Verify changed line behavior',
@@ -206,6 +214,7 @@ describe(
         'claude-sonnet-4-5',
       ])
       const commentNum = (anchored.comment as { number: number }).number
+      const shownBeforeRefresh = await runtime.cli(['review', 'show', `PR${prNumber}`])
 
       // Act: push a mid-flight commit to the PR on GitHub that inserts 2 lines at the top of the file
       await github.changeFiles({
@@ -214,8 +223,13 @@ describe(
       await github.fetch(runtime, github.head)
       const refreshed = await runtime.json(['review', 'refresh', `PR${prNumber}`])
       const shown = await runtime.json(['review', 'show', `PR${prNumber}`])
+      const shownAfterRefresh = await runtime.cli(['review', 'show', `PR${prNumber}`])
 
       // Assert
+      expect(shownBeforeRefresh.code).toBe(0)
+      expect(shownBeforeRefresh.stdout).toContain('── line 6 • unresolved')
+      expect(shownAfterRefresh.code).toBe(0)
+      expect(shownAfterRefresh.stdout).toContain('── line 8 • unresolved')
       expect((refreshed.review as { head_sha: string }).head_sha).toBe(github.head)
       expect(refreshed.updated_anchors).toBeGreaterThanOrEqual(1)
 

@@ -126,8 +126,12 @@ describe(
       const betaReview = await runtime.json(['review', 'new', '--local'])
       const betaBranchList = await runtime.json(['review', 'list', '--local'])
       const allBranchesList = await runtime.json(['review', 'list', '--local', '--all'])
+      const allBranchesText = await runtime.cli(['review', 'list', '--local', '--all'])
+      const betaShowText = await runtime.cli(['review', 'show', '--local'])
 
       // Assert
+      expect(allBranchesText.code).toBe(0)
+      expect(betaShowText.code).toBe(0)
       expect(alphaReview.review).toMatchObject({
         number: 1,
         name: 'R1-feature-alpha',
@@ -188,6 +192,8 @@ describe(
         'claude-sonnet-4-5',
       ])
 
+      const beforeRefreshShow = await runtime.cli(['review', 'show', reviewName, '--local'])
+
       // Act: insert 2 header lines at the top AND overwrite beta's line 6
       await runtime.write(
         'src/lib.rs',
@@ -210,8 +216,14 @@ describe(
       )
       const refreshed = await runtime.json(['review', 'refresh', reviewName, '--local'])
       const shown = await runtime.json(['review', 'show', reviewName, '--local'])
+      const afterRefreshShow = await runtime.cli(['review', 'show', reviewName, '--local'])
 
       // Assert
+      expect(beforeRefreshShow.code).toBe(0)
+      expect(beforeRefreshShow.stdout).toContain('── line 9 • unresolved')
+      expect(afterRefreshShow.code).toBe(0)
+      expect(afterRefreshShow.stdout).toContain('── line 6 • unresolved • outdated')
+      expect(afterRefreshShow.stdout).toContain('── line 11 • unresolved')
       expect(refreshed.updated_anchors).toBe(2)
       const refreshedHeadSha = (refreshed.review as { head_sha: string }).head_sha
       expect(refreshedHeadSha).not.toBe(initialSnapSha)
@@ -316,8 +328,10 @@ describe(
       ])
       const deleted = await runtime.json(['comment', 'delete', String(generalNum), '--local'])
       const shown = await runtime.json(['review', 'show', '--local'])
+      const shownText = await runtime.cli(['review', 'show', '--local'])
 
       // Assert
+      expect(shownText.code).toBe(0)
       expect(range.comment).toMatchObject({
         number: rangeNum,
         body: 'Range finding across beta function',
@@ -399,6 +413,13 @@ describe(
         '--local',
         '--unresolved',
       ])
+      const unresolvedText = await runtime.cli([
+        'review',
+        'show',
+        reviewName,
+        '--local',
+        '--unresolved',
+      ])
       const closed = await runtime.json([
         'review',
         'close',
@@ -425,6 +446,7 @@ describe(
       expect(sessionText.stdout).toContain('══ Session #1 • Ada Lovelace')
       expect(sessionText.stdout).toContain('══ Session #2 • claude-sonnet-4-5 (agent)')
       expect(sessionText.stdout).toContain('── src/lib.rs:5-7 • unresolved')
+      expect(unresolvedText.code).toBe(0)
 
       const unresolvedComments = unresolvedJson.comments as Array<{ number: number }>
       expect(unresolvedComments.map((c) => c.number)).toEqual([
