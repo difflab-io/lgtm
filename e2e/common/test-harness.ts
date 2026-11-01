@@ -16,11 +16,63 @@ function formatCliArg(arg: string): string {
   return /[\s"']/.test(arg) ? JSON.stringify(arg) : arg
 }
 
-function formatCliOutput(text: string, isJson: boolean): string {
-  const trimmed = text.trimEnd()
-  if (!isJson || !trimmed) return trimmed
+function formatAuthorDisplay(author?: Json): string {
+  if (!author) return 'unknown'
+  return author.kind === 'agent' ? `${author.name} (agent)` : String(author.name)
+}
+
+function formatTextInspectionOutput(args: string[], stdout: string): string | null {
+  const trimmed = stdout.trimEnd()
+  if (!args.includes('--json')) return trimmed
+  if (!trimmed) return ''
+  if (args[0] === 'review' && (args[1] === 'show' || args[1] === 'list')) {
+    return null
+  }
   try {
-    return JSON.stringify(JSON.parse(trimmed), null, 2)
+    const data = JSON.parse(trimmed) as Json
+    if (data.error) {
+      return `Error [${data.error.code}]: ${data.error.message}`
+    }
+    if (args[0] === 'add' && Array.isArray(data.staged_paths)) {
+      const mode = data.local ? 'local snapshot' : 'working tree'
+      return `Staged ${data.staged_paths.length} path(s) (${mode}): ${data.staged_paths.join(', ')}`
+    }
+    if (args[0] === 'commit' && typeof data.commit_sha === 'string') {
+      const mode = data.local ? 'local snapshot' : 'working tree'
+      return `Committed ${data.commit_sha.slice(0, 7)} on ${data.branch} (${mode}) by ${formatAuthorDisplay(data.author)}`
+    }
+    if (args[0] === 'push' && typeof data.head_sha === 'string') {
+      return `Pushed ${data.branch} (${data.head_sha.slice(0, 7)}) to ${data.repository_url}`
+    }
+    if (args[0] === 'review' && args[1] === 'new' && data.review && data.session) {
+      const scope = data.review.local ? 'local' : 'remote'
+      return `Created review #${data.review.number}  ${data.review.name}  [${scope}]  (session #${data.session.number} ${data.session.state})`
+    }
+    if (args[0] === 'review' && args[1] === 'refresh' && data.review) {
+      const scope = data.review.local ? 'local' : 'remote'
+      return `Refreshed review #${data.review.number}  ${data.review.name}  [${scope}]  Head: ${String(data.review.head_sha).slice(0, 7)}  (${data.updated_anchors} anchor(s) updated)`
+    }
+    if (args[0] === 'review' && args[1] === 'close' && data.review && data.session) {
+      return `Closed review #${data.review.number}  ${data.review.name}  with ${data.session.outcome} (session #${data.session.number} ${data.session.state})`
+    }
+    if (args[0] === 'comment' && args[1] === 'new' && data.comment) {
+      return `Created comment [${data.comment.number}] by ${formatAuthorDisplay(data.comment.author)}`
+    }
+    if (args[0] === 'comment' && args[1] === 'update' && data.comment) {
+      return `Updated comment [${data.comment.number}]`
+    }
+    if (args[0] === 'comment' && args[1] === 'delete' && data.deleted_number !== undefined) {
+      return `Deleted comment [${data.deleted_number}]`
+    }
+    if (args[0] === 'ui' && typeof data.ui_url === 'string') {
+      return data.ui_url
+    }
+    if (args[0] === 'status' && typeof data.running === 'boolean') {
+      return data.running
+        ? `LGTM backend is running (ui: ${data.ui_url ?? 'n/a'})`
+        : 'LGTM backend is not running'
+    }
+    return trimmed
   } catch {
     return trimmed
   }
@@ -161,23 +213,26 @@ export class TestHarness {
       },
       timeout: 60_000,
     })
-    const isJson = args.includes('--json')
-    const sections = [
-      '',
-      '================================================================================',
-      `$ lgtm ${args.map(formatCliArg).join(' ')}`,
-      `[exit ${result.code ?? 'null'}]`,
-    ]
-    if (result.stdout) {
-      sections.push('--- stdout ---', formatCliOutput(result.stdout, isJson))
-    }
-    if (result.stderr) {
-      sections.push('--- stderr ---', result.stderr.trimEnd())
-    }
-    const entry = `${sections.join('\n')}\n`
-    await appendFile(join(this.directory, 'cli.log'), entry)
-    if (this.cliOutputPath) {
-      await appendFile(this.cliOutputPath, entry)
+    const textOut = formatTextInspectionOutput(args, result.stdout)
+    if (textOut !== null) {
+      const displayArgs = args.filter((arg) => arg !== '--json')
+      const sections = [
+        '',
+        '================================================================================',
+        `$ lgtm ${displayArgs.map(formatCliArg).join(' ')}`,
+        `[exit ${result.code ?? 'null'}]`,
+      ]
+      if (textOut) {
+        sections.push(textOut)
+      }
+      if (result.stderr) {
+        sections.push('--- stderr ---', result.stderr.trimEnd())
+      }
+      const entry = `${sections.join('\n')}\n`
+      await appendFile(join(this.directory, 'cli.log'), entry)
+      if (this.cliOutputPath) {
+        await appendFile(this.cliOutputPath, entry)
+      }
     }
     return result
   }

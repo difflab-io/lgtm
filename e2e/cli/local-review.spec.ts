@@ -126,10 +126,12 @@ describe(
       const betaReview = await runtime.json(['review', 'new', '--local'])
       const betaBranchList = await runtime.json(['review', 'list', '--local'])
       const allBranchesList = await runtime.json(['review', 'list', '--local', '--all'])
+      const betaBranchText = await runtime.cli(['review', 'list', '--local'])
       const allBranchesText = await runtime.cli(['review', 'list', '--local', '--all'])
       const betaShowText = await runtime.cli(['review', 'show', '--local'])
 
       // Assert
+      expect(betaBranchText.code).toBe(0)
       expect(allBranchesText.code).toBe(0)
       expect(betaShowText.code).toBe(0)
       expect(alphaReview.review).toMatchObject({
