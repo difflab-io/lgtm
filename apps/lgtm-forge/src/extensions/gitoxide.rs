@@ -1,4 +1,4 @@
-//! Stateless `gitoxide` (`gix`) and `similar` adapter for local Git repositories, unified diffs, and line-anchor remapping.
+//! Stateless `gitoxide` (`gix`) adapter for local shadow repositories (`~/.lgtm/snapshots/$repoSlug`) and repository inspection.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -13,16 +13,13 @@ use gix::{
     },
     refs::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog},
 };
-use similar::{ChangeTag, TextDiff};
 
 use crate::{
-    database::CommentAnchorShift,
     error::{Error, Result},
-    models::{Comment, CommentAnchor, DiffHunk, DiffLine, DiffLineKind, Identity},
     utils::{normalize_repository_url, resolve_git_paths},
 };
 
-/// Resolved metadata for a local Git working checkout.
+/// Resolved metadata for a local Git working checkout or linked worktree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RepoContext {
     pub git_dir: String,
@@ -34,12 +31,25 @@ pub struct RepoContext {
     pub user_email: String,
 }
 
-/// Inspect a local Git repository and return its canonical `git_dir`, worktree path, active branch, `HEAD` SHA, remote URL, and configured author.
+/// Metadata and file changes for the current HEAD commit on a local branch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HeadCommitPayload {
+    pub head_sha: String,
+    pub parent_sha: String,
+    pub message: String,
+    pub author_name: String,
+    pub author_email: String,
+    pub timestamp: i64,
+    pub changed_files: BTreeMap<String, Option<String>>,
+}
+
+/// Inspect a local Git repository or linked worktree and return its canonical shared `git_dir`, active `worktree_dir`, branch, `HEAD` SHA, remote URL, and configured human author.
 pub fn get_repo_context(git_dir_or_worktree: &str) -> Result<RepoContext> {
-    let (git_dir_path, worktree_dir, normalized_git_dir) = resolve_git_paths(git_dir_or_worktree)?;
-    let repo = match gix::open(&git_dir_path) {
+    let (worktree_git_dir, worktree_dir, normalized_git_dir) =
+        resolve_git_paths(git_dir_or_worktree)?;
+    let repo = match gix::open(&worktree_dir) {
         Ok(repo) => repo,
-        Err(_) => gix::open(&worktree_dir).map_err(|err| {
+        Err(_) => gix::open(&worktree_git_dir).map_err(|err| {
             Error::Git(format!(
                 "failed to open repository '{normalized_git_dir}': {err}"
             ))
@@ -109,16 +119,15 @@ pub fn ensure_bare_repo(repo_dir: &Path) -> Result<()> {
 /// Synchronize objects from `source_git_dir` into `target_repo_dir` so `commit_sha` and its trees/blobs are readable in `target_repo_dir`.
 pub fn fetch_objects(source_git_dir: &str, target_repo_dir: &Path, commit_sha: &str) -> Result<()> {
     ensure_bare_repo(target_repo_dir)?;
-    let oid = gix::ObjectId::from_hex(commit_sha.trim().as_bytes())
-        .map_err(|err| Error::Invalid(format!("invalid commit_sha '{commit_sha}': {err}")))?;
+    let oid = parse_oid(commit_sha)?;
     if let Ok(existing_repo) = gix::open(target_repo_dir)
         && existing_repo.find_object(oid).is_ok()
     {
         return Ok(());
     }
 
-    let (source_git_path, _, _) = resolve_git_paths(source_git_dir)?;
-    let source_objects = source_git_path.join("objects");
+    let (_, _, common_git_dir) = resolve_git_paths(source_git_dir)?;
+    let source_objects = Path::new(&common_git_dir).join("objects");
     let target_objects = target_repo_dir.join("objects");
     copy_objects_dir(&source_objects, &target_objects)?;
 
@@ -132,22 +141,8 @@ pub fn fetch_objects(source_git_dir: &str, target_repo_dir: &Path, commit_sha: &
     Ok(())
 }
 
-/// Stage worktree paths into the working checkout's staging manifest and `.git/index` (used when `local == false`).
-pub fn stage_paths(git_dir_or_worktree: &str, paths: &[String]) -> Result<Vec<String>> {
-    let (git_dir_path, worktree_dir, _) = resolve_git_paths(git_dir_or_worktree)?;
-    let expanded = collect_worktree_paths(&worktree_dir, paths)?;
-    let manifest_path = git_dir_path.join("lgtm-checkout-staged.json");
-    let mut staged = read_staged_manifest(&manifest_path)?;
-
-    let repo = gix::open(&git_dir_path)
-        .map_err(|err| Error::Git(format!("failed to open checkout repository: {err}")))?;
-    stage_worktree_blobs(&repo, &worktree_dir, &expanded, &mut staged)?;
-    write_staged_manifest(&manifest_path, &staged)?;
-    Ok(expanded)
-}
-
-/// Stage worktree paths into a bare snapshot repository without touching the working checkout's `.git/index` (used when `local == true`).
-pub fn stage_worktree_to_index(
+/// Stage worktree paths into `refs/lgtm/staged/<branch>` inside `target_repo_dir` via `gitoxide` without touching the working checkout's `.git/index`.
+pub fn stage_worktree_to_shadow_ref(
     git_dir_or_worktree: &str,
     target_repo_dir: &Path,
     branch: &str,
@@ -159,102 +154,87 @@ pub fn stage_worktree_to_index(
 
     let snapshot_repo = gix::open(target_repo_dir)
         .map_err(|err| Error::Git(format!("failed to open snapshot repo: {err}")))?;
-    let manifest_path = snapshot_stage_manifest_path(target_repo_dir, branch);
-    let mut staged = read_staged_manifest(&manifest_path)?;
+    let base_oid = parse_oid(&ctx.head_sha)?;
+    let head_ref_name = format!("refs/lgtm/heads/{branch}");
+    update_ref(&snapshot_repo, &head_ref_name, base_oid)?;
 
-    stage_worktree_blobs(&snapshot_repo, &ctx.worktree_dir, &expanded, &mut staged)?;
-    write_staged_manifest(&manifest_path, &staged)?;
+    let staged_ref_name = format!("refs/lgtm/staged/{branch}");
+    let snap_ref_name = format!("refs/lgtm/snapshots/{branch}");
+
+    let mut tree_entries =
+        if let Some(staged_tree_oid) = resolve_ref_oid(&snapshot_repo, &staged_ref_name) {
+            let mut flat = BTreeMap::new();
+            collect_tree_recursive(&snapshot_repo, staged_tree_oid, "", &mut flat)?;
+            flat
+        } else if let Some(snap_commit_oid) = resolve_ref_oid(&snapshot_repo, &snap_ref_name) {
+            read_commit_flat_tree(&snapshot_repo, snap_commit_oid)?
+        } else {
+            read_commit_flat_tree(&snapshot_repo, base_oid)?
+        };
+
+    for rel_path in &expanded {
+        let full_path = ctx.worktree_dir.join(rel_path);
+        if full_path.is_file() {
+            let bytes = std::fs::read(&full_path).map_err(|err| {
+                Error::Git(format!("failed to read '{}': {err}", full_path.display()))
+            })?;
+            let blob_id = snapshot_repo
+                .write_blob(&bytes)
+                .map_err(|err| Error::Git(format!("failed to write blob: {err}")))?
+                .detach();
+            tree_entries.insert(rel_path.clone(), blob_id);
+        } else {
+            tree_entries.remove(rel_path);
+        }
+    }
+
+    let staged_tree_oid = write_flat_tree(&snapshot_repo, &tree_entries)?;
+    update_ref(&snapshot_repo, &staged_ref_name, staged_tree_oid)?;
     Ok(expanded)
 }
 
-/// Create a commit on the working checkout's active branch (used when `local == false`).
-pub fn create_commit(
-    git_dir_or_worktree: &str,
-    message: Option<&str>,
-    author: &Identity,
-) -> Result<(String, String)> {
-    let ctx = get_repo_context(git_dir_or_worktree)?;
-    let (git_dir_path, worktree_dir, _) = resolve_git_paths(git_dir_or_worktree)?;
-    let repo = gix::open(&git_dir_path)
-        .map_err(|err| Error::Git(format!("failed to open checkout repository: {err}")))?;
-
-    let manifest_path = git_dir_path.join("lgtm-checkout-staged.json");
-    let mut staged = read_staged_manifest(&manifest_path)?;
-    if staged.is_empty() {
-        let worktree_files = collect_worktree_paths(&worktree_dir, &[".".to_owned()])?;
-        stage_worktree_blobs(&repo, &worktree_dir, &worktree_files, &mut staged)?;
-    }
-
-    let parent_oid = gix::ObjectId::from_hex(ctx.head_sha.as_bytes())
-        .map_err(|err| Error::Git(format!("invalid HEAD oid: {err}")))?;
-    let mut tree_entries = read_commit_flat_tree(&repo, parent_oid)?;
-    apply_staged_entries(&mut tree_entries, &staged)?;
-    let new_tree_oid = write_flat_tree(&repo, &tree_entries)?;
-
-    let ref_name = format!("refs/heads/{}", ctx.branch);
-    let commit_message = normalize_commit_message(message, "Update working branch");
-    let commit_oid = write_commit_object(
-        &repo,
-        new_tree_oid,
-        vec![parent_oid],
-        &commit_message,
-        author,
-    )?;
-    update_ref(&repo, &ref_name, commit_oid)?;
-    let _ = std::fs::remove_file(&manifest_path);
-
-    Ok((commit_oid.to_hex().to_string(), ctx.branch))
-}
-
-/// Create a commit directly on `ref_name` inside `target_repo_dir` without modifying the working checkout (used when `local == true`).
+/// Create a shadow commit on `ref_name` (`refs/lgtm/snapshots/<branch>`) inside `target_repo_dir` using the human author from `git config`.
 pub fn create_commit_on_ref(
     git_dir_or_worktree: &str,
     target_repo_dir: &Path,
     ref_name: &str,
     branch: &str,
     message: Option<&str>,
-    author: &Identity,
 ) -> Result<String> {
     let ctx = get_repo_context(git_dir_or_worktree)?;
     fetch_objects(&ctx.git_dir, target_repo_dir, &ctx.head_sha)?;
     let head_ref_name = format!("refs/lgtm/heads/{branch}");
+    let staged_ref_name = format!("refs/lgtm/staged/{branch}");
     let snapshot_repo = gix::open(target_repo_dir)
         .map_err(|err| Error::Git(format!("failed to open snapshot repo: {err}")))?;
-    let base_oid = gix::ObjectId::from_hex(ctx.head_sha.as_bytes())
-        .map_err(|err| Error::Git(format!("invalid base oid: {err}")))?;
+    let base_oid = parse_oid(&ctx.head_sha)?;
     update_ref(&snapshot_repo, &head_ref_name, base_oid)?;
 
     let parent_oid = resolve_ref_oid(&snapshot_repo, ref_name).unwrap_or(base_oid);
-    let manifest_path = snapshot_stage_manifest_path(target_repo_dir, branch);
-    let mut staged = read_staged_manifest(&manifest_path)?;
-    if staged.is_empty() {
-        let worktree_files = collect_worktree_paths(&ctx.worktree_dir, &[".".to_owned()])?;
-        stage_worktree_blobs(
-            &snapshot_repo,
-            &ctx.worktree_dir,
-            &worktree_files,
-            &mut staged,
-        )?;
-    }
+    let new_tree_oid =
+        if let Some(staged_tree_oid) = resolve_ref_oid(&snapshot_repo, &staged_ref_name) {
+            let _ = delete_ref(&snapshot_repo, &staged_ref_name);
+            staged_tree_oid
+        } else {
+            let worktree_entries = hash_worktree_entries(&snapshot_repo, &ctx.worktree_dir)?;
+            write_flat_tree(&snapshot_repo, &worktree_entries)?
+        };
 
-    let mut tree_entries = read_commit_flat_tree(&snapshot_repo, parent_oid)?;
-    apply_staged_entries(&mut tree_entries, &staged)?;
-    let new_tree_oid = write_flat_tree(&snapshot_repo, &tree_entries)?;
     let commit_message = normalize_commit_message(message, "LGTM local snapshot");
     let commit_oid = write_commit_object(
         &snapshot_repo,
         new_tree_oid,
         vec![parent_oid],
         &commit_message,
-        author,
+        &ctx.user_name,
+        &ctx.user_email,
     )?;
     update_ref(&snapshot_repo, ref_name, commit_oid)?;
-    let _ = std::fs::remove_file(&manifest_path);
 
     Ok(commit_oid.to_hex().to_string())
 }
 
-/// Snapshot the working tree into `target_repo_dir` if needed, returning `(base_sha, head_sha)`.
+/// Snapshot the working tree into `target_repo_dir` idempotently via `gitoxide`, returning `(base_sha, head_sha)`.
 pub fn snapshot_worktree(
     git_dir_or_worktree: &str,
     target_repo_dir: &Path,
@@ -264,29 +244,13 @@ pub fn snapshot_worktree(
     let snapshot_repo = gix::open(target_repo_dir)
         .map_err(|err| Error::Git(format!("failed to open snapshot repo: {err}")))?;
 
-    let base_oid = gix::ObjectId::from_hex(ctx.head_sha.as_bytes())
-        .map_err(|err| Error::Git(format!("invalid base oid: {err}")))?;
+    let base_oid = parse_oid(&ctx.head_sha)?;
     let head_ref_name = format!("refs/lgtm/heads/{}", ctx.branch);
     update_ref(&snapshot_repo, &head_ref_name, base_oid)?;
 
     let snap_ref_name = format!("refs/lgtm/snapshots/{}", ctx.branch);
     let current_snap_oid = resolve_ref_oid(&snapshot_repo, &snap_ref_name);
-
-    let mut worktree_entries = BTreeMap::new();
-    let worktree_files = collect_worktree_paths(&ctx.worktree_dir, &[".".to_owned()])?;
-    for rel_path in worktree_files {
-        let full_path = ctx.worktree_dir.join(&rel_path);
-        if full_path.is_file() {
-            let bytes = std::fs::read(&full_path).map_err(|err| {
-                Error::Git(format!("failed to read '{}': {err}", full_path.display()))
-            })?;
-            let blob_id = snapshot_repo
-                .write_blob(&bytes)
-                .map_err(|err| Error::Git(format!("failed to write snapshot blob: {err}")))?
-                .detach();
-            worktree_entries.insert(rel_path, blob_id);
-        }
-    }
+    let worktree_entries = hash_worktree_entries(&snapshot_repo, &ctx.worktree_dir)?;
 
     if let Some(existing_oid) = current_snap_oid {
         let existing_tree = read_commit_flat_tree(&snapshot_repo, existing_oid)?;
@@ -294,13 +258,13 @@ pub fn snapshot_worktree(
             return Ok((ctx.head_sha, existing_oid.to_hex().to_string()));
         }
         let new_tree_oid = write_flat_tree(&snapshot_repo, &worktree_entries)?;
-        let author = Identity::new_human(uuid::Uuid::nil(), &ctx.user_name, &ctx.user_email, None)?;
         let commit_oid = write_commit_object(
             &snapshot_repo,
             new_tree_oid,
             vec![existing_oid],
             "LGTM worktree snapshot",
-            &author,
+            &ctx.user_name,
+            &ctx.user_email,
         )?;
         update_ref(&snapshot_repo, &snap_ref_name, commit_oid)?;
         return Ok((ctx.head_sha, commit_oid.to_hex().to_string()));
@@ -308,7 +272,6 @@ pub fn snapshot_worktree(
 
     let base_tree = read_commit_flat_tree(&snapshot_repo, base_oid)?;
     let new_tree_oid = write_flat_tree(&snapshot_repo, &worktree_entries)?;
-    let author = Identity::new_human(uuid::Uuid::nil(), &ctx.user_name, &ctx.user_email, None)?;
     let parent_oids = if base_tree == worktree_entries {
         if let Some(first_parent) = read_commit_first_parent(&snapshot_repo, base_oid)? {
             let first_parent_hex = first_parent.to_hex().to_string();
@@ -325,62 +288,14 @@ pub fn snapshot_worktree(
         new_tree_oid,
         parent_oids,
         "LGTM worktree snapshot",
-        &author,
+        &ctx.user_name,
+        &ctx.user_email,
     )?;
     update_ref(&snapshot_repo, &snap_ref_name, commit_oid)?;
     Ok((ctx.head_sha, commit_oid.to_hex().to_string()))
 }
 
-/// Update `ref_name` in `repo_dir` to point at `commit_sha`.
-pub fn set_reference(repo_dir: &Path, ref_name: &str, commit_sha: &str) -> Result<()> {
-    let repo = gix::open(repo_dir)
-        .map_err(|err| Error::Git(format!("failed to open repository: {err}")))?;
-    let oid = gix::ObjectId::from_hex(commit_sha.trim().as_bytes())
-        .map_err(|err| Error::Invalid(format!("invalid commit_sha '{commit_sha}': {err}")))?;
-    update_ref(&repo, ref_name, oid)
-}
-
-/// Push the active branch from `git_dir` to `origin/<branch>`.
-pub fn push_branch(git_dir_or_worktree: &str, branch: &str) -> Result<(String, String)> {
-    let ctx = get_repo_context(git_dir_or_worktree)?;
-    let repository_url = ctx.repository_url.ok_or_else(|| {
-        Error::Invalid("working repository has no 'origin' remote configured".to_owned())
-    })?;
-    let (git_dir_path, worktree_dir, _) = resolve_git_paths(git_dir_or_worktree)?;
-    let repo = gix::open(&git_dir_path)
-        .map_err(|err| Error::Git(format!("failed to open checkout repository: {err}")))?;
-    let remote_raw = repo
-        .config_snapshot()
-        .string("remote.origin.url")
-        .and_then(|v| v.to_str().ok().map(str::to_owned))
-        .unwrap_or_else(|| repository_url.clone());
-
-    let remote_path = Path::new(&remote_raw);
-    if remote_path.exists() {
-        fetch_objects(&ctx.git_dir, remote_path, &ctx.head_sha)?;
-        set_reference(remote_path, &format!("refs/heads/{branch}"), &ctx.head_sha)?;
-        return Ok((ctx.head_sha, repository_url));
-    }
-
-    let output = std::process::Command::new("git")
-        .arg("-C")
-        .arg(&worktree_dir)
-        .arg("push")
-        .arg("origin")
-        .arg(branch)
-        .output()
-        .map_err(|err| Error::Git(format!("failed to invoke git push: {err}")))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(Error::Git(format!(
-            "git push origin {branch} failed: {}",
-            stderr.trim()
-        )));
-    }
-    Ok((ctx.head_sha, repository_url))
-}
-
-/// Return all relative file paths modified, added, or removed between `old_sha` and `new_sha`.
+/// Return all relative file paths modified, added, or removed between `old_sha` and `new_sha` inside `repo_dir`.
 pub fn get_changed_files(repo_dir: &Path, old_sha: &str, new_sha: &str) -> Result<Vec<String>> {
     if old_sha.trim() == new_sha.trim() {
         return Ok(Vec::new());
@@ -406,279 +321,173 @@ pub fn get_changed_files(repo_dir: &Path, old_sha: &str, new_sha: &str) -> Resul
     Ok(changed)
 }
 
-/// Validate that `file_path` and `line` (plus optional `start_line`) exist within the unified diff between `base_sha` and `head_sha`.
-pub fn validate_diff_line(
+/// Read all UTF-8 file blobs in `commit_sha`'s tree inside `repo_dir`.
+pub fn get_commit_blobs(repo_dir: &Path, commit_sha: &str) -> Result<BTreeMap<String, String>> {
+    let repo = gix::open(repo_dir).map_err(|err| {
+        Error::Git(format!(
+            "failed to open repo '{}': {err}",
+            repo_dir.display()
+        ))
+    })?;
+    let commit_oid = parse_oid(commit_sha)?;
+    let flat_tree = read_commit_flat_tree(&repo, commit_oid)?;
+    let mut blobs = BTreeMap::new();
+    for (path, oid) in flat_tree {
+        blobs.insert(path, read_blob_string(&repo, oid)?);
+    }
+    Ok(blobs)
+}
+
+/// Read a single UTF-8 file blob at `commit_sha` inside `repo_dir`.
+pub fn get_file_at_commit(
     repo_dir: &Path,
-    base_sha: &str,
-    head_sha: &str,
+    commit_sha: &str,
     file_path: &str,
-    start_line: Option<u32>,
-    line: u32,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let file_path = file_path.trim();
     if file_path.is_empty() {
         return Err(Error::Invalid("file_path must not be empty".to_owned()));
     }
-    if line == 0 {
-        return Err(Error::Invalid("line must be >= 1".to_owned()));
-    }
-    if let Some(start) = start_line
-        && (start == 0 || start > line)
-    {
-        return Err(Error::Invalid(format!(
-            "start_line ({start}) must be between 1 and line ({line})"
-        )));
-    }
-
     let repo = gix::open(repo_dir).map_err(|err| {
         Error::Git(format!(
             "failed to open repo '{}': {err}",
             repo_dir.display()
         ))
     })?;
-    let base_oid = parse_oid(base_sha)?;
-    let head_oid = parse_oid(head_sha)?;
-    let base_tree = read_commit_flat_tree(&repo, base_oid)?;
+    let commit_oid = parse_oid(commit_sha)?;
+    let flat_tree = read_commit_flat_tree(&repo, commit_oid)?;
+    let Some(blob_oid) = flat_tree.get(file_path) else {
+        return Ok(None);
+    };
+    Ok(Some(read_blob_string(&repo, *blob_oid)?))
+}
+
+/// Read the current HEAD commit metadata and file changes relative to its first parent.
+pub fn get_head_commit_payload(git_dir_or_worktree: &str) -> Result<HeadCommitPayload> {
+    let ctx = get_repo_context(git_dir_or_worktree)?;
+    let (_, worktree_dir, _) = resolve_git_paths(git_dir_or_worktree)?;
+    let repo = gix::open(&worktree_dir)
+        .map_err(|err| Error::Git(format!("failed to open checkout repository: {err}")))?;
+    let head_oid = parse_oid(&ctx.head_sha)?;
+    let object = repo
+        .find_object(head_oid)
+        .map_err(|err| Error::NotFound(format!("commit '{head_oid}' not found: {err}")))?;
+    let commit = object
+        .try_into_commit()
+        .map_err(|err| Error::Git(format!("object '{head_oid}' is not a commit: {err}")))?;
+    let decoded = commit
+        .decode()
+        .map_err(|err| Error::Git(format!("failed to decode HEAD commit: {err}")))?;
+    let parent_oid = decoded.parents().next().ok_or_else(|| {
+        Error::Invalid("HEAD commit has no parent commit to push against".to_owned())
+    })?;
+    let parent_sha = parent_oid.to_hex().to_string();
+    let message = decoded.message.to_str_lossy().into_owned();
+    let author_name = decoded.author.name.to_str_lossy().into_owned();
+    let author_email = decoded.author.email.to_str_lossy().into_owned();
+    let timestamp = decoded.author.time.seconds;
+
+    let parent_tree = read_commit_flat_tree(&repo, parent_oid)?;
     let head_tree = read_commit_flat_tree(&repo, head_oid)?;
-
-    let head_blob_oid = head_tree.get(file_path).ok_or_else(|| {
-        Error::Invalid(format!(
-            "file '{file_path}' does not exist at commit '{head_sha}'"
-        ))
-    })?;
-    let head_content = read_blob_string(&repo, *head_blob_oid)?;
-    let total_lines = u32::try_from(head_content.lines().count().max(1)).unwrap_or(u32::MAX);
-    if line > total_lines {
-        return Err(Error::Invalid(format!(
-            "line {line} is out of range for '{file_path}' ({total_lines} lines at '{head_sha}')"
-        )));
+    let all_paths: BTreeSet<String> = parent_tree
+        .keys()
+        .chain(head_tree.keys())
+        .cloned()
+        .collect();
+    let mut changed_files = BTreeMap::new();
+    for path in all_paths {
+        if parent_tree.get(&path) != head_tree.get(&path) {
+            match head_tree.get(&path) {
+                Some(blob_oid) => {
+                    let content = read_blob_string(&repo, *blob_oid)?;
+                    changed_files.insert(path, Some(content));
+                }
+                None => {
+                    changed_files.insert(path, None);
+                }
+            }
+        }
     }
 
-    let _ = base_tree.get(file_path);
-    Ok(())
+    Ok(HeadCommitPayload {
+        head_sha: ctx.head_sha,
+        parent_sha,
+        message,
+        author_name,
+        author_email,
+        timestamp,
+        changed_files,
+    })
 }
 
-/// Extract unified inline diff hunks around each comment anchor between `base_sha` and `head_sha`.
-pub fn get_inline_diff_hunks(
-    repo_dir: &Path,
-    base_sha: &str,
-    head_sha: &str,
-    anchors: &[CommentAnchor],
-) -> Result<Vec<DiffHunk>> {
-    if anchors.is_empty() {
-        return Ok(Vec::new());
+/// Expand and validate relative worktree paths under `worktree_dir`.
+pub fn collect_worktree_paths(worktree_dir: &Path, raw_paths: &[String]) -> Result<Vec<String>> {
+    if raw_paths.is_empty() {
+        return Err(Error::Invalid("at least one path is required".to_owned()));
     }
-    let repo = gix::open(repo_dir).map_err(|err| {
-        Error::Git(format!(
-            "failed to open repo '{}': {err}",
-            repo_dir.display()
-        ))
-    })?;
-    let base_oid = parse_oid(base_sha)?;
-    let head_oid = parse_oid(head_sha)?;
-    let base_tree = read_commit_flat_tree(&repo, base_oid)?;
-    let head_tree = read_commit_flat_tree(&repo, head_oid)?;
-
-    let mut hunks = Vec::with_capacity(anchors.len());
-    for anchor in anchors {
-        let old_text = match base_tree.get(&anchor.file_path) {
-            Some(oid) => read_blob_string(&repo, *oid)?,
-            None => String::new(),
-        };
-        let target_oid = parse_oid(&anchor.commit_sha).unwrap_or(head_oid);
-        let target_tree =
-            read_commit_flat_tree(&repo, target_oid).unwrap_or_else(|_| head_tree.clone());
-        let new_text = match target_tree.get(&anchor.file_path) {
-            Some(oid) => read_blob_string(&repo, *oid)?,
-            None => String::new(),
-        };
-
-        let diff = TextDiff::from_lines(&old_text, &new_text);
-        let window_start = anchor
-            .start_line
-            .unwrap_or(anchor.line)
-            .saturating_sub(3)
-            .max(1);
-        let window_end = anchor.line.saturating_add(3);
-
-        let mut lines = Vec::new();
-        let mut new_line_cursor: u32 = 1;
-        for change in diff.iter_all_changes() {
-            let content = change
-                .value()
-                .trim_end_matches(&['\r', '\n'][..])
-                .to_owned();
-            match change.tag() {
-                ChangeTag::Equal => {
-                    if let Some(new_idx) = change.new_index() {
-                        let line_num = u32::try_from(new_idx + 1).unwrap_or(1);
-                        new_line_cursor = line_num.saturating_add(1);
-                        if line_num >= window_start && line_num <= window_end {
-                            lines.push(DiffLine {
-                                kind: DiffLineKind::Context,
-                                line_number: line_num,
-                                content,
-                            });
-                        }
-                    }
-                }
-                ChangeTag::Insert => {
-                    if let Some(new_idx) = change.new_index() {
-                        let line_num = u32::try_from(new_idx + 1).unwrap_or(1);
-                        new_line_cursor = line_num.saturating_add(1);
-                        if line_num >= window_start && line_num <= window_end {
-                            lines.push(DiffLine {
-                                kind: DiffLineKind::Added,
-                                line_number: line_num,
-                                content,
-                            });
-                        }
-                    }
-                }
-                ChangeTag::Delete => {
-                    if let Some(old_idx) = change.old_index() {
-                        let line_num = u32::try_from(old_idx + 1).unwrap_or(1);
-                        if new_line_cursor >= window_start && new_line_cursor <= window_end {
-                            lines.push(DiffLine {
-                                kind: DiffLineKind::Removed,
-                                line_number: line_num,
-                                content,
-                            });
-                        }
-                    }
-                }
-            }
+    let mut collected = BTreeSet::new();
+    for raw in raw_paths {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
         }
-
-        let start_line = lines
-            .first()
-            .map(|l| l.line_number)
-            .unwrap_or(anchor.start_line.unwrap_or(anchor.line));
-        hunks.push(DiffHunk {
-            file_path: anchor.file_path.clone(),
-            commit_sha: anchor.commit_sha.clone(),
-            start_line,
-            lines,
-        });
+        let candidate = Path::new(trimmed);
+        if candidate.is_absolute()
+            || candidate
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return Err(Error::Invalid(format!(
+                "path '{trimmed}' must be a relative path inside the worktree"
+            )));
+        }
+        let target = if trimmed == "." {
+            worktree_dir.to_path_buf()
+        } else {
+            worktree_dir.join(candidate)
+        };
+        if target.is_dir() {
+            collect_files_under_dir(worktree_dir, &target, &mut collected)?;
+        } else if target.is_file() {
+            let rel = target
+                .strip_prefix(worktree_dir)
+                .map_err(|err| Error::Invalid(format!("invalid worktree path: {err}")))?
+                .to_string_lossy()
+                .replace('\\', "/");
+            collected.insert(rel);
+        } else {
+            let rel = trimmed.trim_start_matches("./").replace('\\', "/");
+            collected.insert(rel);
+        }
     }
-
-    Ok(hunks)
+    if collected.is_empty() {
+        return Err(Error::Invalid(
+            "no matching worktree paths found".to_owned(),
+        ));
+    }
+    Ok(collected.into_iter().collect())
 }
 
-/// Recompute comment anchors across `old_head_sha..new_head_sha`, shifting surviving lines and marking edited/deleted lines `outdated = true`.
-pub fn recompute_anchors(
-    repo_dir: &Path,
-    old_head_sha: &str,
-    new_head_sha: &str,
-    comments: &[Comment],
-) -> Result<Vec<CommentAnchorShift>> {
-    if old_head_sha.trim() == new_head_sha.trim() {
-        return Ok(Vec::new());
-    }
-    let repo = gix::open(repo_dir).map_err(|err| {
-        Error::Git(format!(
-            "failed to open repo '{}': {err}",
-            repo_dir.display()
-        ))
-    })?;
-    let old_oid = parse_oid(old_head_sha)?;
-    let new_oid = parse_oid(new_head_sha)?;
-    let old_tree = read_commit_flat_tree(&repo, old_oid)?;
-    let new_tree = read_commit_flat_tree(&repo, new_oid)?;
-
-    let mut shifts = Vec::new();
-    for comment in comments {
-        let Some(anchor) = &comment.anchor else {
-            continue;
-        };
-        if comment.outdated {
-            continue;
-        }
-
-        let Some(old_blob_oid) = old_tree.get(&anchor.file_path) else {
-            continue;
-        };
-        let Some(new_blob_oid) = new_tree.get(&anchor.file_path) else {
-            shifts.push(CommentAnchorShift {
-                comment_id: comment.id,
-                start_line: anchor.start_line.and_then(|v| i32::try_from(v).ok()),
-                line: i32::try_from(anchor.line).ok(),
-                commit_sha: Some(anchor.commit_sha.clone()),
-                outdated: true,
-            });
-            continue;
-        };
-
-        if old_blob_oid == new_blob_oid {
-            if anchor.commit_sha != new_head_sha {
-                shifts.push(CommentAnchorShift {
-                    comment_id: comment.id,
-                    start_line: anchor.start_line.and_then(|v| i32::try_from(v).ok()),
-                    line: i32::try_from(anchor.line).ok(),
-                    commit_sha: Some(new_head_sha.to_owned()),
-                    outdated: false,
-                });
-            }
-            continue;
-        }
-
-        let old_text = read_blob_string(&repo, *old_blob_oid)?;
-        let new_text = read_blob_string(&repo, *new_blob_oid)?;
-        let line_map = compute_surviving_line_map(&old_text, &new_text);
-
-        let mapped_line = line_map.get(&anchor.line).copied().flatten();
-        let mapped_start = match anchor.start_line {
-            Some(start) => line_map.get(&start).copied().flatten().map(Some),
-            None => Some(None),
-        };
-
-        match (mapped_start, mapped_line) {
-            (Some(new_start), Some(new_line)) => {
-                shifts.push(CommentAnchorShift {
-                    comment_id: comment.id,
-                    start_line: new_start.and_then(|v| i32::try_from(v).ok()),
-                    line: i32::try_from(new_line).ok(),
-                    commit_sha: Some(new_head_sha.to_owned()),
-                    outdated: false,
-                });
-            }
-            _ => {
-                shifts.push(CommentAnchorShift {
-                    comment_id: comment.id,
-                    start_line: anchor.start_line.and_then(|v| i32::try_from(v).ok()),
-                    line: i32::try_from(anchor.line).ok(),
-                    commit_sha: Some(anchor.commit_sha.clone()),
-                    outdated: true,
-                });
-            }
+fn hash_worktree_entries(
+    snapshot_repo: &gix::Repository,
+    worktree_dir: &Path,
+) -> Result<BTreeMap<String, gix::ObjectId>> {
+    let mut worktree_entries = BTreeMap::new();
+    let worktree_files = collect_worktree_paths(worktree_dir, &[".".to_owned()])?;
+    for rel_path in worktree_files {
+        let full_path = worktree_dir.join(&rel_path);
+        if full_path.is_file() {
+            let bytes = std::fs::read(&full_path).map_err(|err| {
+                Error::Git(format!("failed to read '{}': {err}", full_path.display()))
+            })?;
+            let blob_id = snapshot_repo
+                .write_blob(&bytes)
+                .map_err(|err| Error::Git(format!("failed to write snapshot blob: {err}")))?
+                .detach();
+            worktree_entries.insert(rel_path, blob_id);
         }
     }
-
-    Ok(shifts)
-}
-
-fn compute_surviving_line_map(old_text: &str, new_text: &str) -> BTreeMap<u32, Option<u32>> {
-    let diff = TextDiff::from_lines(old_text, new_text);
-    let mut map = BTreeMap::new();
-    for change in diff.iter_all_changes() {
-        match change.tag() {
-            ChangeTag::Equal => {
-                if let (Some(old_idx), Some(new_idx)) = (change.old_index(), change.new_index()) {
-                    let old_line = u32::try_from(old_idx + 1).unwrap_or(1);
-                    let new_line = u32::try_from(new_idx + 1).unwrap_or(1);
-                    map.insert(old_line, Some(new_line));
-                }
-            }
-            ChangeTag::Delete => {
-                if let Some(old_idx) = change.old_index() {
-                    let old_line = u32::try_from(old_idx + 1).unwrap_or(1);
-                    map.insert(old_line, None);
-                }
-            }
-            ChangeTag::Insert => {}
-        }
-    }
-    map
+    Ok(worktree_entries)
 }
 
 fn parse_oid(sha: &str) -> Result<gix::ObjectId> {
@@ -709,6 +518,21 @@ fn update_ref(repo: &gix::Repository, ref_name: &str, target: gix::ObjectId) -> 
         deref: false,
     })
     .map_err(|err| Error::Git(format!("failed to update ref '{ref_name}': {err}")))?;
+    Ok(())
+}
+
+fn delete_ref(repo: &gix::Repository, ref_name: &str) -> Result<()> {
+    repo.edit_reference(RefEdit {
+        change: Change::Delete {
+            expected: PreviousValue::Any,
+            log: RefLog::AndReference,
+        },
+        name: ref_name
+            .try_into()
+            .map_err(|err| Error::Git(format!("invalid ref name '{ref_name}': {err}")))?,
+        deref: false,
+    })
+    .map_err(|err| Error::Git(format!("failed to delete ref '{ref_name}': {err}")))?;
     Ok(())
 }
 
@@ -858,18 +682,29 @@ fn write_commit_object(
     tree_oid: gix::ObjectId,
     parents: Vec<gix::ObjectId>,
     message: &str,
-    author: &Identity,
+    author_name: &str,
+    author_email: &str,
 ) -> Result<gix::ObjectId> {
-    let timestamp = chrono::Utc::now().timestamp();
-    let sig = gix::actor::Signature {
-        name: author.name.clone().into(),
-        email: author.git_author_email().into(),
-        time: gix::date::Time::new(timestamp, 0),
-    };
-    let full_message = if let Some(footer) = author.agent_disclosure_footer() {
-        format!("{message}\n\n{footer}\n")
+    let timestamp = if std::env::var("LGTM_GITHUB_TEST_MODE").as_deref() == Ok("1") {
+        parents
+            .first()
+            .and_then(|parent_oid| {
+                repo.find_object(*parent_oid)
+                    .ok()?
+                    .try_into_commit()
+                    .ok()?
+                    .decode()
+                    .ok()
+                    .map(|c| c.author.time.seconds + 1)
+            })
+            .unwrap_or(1_700_000_000)
     } else {
-        format!("{message}\n")
+        chrono::Utc::now().timestamp()
+    };
+    let sig = gix::actor::Signature {
+        name: author_name.to_owned().into(),
+        email: author_email.to_owned().into(),
+        time: gix::date::Time::new(timestamp, 0),
     };
     let commit = Commit {
         tree: tree_oid,
@@ -877,7 +712,7 @@ fn write_commit_object(
         author: sig.clone(),
         committer: sig,
         encoding: None,
-        message: full_message.into(),
+        message: message.trim_end_matches('\n').to_owned().into(),
         extra_headers: Vec::new(),
     };
     repo.write_object(&commit)
@@ -890,95 +725,6 @@ fn read_blob_string(repo: &gix::Repository, blob_oid: gix::ObjectId) -> Result<S
         .find_object(blob_oid)
         .map_err(|err| Error::Git(format!("failed to find blob '{blob_oid}': {err}")))?;
     Ok(String::from_utf8_lossy(&object.data).into_owned())
-}
-
-fn stage_worktree_blobs(
-    repo: &gix::Repository,
-    worktree_dir: &Path,
-    paths: &[String],
-    staged: &mut BTreeMap<String, Option<String>>,
-) -> Result<()> {
-    for rel_path in paths {
-        let full_path = worktree_dir.join(rel_path);
-        if full_path.is_file() {
-            let bytes = std::fs::read(&full_path).map_err(|err| {
-                Error::Git(format!("failed to read '{}': {err}", full_path.display()))
-            })?;
-            let blob_id = repo
-                .write_blob(&bytes)
-                .map_err(|err| Error::Git(format!("failed to write blob: {err}")))?
-                .detach();
-            staged.insert(rel_path.clone(), Some(blob_id.to_hex().to_string()));
-        } else {
-            staged.insert(rel_path.clone(), None);
-        }
-    }
-    Ok(())
-}
-
-fn apply_staged_entries(
-    tree_entries: &mut BTreeMap<String, gix::ObjectId>,
-    staged: &BTreeMap<String, Option<String>>,
-) -> Result<()> {
-    for (path, maybe_hex) in staged {
-        match maybe_hex {
-            Some(hex) => {
-                let oid = parse_oid(hex)?;
-                tree_entries.insert(path.clone(), oid);
-            }
-            None => {
-                tree_entries.remove(path);
-            }
-        }
-    }
-    Ok(())
-}
-
-fn collect_worktree_paths(worktree_dir: &Path, raw_paths: &[String]) -> Result<Vec<String>> {
-    if raw_paths.is_empty() {
-        return Err(Error::Invalid("at least one path is required".to_owned()));
-    }
-    let mut collected = BTreeSet::new();
-    for raw in raw_paths {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let candidate = Path::new(trimmed);
-        if candidate.is_absolute()
-            || candidate
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
-        {
-            return Err(Error::Invalid(format!(
-                "path '{trimmed}' must be a relative path inside the worktree"
-            )));
-        }
-        let target = if trimmed == "." {
-            worktree_dir.to_path_buf()
-        } else {
-            worktree_dir.join(candidate)
-        };
-        if target.is_dir() {
-            collect_files_under_dir(worktree_dir, &target, &mut collected)?;
-        } else if target.is_file() {
-            let rel = target
-                .strip_prefix(worktree_dir)
-                .map_err(|err| Error::Invalid(format!("invalid worktree path: {err}")))?
-                .to_string_lossy()
-                .replace('\\', "/");
-            collected.insert(rel);
-        } else {
-            let rel = trimmed.trim_start_matches("./").replace('\\', "/");
-            collected.insert(rel);
-        }
-    }
-    if collected.is_empty() {
-        return Err(Error::Invalid(
-            "no matching worktree paths found".to_owned(),
-        ));
-    }
-    Ok(collected.into_iter().collect())
 }
 
 fn collect_files_under_dir(
@@ -1041,31 +787,6 @@ fn copy_objects_dir(src_dir: &Path, dst_dir: &Path) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn snapshot_stage_manifest_path(target_repo_dir: &Path, branch: &str) -> PathBuf {
-    let safe_branch = branch
-        .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
-        .collect::<String>();
-    target_repo_dir.join(format!("lgtm-stage-{safe_branch}.json"))
-}
-
-fn read_staged_manifest(path: &Path) -> Result<BTreeMap<String, Option<String>>> {
-    if !path.exists() {
-        return Ok(BTreeMap::new());
-    }
-    let raw = std::fs::read_to_string(path)
-        .map_err(|err| Error::Git(format!("failed to read stage manifest: {err}")))?;
-    serde_json::from_str(&raw)
-        .map_err(|err| Error::Git(format!("failed to parse stage manifest: {err}")))
-}
-
-fn write_staged_manifest(path: &Path, staged: &BTreeMap<String, Option<String>>) -> Result<()> {
-    let serialized = serde_json::to_string(staged)
-        .map_err(|err| Error::Git(format!("failed to serialize stage manifest: {err}")))?;
-    std::fs::write(path, serialized)
-        .map_err(|err| Error::Git(format!("failed to write stage manifest: {err}")))
 }
 
 fn normalize_commit_message(message: Option<&str>, fallback: &str) -> String {

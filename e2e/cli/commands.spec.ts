@@ -3,100 +3,69 @@
  * @module-tag cli
  */
 import { describe, it, expect } from 'vitest'
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { readdir } from 'node:fs/promises'
 import { useTestHarness } from '../common/fixtures.js'
 
-describe('When using the CLI skeleton', { tags: ['e2e', 'cli', 'commands'] }, () => {
-  const fixture = useTestHarness('cli')
+describe(
+  'When validating CLI command shape and workspace boundaries',
+  { tags: ['e2e', 'cli', 'commands'] },
+  () => {
+    const fixture = useTestHarness('cli')
 
-  it(
-    'should_call_the_bundled_hello_review_RPC_and_label_demo_output',
-    { tags: ['smoke'] },
-    async () => {
+    it(
+      'should_expose_the_new_command_shape_and_reject_removed_commands_and_bad_outcomes',
+      { tags: ['smoke'] },
+      async () => {
+        // Arrange
+        const { runtime } = fixture()
+
+        // Act
+        const help = await runtime.cli(['--help'])
+        const reviewHelp = await runtime.cli(['review', '--help'])
+        const commentHelp = await runtime.cli(['comment', '--help'])
+        const removedSession = await runtime.cli(['session', 'list'])
+        const removedComments = await runtime.cli(['comments', 'list'])
+        const badOutcome = await runtime.cli(['review', 'close', 'demo', '--with', 'merge'])
+
+        // Assert
+        expect(help.code).toBe(0)
+        for (const name of [
+          'add',
+          'commit',
+          'push',
+          'review',
+          'comment',
+          'ui',
+          'up',
+          'down',
+          'status',
+        ])
+          expect(help.stdout).toContain(name)
+        for (const sub of ['list', 'new', 'refresh', 'show', 'close'])
+          expect(reviewHelp.stdout).toContain(sub)
+        for (const sub of ['new', 'update', 'delete']) expect(commentHelp.stdout).toContain(sub)
+        expect(removedSession.code).not.toBe(0)
+        expect(removedComments.code).not.toBe(0)
+        expect(badOutcome.code).not.toBe(0)
+        expect(badOutcome.stderr).toContain('merge')
+      },
+    )
+
+    it('should_fail_outside_a_git_repository_without_mutating_workspace_or_home', async () => {
       // Arrange
       const { runtime } = fixture()
 
       // Act
-      const reply = await runtime.json(['review', 'list', '--local'])
+      const listOut = await runtime.cli(['review', 'list', '--local', '--json'])
+      const addOut = await runtime.cli(['add', 'file.txt', '--local', '--json'])
+      const workspaceEntries = await readdir(runtime.workspace)
 
       // Assert
-      expect(reply.demo).toBe(true)
-      expect(reply.message).toMatch(/^Hello, .+!$/)
-    },
-  )
-
-  it('should_reject_unimplemented_operations_without_changing_checkout_or_upstream', async () => {
-    // Arrange
-    const { runtime } = fixture()
-    await runtime.git('init', '-q')
-    await runtime.write('file.txt', 'committed\n')
-    const head = await runtime.commit('initial')
-    const upstream = join(runtime.directory, 'upstream.git')
-    await runtime.git('clone', '--bare', runtime.workspace, upstream)
-    await runtime.git('remote', 'add', 'origin', upstream)
-    await runtime.write('file.txt', 'working changes\n')
-    await runtime.git('add', 'file.txt')
-    await runtime.write('file.txt', 'unstaged changes\n')
-    const status = await runtime.git('status', '--porcelain')
-    const before = {
-      files: await readFile(join(runtime.workspace, 'file.txt'), 'utf8'),
-      index: await readFile(join(runtime.workspace, '.git/index')),
-      refs: await runtime.git('show-ref'),
-      upstream: await runtime.git('ls-remote', 'origin'),
-      status,
-    }
-    const commands = [
-      ['add', 'file.txt'],
-      ['commit', '--as', 'Agent', '-m', 'snapshot'],
-      ['push'],
-      ['review', 'new'],
-      ['review', 'refresh'],
-      ['review', 'show', '--group-by', 'session', '--unresolved'],
-      ['comment', 'new', 'Concern', '--file', 'file.txt', '--line', '1', '--as', 'Agent'],
-      ['comment', 'update', '1', '--body', 'Updated', '--line', '2', '--as', 'Agent'],
-      ['comment', 'delete', '1', '--as', 'Agent'],
-    ]
-
-    // Act
-    const results = []
-    for (const command of commands) {
-      results.push(await runtime.cli([...command, '--json']))
-      results.push(await runtime.cli([...command, '--local', '--json']))
-    }
-    for (const outcome of ['comment', 'reject', 'approve', 'request'])
-      results.push(await runtime.cli(['review', 'close', '--with', outcome, '--json']))
-
-    // Assert
-    for (const result of results) {
-      expect(result.code).not.toBe(0)
-      expect(JSON.parse(result.stdout).error.code).toBe('not_implemented')
-    }
-    expect(await runtime.git('rev-parse', 'HEAD')).toBe(head)
-    expect(await readFile(join(runtime.workspace, 'file.txt'), 'utf8')).toBe(before.files)
-    expect(await readFile(join(runtime.workspace, '.git/index'))).toEqual(before.index)
-    expect(await runtime.git('show-ref')).toBe(before.refs)
-    expect(await runtime.git('ls-remote', 'origin')).toBe(before.upstream)
-    expect(await runtime.git('status', '--porcelain')).toBe(before.status)
-  })
-
-  it('should_expose_the_new_command_shape_and_reject_removed_commands_and_bad_outcomes', async () => {
-    // Arrange
-    const { runtime } = fixture()
-
-    // Act
-    const help = await runtime.cli(['--help'])
-    const removedSession = await runtime.cli(['session', 'list'])
-    const removedComments = await runtime.cli(['comments', 'list'])
-    const badOutcome = await runtime.cli(['review', 'close', 'demo', '--with', 'merge'])
-
-    // Assert
-    expect(help.code).toBe(0)
-    for (const name of ['add', 'commit', 'push', 'review', 'comment', 'ui', 'up', 'down', 'status'])
-      expect(help.stdout).toContain(name)
-    expect(removedSession.code).not.toBe(0)
-    expect(removedComments.code).not.toBe(0)
-    expect(badOutcome.code).not.toBe(0)
-    expect(badOutcome.stderr).toContain('merge')
-  })
-})
+      expect(listOut.code).not.toBe(0)
+      expect(JSON.parse(listOut.stdout).error.code).toBe('invalid_argument')
+      expect(addOut.code).not.toBe(0)
+      expect(JSON.parse(addOut.stdout).error.code).toBe('invalid_argument')
+      expect(workspaceEntries).toEqual([])
+    })
+  },
+)

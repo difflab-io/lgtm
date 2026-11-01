@@ -9,18 +9,41 @@ use crate::error::{Error, Result};
 
 /// Resolve the default root directory (`~/.lgtm/snapshots` or `$LGTM_HOME/snapshots`) for local snapshot repositories.
 pub fn default_snapshots_root() -> PathBuf {
+    default_lgtm_home().join("snapshots")
+}
+
+/// Resolve the default database URL (`LGTM_DATABASE_URL`, `DATABASE_URL`, or `sqlite://$LGTM_HOME/lgtm.db?mode=rwc`).
+pub fn default_database_url() -> Result<String> {
+    for var in ["LGTM_DATABASE_URL", "DATABASE_URL"] {
+        if let Ok(url) = std::env::var(var)
+            && !url.trim().is_empty()
+        {
+            return Ok(url.trim().to_owned());
+        }
+    }
+    let lgtm_home = default_lgtm_home();
+    std::fs::create_dir_all(&lgtm_home).map_err(|err| {
+        Error::Invalid(format!(
+            "failed to create LGTM home directory '{}': {err}",
+            lgtm_home.display()
+        ))
+    })?;
+    let db_path = lgtm_home.join("lgtm.db");
+    Ok(format!("sqlite://{}?mode=rwc", db_path.display()))
+}
+
+fn default_lgtm_home() -> PathBuf {
     if let Ok(home) = std::env::var("LGTM_HOME")
         && !home.trim().is_empty()
     {
-        return PathBuf::from(home).join("snapshots");
+        return PathBuf::from(home.trim());
     }
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".lgtm")
-        .join("snapshots")
 }
 
-/// Normalize a working tree or `.git` path to the canonical `.git` directory string and worktree root.
+/// Normalize a working tree or `.git` path to the repository's canonical shared `common_dir` (for `$repoSlug` and DB scoping) and the active worktree's root directory.
 pub fn resolve_git_paths(git_dir_or_worktree: &str) -> Result<(PathBuf, PathBuf, String)> {
     let trimmed = git_dir_or_worktree.trim();
     if trimmed.is_empty() {
@@ -34,32 +57,58 @@ pub fn resolve_git_paths(git_dir_or_worktree: &str) -> Result<(PathBuf, PathBuf,
         ))
     })?;
 
-    let (git_dir, worktree_dir) = if canonical.file_name().is_some_and(|name| name == ".git") {
-        let worktree = canonical
-            .parent()
-            .ok_or_else(|| Error::Invalid("git_dir has no parent worktree".to_owned()))?
-            .to_path_buf();
-        (canonical, worktree)
-    } else if canonical.join(".git").exists() {
-        let dot_git = canonical.join(".git");
-        let resolved_git = if dot_git.is_file() {
-            resolve_gitdir_file(&dot_git)?
+    let (worktree_git_dir, worktree_dir) =
+        if canonical.file_name().is_some_and(|name| name == ".git") {
+            let worktree = canonical
+                .parent()
+                .ok_or_else(|| Error::Invalid("git_dir has no parent worktree".to_owned()))?
+                .to_path_buf();
+            let resolved_git = if canonical.is_file() {
+                resolve_gitdir_file(&canonical)?
+            } else {
+                canonical
+            };
+            (resolved_git, worktree)
+        } else if canonical.join(".git").exists() {
+            let dot_git = canonical.join(".git");
+            let resolved_git = if dot_git.is_file() {
+                resolve_gitdir_file(&dot_git)?
+            } else {
+                dot_git
+            };
+            (resolved_git, canonical)
+        } else if canonical.join("gitdir").is_file() && canonical.join("commondir").is_file() {
+            let wt_git_file = std::fs::read_to_string(canonical.join("gitdir")).map_err(|err| {
+                Error::Invalid(format!(
+                    "failed to read worktree gitdir '{}': {err}",
+                    canonical.display()
+                ))
+            })?;
+            let wt_dot_git = Path::new(wt_git_file.trim());
+            let wt_dir = wt_dot_git
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| canonical.clone());
+            (canonical, wt_dir)
         } else {
-            dot_git
+            (canonical.clone(), canonical)
         };
-        (resolved_git, canonical)
-    } else {
-        (canonical.clone(), canonical)
-    };
 
-    let normalized_git_dir = git_dir.to_string_lossy().into_owned();
-    Ok((git_dir, worktree_dir, normalized_git_dir))
+    let common_git_dir = resolve_common_git_dir(&worktree_git_dir)?;
+    let normalized_git_dir = common_git_dir.to_string_lossy().into_owned();
+    Ok((worktree_git_dir, worktree_dir, normalized_git_dir))
 }
 
-/// Compute a deterministic, filesystem-safe `$repoSlug` for a canonical `git_dir`.
+/// Compute a deterministic, filesystem-safe `$repoSlug` for a repository's shared `common_dir`.
 pub fn compute_repo_slug(git_dir: &str) -> Result<String> {
     let (_, worktree_dir, normalized_git_dir) = resolve_git_paths(git_dir)?;
-    let repo_name = worktree_dir
+    let common_path = Path::new(&normalized_git_dir);
+    let repo_root = if common_path.file_name().is_some_and(|name| name == ".git") {
+        common_path.parent().unwrap_or(&worktree_dir)
+    } else {
+        common_path
+    };
+    let repo_name = repo_root
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("repo")
@@ -188,6 +237,31 @@ pub fn parse_agent_descriptor(raw: &str) -> Result<(String, String, String)> {
         "custom"
     };
     Ok((trimmed.to_owned(), provider.to_owned(), trimmed.to_owned()))
+}
+
+fn resolve_common_git_dir(worktree_git_dir: &Path) -> Result<PathBuf> {
+    let commondir_file = worktree_git_dir.join("commondir");
+    if commondir_file.is_file() {
+        let raw = std::fs::read_to_string(&commondir_file).map_err(|err| {
+            Error::Invalid(format!(
+                "failed to read commondir file '{}': {err}",
+                commondir_file.display()
+            ))
+        })?;
+        let rel = raw.trim();
+        let target = if Path::new(rel).is_absolute() {
+            PathBuf::from(rel)
+        } else {
+            worktree_git_dir.join(rel)
+        };
+        return std::fs::canonicalize(&target).map_err(|err| {
+            Error::Invalid(format!(
+                "failed to canonicalize commondir target '{}': {err}",
+                target.display()
+            ))
+        });
+    }
+    Ok(worktree_git_dir.to_path_buf())
 }
 
 fn resolve_gitdir_file(dot_git_file: &Path) -> Result<PathBuf> {

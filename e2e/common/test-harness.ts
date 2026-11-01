@@ -1,10 +1,82 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { appendFileSync } from 'node:fs'
 import { once } from 'node:events'
-import { join, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { expect } from 'vitest'
 import { isolatedEnv, waitFor, type Json } from './test-utils.js'
+
+export interface TestTaskMeta {
+  filepath: string
+  name: string
+  fullName: string
+}
+
+function formatCliArg(arg: string): string {
+  return /[\s"']/.test(arg) ? JSON.stringify(arg) : arg
+}
+
+function formatAuthorDisplay(author?: Json): string {
+  if (!author) return 'unknown'
+  return author.kind === 'agent' ? `${author.name} (agent)` : String(author.name)
+}
+
+function formatTextInspectionOutput(args: string[], stdout: string): string | null {
+  const trimmed = stdout.trimEnd()
+  if (!args.includes('--json')) return trimmed
+  if (!trimmed) return ''
+  if (args[0] === 'review' && (args[1] === 'show' || args[1] === 'list')) {
+    return null
+  }
+  try {
+    const data = JSON.parse(trimmed) as Json
+    if (data.error) {
+      return `Error [${data.error.code}]: ${data.error.message}`
+    }
+    if (args[0] === 'add' && Array.isArray(data.staged_paths)) {
+      const mode = data.local ? 'local snapshot' : 'working tree'
+      return `Staged ${data.staged_paths.length} path(s) (${mode}): ${data.staged_paths.join(', ')}`
+    }
+    if (args[0] === 'commit' && typeof data.commit_sha === 'string') {
+      const mode = data.local ? 'local snapshot' : 'working tree'
+      return `Committed ${data.commit_sha.slice(0, 7)} on ${data.branch} (${mode}) by ${formatAuthorDisplay(data.author)}`
+    }
+    if (args[0] === 'push' && typeof data.head_sha === 'string') {
+      return `Pushed ${data.branch} (${data.head_sha.slice(0, 7)}) to ${data.repository_url}`
+    }
+    if (args[0] === 'review' && args[1] === 'new' && data.review && data.session) {
+      const scope = data.review.local ? 'local' : 'remote'
+      return `Created review #${data.review.number}  ${data.review.name}  [${scope}]  (session #${data.session.number} ${data.session.state})`
+    }
+    if (args[0] === 'review' && args[1] === 'refresh' && data.review) {
+      const scope = data.review.local ? 'local' : 'remote'
+      return `Refreshed review #${data.review.number}  ${data.review.name}  [${scope}]  Head: ${String(data.review.head_sha).slice(0, 7)}  (${data.updated_anchors} anchor(s) updated)`
+    }
+    if (args[0] === 'review' && args[1] === 'close' && data.review && data.session) {
+      return `Closed review #${data.review.number}  ${data.review.name}  with ${data.session.outcome} (session #${data.session.number} ${data.session.state})`
+    }
+    if (args[0] === 'comment' && args[1] === 'new' && data.comment) {
+      return `Created comment [${data.comment.number}] by ${formatAuthorDisplay(data.comment.author)}`
+    }
+    if (args[0] === 'comment' && args[1] === 'update' && data.comment) {
+      return `Updated comment [${data.comment.number}]`
+    }
+    if (args[0] === 'comment' && args[1] === 'delete' && data.deleted_number !== undefined) {
+      return `Deleted comment [${data.deleted_number}]`
+    }
+    if (args[0] === 'ui' && typeof data.ui_url === 'string') {
+      return data.ui_url
+    }
+    if (args[0] === 'status' && typeof data.running === 'boolean') {
+      return data.running
+        ? `LGTM backend is running (ui: ${data.ui_url ?? 'n/a'})`
+        : 'LGTM backend is not running'
+    }
+    return trimmed
+  } catch {
+    return trimmed
+  }
+}
 
 export const ROOT = resolve(import.meta.dirname, '../..')
 export const binary = (name: string) =>
@@ -57,6 +129,7 @@ export class TestHarness {
   child?: ChildProcess
   env: NodeJS.ProcessEnv
   log = ''
+  cliOutputPath?: string
   private constructor(
     readonly directory: string,
     readonly home: string,
@@ -132,7 +205,7 @@ export class TestHarness {
   }
 
   async cli(args: string[]) {
-    return command(binary('lgtm'), args, {
+    const result = await command(binary('lgtm'), args, {
       cwd: this.workspace,
       env: {
         ...this.env,
@@ -140,6 +213,28 @@ export class TestHarness {
       },
       timeout: 60_000,
     })
+    const textOut = formatTextInspectionOutput(args, result.stdout)
+    if (textOut !== null) {
+      const displayArgs = args.filter((arg) => arg !== '--json')
+      const sections = [
+        '',
+        '================================================================================',
+        `$ lgtm ${displayArgs.map(formatCliArg).join(' ')}`,
+        `[exit ${result.code ?? 'null'}]`,
+      ]
+      if (textOut) {
+        sections.push(textOut)
+      }
+      if (result.stderr) {
+        sections.push('--- stderr ---', result.stderr.trimEnd())
+      }
+      const entry = `${sections.join('\n')}\n`
+      await appendFile(join(this.directory, 'cli.log'), entry)
+      if (this.cliOutputPath) {
+        await appendFile(this.cliOutputPath, entry)
+      }
+    }
+    return result
   }
 
   async json(args: string[]): Promise<Json> {
@@ -181,7 +276,11 @@ export class TestHarness {
     else await rm(this.directory, { recursive: true, force: true })
   }
 
-  static async create(kind: 'forge' | 'backend' | 'cli' = 'forge', env: NodeJS.ProcessEnv = {}) {
+  static async create(
+    kind: 'forge' | 'backend' | 'cli' = 'forge',
+    env: NodeJS.ProcessEnv = {},
+    task?: TestTaskMeta,
+  ) {
     const parent = join(ROOT, 'target/e2e', kind)
     await mkdir(parent, { recursive: true })
     const directory = await mkdtemp(join(parent, 'journey-'))
@@ -191,6 +290,18 @@ export class TestHarness {
     await mkdir(workspace)
     const runtime = new TestHarness(directory, home, workspace, kind)
     Object.assign(runtime.env, env)
+    if (kind === 'cli' && task) {
+      const relSpec = relative(join(ROOT, 'e2e'), task.filepath)
+        .replaceAll('\\', '/')
+        .replace(/\.spec\.ts$/, '')
+      const slug = task.name.replace(/[^a-zA-Z0-9_-]+/g, '_')
+      runtime.cliOutputPath = join(ROOT, 'e2e/outputs', relSpec, `${slug}.log`)
+      await mkdir(dirname(runtime.cliOutputPath), { recursive: true })
+      await writeFile(
+        runtime.cliOutputPath,
+        `# Test: ${task.fullName}\n# Spec: e2e/${relSpec}.spec.ts\n`,
+      )
+    }
     try {
       await runtime.launch()
       return runtime

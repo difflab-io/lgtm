@@ -20,6 +20,8 @@ export function suiteConfig(
           'hello-review',
           'commands',
           'daemon',
+          'local-review',
+          'pr-review',
           'required',
           'kak',
         ].map((name) => ({ name })),
