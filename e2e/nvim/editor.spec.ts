@@ -15,7 +15,7 @@ for (const profile of profiles) {
     const fixture = useEditor(profile)
 
     it(
-      'Loads and accepts setup without commands or feature windows',
+      'should_load_lgtm_register_commands_and_whichkey_mappings_without_opening_windows',
       { tags: ['smoke'] },
       async () => {
         // Arrange
@@ -28,7 +28,10 @@ for (const profile of profiles) {
         // Assert
         expect(await editor.value('vim.g.loaded_lgtm')).toBe(true)
         expect(await editor.value('vim.v.errmsg')).toBe('')
-        expect(await editor.value('vim.fn.exists(":Lgtm")')).toBe(0)
+        expect(await editor.value('vim.fn.exists(":Lgtm")')).toBe(2)
+        expect(await editor.value('vim.fn.maparg("<leader>rc", "n") ~= ""')).toBe(true)
+        expect(await editor.value('vim.fn.maparg("<leader>rp", "n") ~= ""')).toBe(true)
+        expect(await editor.value('vim.fn.maparg("<leader>rt", "n") ~= ""')).toBe(true)
         expect(await editor.value('vim.api.nvim_list_wins()')).toEqual(windows)
         expect(windows).toHaveLength(1)
       },
@@ -129,7 +132,7 @@ describe(
         for _, name in ipairs({"codediff", "which-key", "notify", "nui-components", "nui.popup"}) do
           assert(package.loaded[name], "Plugin setup did not require " .. name)
         end
-        assert(vim.fn.exists(":Lgtm") == 0, "Unexpected feature command")
+        assert(vim.fn.exists(":Lgtm") == 2, "Expected :Lgtm command to be registered")
         assert(vim.v.errmsg == "", vim.v.errmsg)
         assert(debug.getinfo(require("lgtm").setup).source:find(${JSON.stringify(root)}, 1, true), "Loaded another installation")
         vim.cmd("helptags " .. vim.fn.fnameescape(${JSON.stringify(join(root, 'doc'))}))
@@ -202,7 +205,7 @@ for (const profile of profiles) {
             verify,
             `
           assert(vim.g.loaded_lgtm and package.loaded.lgtm, "Plugin package failed to load")
-          assert(vim.fn.exists(":Lgtm") == 0, "Feature commands were restored")
+          assert(vim.fn.exists(":Lgtm") == 2, "Expected :Lgtm command to be registered")
           assert(vim.v.errmsg == "", vim.v.errmsg)
           assert(require("nui-components") and require("nui.popup"))
           assert(require("codediff") and require("which-key") and require("notify"))

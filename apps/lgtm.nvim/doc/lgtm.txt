@@ -1,12 +1,14 @@
-*lgtm.txt*  LGTM Neovim plugin shell
+*lgtm.txt*  LGTM Neovim review UI plugin
 
 ==============================================================================
-STATUS                                                       *lgtm*
+OVERVIEW                                                     *lgtm*
 
-The previous plugin UI and review logic have been removed for a rewrite.
-The package retains its loading entry points and this help page. There are
-currently no LGTM commands, keymaps, review workflows or backend calls.
+lgtm.nvim provides reactive Neovim UI scaffolding for two review workflows:
+- Local Review (always on during normal buffer editing via LocalReviewService)
+- PR Review (activated by selecting an open branch PR in pr-select-modal and
+  opening a CodeDiff session via PrService)
 
+==============================================================================
 SETUP                                                        *lgtm-setup*
 
 Add apps/lgtm.nvim from the repository to 'runtimepath', then run: >lua
@@ -14,12 +16,38 @@ Add apps/lgtm.nvim from the repository to 'runtimepath', then run: >lua
     vim.cmd("runtime plugin/lgtm.lua")
 <
 setup() and setup({}) load CodeDiff, WhichKey, nvim-notify and
-NuiComponents/NUI. Kak is loaded when available. Previous feature options
-have no effect. The shell does not need a running backend.
+NuiComponents/NUI, initialize LocalReviewService, PrService and
+ThreadsOverlay, and register :Lgtm and <leader>r WhichKey mappings without
+opening windows on startup. Kak is loaded when available.
 
+==============================================================================
+COMMANDS AND KEYMAPS                                         *lgtm-keymaps*
+
+Commands:
+  :Lgtm pr               Open pr-select-modal for open branch pull requests
+  :Lgtm threads          Toggle the right-hand threads-pane split
+  :Lgtm comment          Open comment-editor at the cursor line
+  :Lgtm thread           Open thread-detail-view for the thread at cursor
+  :Lgtm resolve          Toggle resolved state for the thread at cursor
+  :Lgtm submit           Open pr-submit-editor (Comment)
+  :Lgtm approve          Open pr-submit-editor (Approve)
+  :Lgtm request_changes  Open pr-submit-editor (Request Changes)
+
+Default WhichKey mappings (<leader>r):
+  <leader>rc             Draft local/PR comment or reply via comment-editor
+  <leader>rp             Open pr-select-modal
+  <leader>rt             Toggle threads-pane split
+  <leader>ro             Open thread at cursor in thread-detail-view
+  <leader>rx             Toggle thread resolved state
+  <leader>rs             Submit PR review (Comment)
+  <leader>ra             Approve pull request
+  <leader>rr             Request changes on pull request
+  ]c / [c                Jump to next / previous thread in buffer
+
+==============================================================================
 DEVELOPMENT                                                  *lgtm-development*
 
 See apps/lgtm.nvim/README.md and e2e/README.md in the repository for
-installation, plugin load checks and the retained Neovim E2E machinery.
+installation, plugin unit specs and Neovim E2E test suites.
 
 vim:tw=78:ts=8:noet:ft=help:norl:
