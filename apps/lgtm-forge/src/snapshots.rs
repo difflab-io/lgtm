@@ -86,7 +86,7 @@ impl SnapshotStore {
     }
 
     /// Read a single UTF-8 file blob at `commit_sha` from the snapshot repository.
-    pub fn read_file_at_commit(
+    pub fn get_file_at_commit(
         &self,
         git_dir: &str,
         commit_sha: &str,
@@ -94,7 +94,7 @@ impl SnapshotStore {
     ) -> Result<Option<String>> {
         let snap_dir = self.ensure_snapshot_dir(git_dir)?;
         let _ = gitoxide::fetch_objects(git_dir, &snap_dir, commit_sha);
-        gitoxide::read_file_at_commit(&snap_dir, commit_sha, file_path)
+        gitoxide::get_file_at_commit(&snap_dir, commit_sha, file_path)
     }
 }
 

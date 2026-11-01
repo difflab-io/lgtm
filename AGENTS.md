@@ -41,7 +41,7 @@ These rules apply to every app and library in the workspace.
 
 - Colocate private unit tests in the source file under `#[cfg(test)] mod tests`. Shared unit fixtures belong under `src/tests/`.
 - Use separate integration test files directly under `tests/` for each service or repository area (for example, `tests/review_service.rs`). Group cases with inline `mod name { ... }` blocks inside those files. Do not consolidate all integration tests into one file or add a nested `tests/integration/` directory or `#[path]` declarations. Shared integration fixtures belong under `tests/common/`; do not use `tests/support/` or `tests/test_support/`.
-- Name tests `should_<behavior>` and keep fixture helpers separate from test cases with the standard separators.
+- Name tests `should_<behavior>` and keep fixture helpers separate from test cases with the standard separators. Group integration and E2E tests using BDD `Given` / `When` clauses (`mod given_* { mod when_* { ... } }` in Rust integration tests and `describe('Given ... / When ...')` in Vitest specs) with `should_<behavior>` leaf cases.
 - Test multi-operation transactions and full review lifecycles against real SQLite and PostgreSQL. Use dummy external services.
 - Run checks through project Mise tasks invoked by Premise. Keep their source scripts tracked; generated output stays ignored.
 - Use `e2e/README.md` for PR E2E replay, recording refresh and live parity commands. Keep TypeScript E2E tests under e2e/, outside Rust app test directories.

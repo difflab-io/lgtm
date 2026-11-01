@@ -25,8 +25,6 @@ pub struct CommentAnchor {
 }
 
 impl CommentAnchor {
-    // Public ------------------------------------------------------------------
-
     /// Construct and validate a new comment anchor at its initial commit.
     pub fn new(
         file_path: &str,
@@ -34,29 +32,12 @@ impl CommentAnchor {
         line: u32,
         commit_sha: &str,
     ) -> Result<Self> {
-        let file_path = file_path.trim();
+        let file_path = Self::validate_coordinates(file_path, start_line, line)?;
         let commit_sha = commit_sha.trim();
-        if file_path.is_empty() {
-            return Err(Error::Invalid(
-                "comment anchor file_path must not be empty".to_owned(),
-            ));
-        }
         if commit_sha.is_empty() {
             return Err(Error::Invalid(
                 "comment anchor commit_sha must not be empty".to_owned(),
             ));
-        }
-        if line == 0 {
-            return Err(Error::Invalid(
-                "comment anchor line must be >= 1".to_owned(),
-            ));
-        }
-        if let Some(start) = start_line
-            && (start == 0 || start > line)
-        {
-            return Err(Error::Invalid(format!(
-                "comment anchor start_line ({start}) must be between 1 and line ({line})"
-            )));
         }
         Ok(Self {
             file_path: file_path.to_owned(),
@@ -69,6 +50,8 @@ impl CommentAnchor {
         })
     }
 
+    // Public ------------------------------------------------------------------
+
     /// Validate in memory that `file_path` content exists and `1 <= start_line <= line <= total_lines`.
     pub fn validate_line(
         head_blob: Option<&str>,
@@ -76,20 +59,7 @@ impl CommentAnchor {
         start_line: Option<u32>,
         line: u32,
     ) -> Result<()> {
-        let file_path = file_path.trim();
-        if file_path.is_empty() {
-            return Err(Error::Invalid("file_path must not be empty".to_owned()));
-        }
-        if line == 0 {
-            return Err(Error::Invalid("line must be >= 1".to_owned()));
-        }
-        if let Some(start) = start_line
-            && (start == 0 || start > line)
-        {
-            return Err(Error::Invalid(format!(
-                "start_line ({start}) must be between 1 and line ({line})"
-            )));
-        }
+        let file_path = Self::validate_coordinates(file_path, start_line, line)?;
         let head_content = head_blob.ok_or_else(|| {
             Error::Invalid(format!(
                 "file '{file_path}' does not exist at target commit"
@@ -183,6 +153,28 @@ impl CommentAnchor {
     }
 
     // Private -----------------------------------------------------------------
+
+    fn validate_coordinates(file_path: &str, start_line: Option<u32>, line: u32) -> Result<&str> {
+        let file_path = file_path.trim();
+        if file_path.is_empty() {
+            return Err(Error::Invalid(
+                "comment anchor file_path must not be empty".to_owned(),
+            ));
+        }
+        if line == 0 {
+            return Err(Error::Invalid(
+                "comment anchor line must be >= 1".to_owned(),
+            ));
+        }
+        if let Some(start) = start_line
+            && (start == 0 || start > line)
+        {
+            return Err(Error::Invalid(format!(
+                "comment anchor start_line ({start}) must be between 1 and line ({line})"
+            )));
+        }
+        Ok(file_path)
+    }
 
     fn compute_surviving_line_map(old_text: &str, new_text: &str) -> BTreeMap<u32, Option<u32>> {
         let diff = TextDiff::from_lines(old_text, new_text);

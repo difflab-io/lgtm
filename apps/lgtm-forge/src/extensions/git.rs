@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     error::{Error, Result},
-    extensions::gitoxide::{self, HeadCommitPayload},
+    extensions::gitoxide,
     utils::resolve_git_paths,
 };
 
@@ -161,11 +161,6 @@ pub fn is_local_remote(git_dir_or_worktree: &str) -> Result<bool> {
     Ok(Path::new(clean).exists())
 }
 
-/// Read the current HEAD commit metadata and file changes relative to its first parent from the working checkout.
-pub fn get_head_commit_payload(git_dir_or_worktree: &str) -> Result<HeadCommitPayload> {
-    gitoxide::get_head_commit_payload(git_dir_or_worktree)
-}
-
 /// Update `ref_name` in the working checkout to point at `commit_sha` via `git update-ref`.
 pub fn set_reference(git_dir_or_worktree: &str, ref_name: &str, commit_sha: &str) -> Result<()> {
     let (_, worktree_dir, _) = resolve_git_paths(git_dir_or_worktree)?;
@@ -219,7 +214,7 @@ pub fn get_changed_files(
 }
 
 /// Read the UTF-8 contents of `file_path` at `commit_sha` in the working checkout via `git show <commit_sha>:<file_path>`.
-pub fn read_file_at_commit(
+pub fn get_file_at_commit(
     git_dir_or_worktree: &str,
     commit_sha: &str,
     file_path: &str,
@@ -250,7 +245,7 @@ pub fn get_commit_blobs_for_paths(
 ) -> Result<BTreeMap<String, String>> {
     let mut blobs = BTreeMap::new();
     for path in paths {
-        if let Some(content) = read_file_at_commit(git_dir_or_worktree, commit_sha, path)? {
+        if let Some(content) = get_file_at_commit(git_dir_or_worktree, commit_sha, path)? {
             blobs.insert(path.clone(), content);
         }
     }

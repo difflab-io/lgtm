@@ -588,7 +588,7 @@ sequenceDiagram
   - `ensure_snapshot(&self, git_dir) -> Result<(String, String)>`
   - `get_changed_files(&self, git_dir, old_sha, new_sha) -> Result<Vec<String>>`
   - `get_commit_blobs(&self, git_dir, commit_sha) -> Result<BTreeMap<String, String>>`
-  - `read_file_at_commit(&self, git_dir, commit_sha, file_path) -> Result<Option<String>>`
+  - `get_file_at_commit(&self, git_dir, commit_sha, file_path) -> Result<Option<String>>`
 - `CommentAnchor` and `DiffHunk` (pure in-memory domain models):
   - `CommentAnchor::validate_line(head_blob, file_path, start_line, line) -> Result<()>`
   - `CommentAnchor::recompute_shifts(old_blobs, new_blobs, new_head_sha, comments) -> Vec<CommentAnchorShift>`

@@ -40,7 +40,7 @@ let (snap_sha, branch) = snapshots.commit(
 let (base_sha, head_sha) = snapshots.ensure_snapshot("/repo/.git")?;
 
 // 3. Validate and shift anchors via CommentAnchor, and build ShowReview hunks via DiffHunk
-let head_blob = snapshots.read_file_at_commit("/repo/.git", &head_sha, "src/lib.rs")?;
+let head_blob = snapshots.get_file_at_commit("/repo/.git", &head_sha, "src/lib.rs")?;
 CommentAnchor::validate_line(head_blob.as_deref(), "src/lib.rs", Some(5), 7)?;
 let shifts = CommentAnchor::recompute_shifts(&old_blobs, &new_blobs, &new_head_sha, &comments);
 let hunks = DiffHunk::from_blobs("src/lib.rs", &head_sha, base_blob.as_deref(), head_blob.as_deref(), &anchors);
@@ -209,7 +209,7 @@ impl SnapshotStore {
     pub fn ensure_snapshot(&self, git_dir: &str) -> Result<(String, String)>;
     pub fn get_changed_files(&self, git_dir: &str, old_sha: &str, new_sha: &str) -> Result<Vec<String>>;
     pub fn get_commit_blobs(&self, git_dir: &str, commit_sha: &str) -> Result<BTreeMap<String, String>>;
-    pub fn read_file_at_commit(&self, git_dir: &str, commit_sha: &str, file_path: &str) -> Result<Option<String>>;
+    pub fn get_file_at_commit(&self, git_dir: &str, commit_sha: &str, file_path: &str) -> Result<Option<String>>;
 }
 
 impl CommentAnchor {

@@ -180,7 +180,7 @@ impl ReviewService {
             let (sha, _) = git::push_branch(git_dir, &ctx.branch)?;
             sha
         } else {
-            let payload = git::get_head_commit_payload(git_dir)?;
+            let payload = gitoxide::get_head_commit_payload(git_dir)?;
             if let Some(pushed_sha) = self
                 .forge
                 .push_branch(&repository_url, &ctx.branch, &payload)
@@ -533,7 +533,6 @@ impl ReviewService {
             let line = input.line.ok_or_else(|| {
                 Error::Invalid("file-anchored comment requires --line".to_owned())
             })?;
-            let _ = CommentAnchor::new(file_path, input.start_line, line, &review.head_sha)?;
             let head_blob =
                 self.read_blob_at_commit(&input.git_dir, &review, &review.head_sha, file_path)?;
             CommentAnchor::validate_line(head_blob.as_deref(), file_path, input.start_line, line)?;
@@ -813,9 +812,9 @@ impl ReviewService {
     ) -> Result<Option<String>> {
         if review.context.is_local() {
             self.snapshots
-                .read_file_at_commit(git_dir, commit_sha, file_path)
+                .get_file_at_commit(git_dir, commit_sha, file_path)
         } else {
-            git::read_file_at_commit(git_dir, commit_sha, file_path)
+            git::get_file_at_commit(git_dir, commit_sha, file_path)
         }
     }
 
@@ -828,29 +827,36 @@ impl ReviewService {
         if anchors.is_empty() {
             return Vec::new();
         }
-        let mut hunks = Vec::with_capacity(anchors.len());
+        let mut grouped: BTreeMap<(String, String), Vec<CommentAnchor>> = BTreeMap::new();
         for anchor in anchors {
+            grouped
+                .entry((anchor.file_path.clone(), anchor.commit_sha.clone()))
+                .or_default()
+                .push(anchor.clone());
+        }
+        let mut hunks = Vec::with_capacity(anchors.len());
+        for ((file_path, commit_sha), group_anchors) in grouped {
             let base_blob = self
-                .read_blob_at_commit(git_dir, review, &review.base_sha, &anchor.file_path)
+                .read_blob_at_commit(git_dir, review, &review.base_sha, &file_path)
                 .ok()
                 .flatten();
             let head_blob = self
-                .read_blob_at_commit(git_dir, review, &anchor.commit_sha, &anchor.file_path)
+                .read_blob_at_commit(git_dir, review, &commit_sha, &file_path)
                 .ok()
                 .flatten()
                 .or_else(|| {
-                    self.read_blob_at_commit(git_dir, review, &review.head_sha, &anchor.file_path)
+                    self.read_blob_at_commit(git_dir, review, &review.head_sha, &file_path)
                         .ok()
                         .flatten()
                 });
-            let mut anchor_hunks = DiffHunk::from_blobs(
-                &anchor.file_path,
-                &anchor.commit_sha,
+            let mut group_hunks = DiffHunk::from_blobs(
+                &file_path,
+                &commit_sha,
                 base_blob.as_deref(),
                 head_blob.as_deref(),
-                std::slice::from_ref(anchor),
+                &group_anchors,
             );
-            hunks.append(&mut anchor_hunks);
+            hunks.append(&mut group_hunks);
         }
         hunks
     }

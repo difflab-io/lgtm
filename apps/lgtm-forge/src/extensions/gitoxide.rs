@@ -339,7 +339,7 @@ pub fn get_commit_blobs(repo_dir: &Path, commit_sha: &str) -> Result<BTreeMap<St
 }
 
 /// Read a single UTF-8 file blob at `commit_sha` inside `repo_dir`.
-pub fn read_file_at_commit(
+pub fn get_file_at_commit(
     repo_dir: &Path,
     commit_sha: &str,
     file_path: &str,
