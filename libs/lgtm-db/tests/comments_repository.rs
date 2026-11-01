@@ -570,6 +570,7 @@ mod when_querying_visibility_unsynced_drafts_and_shifting_anchors {
             .update_comment_anchors(&[
                 CommentAnchorShift {
                     comment_id: shifted.id,
+                    file_path: Some("src/extracted.rs".to_string()),
                     start_line: Some(14),
                     line: Some(19),
                     commit_sha: Some("3333333".to_string()),
@@ -577,6 +578,7 @@ mod when_querying_visibility_unsynced_drafts_and_shifting_anchors {
                 },
                 CommentAnchorShift {
                     comment_id: invalidated.id,
+                    file_path: None,
                     start_line: None,
                     line: Some(40),
                     commit_sha: Some("3333333".to_string()),
@@ -594,6 +596,7 @@ mod when_querying_visibility_unsynced_drafts_and_shifting_anchors {
             .await
             .unwrap()
             .unwrap();
+        assert_eq!(shifted_after.file_path.as_deref(), Some("src/extracted.rs"));
         assert_eq!(shifted_after.start_line, Some(14));
         assert_eq!(shifted_after.line, Some(19));
         assert_eq!(shifted_after.commit_sha.as_deref(), Some("3333333"));

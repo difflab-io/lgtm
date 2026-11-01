@@ -5,18 +5,20 @@
  * @module-tag pr-review
  */
 import { describe, it, expect } from 'vitest'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { usePrFixture } from '../common/pr.fixtures.js'
 import type { Json } from '../common/test-utils.js'
 import { setupPrCheckout } from './pr-review.fixtures.js'
 
 describe(
-  'When committing, pushing, and syncing a remote GitHub pull request review',
+  'Given a remote PR checkout / When committing, pushing, and syncing a remote GitHub pull request review',
   { tags: ['e2e', 'cli', 'github', 'pr-review'] },
   () => {
     const fixture = usePrFixture('cli')
 
     it(
-      'should_commit_as_agent_push_branch_and_create_or_refresh_remote_pr_review',
+      'should_commit_as_human_push_branch_and_create_or_refresh_remote_pr_review_without_shadow_snapshots',
       { tags: ['smoke'] },
       async () => {
         // Arrange
@@ -30,13 +32,7 @@ describe(
 
         // Act
         const added = await runtime.json(['add', filePath])
-        const committed = await runtime.json([
-          'commit',
-          '--as',
-          'anthropic/claude-sonnet-4-5',
-          '-m',
-          'Update PR branch via lgtm CLI',
-        ])
+        const committed = await runtime.json(['commit', '-m', 'Update PR branch via lgtm CLI'])
         const pushed = await runtime.json(['push'])
         const created = await runtime.json(['review', 'new'])
         const listed = await runtime.json(['review', 'list'])
@@ -53,11 +49,11 @@ describe(
         expect(committed.local).toBe(false)
         expect(committed.commit_sha).not.toBe(initialHead)
         expect(committed.author).toMatchObject({
-          name: 'claude-sonnet-4-5',
-          kind: 'agent',
-          provider: 'anthropic',
-          model: 'claude-sonnet-4-5',
+          name: 'Ada Lovelace',
+          kind: 'human',
+          email: 'ada@example.test',
         })
+        expect(existsSync(join(runtime.home, 'snapshots'))).toBe(false)
         expect(pushed).toMatchObject({
           local: false,
           head_sha: committed.commit_sha,
@@ -80,7 +76,7 @@ describe(
 )
 
 describe(
-  'When drafting, replying to, resolving, and deleting remote PR comments',
+  'Given a remote PR checkout / When drafting, replying to, resolving, and deleting remote PR comments',
   { tags: ['e2e', 'cli', 'github', 'pr-review'] },
   () => {
     const fixture = usePrFixture('cli')
@@ -192,7 +188,7 @@ describe(
 )
 
 describe(
-  'When refreshing a remote PR review after mid-flight commits',
+  'Given a remote PR checkout / When refreshing a remote PR review after mid-flight commits',
   { tags: ['e2e', 'cli', 'github', 'pr-review'] },
   () => {
     const fixture = usePrFixture('cli')
@@ -256,6 +252,82 @@ describe(
       expect(remapped.anchor.commit_sha).toBe(github.head)
       expect(remapped.anchor.original_line).toBe(6)
       expect(remapped.anchor.original_commit_sha).toBe(initialHead)
+    })
+  },
+)
+
+describe(
+  'Given a remote PR with agent-authored comments / When a remote comment loses its AI disclosure banner and the review is refreshed',
+  { tags: ['e2e', 'cli', 'github', 'pr-review'] },
+  () => {
+    const fixture = usePrFixture('cli')
+
+    it('should_preserve_agent_comment_attribution_monotonically_across_remote_refresh', async () => {
+      // Arrange
+      const { runtime, github } = fixture()
+      const { prNumber, filePath } = await setupPrCheckout(runtime, github)
+      await runtime.json(['review', 'new', '--as', 'anthropic/claude-sonnet-4-5'])
+      const created = await runtime.json([
+        'comment',
+        'new',
+        'Agent finding whose remote disclosure banner is removed on GitHub',
+        '--file',
+        filePath,
+        '--line',
+        '2',
+        '--as',
+        'anthropic/claude-sonnet-4-5',
+      ])
+      const commentNum = (created.comment as { number: number }).number
+
+      // Act: strip the AI disclosure banner directly on GitHub, then refresh and update the comment
+      const remoteComments = await github.api<Json[]>(
+        `repos/${github.repository}/pulls/${prNumber}/comments?per_page=100`,
+      )
+      const remoteTarget = remoteComments.find((c) =>
+        String(c.body).includes(
+          'Agent finding whose remote disclosure banner is removed on GitHub',
+        ),
+      )!
+      expect(remoteTarget).toBeDefined()
+      await github.api(`repos/${github.repository}/pulls/comments/${remoteTarget.id}`, 'PATCH', {
+        body: 'Agent finding edited on GitHub without disclosure banner',
+      })
+
+      await runtime.json(['review', 'refresh', `PR${prNumber}`])
+      const shownAfterRefresh = await runtime.json(['review', 'show', `PR${prNumber}`])
+      await runtime.json([
+        'comment',
+        'update',
+        String(commentNum),
+        '--body',
+        'Agent finding re-exported after refresh',
+      ])
+      const remoteCommentsAfterUpdate = await github.api<Json[]>(
+        `repos/${github.repository}/pulls/${prNumber}/comments?per_page=100`,
+      )
+
+      // Assert: prior local Agent attribution is preserved monotonically and re-emits the banner on export
+      const refreshedComment = (
+        shownAfterRefresh.comments as Array<{
+          number: number
+          body: string
+          author: { kind: string; name: string; provider: string; model: string }
+        }>
+      ).find((c) => c.number === commentNum)!
+      expect(refreshedComment).toBeDefined()
+      expect(refreshedComment.body).toBe('Agent finding edited on GitHub without disclosure banner')
+      expect(refreshedComment.author).toMatchObject({
+        kind: 'agent',
+        name: 'claude-sonnet-4-5',
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-5',
+      })
+
+      const reexported = remoteCommentsAfterUpdate.find((c) => c.id === remoteTarget.id)!
+      expect(String(reexported.body)).toContain(
+        '> Generated by AI agent `anthropic/claude-sonnet-4-5` via LGTM',
+      )
     })
   },
 )

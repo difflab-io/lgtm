@@ -79,12 +79,7 @@ impl ReviewService for ReviewApi {
     ) -> ServiceResult<impl Encodable<CommitResponse> + Send + use<'a>> {
         let outcome = self
             .reviews
-            .commit_changes(
-                request.git_dir,
-                request.message,
-                request.as_agent,
-                request.local,
-            )
+            .commit_changes(request.git_dir, request.message, request.local)
             .await
             .map_err(ConnectError::from)?;
         Response::ok(CommitResponse {
@@ -141,7 +136,7 @@ impl ReviewService for ReviewApi {
     ) -> ServiceResult<impl Encodable<CreateReviewResponse> + Send + use<'a>> {
         let (review, session) = self
             .reviews
-            .create_review(request.git_dir, request.local)
+            .create_review(request.git_dir, request.local, request.as_agent)
             .await
             .map_err(ConnectError::from)?;
         Response::ok(CreateReviewResponse {

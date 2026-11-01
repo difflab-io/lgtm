@@ -1,4 +1,5 @@
 //! Shared integration test fixtures (`TestContext`, temporary Git checkout, `SnapshotStore`, and `DummyForge`) for `lgtm-forge`.
+#![allow(dead_code)]
 
 use std::{
     collections::BTreeMap,
@@ -252,6 +253,16 @@ impl TestContext {
     /// Write `contents` to `rel_path` inside the test working tree.
     pub fn write_file(&self, rel_path: &str, contents: &str) {
         write_repo_file(&self.worktree_dir, rel_path, contents);
+    }
+
+    /// Run a `git` command in `worktree_dir` and assert success.
+    pub fn git(&self, args: &[&str]) {
+        run_git(&self.worktree_dir, args);
+    }
+
+    /// Run a `git` command in `worktree_dir` and return trimmed stdout.
+    pub fn git_stdout(&self, args: &[&str]) -> String {
+        git_stdout(&self.worktree_dir, args)
     }
 
     /// Return the current `HEAD` commit SHA of the working checkout.

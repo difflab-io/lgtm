@@ -4,15 +4,13 @@ use serde_json::json;
 use crate::{
     backend::proto::lgtm::v1::CommitRequest,
     commands::resolve_git_dir,
-    models::{ActorArgs, LocalArgs, format_identity_display, format_identity_json, short_sha},
+    models::{LocalArgs, format_identity_display, format_identity_json, short_sha},
     rpc_client::Client,
     store::Store,
 };
 
 #[derive(Args)]
 pub struct CommitArgs {
-    #[command(flatten)]
-    pub actor: ActorArgs,
     #[command(flatten)]
     pub location: LocalArgs,
     #[arg(short, long)]
@@ -26,7 +24,6 @@ pub async fn run(args: CommitArgs, store: &Store, json: bool) -> anyhow::Result<
         .commit(CommitRequest {
             git_dir,
             message: args.message,
-            as_agent: args.actor.agent_name,
             local: args.location.local,
             ..Default::default()
         })

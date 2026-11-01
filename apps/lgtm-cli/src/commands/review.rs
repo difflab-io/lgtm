@@ -31,7 +31,12 @@ pub enum ReviewCommand {
         all: bool,
     },
     /// Create a local snapshot review or synchronize a remote pull request review.
-    New(LocalArgs),
+    New {
+        #[command(flatten)]
+        location: LocalArgs,
+        #[command(flatten)]
+        actor: ActorArgs,
+    },
     /// Refresh review comments, remote pull request state, and line anchors.
     Refresh {
         #[arg(value_parser = parse_nonempty)]
@@ -105,11 +110,12 @@ pub async fn run(args: ReviewArgs, store: &Store, json: bool) -> anyhow::Result<
             }
             Ok(())
         }
-        ReviewCommand::New(location) => {
+        ReviewCommand::New { location, actor } => {
             let response = client
                 .create_review(CreateReviewRequest {
                     git_dir,
                     local: location.local,
+                    as_agent: actor.agent_name,
                     ..Default::default()
                 })
                 .await?;

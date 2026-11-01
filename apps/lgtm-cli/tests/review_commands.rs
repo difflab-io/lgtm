@@ -111,15 +111,8 @@ mod review_commands {
 
         // Act
         let added = ws.lgtm_json(&["add", "src/lib.rs", "--local"]);
-        let committed = ws.lgtm_json(&[
-            "commit",
-            "--local",
-            "--as",
-            "claude-sonnet-4-5",
-            "-m",
-            "Shadow snapshot commit",
-        ]);
-        let created = ws.lgtm_json(&["review", "new", "--local"]);
+        let committed = ws.lgtm_json(&["commit", "--local", "-m", "Shadow snapshot commit"]);
+        let created = ws.lgtm_json(&["review", "new", "--local", "--as", "claude-sonnet-4-5"]);
         let review_name = created["review"]["name"].as_str().unwrap().to_owned();
         let listed = ws.lgtm_json(&["review", "list", "--local"]);
 
@@ -197,7 +190,8 @@ mod review_commands {
         // Assert
         assert_eq!(added["staged_paths"], serde_json::json!(["src/lib.rs"]));
         assert_eq!(committed["local"], true);
-        assert_eq!(committed["author"]["kind"], "agent");
+        assert_eq!(committed["author"]["kind"], "human");
+        assert_eq!(created["session"]["author"]["kind"], "agent");
         assert_eq!(
             CliWorkspace::git(&ws.repo, &["rev-parse", "HEAD"]),
             initial_head

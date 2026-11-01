@@ -10,13 +10,13 @@ import { useTestHarness } from '../common/fixtures.js'
 import { EDITED_LIB_RS, captureCheckoutState, initLocalRepo } from './local-review.fixtures.js'
 
 describe(
-  'When staging and committing in local snapshot mode',
+  'Given a local working tree / When staging and committing in local snapshot mode',
   { tags: ['e2e', 'cli', 'local-review'] },
   () => {
     const fixture = useTestHarness('cli')
 
     it(
-      'should_stage_and_shadow_commit_worktree_changes_without_modifying_checkout_or_origin',
+      'should_stage_and_shadow_commit_worktree_changes_as_human_without_modifying_checkout_or_origin',
       { tags: ['smoke'] },
       async () => {
         // Arrange
@@ -28,6 +28,12 @@ describe(
         // Act
         const added = await runtime.json(['add', 'src/lib.rs', '--local'])
         const committed = await runtime.json(['commit', '--local', '-m', 'Local shadow snapshot'])
+        const textOut = await runtime.cli([
+          'commit',
+          '--local',
+          '-m',
+          'Second human local snapshot',
+        ])
         const after = await captureCheckoutState(runtime)
         const snapshotDirs = await readdir(join(runtime.home, 'snapshots'))
 
@@ -44,6 +50,8 @@ describe(
           kind: 'human',
           email: 'ada@example.test',
         })
+        expect(textOut.code).toBe(0)
+        expect(textOut.stdout).toContain('(local snapshot) by Ada Lovelace')
         expect(after.head).toBe(before.head)
         expect(after.status).toBe(before.status)
         expect(after.index).toEqual(before.index)
@@ -51,43 +59,6 @@ describe(
         expect(snapshotDirs.length).toBe(1)
       },
     )
-
-    it('should_attribute_local_shadow_commits_to_an_agent_with_as', async () => {
-      // Arrange
-      const { runtime } = fixture()
-      await initLocalRepo(runtime)
-      await runtime.write('src/lib.rs', EDITED_LIB_RS)
-
-      // Act
-      await runtime.json(['add', 'src/lib.rs', '--local'])
-      const committed = await runtime.json([
-        'commit',
-        '--local',
-        '--as',
-        'anthropic/claude-sonnet-4-5',
-        '-m',
-        'Agent local snapshot',
-      ])
-      const textOut = await runtime.cli([
-        'commit',
-        '--local',
-        '--as',
-        'claude-sonnet-4-5',
-        '-m',
-        'Second agent snapshot',
-      ])
-
-      // Assert
-      expect(committed.local).toBe(true)
-      expect(committed.author).toMatchObject({
-        name: 'claude-sonnet-4-5',
-        kind: 'agent',
-        provider: 'anthropic',
-        model: 'claude-sonnet-4-5',
-      })
-      expect(textOut.code).toBe(0)
-      expect(textOut.stdout).toContain('(local snapshot) by claude-sonnet-4-5 (agent)')
-    })
 
     it('should_reject_push_in_local_mode_without_contacting_origin', async () => {
       // Arrange
@@ -108,7 +79,7 @@ describe(
 )
 
 describe(
-  'When creating, listing, and refreshing local snapshot reviews',
+  'Given a local working tree / When creating, listing, and refreshing local snapshot reviews',
   { tags: ['e2e', 'cli', 'local-review'] },
   () => {
     const fixture = useTestHarness('cli')
@@ -261,7 +232,7 @@ describe(
 )
 
 describe(
-  'When drafting comments, inspecting diff hunks, and closing a local review',
+  'Given an active local review / When drafting comments, inspecting diff hunks, and closing a local review',
   { tags: ['e2e', 'cli', 'local-review'] },
   () => {
     const fixture = useTestHarness('cli')
@@ -461,6 +432,139 @@ describe(
         outcome: 'approve',
         body: 'Local review approved',
       })
+    })
+  },
+)
+
+describe(
+  'Given an active local review with human and agent participants / When an agent extracts code to a new file and relocates comment anchors',
+  { tags: ['e2e', 'cli', 'local-review'] },
+  () => {
+    const fixture = useTestHarness('cli')
+
+    it('should_relocate_comment_across_files_and_publish_agent_session_while_human_session_stays_draft', async () => {
+      // Arrange
+      const { runtime } = fixture()
+      await initLocalRepo(runtime)
+      await runtime.write('src/lib.rs', EDITED_LIB_RS)
+      const created = await runtime.json([
+        'review',
+        'new',
+        '--local',
+        '--as',
+        'anthropic/claude-sonnet-4-5',
+      ])
+      const reviewName = (created.review as { name: string }).name
+      const initialSnapSha = (created.review as { head_sha: string }).head_sha
+
+      const humanComment = await runtime.json([
+        'comment',
+        'new',
+        'Extract beta into its own module',
+        '--file',
+        'src/lib.rs',
+        '--line',
+        '6',
+        '--local',
+      ])
+      const commentNum = (humanComment.comment as { number: number }).number
+
+      // Act: extract beta() into src/beta.rs, refresh review, relocate comment across files as agent, reply, and close agent session
+      await runtime.write(
+        'src/lib.rs',
+        [
+          'pub mod beta;',
+          '',
+          'pub fn alpha() -> i32 {',
+          '    10',
+          '}',
+          '',
+          'pub fn gamma() -> i32 {',
+          '    30',
+          '}',
+          '',
+        ].join('\n'),
+      )
+      await runtime.write('src/beta.rs', ['pub fn beta() -> i32 {', '    20', '}', ''].join('\n'))
+
+      const refreshed = await runtime.json(['review', 'refresh', reviewName, '--local'])
+      const relocated = await runtime.json([
+        'comment',
+        'update',
+        String(commentNum),
+        '--file',
+        'src/beta.rs',
+        '--line',
+        '2',
+        '--local',
+        '--as',
+        'anthropic/claude-sonnet-4-5',
+      ])
+      await runtime.json([
+        'comment',
+        'new',
+        'Extracted beta() to src/beta.rs:2 and relocated anchor',
+        '--reply-to',
+        String(commentNum),
+        '--local',
+        '--as',
+        'anthropic/claude-sonnet-4-5',
+      ])
+      const agentClosed = await runtime.json([
+        'review',
+        'close',
+        reviewName,
+        '--local',
+        '--with',
+        'comment',
+        '--body',
+        'Completed extraction and anchor relocation',
+        '--as',
+        'anthropic/claude-sonnet-4-5',
+      ])
+      const shown = await runtime.json(['review', 'show', reviewName, '--local'])
+
+      // Assert
+      expect(created.session).toMatchObject({
+        state: 'draft',
+        author: {
+          name: 'claude-sonnet-4-5',
+          kind: 'agent',
+          provider: 'anthropic',
+          model: 'claude-sonnet-4-5',
+        },
+      })
+      const refreshedHeadSha = (refreshed.review as { head_sha: string }).head_sha
+      expect(refreshedHeadSha).not.toBe(initialSnapSha)
+
+      expect(relocated.comment).toMatchObject({
+        number: commentNum,
+        outdated: false,
+        anchor: {
+          file_path: 'src/beta.rs',
+          line: 2,
+          commit_sha: refreshedHeadSha,
+          original_line: 6,
+          original_commit_sha: initialSnapSha,
+        },
+      })
+      expect(agentClosed.session).toMatchObject({
+        state: 'published',
+        outcome: 'comment',
+        author: {
+          name: 'claude-sonnet-4-5',
+          kind: 'agent',
+        },
+      })
+
+      const sessions = shown.sessions as Array<{
+        state: string
+        author: { kind: string; name: string }
+      }>
+      const agentSession = sessions.find((s) => s.author.kind === 'agent')!
+      const humanSession = sessions.find((s) => s.author.kind === 'human')!
+      expect(agentSession.state).toBe('published')
+      expect(humanSession.state).toBe('draft')
     })
   },
 )

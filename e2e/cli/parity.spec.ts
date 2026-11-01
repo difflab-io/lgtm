@@ -24,7 +24,7 @@ function normalizeDiffAndThreadsOutput(stdout: string): string {
 }
 
 describe(
-  'When showing and closing a remote PR review with local workflow parity',
+  'Given identical local and remote review workflows / When showing and closing reviews with human and agent sessions',
   { tags: ['e2e', 'cli', 'github', 'local-review', 'pr-review'] },
   () => {
     const fixture = usePrFixture('cli')

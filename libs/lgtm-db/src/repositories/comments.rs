@@ -52,11 +52,13 @@ pub struct UpdateComment {
     pub forge_id: Option<String>,
 }
 
-/// Anchor shift applied to a comment when a review's head commit advances.
+/// Anchor shift applied to a comment when a review's head commit advances or a comment is relocated.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommentAnchorShift {
     /// Target `comments.id`.
     pub comment_id: Uuid,
+    /// Updated relative repository file path (`None` preserves the existing `file_path`).
+    pub file_path: Option<String>,
     /// Shifted starting line of a multi-line range.
     pub start_line: Option<i32>,
     /// Shifted target or ending line.
@@ -256,14 +258,17 @@ impl<C: ConnectionTrait> CommentsRepository<C> {
             .map_err(DbError::from_db_err)
     }
 
-    /// Batch-update current line anchors (`start_line`, `line`, `commit_sha`) and `outdated` status while preserving `original_*`.
+    /// Batch-update current anchors (`file_path`, `start_line`, `line`, `commit_sha`) and `outdated` status while preserving `original_*`.
     pub async fn update_comment_anchors(&self, shifts: &[CommentAnchorShift]) -> Result<()> {
         let now = Utc::now();
         for shift in shifts {
             let existing = self.require_comment(shift.comment_id).await?;
-            Self::validate_anchor(existing.file_path.as_deref(), shift.start_line, shift.line)?;
+            let next_file_path =
+                normalize_optional(shift.file_path.clone()).or_else(|| existing.file_path.clone());
+            Self::validate_anchor(next_file_path.as_deref(), shift.start_line, shift.line)?;
             let commit_sha = normalize_optional(shift.commit_sha.clone());
             let mut active: ActiveModel = existing.into();
+            active.file_path = Set(next_file_path);
             active.start_line = Set(shift.start_line);
             active.line = Set(shift.line);
             active.commit_sha = Set(commit_sha);

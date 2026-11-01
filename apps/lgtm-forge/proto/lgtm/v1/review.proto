@@ -142,8 +142,7 @@ message AddResponse {
 message CommitRequest {
   string git_dir = 1;
   optional string message = 2;
-  optional string as_agent = 3;
-  bool local = 4;
+  bool local = 3;
 }
 
 message CommitResponse {
@@ -178,6 +177,7 @@ message ListReviewsResponse {
 message CreateReviewRequest {
   string git_dir = 1;
   bool local = 2;
+  optional string as_agent = 3;
 }
 
 message CreateReviewResponse {

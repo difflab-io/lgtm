@@ -1,7 +1,7 @@
 //! Core `ReviewService` orchestrating local snapshot reviews and remote forge synchronization.
 
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     sync::Arc,
 };
 
@@ -14,13 +14,14 @@ use crate::{
         UpsertForgeComment, UpsertForgeReview, UpsertForgeSession,
     },
     error::{Error, Result},
-    extensions::gitoxide,
+    extensions::{git, gitoxide},
     forge::{
         ForgeCommentUpdate, ForgeDraftCommentInput, ForgePullRequestBundle, GitHubForge,
         RemoteForge,
     },
     models::{
-        Comment, CommentAnchor, DiffHunk, Identity, Review, ReviewGroupBy, ReviewOutcome, Session,
+        Comment, CommentAnchor, DiffHunk, Identity, IdentityKind, Review, ReviewGroupBy,
+        ReviewOutcome, Session,
         comment::{format_body_with_disclosure, parse_body_agent_disclosure},
     },
     snapshots::SnapshotStore,
@@ -90,7 +91,7 @@ pub struct FileReviewedOutcome {
     pub commit_sha: String,
 }
 
-/// Application service coordinating `lgtm-db`, `SnapshotStore`, `extensions::gitoxide`, and `RemoteForge`.
+/// Application service coordinating `lgtm-db`, `SnapshotStore` (`--local`), `extensions::git` (`ForgeBacked`), and `RemoteForge`.
 #[derive(Clone)]
 pub struct ReviewService {
     database: Database,
@@ -125,7 +126,7 @@ impl ReviewService {
 
     // Git & Snapshots
 
-    /// Stage worktree paths into `SnapshotStore` (`local == true`) or the working checkout (`local == false`).
+    /// Stage worktree paths into `SnapshotStore` (`local == true`) or the working checkout's `.git/index` (`local == false`).
     pub async fn add_paths(
         &self,
         git_dir: &str,
@@ -136,26 +137,23 @@ impl ReviewService {
         if local {
             self.snapshots.stage_paths(git_dir, paths)
         } else {
-            gitoxide::stage_paths(git_dir, paths)
+            git::stage_paths(git_dir, paths)
         }
     }
 
-    /// Create a shadow commit (`local == true`) or working checkout commit mirrored to `SnapshotStore` (`local == false`).
+    /// Create a shadow commit (`local == true`) or working checkout commit (`local == false`), always authored by the human user from `git config`.
     pub async fn commit_changes(
         &self,
         git_dir: &str,
         message: Option<&str>,
-        as_agent: Option<&str>,
         local: bool,
     ) -> Result<CommitOutcome> {
         let ctx = gitoxide::get_repo_context(git_dir)?;
-        let author = self.resolve_actor(&ctx, as_agent).await?;
+        let author = self.resolve_actor(&ctx, None).await?;
         let (commit_sha, branch) = if local {
-            self.snapshots.commit(&ctx.git_dir, message, &author)?
+            self.snapshots.commit(git_dir, message)?
         } else {
-            let (sha, branch) = gitoxide::create_commit(&ctx.git_dir, message, &author)?;
-            self.snapshots.mirror_checkout_commits(&ctx.git_dir, &sha)?;
-            (sha, branch)
+            git::create_commit(git_dir, message)?
         };
         tracing::info!(commit_sha, branch, local, "created commit");
         Ok(CommitOutcome {
@@ -178,30 +176,26 @@ impl ReviewService {
         let repository_url = ctx.repository_url.clone().ok_or_else(|| {
             Error::Invalid("working repository has no 'origin' remote configured".to_owned())
         })?;
-        let head_sha = if gitoxide::is_local_remote(&ctx.git_dir)? {
-            let (sha, _) = gitoxide::push_branch(&ctx.git_dir, &ctx.branch)?;
+        let head_sha = if git::is_local_remote(git_dir)? {
+            let (sha, _) = git::push_branch(git_dir, &ctx.branch)?;
             sha
         } else {
-            let payload = gitoxide::get_head_commit_payload(&ctx.git_dir)?;
+            let payload = git::get_head_commit_payload(git_dir)?;
             if let Some(pushed_sha) = self
                 .forge
                 .push_branch(&repository_url, &ctx.branch, &payload)
                 .await?
             {
                 if pushed_sha != ctx.head_sha {
-                    let (git_dir_path, _, _) = crate::utils::resolve_git_paths(&ctx.git_dir)?;
-                    let _ = gitoxide::set_reference(
-                        &git_dir_path,
+                    let _ = git::set_reference(
+                        git_dir,
                         &format!("refs/heads/{}", ctx.branch),
                         &pushed_sha,
                     );
                 }
-                let _ = self
-                    .snapshots
-                    .mirror_checkout_commits(&ctx.git_dir, &pushed_sha);
                 pushed_sha
             } else {
-                let (sha, _) = gitoxide::push_branch(&ctx.git_dir, &ctx.branch)?;
+                let (sha, _) = git::push_branch(git_dir, &ctx.branch)?;
                 sha
             }
         };
@@ -240,12 +234,17 @@ impl ReviewService {
     }
 
     /// Create a new local snapshot review (`local == true`) or synchronize a remote pull request review (`local == false`).
-    pub async fn create_review(&self, git_dir: &str, local: bool) -> Result<(Review, Session)> {
+    pub async fn create_review(
+        &self,
+        git_dir: &str,
+        local: bool,
+        as_agent: Option<&str>,
+    ) -> Result<(Review, Session)> {
         let ctx = gitoxide::get_repo_context(git_dir)?;
-        let actor = self.resolve_actor(&ctx, None).await?;
+        let actor = self.resolve_actor(&ctx, as_agent).await?;
 
         if local {
-            let (base_sha, head_sha) = self.snapshots.ensure_snapshot(&ctx.git_dir)?;
+            let (base_sha, head_sha) = self.snapshots.ensure_snapshot(git_dir)?;
             let tx = self.database.begin().await?;
             let db_review = tx
                 .reviews
@@ -277,14 +276,8 @@ impl ReviewService {
             .forge
             .get_pull_request_bundle(&repository_url, &ctx.branch)
             .await?;
-        let _ = self
-            .snapshots
-            .mirror_checkout_commits(&ctx.git_dir, &bundle.pull_request.base_sha);
-        let _ = self
-            .snapshots
-            .mirror_checkout_commits(&ctx.git_dir, &bundle.pull_request.head_sha);
         let (review, session, _) = self
-            .import_pr_bundle(&ctx.git_dir, &repository_url, &actor, bundle)
+            .import_pr_bundle(git_dir, &ctx.git_dir, &repository_url, &actor, bundle)
             .await?;
         Ok((review, session))
     }
@@ -303,17 +296,20 @@ impl ReviewService {
             let existing = self
                 .resolve_review(&ctx.git_dir, &ctx.branch, selector, true)
                 .await?;
-            let (base_sha, new_head_sha) = self.snapshots.ensure_snapshot(&ctx.git_dir)?;
+            let (base_sha, new_head_sha) = self.snapshots.ensure_snapshot(git_dir)?;
             let comments = self.load_review_comments(existing.id).await?;
-            let shifts = self.snapshots.recompute_anchors(
-                &ctx.git_dir,
-                &existing.head_sha,
-                &new_head_sha,
-                &comments,
-            )?;
+            let shifts = if existing.head_sha == new_head_sha {
+                Vec::new()
+            } else {
+                let old_blobs = self
+                    .snapshots
+                    .get_commit_blobs(git_dir, &existing.head_sha)?;
+                let new_blobs = self.snapshots.get_commit_blobs(git_dir, &new_head_sha)?;
+                CommentAnchor::recompute_shifts(&old_blobs, &new_blobs, &new_head_sha, &comments)
+            };
             let updated_anchors = u32::try_from(shifts.len()).unwrap_or(u32::MAX);
             let next_reviewed_files =
-                self.prune_modified_reviewed_files(&ctx.git_dir, &existing, &new_head_sha)?;
+                self.prune_modified_reviewed_files(git_dir, &existing, &new_head_sha)?;
 
             let tx = self.database.begin().await?;
             tx.reviews
@@ -351,15 +347,9 @@ impl ReviewService {
             .forge
             .get_pull_request_bundle(&repository_url, target_selector)
             .await?;
-        let _ = self
-            .snapshots
-            .mirror_checkout_commits(&ctx.git_dir, &bundle.pull_request.base_sha);
-        let _ = self
-            .snapshots
-            .mirror_checkout_commits(&ctx.git_dir, &bundle.pull_request.head_sha);
 
         let (review, _, updated_anchors) = self
-            .import_pr_bundle(&ctx.git_dir, &repository_url, &actor, bundle)
+            .import_pr_bundle(git_dir, &ctx.git_dir, &repository_url, &actor, bundle)
             .await?;
         Ok((review, updated_anchors))
     }
@@ -403,10 +393,7 @@ impl ReviewService {
             .filter(|c| c.reply_to_number.is_none())
             .filter_map(|c| c.anchor.clone())
             .collect();
-        let diff_hunks = self
-            .snapshots
-            .get_inline_diff_hunks(&ctx.git_dir, &review.base_sha, &review.head_sha, &anchors)
-            .unwrap_or_default();
+        let diff_hunks = self.build_diff_hunks(git_dir, &review, &anchors);
 
         Ok(ReviewDetail {
             review,
@@ -433,11 +420,6 @@ impl ReviewService {
             .await?;
 
         if review.context.is_local() {
-            let all_sessions = self
-                .database
-                .sessions
-                .get_sessions_by_review(review.id)
-                .await?;
             let tx = self.database.begin().await?;
             let draft = tx
                 .sessions
@@ -445,16 +427,8 @@ impl ReviewService {
                 .await?;
             let published = tx
                 .sessions
-                .publish_session(draft.id, outcome.into(), body.clone(), None)
+                .publish_session(draft.id, outcome.into(), body, None)
                 .await?;
-            for sess in all_sessions {
-                if sess.state == DbSessionState::Draft && sess.id != draft.id {
-                    let _ = tx
-                        .sessions
-                        .publish_session(sess.id, outcome.into(), sess.body, None)
-                        .await;
-                }
-            }
             tx.commit().await?;
             return Ok((review, Session::from_db(published, actor)?));
         }
@@ -504,7 +478,10 @@ impl ReviewService {
             )
             .await?;
         for sess in all_sessions {
-            if sess.state == DbSessionState::Draft && sess.id != db_draft.id {
+            if sess.state == DbSessionState::Draft
+                && sess.id != db_draft.id
+                && sess.forge_id.is_some()
+            {
                 let _ = self
                     .database
                     .sessions
@@ -557,14 +534,9 @@ impl ReviewService {
                 Error::Invalid("file-anchored comment requires --line".to_owned())
             })?;
             let _ = CommentAnchor::new(file_path, input.start_line, line, &review.head_sha)?;
-            self.snapshots.validate_diff_line(
-                &ctx.git_dir,
-                &review.base_sha,
-                &review.head_sha,
-                file_path,
-                input.start_line,
-                line,
-            )?;
+            let head_blob =
+                self.read_blob_at_commit(&input.git_dir, &review, &review.head_sha, file_path)?;
+            CommentAnchor::validate_line(head_blob.as_deref(), file_path, input.start_line, line)?;
         } else if input.line.is_some() || input.start_line.is_some() {
             return Err(Error::Invalid(
                 "line-anchored comment requires --file".to_owned(),
@@ -664,7 +636,7 @@ impl ReviewService {
         Ok(domain_comment)
     }
 
-    /// Update an existing comment's body, anchor, or thread resolution status locally and on `RemoteForge` when `local == false`.
+    /// Update an existing comment's body, anchor (including cross-file relocation), or thread resolution status locally and on `RemoteForge` when `local == false`.
     pub async fn update_comment(&self, input: UpdateCommentInput) -> Result<Comment> {
         let ctx = gitoxide::get_repo_context(&input.git_dir)?;
         let actor = self.resolve_actor(&ctx, input.as_agent.as_deref()).await?;
@@ -672,13 +644,13 @@ impl ReviewService {
             .load_comment_and_review(input.comment_number, input.local)
             .await?;
 
-        if input.line.is_some() || input.start_line.is_some() {
+        if input.file_path.is_some() || input.line.is_some() || input.start_line.is_some() {
             let file_path = input
                 .file_path
                 .as_deref()
                 .or(existing.file_path.as_deref())
                 .ok_or_else(|| {
-                    Error::Invalid("updating --line requires a file-anchored comment".to_owned())
+                    Error::Invalid("updating anchor requires a file-anchored comment".to_owned())
                 })?;
             let new_line = input
                 .line
@@ -686,23 +658,23 @@ impl ReviewService {
                 .ok_or_else(|| {
                     Error::Invalid("updating anchor requires a valid target line".to_owned())
                 })?;
-            let start_line = input.start_line.or_else(|| {
-                existing
-                    .start_line
-                    .and_then(|value| u32::try_from(value).ok())
-            });
-            self.snapshots.validate_diff_line(
-                &ctx.git_dir,
-                &review.base_sha,
-                &review.head_sha,
-                file_path,
-                start_line,
-                new_line,
-            )?;
+            let start_line = if input.file_path.is_some() && input.start_line.is_none() {
+                None
+            } else {
+                input.start_line.or_else(|| {
+                    existing
+                        .start_line
+                        .and_then(|value| u32::try_from(value).ok())
+                })
+            };
+            let head_blob =
+                self.read_blob_at_commit(&input.git_dir, &review, &review.head_sha, file_path)?;
+            CommentAnchor::validate_line(head_blob.as_deref(), file_path, start_line, new_line)?;
             self.database
                 .comments
                 .update_comment_anchors(&[CommentAnchorShift {
                     comment_id: existing.id,
+                    file_path: Some(file_path.to_owned()),
                     start_line: start_line.and_then(|v| i32::try_from(v).ok()),
                     line: i32::try_from(new_line).ok(),
                     commit_sha: Some(review.head_sha.clone()),
@@ -726,15 +698,20 @@ impl ReviewService {
 
         let reply_to_number = self.resolve_reply_to_number(updated.reply_to_id).await?;
         let author = self.load_identity(updated.author_id).await?;
-        let domain_comment = Comment::from_db(updated, author, reply_to_number)?;
+        let domain_comment = Comment::from_db(updated, author.clone(), reply_to_number)?;
 
         if let Ok((repository_url, _, _)) = review.context.require_forge_backed()
             && let Some(forge_id) = &domain_comment.forge_id
         {
+            let disclosure_actor = if matches!(author.kind, IdentityKind::Agent { .. }) {
+                &author
+            } else {
+                &actor
+            };
             let export_body = input
                 .body
                 .as_deref()
-                .map(|raw| format_body_with_disclosure(raw, &actor));
+                .map(|raw| format_body_with_disclosure(raw, disclosure_actor));
             self.forge
                 .update_remote_comment(
                     repository_url,
@@ -826,6 +803,57 @@ impl ReviewService {
     }
 
     // Private -----------------------------------------------------------------
+
+    fn read_blob_at_commit(
+        &self,
+        git_dir: &str,
+        review: &Review,
+        commit_sha: &str,
+        file_path: &str,
+    ) -> Result<Option<String>> {
+        if review.context.is_local() {
+            self.snapshots
+                .read_file_at_commit(git_dir, commit_sha, file_path)
+        } else {
+            git::read_file_at_commit(git_dir, commit_sha, file_path)
+        }
+    }
+
+    fn build_diff_hunks(
+        &self,
+        git_dir: &str,
+        review: &Review,
+        anchors: &[CommentAnchor],
+    ) -> Vec<DiffHunk> {
+        if anchors.is_empty() {
+            return Vec::new();
+        }
+        let mut hunks = Vec::with_capacity(anchors.len());
+        for anchor in anchors {
+            let base_blob = self
+                .read_blob_at_commit(git_dir, review, &review.base_sha, &anchor.file_path)
+                .ok()
+                .flatten();
+            let head_blob = self
+                .read_blob_at_commit(git_dir, review, &anchor.commit_sha, &anchor.file_path)
+                .ok()
+                .flatten()
+                .or_else(|| {
+                    self.read_blob_at_commit(git_dir, review, &review.head_sha, &anchor.file_path)
+                        .ok()
+                        .flatten()
+                });
+            let mut anchor_hunks = DiffHunk::from_blobs(
+                &anchor.file_path,
+                &anchor.commit_sha,
+                base_blob.as_deref(),
+                head_blob.as_deref(),
+                std::slice::from_ref(anchor),
+            );
+            hunks.append(&mut anchor_hunks);
+        }
+        hunks
+    }
 
     async fn resolve_actor(
         &self,
@@ -1017,7 +1045,8 @@ impl ReviewService {
 
     async fn import_pr_bundle(
         &self,
-        git_dir: &str,
+        worktree_or_git_dir: &str,
+        canonical_git_dir: &str,
         repository_url: &str,
         actor: &Identity,
         bundle: ForgePullRequestBundle,
@@ -1025,13 +1054,23 @@ impl ReviewService {
         let pr = bundle.pull_request;
         let existing_review = self
             .find_existing_review(
-                git_dir,
+                canonical_git_dir,
                 &pr.branch,
                 Some(&format!("PR{}", pr.pr_number)),
                 false,
             )
             .await?;
         let old_head_sha = existing_review.as_ref().map(|r| r.head_sha.clone());
+        let existing_sessions_by_forge_id: HashMap<String, Session> =
+            if let Some(existing) = &existing_review {
+                self.load_review_sessions(existing.id)
+                    .await?
+                    .into_iter()
+                    .filter_map(|s| s.forge_id.clone().map(|fid| (fid, s)))
+                    .collect()
+            } else {
+                HashMap::new()
+            };
         let existing_comments_by_forge_id: HashMap<String, Comment> =
             if let Some(existing) = &existing_review {
                 self.load_review_comments(existing.id)
@@ -1047,7 +1086,7 @@ impl ReviewService {
         let db_review = tx
             .reviews
             .upsert_forge_review(UpsertForgeReview {
-                git_dir: git_dir.to_owned(),
+                git_dir: canonical_git_dir.to_owned(),
                 branch: pr.branch.clone(),
                 repository_url: repository_url.to_owned(),
                 pr_number: i64::try_from(pr.pr_number).unwrap_or(1),
@@ -1060,23 +1099,42 @@ impl ReviewService {
 
         let mut session_id_by_forge_id: HashMap<String, Uuid> = HashMap::new();
         for remote_sess in bundle.sessions {
-            let author_row = tx
-                .identities
-                .upsert_human(
-                    &remote_sess.author_name,
-                    &remote_sess.author_email,
-                    Some(&remote_sess.author_login),
-                )
-                .await?;
+            let (clean_sess_body, parsed_sess_agent) = match remote_sess.body.as_deref() {
+                Some(raw) => {
+                    let (clean, parsed) = parse_body_agent_disclosure(raw);
+                    (Some(clean), parsed)
+                }
+                None => (None, None),
+            };
+            let prev_sess = existing_sessions_by_forge_id.get(&remote_sess.forge_id);
+            let author_id = if let Some((agent_name, provider, model)) = parsed_sess_agent {
+                tx.identities
+                    .upsert_agent(&agent_name, &provider, &model)
+                    .await?
+                    .id
+            } else if let Some(prev) = prev_sess
+                && matches!(prev.author.kind, IdentityKind::Agent { .. })
+            {
+                prev.author.id
+            } else {
+                tx.identities
+                    .upsert_human(
+                        &remote_sess.author_name,
+                        &remote_sess.author_email,
+                        Some(&remote_sess.author_login),
+                    )
+                    .await?
+                    .id
+            };
             let saved_sess = tx
                 .sessions
                 .upsert_forge_session(UpsertForgeSession {
                     review_id: db_review.id,
-                    author_id: author_row.id,
+                    author_id,
                     forge_id: remote_sess.forge_id.clone(),
                     state: remote_sess.state.into(),
                     outcome: remote_sess.outcome.map(Into::into),
-                    body: remote_sess.body,
+                    body: clean_sess_body,
                     published_at: remote_sess.published_at,
                 })
                 .await?;
@@ -1092,10 +1150,15 @@ impl ReviewService {
         for remote_comment in roots.into_iter().chain(replies.into_iter()) {
             let (clean_body, parsed_agent) = parse_body_agent_disclosure(&remote_comment.body);
             let prev_comment = existing_comments_by_forge_id.get(&remote_comment.forge_id);
-            let author_row = if let Some((agent_name, provider, model)) = parsed_agent {
+            let author_id = if let Some((agent_name, provider, model)) = parsed_agent {
                 tx.identities
                     .upsert_agent(&agent_name, &provider, &model)
                     .await?
+                    .id
+            } else if let Some(prev) = prev_comment
+                && matches!(prev.author.kind, IdentityKind::Agent { .. })
+            {
+                prev.author.id
             } else {
                 tx.identities
                     .upsert_human(
@@ -1104,6 +1167,7 @@ impl ReviewService {
                         Some(&remote_comment.author_login),
                     )
                     .await?
+                    .id
             };
             let session_id = if let Some(&id) =
                 session_id_by_forge_id.get(&remote_comment.session_forge_id)
@@ -1116,7 +1180,7 @@ impl ReviewService {
                     .sessions
                     .upsert_forge_session(UpsertForgeSession {
                         review_id: db_review.id,
-                        author_id: author_row.id,
+                        author_id,
                         forge_id: remote_comment.session_forge_id.clone(),
                         state: DbSessionState::Published,
                         outcome: Some(ReviewOutcome::Comment.into()),
@@ -1165,7 +1229,7 @@ impl ReviewService {
                 .upsert_forge_comment(UpsertForgeComment {
                     review_id: db_review.id,
                     session_id,
-                    author_id: author_row.id,
+                    author_id,
                     reply_to_id,
                     forge_id: remote_comment.forge_id.clone(),
                     file_path: remote_comment.file_path,
@@ -1202,46 +1266,59 @@ impl ReviewService {
             && old_sha != pr.head_sha
         {
             let comments = self.load_review_comments(domain_review.id).await?;
-            if let Ok(shifts) =
-                self.snapshots
-                    .recompute_anchors(git_dir, &old_sha, &pr.head_sha, &comments)
-                && !shifts.is_empty()
-            {
-                updated_anchors = u32::try_from(shifts.len()).unwrap_or(u32::MAX);
-                self.database
-                    .comments
-                    .update_comment_anchors(&shifts)
-                    .await?;
-                let comment_by_id: HashMap<Uuid, &Comment> =
-                    comments.iter().map(|c| (c.id, c)).collect();
-                for shift in &shifts {
-                    if let Some(comment) = comment_by_id.get(&shift.comment_id)
-                        && let Some(forge_id) = &comment.forge_id
-                        && let Some(anchor) = &comment.anchor
-                    {
-                        let _ = self
-                            .forge
-                            .update_remote_comment(
-                                repository_url,
-                                forge_id,
-                                &ForgeCommentUpdate {
-                                    body: None,
-                                    file_path: Some(anchor.file_path.clone()),
-                                    start_line: shift
-                                        .start_line
-                                        .and_then(|v| u32::try_from(v).ok()),
-                                    line: shift.line.and_then(|v| u32::try_from(v).ok()),
-                                    commit_sha: shift.commit_sha.clone(),
-                                    resolved: None,
-                                },
-                            )
-                            .await;
+            let anchored_paths: BTreeSet<String> = comments
+                .iter()
+                .filter_map(|c| c.anchor.as_ref().map(|a| a.file_path.clone()))
+                .collect();
+            if let (Ok(old_blobs), Ok(new_blobs)) = (
+                git::get_commit_blobs_for_paths(worktree_or_git_dir, &old_sha, &anchored_paths),
+                git::get_commit_blobs_for_paths(worktree_or_git_dir, &pr.head_sha, &anchored_paths),
+            ) {
+                let shifts = CommentAnchor::recompute_shifts(
+                    &old_blobs,
+                    &new_blobs,
+                    &pr.head_sha,
+                    &comments,
+                );
+                if !shifts.is_empty() {
+                    updated_anchors = u32::try_from(shifts.len()).unwrap_or(u32::MAX);
+                    self.database
+                        .comments
+                        .update_comment_anchors(&shifts)
+                        .await?;
+                    let comment_by_id: HashMap<Uuid, &Comment> =
+                        comments.iter().map(|c| (c.id, c)).collect();
+                    for shift in &shifts {
+                        if let Some(comment) = comment_by_id.get(&shift.comment_id)
+                            && let Some(forge_id) = &comment.forge_id
+                            && let Some(anchor) = &comment.anchor
+                        {
+                            let _ = self
+                                .forge
+                                .update_remote_comment(
+                                    repository_url,
+                                    forge_id,
+                                    &ForgeCommentUpdate {
+                                        body: None,
+                                        file_path: Some(anchor.file_path.clone()),
+                                        start_line: shift
+                                            .start_line
+                                            .and_then(|v| u32::try_from(v).ok()),
+                                        line: shift.line.and_then(|v| u32::try_from(v).ok()),
+                                        commit_sha: shift.commit_sha.clone(),
+                                        resolved: None,
+                                    },
+                                )
+                                .await;
+                        }
                     }
                 }
             }
-            if let Ok(pruned) =
-                self.prune_modified_reviewed_files(git_dir, &domain_review, &pr.head_sha)
-            {
+            if let Ok(pruned) = self.prune_modified_reviewed_files(
+                worktree_or_git_dir,
+                &domain_review,
+                &pr.head_sha,
+            ) {
                 let updated_row = self
                     .database
                     .reviews
@@ -1271,9 +1348,12 @@ impl ReviewService {
             let changed_set = if let Some(cached) = changed_by_sha.get(viewed_sha) {
                 cached
             } else {
-                let changed =
+                let changed = if review.context.is_local() {
                     self.snapshots
-                        .get_changed_files(git_dir, viewed_sha, new_head_sha)?;
+                        .get_changed_files(git_dir, viewed_sha, new_head_sha)?
+                } else {
+                    git::get_changed_files(git_dir, viewed_sha, new_head_sha)?
+                };
                 changed_by_sha
                     .entry(viewed_sha.clone())
                     .or_insert_with(|| changed.into_iter().collect())
