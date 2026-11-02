@@ -48,6 +48,7 @@
         <CodeEditor
           bind:this={editorRef}
           value={workspace.fileContent.content}
+          filename={workspace.selected.name}
           label={workspace.selected.name}
         />
       {/key}

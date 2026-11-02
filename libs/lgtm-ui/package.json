@@ -20,6 +20,8 @@
     "@ark-ui/svelte": "5.24.3",
     "@cloudvoyant/helical-svelte": "0.19.0",
     "@cloudvoyant/helical-ui": "0.19.0",
+    "@codemirror/language": "6.13.1",
+    "@codemirror/language-data": "6.5.2",
     "@codemirror/state": "6.6.0",
     "@codemirror/view": "6.41.0",
     "class-variance-authority": "0.7.1",

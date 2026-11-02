@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte'
+  import { LanguageDescription } from '@codemirror/language'
+  import { languages } from '@codemirror/language-data'
   import { Compartment, EditorState } from '@codemirror/state'
   import { EditorView } from '@codemirror/view'
   import { basicSetup } from 'codemirror'
@@ -10,6 +12,7 @@
   // Props ---------------------------------------------------------------------
   let {
     value,
+    filename,
     readonly = false,
     size = 'sm',
     label = 'Code editor',
@@ -19,8 +22,9 @@
 
   // State ---------------------------------------------------------------------
   let host: HTMLDivElement | undefined = $state()
-  let view: EditorView | undefined
+  let view: EditorView | undefined = $state()
   const readOnlyCompartment = new Compartment()
+  const languageCompartment = new Compartment()
 
   // Derived -------------------------------------------------------------------
   const rootClasses = $derived(cn(codeEditorRootVariants({ size }), className))
@@ -34,6 +38,7 @@
       doc: initialDoc,
       extensions: [
         basicSetup,
+        languageCompartment.of([]),
         readOnlyCompartment.of([
           EditorState.readOnly.of(initialReadOnly),
           EditorView.editable.of(!initialReadOnly),
@@ -71,6 +76,26 @@
           EditorView.editable.of(!nextReadOnly),
         ]),
       })
+    }
+  })
+
+  $effect(() => {
+    const currentView = view
+    const targetName = filename ?? label
+    if (!currentView) return
+    const description = targetName ? LanguageDescription.matchFilename(languages, targetName) : null
+    if (!description) {
+      currentView.dispatch({ effects: languageCompartment.reconfigure([]) })
+      return
+    }
+    let cancelled = false
+    void description.load().then((support) => {
+      if (!cancelled && view === currentView) {
+        currentView.dispatch({ effects: languageCompartment.reconfigure(support) })
+      }
+    })
+    return () => {
+      cancelled = true
     }
   })
 

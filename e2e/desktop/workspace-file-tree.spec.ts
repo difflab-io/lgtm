@@ -30,6 +30,7 @@ test.describe('When opening an existing workspace', { tag: ['@desktop', '@file-t
 
     // Assert
     await expect(page.locator('.cm-content')).toContainText('# One')
+    await expect(page.locator('.cm-content .cm-line span[class]').first()).toBeVisible()
     await page.locator('[role="treeitem"][data-value$="same.md"]').click()
     await expect(page.locator('.cm-content')).toContainText('# Markdown')
     await page.locator('[role="treeitem"][data-value$="notes.txt"]').click()
