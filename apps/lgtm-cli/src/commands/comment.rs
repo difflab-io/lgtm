@@ -6,7 +6,7 @@ use crate::{
         proto::lgtm::v1::{CreateCommentRequest, DeleteCommentRequest, UpdateCommentRequest},
     },
     models::{
-        ActorArgs, CommentView, DeletedCommentView, LocalArgs, parse_comment_id, parse_nonempty,
+        ActorArgs, Comment, DeleteCommentCommandOutput, LocalArgs, parse_comment_id, parse_nonempty,
     },
     rpc_client,
     store::Store,
@@ -99,7 +99,7 @@ pub async fn run(args: CommentArgs, store: &Store, json: bool) -> anyhow::Result
                 })
                 .await?
                 .into_owned();
-            CommentView::try_from(response)?.print_created(json);
+            Comment::try_from(response)?.print_created(json);
             Ok(())
         }
         CommentCommand::Update {
@@ -127,7 +127,7 @@ pub async fn run(args: CommentArgs, store: &Store, json: bool) -> anyhow::Result
                 })
                 .await?
                 .into_owned();
-            CommentView::try_from(response)?.print_updated(json);
+            Comment::try_from(response)?.print_updated(json);
             Ok(())
         }
         CommentCommand::Delete {
@@ -145,7 +145,7 @@ pub async fn run(args: CommentArgs, store: &Store, json: bool) -> anyhow::Result
                 })
                 .await?
                 .into_owned();
-            DeletedCommentView::from(response).print(json);
+            DeleteCommentCommandOutput::from(response).print(json);
             Ok(())
         }
     }

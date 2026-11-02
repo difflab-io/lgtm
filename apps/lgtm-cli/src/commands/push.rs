@@ -2,7 +2,7 @@ use clap::Args;
 
 use crate::{
     backend::{extensions::git::get_cwd_git_dir, proto::lgtm::v1::PushRequest},
-    models::{LocalArgs, PushView},
+    models::{LocalArgs, PushCommandOutput},
     rpc_client,
     store::Store,
 };
@@ -25,6 +25,6 @@ pub async fn run(args: PushArgs, store: &Store, json: bool) -> anyhow::Result<()
         .await?
         .into_owned();
 
-    PushView::from(response).print(json);
+    PushCommandOutput::from(response).print(json);
     Ok(())
 }

@@ -9,8 +9,8 @@ use crate::{
         },
     },
     models::{
-        ActorArgs, LocalArgs, ReviewDetailView, ReviewGroupBy, ReviewListView, ReviewOutcome,
-        ReviewRefreshView, ReviewSessionView, parse_nonempty,
+        ActorArgs, ListReviewsCommandOutput, LocalArgs, RefreshReviewCommandOutput, ReviewGroupBy,
+        ReviewOutcome, ReviewSessionCommandOutput, ShowReviewCommandOutput, parse_nonempty,
     },
     rpc_client,
     store::Store,
@@ -86,7 +86,7 @@ pub async fn run(args: ReviewArgs, store: &Store, json: bool) -> anyhow::Result<
                 })
                 .await?
                 .into_owned();
-            ReviewListView::from(response).print(json);
+            ListReviewsCommandOutput::from(response).print(json);
             Ok(())
         }
         ReviewCommand::New { location, actor } => {
@@ -99,7 +99,7 @@ pub async fn run(args: ReviewArgs, store: &Store, json: bool) -> anyhow::Result<
                 })
                 .await?
                 .into_owned();
-            ReviewSessionView::try_from(response)?.print_created(json);
+            ReviewSessionCommandOutput::try_from(response)?.print_created(json);
             Ok(())
         }
         ReviewCommand::Refresh { review, location } => {
@@ -112,7 +112,7 @@ pub async fn run(args: ReviewArgs, store: &Store, json: bool) -> anyhow::Result<
                 })
                 .await?
                 .into_owned();
-            ReviewRefreshView::try_from(response)?.print(json);
+            RefreshReviewCommandOutput::try_from(response)?.print(json);
             Ok(())
         }
         ReviewCommand::Show {
@@ -133,7 +133,7 @@ pub async fn run(args: ReviewArgs, store: &Store, json: bool) -> anyhow::Result<
                 })
                 .await?
                 .into_owned();
-            ReviewDetailView::try_from(response)?.print(group_by, unresolved, json);
+            ShowReviewCommandOutput::try_from(response)?.print(group_by, unresolved, json);
             Ok(())
         }
         ReviewCommand::Close {
@@ -156,7 +156,7 @@ pub async fn run(args: ReviewArgs, store: &Store, json: bool) -> anyhow::Result<
                 })
                 .await?
                 .into_owned();
-            ReviewSessionView::try_from(response)?.print_closed(outcome, json);
+            ReviewSessionCommandOutput::try_from(response)?.print_closed(outcome, json);
             Ok(())
         }
     }

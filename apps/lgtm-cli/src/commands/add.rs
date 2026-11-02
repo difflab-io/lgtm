@@ -2,7 +2,7 @@ use clap::Args;
 
 use crate::{
     backend::{extensions::git::get_cwd_git_dir, proto::lgtm::v1::AddRequest},
-    models::{AddView, LocalArgs, parse_nonempty},
+    models::{AddCommandOutput, LocalArgs, parse_nonempty},
     rpc_client,
     store::Store,
 };
@@ -29,6 +29,6 @@ pub async fn run(args: AddArgs, store: &Store, json: bool) -> anyhow::Result<()>
         .await?
         .into_owned();
 
-    AddView::from((response, local)).print(json);
+    AddCommandOutput::from((response, local)).print(json);
     Ok(())
 }

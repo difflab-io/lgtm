@@ -2,7 +2,7 @@ use clap::Args;
 
 use crate::{
     backend::{extensions::git::get_cwd_git_dir, proto::lgtm::v1::CommitRequest},
-    models::{CommitView, LocalArgs},
+    models::{CommitCommandOutput, LocalArgs},
     rpc_client,
     store::Store,
 };
@@ -28,6 +28,6 @@ pub async fn run(args: CommitArgs, store: &Store, json: bool) -> anyhow::Result<
         .await?
         .into_owned();
 
-    CommitView::from(response).print(json);
+    CommitCommandOutput::from(response).print(json);
     Ok(())
 }

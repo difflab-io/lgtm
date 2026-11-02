@@ -70,9 +70,9 @@ impl From<ReviewGroupBy> for ProtoGroupBy {
     }
 }
 
-/// View model for a human or AI agent identity.
+/// Human or AI agent identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct IdentityView {
+pub struct Identity {
     pub id: String,
     pub name: String,
     pub kind: String,
@@ -82,7 +82,7 @@ pub struct IdentityView {
     pub model: Option<String>,
 }
 
-impl IdentityView {
+impl Identity {
     // Public ------------------------------------------------------------------
 
     /// Render the display label for terminal output (`<name>` for humans, `<name> (agent)` for agents).
@@ -108,7 +108,7 @@ impl IdentityView {
     }
 }
 
-impl From<&IdentitySummary> for IdentityView {
+impl From<&IdentitySummary> for Identity {
     fn from(id: &IdentitySummary) -> Self {
         Self {
             id: id.id.clone(),
@@ -122,9 +122,9 @@ impl From<&IdentitySummary> for IdentityView {
     }
 }
 
-/// View model for a file and line diff anchor.
+/// File and line diff anchor for a comment.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AnchorView {
+pub struct CommentAnchor {
     pub file_path: String,
     pub start_line: Option<u32>,
     pub line: u32,
@@ -134,7 +134,7 @@ pub struct AnchorView {
     pub original_commit_sha: String,
 }
 
-impl AnchorView {
+impl CommentAnchor {
     // Public ------------------------------------------------------------------
 
     /// Format the human-readable line or line-range label (`line N` or `lines M-N`).
@@ -168,7 +168,7 @@ impl AnchorView {
     }
 }
 
-impl From<&CommentAnchorDetail> for AnchorView {
+impl From<&CommentAnchorDetail> for CommentAnchor {
     fn from(anchor: &CommentAnchorDetail) -> Self {
         Self {
             file_path: anchor.file_path.clone(),
