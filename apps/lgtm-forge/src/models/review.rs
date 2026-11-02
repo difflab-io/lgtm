@@ -199,15 +199,6 @@ impl Review {
             reviewed_files,
         })
     }
-
-    // Public ------------------------------------------------------------------
-
-    /// Format a greeting message for the `HelloReview` demonstration endpoint.
-    pub fn format_hello(greeting: &str, name: &str) -> String {
-        let name = name.trim();
-        let name = if name.is_empty() { "World" } else { name };
-        format!("{greeting}, {name}!")
-    }
 }
 
 impl From<ReviewStatus> for database::ReviewStatus {
@@ -331,24 +322,34 @@ impl From<Review> for ReviewSummary {
 mod tests {
     use super::*;
 
-    #[test]
-    fn should_reject_remote_operations_for_local_review_context() {
-        let local = ReviewContext::new_local("/tmp/repo/.git", "feature/test").unwrap();
-        assert!(local.is_local());
-        assert!(local.require_forge_backed().is_err());
+    // tests -------------------------------------------------------------------
 
-        let forge = ReviewContext::new_forge_backed(
-            "/tmp/repo/.git",
-            "feature/test",
-            "https://github.com/difflab-io/lgtm",
-            42,
-            Some("PR_kwDO123".to_owned()),
-        )
-        .unwrap();
-        assert!(!forge.is_local());
-        assert_eq!(
-            forge.require_forge_backed().unwrap(),
-            ("https://github.com/difflab-io/lgtm", 42, Some("PR_kwDO123"))
-        );
+    mod given_review_context {
+        use super::*;
+
+        mod when_requiring_forge_backed_context {
+            use super::*;
+
+            #[test]
+            fn should_reject_remote_operations_for_local_review_context() {
+                let local = ReviewContext::new_local("/tmp/repo/.git", "feature/test").unwrap();
+                assert!(local.is_local());
+                assert!(local.require_forge_backed().is_err());
+
+                let forge = ReviewContext::new_forge_backed(
+                    "/tmp/repo/.git",
+                    "feature/test",
+                    "https://github.com/difflab-io/lgtm",
+                    42,
+                    Some("PR_kwDO123".to_owned()),
+                )
+                .unwrap();
+                assert!(!forge.is_local());
+                assert_eq!(
+                    forge.require_forge_backed().unwrap(),
+                    ("https://github.com/difflab-io/lgtm", 42, Some("PR_kwDO123"))
+                );
+            }
+        }
     }
 }

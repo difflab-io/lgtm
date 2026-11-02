@@ -1,5 +1,11 @@
-use crate::{commands::NotImplemented, models::LocalArgs};
 use clap::Args;
+
+use crate::{
+    backend::{extensions::git::get_cwd_git_dir, proto::lgtm::v1::PushRequest},
+    models::{LocalArgs, PushCommandOutput},
+    rpc_client,
+    store::Store,
+};
 
 #[derive(Args)]
 pub struct PushArgs {
@@ -7,6 +13,18 @@ pub struct PushArgs {
     pub location: LocalArgs,
 }
 
-pub fn run(_args: PushArgs) -> anyhow::Result<()> {
-    Err(NotImplemented { operation: "push" }.into())
+pub async fn run(args: PushArgs, store: &Store, json: bool) -> anyhow::Result<()> {
+    let git_dir = get_cwd_git_dir()?;
+    let client = rpc_client::connect(store).await?;
+    let response = client
+        .push(PushRequest {
+            git_dir,
+            local: args.location.local,
+            ..Default::default()
+        })
+        .await?
+        .into_owned();
+
+    PushCommandOutput::from(response).print(json);
+    Ok(())
 }

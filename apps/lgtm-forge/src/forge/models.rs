@@ -43,7 +43,7 @@ pub struct ForgeReviewSession {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForgeReviewComment {
     pub forge_id: String,
-    pub session_forge_id: String,
+    pub session_forge_id: Option<String>,
     pub reply_to_forge_id: Option<String>,
     pub author_name: String,
     pub author_email: String,

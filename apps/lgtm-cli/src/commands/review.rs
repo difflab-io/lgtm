@@ -1,30 +1,45 @@
+use clap::{Args, Subcommand};
+
 use crate::{
-    commands::NotImplemented,
-    models::{LocalArgs, ReviewGroupBy, ReviewOutcome, parse_nonempty},
-    rpc_client::Client,
+    backend::{
+        extensions::git::get_cwd_git_dir,
+        proto::lgtm::v1::{
+            CloseReviewRequest, CreateReviewRequest, ListReviewsRequest, RefreshReviewRequest,
+            ReviewGroupBy as ProtoGroupBy, ReviewOutcome as ProtoOutcome, ShowReviewRequest,
+        },
+    },
+    models::{
+        ActorArgs, ListReviewsCommandOutput, LocalArgs, RefreshReviewCommandOutput, ReviewGroupBy,
+        ReviewOutcome, ReviewSessionCommandOutput, ShowReviewCommandOutput, parse_nonempty,
+    },
+    rpc_client,
     store::Store,
 };
-use clap::{Args, Subcommand};
 
 #[derive(Subcommand)]
 pub enum ReviewCommand {
-    /// Call the backend hello-review demonstration; no reviews are persisted.
+    /// List open or all reviews in the repository.
     List {
         #[command(flatten)]
         location: LocalArgs,
         #[arg(long)]
         all: bool,
     },
-    /// Create a review (not implemented yet).
-    New(LocalArgs),
-    /// Refresh review comments and anchors (not implemented yet).
+    /// Create a local snapshot review or synchronize a remote pull request review.
+    New {
+        #[command(flatten)]
+        location: LocalArgs,
+        #[command(flatten)]
+        actor: ActorArgs,
+    },
+    /// Refresh review comments, remote pull request state, and line anchors.
     Refresh {
         #[arg(value_parser = parse_nonempty)]
         review: Option<String>,
         #[command(flatten)]
         location: LocalArgs,
     },
-    /// Show review comments and diff hunks (not implemented yet).
+    /// Show review comments and inline unified diff hunks.
     Show {
         #[arg(value_parser = parse_nonempty)]
         review: Option<String>,
@@ -35,7 +50,7 @@ pub enum ReviewCommand {
         #[arg(long)]
         unresolved: bool,
     },
-    /// Close a review (not implemented yet).
+    /// Publish/close the active draft review session with an outcome and optional summary body.
     Close {
         #[arg(value_parser = parse_nonempty)]
         review: Option<String>,
@@ -45,6 +60,8 @@ pub enum ReviewCommand {
         outcome: ReviewOutcome,
         #[arg(long)]
         body: Option<String>,
+        #[command(flatten)]
+        actor: ActorArgs,
     },
 }
 
@@ -55,34 +72,92 @@ pub struct ReviewArgs {
 }
 
 pub async fn run(args: ReviewArgs, store: &Store, json: bool) -> anyhow::Result<()> {
+    let git_dir = get_cwd_git_dir()?;
+    let client = rpc_client::connect(store).await?;
+
     match args.command {
-        ReviewCommand::List { .. } => {
-            let response = Client::new(store)?.get_hello("CLI").await?;
-            if json {
-                println!(
-                    "{}",
-                    serde_json::json!({"demo": true, "message": response.message})
-                );
-            } else {
-                println!("Demo review: {} (no saved reviews)", response.message);
-            }
+        ReviewCommand::List { location, all } => {
+            let response = client
+                .list_reviews(ListReviewsRequest {
+                    git_dir,
+                    local: location.local,
+                    all,
+                    ..Default::default()
+                })
+                .await?
+                .into_owned();
+            ListReviewsCommandOutput::from(response).print(json);
             Ok(())
         }
-        ReviewCommand::New(_) => Err(NotImplemented {
-            operation: "review new",
+        ReviewCommand::New { location, actor } => {
+            let response = client
+                .create_review(CreateReviewRequest {
+                    git_dir,
+                    local: location.local,
+                    as_agent: actor.agent_name,
+                    ..Default::default()
+                })
+                .await?
+                .into_owned();
+            ReviewSessionCommandOutput::try_from(response)?.print_created(json);
+            Ok(())
         }
-        .into()),
-        ReviewCommand::Refresh { .. } => Err(NotImplemented {
-            operation: "review refresh",
+        ReviewCommand::Refresh { review, location } => {
+            let response = client
+                .refresh_review(RefreshReviewRequest {
+                    git_dir,
+                    selector: review,
+                    local: location.local,
+                    ..Default::default()
+                })
+                .await?
+                .into_owned();
+            RefreshReviewCommandOutput::try_from(response)?.print(json);
+            Ok(())
         }
-        .into()),
-        ReviewCommand::Show { .. } => Err(NotImplemented {
-            operation: "review show",
+        ReviewCommand::Show {
+            review,
+            location,
+            group_by,
+            unresolved,
+        } => {
+            let proto_group: ProtoGroupBy = group_by.into();
+            let response = client
+                .show_review(ShowReviewRequest {
+                    git_dir,
+                    selector: review,
+                    local: location.local,
+                    group_by: proto_group.into(),
+                    unresolved,
+                    ..Default::default()
+                })
+                .await?
+                .into_owned();
+            ShowReviewCommandOutput::try_from(response)?.print(group_by, unresolved, json);
+            Ok(())
         }
-        .into()),
-        ReviewCommand::Close { .. } => Err(NotImplemented {
-            operation: "review close",
+        ReviewCommand::Close {
+            review,
+            location,
+            outcome,
+            body,
+            actor,
+        } => {
+            let proto_outcome: ProtoOutcome = outcome.into();
+            let response = client
+                .close_review(CloseReviewRequest {
+                    git_dir,
+                    selector: review,
+                    local: location.local,
+                    with_outcome: proto_outcome.into(),
+                    body,
+                    as_agent: actor.agent_name,
+                    ..Default::default()
+                })
+                .await?
+                .into_owned();
+            ReviewSessionCommandOutput::try_from(response)?.print_closed(outcome, json);
+            Ok(())
         }
-        .into()),
     }
 }

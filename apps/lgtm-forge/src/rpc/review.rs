@@ -14,11 +14,11 @@ use crate::{
         AddRequest, AddResponse, CloseReviewRequest, CloseReviewResponse, CommentDetail,
         CommitRequest, CommitResponse, CreateCommentRequest, CreateCommentResponse,
         CreateReviewRequest, CreateReviewResponse, DeleteCommentRequest, DeleteCommentResponse,
-        DiffHunkDetail, HelloReviewRequest, HelloReviewResponse, IdentitySummary,
-        ListReviewsRequest, ListReviewsResponse, PushRequest, PushResponse, RefreshReviewRequest,
-        RefreshReviewResponse, ReviewOutcome as ProtoReviewOutcome, ReviewService, ReviewSummary,
-        SessionSummary, SetFileReviewedRequest, SetFileReviewedResponse, ShowReviewRequest,
-        ShowReviewResponse, UpdateCommentRequest, UpdateCommentResponse,
+        DiffHunkDetail, IdentitySummary, ListReviewsRequest, ListReviewsResponse, PushRequest,
+        PushResponse, RefreshReviewRequest, RefreshReviewResponse,
+        ReviewOutcome as ProtoReviewOutcome, ReviewService, ReviewSummary, SessionSummary,
+        SetFileReviewedRequest, SetFileReviewedResponse, ShowReviewRequest, ShowReviewResponse,
+        UpdateCommentRequest, UpdateCommentResponse,
     },
     services::{CreateCommentInput, ReviewService as DomainReviewService, UpdateCommentInput},
     snapshots::SnapshotStore,
@@ -79,12 +79,7 @@ impl ReviewService for ReviewApi {
     ) -> ServiceResult<impl Encodable<CommitResponse> + Send + use<'a>> {
         let outcome = self
             .reviews
-            .commit_changes(
-                request.git_dir,
-                request.message,
-                request.as_agent,
-                request.local,
-            )
+            .commit_changes(request.git_dir, request.message, request.local)
             .await
             .map_err(ConnectError::from)?;
         Response::ok(CommitResponse {
@@ -141,7 +136,7 @@ impl ReviewService for ReviewApi {
     ) -> ServiceResult<impl Encodable<CreateReviewResponse> + Send + use<'a>> {
         let (review, session) = self
             .reviews
-            .create_review(request.git_dir, request.local)
+            .create_review(request.git_dir, request.local, request.as_agent)
             .await
             .map_err(ConnectError::from)?;
         Response::ok(CreateReviewResponse {
@@ -339,18 +334,6 @@ impl ReviewService for ReviewApi {
             file_path: outcome.file_path,
             viewed: outcome.viewed,
             commit_sha: outcome.commit_sha,
-            ..Default::default()
-        })
-    }
-
-    #[tracing::instrument(name = "rpc_request", skip_all, fields(rpc.method = "lgtm.v1.ReviewService/HelloReview"))]
-    async fn hello_review<'a>(
-        &'a self,
-        _context: RequestContext,
-        request: ServiceRequest<'_, HelloReviewRequest>,
-    ) -> ServiceResult<impl Encodable<HelloReviewResponse> + Send + use<'a>> {
-        Response::ok(HelloReviewResponse {
-            message: self.reviews.get_hello(request.name),
             ..Default::default()
         })
     }

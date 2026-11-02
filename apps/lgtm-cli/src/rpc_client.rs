@@ -1,46 +1,29 @@
-//! Generated review client; command modules do not own transport details.
-use crate::{
-    backend::proto::lgtm::v1::{HelloReviewRequest, HelloReviewResponse, ReviewServiceClient},
-    store::Store,
-};
-use anyhow::{Context, Result};
-use connectrpc::{
-    Protocol,
-    client::{CallOptions, ClientConfig, HttpClient},
-};
+//! Generated review client factory; command modules call `ReviewServiceClient` methods directly.
+
 use std::time::Duration;
 
-pub struct Client {
-    endpoint_url: String,
-}
+use anyhow::Result;
+use connectrpc::{
+    Protocol,
+    client::{ClientConfig, HttpClient},
+};
 
-impl Client {
-    pub fn new(store: &Store) -> Result<Self> {
-        let endpoint_url = std::env::var("LGTM_RPC_URL")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .or_else(|| {
-                store
-                    .instance()
-                    .map(|instance| format!("{}/rpc", instance.url()))
-            })
-            .context("LGTM backend is unavailable; run lgtm up --no-open or set LGTM_RPC_URL")?;
-        Ok(Self { endpoint_url })
-    }
+use crate::{backend::proto::lgtm::v1::ReviewServiceClient, daemon, store::Store};
 
-    // Public ------------------------------------------------------------------
+const RPC_TIMEOUT: Duration = Duration::from_secs(30);
 
-    pub async fn get_hello(&self, name: &str) -> Result<HelloReviewResponse> {
-        let config = ClientConfig::new(self.endpoint_url.parse()?).with_protocol(Protocol::Connect);
-        let response = ReviewServiceClient::new(HttpClient::plaintext(), config)
-            .hello_review_with_options(
-                HelloReviewRequest {
-                    name: name.into(),
-                    ..Default::default()
-                },
-                CallOptions::default().with_timeout(Duration::from_secs(5)),
-            )
-            .await?;
-        Ok(response.into_owned())
-    }
+/// Connect to `LGTM_RPC_URL` if set, or reuse/auto-start the background daemon from `store`, returning the generated `ReviewServiceClient`.
+pub async fn connect(store: &Store) -> Result<ReviewServiceClient<HttpClient>> {
+    let endpoint_url = if let Ok(url) = std::env::var("LGTM_RPC_URL")
+        && !url.trim().is_empty()
+    {
+        url.trim().to_owned()
+    } else {
+        let instance = daemon::ensure_running(0, store).await?;
+        format!("{}/rpc", instance.url())
+    };
+    let config = ClientConfig::new(endpoint_url.parse()?)
+        .with_protocol(Protocol::Connect)
+        .with_default_timeout(RPC_TIMEOUT);
+    Ok(ReviewServiceClient::new(HttpClient::plaintext(), config))
 }

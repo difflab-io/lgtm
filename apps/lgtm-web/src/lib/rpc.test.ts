@@ -63,16 +63,16 @@ afterAll(async () => {
   if (home) await rm(home, { recursive: true, force: true })
 })
 
-describe('hello-review frontend service against the Rust backend', () => {
-  test('should_return_demo_data_with_the_real_review_greeting', async () => {
+describe('Given the web frontend service / When calling the Rust greeting RPC', () => {
+  test('should return demo data with the real greeting', async () => {
     expect(await getReviewDemo('Web', baseUrl)).toEqual({ demo: true, message: 'Hello, Web!' })
   })
 
-  test('should_use_the_server_default_for_an_empty_name', async () => {
+  test('should use the server default for an empty name', async () => {
     expect((await getReviewDemo('', baseUrl)).message).toBe('Hello, World!')
   })
 
-  test('should_report_an_unavailable_backend_without_fake_success', async () => {
+  test('should report an unavailable backend without fake success', async () => {
     await expect(getReviewDemo('Web', 'http://127.0.0.1:0')).rejects.toThrow()
   })
 })

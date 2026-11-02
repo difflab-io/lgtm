@@ -23,15 +23,15 @@ enum Command {
     Down,
     /// Show whether the server is running.
     Status,
-    /// Stage paths for LGTM storage (not implemented yet).
+    /// Stage worktree paths into LGTM snapshot storage or the working checkout.
     Add(commands::add::AddArgs),
-    /// Capture work in LGTM storage (not implemented yet).
+    /// Commit staged or modified work with optional agent attribution.
     Commit(commands::commit::CommitArgs),
-    /// Publish work (not implemented yet).
+    /// Push committed changes on the active branch to the remote repository.
     Push(commands::push::PushArgs),
-    /// Manage reviews; list currently demonstrates the hello-review RPC.
+    /// Manage local snapshot and remote pull request reviews.
     Review(commands::review::ReviewArgs),
-    /// Add feedback (not implemented yet).
+    /// Create, update, resolve, or delete review comments.
     Comment(commands::comment::CommentArgs),
     /// Start or reuse the application and open its browser interface.
     Ui(commands::ui::UiArgs),
@@ -75,10 +75,28 @@ struct Cli {
 fn main() {
     let json_output = std::env::args().any(|arg| arg == "--json");
     if let Err(error) = run() {
+        let code = error
+            .downcast_ref::<connectrpc::ConnectError>()
+            .map(|connect_err| connect_err.code.as_str())
+            .or_else(|| {
+                error
+                    .downcast_ref::<crate::backend::error::Error>()
+                    .map(|domain_err| match domain_err {
+                        crate::backend::error::Error::Invalid(_) => "invalid_argument",
+                        crate::backend::error::Error::NotFound(_) => "not_found",
+                        _ => "command_failed",
+                    })
+            })
+            .unwrap_or("command_failed");
         if json_output {
             println!(
                 "{}",
-                serde_json::json!({"error":{"code":if error.is::<commands::NotImplemented>() { "not_implemented" } else { "command_failed" },"message":error.to_string()}})
+                serde_json::json!({
+                    "error": {
+                        "code": code,
+                        "message": error.to_string(),
+                    }
+                })
             );
         } else {
             eprintln!("{error:#}");
@@ -123,11 +141,11 @@ fn run() -> anyhow::Result<()> {
                 Command::Up(options) => daemon::up(options.port, !options.no_open, &store).await,
                 Command::Down => daemon::down(&store).await,
                 Command::Status => daemon::status(&store, cli.json).await,
-                Command::Add(args) => commands::add::run(args),
+                Command::Add(args) => commands::add::run(args, &store, cli.json).await,
                 Command::Review(args) => commands::review::run(args, &store, cli.json).await,
-                Command::Commit(args) => commands::commit::run(args),
-                Command::Push(args) => commands::push::run(args),
-                Command::Comment(args) => commands::comment::run(args),
+                Command::Commit(args) => commands::commit::run(args, &store, cli.json).await,
+                Command::Push(args) => commands::push::run(args, &store, cli.json).await,
+                Command::Comment(args) => commands::comment::run(args, &store, cli.json).await,
                 Command::Ui(args) => commands::ui::run(args, &store, cli.json).await,
                 Command::Serve { port, daemonize } => server::serve(port, &store, daemonize).await,
             }

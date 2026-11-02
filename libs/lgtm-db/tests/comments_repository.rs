@@ -12,7 +12,7 @@ use lgtm_db::{
 
 fn line_comment(
     review_id: uuid::Uuid,
-    session_id: uuid::Uuid,
+    session_id: Option<uuid::Uuid>,
     author_id: uuid::Uuid,
     file_path: &str,
     start_line: Option<i32>,
@@ -49,7 +49,7 @@ mod when_creating_and_threading_comments {
             .comments
             .create_comment(NewComment {
                 review_id: review.id,
-                session_id: session.id,
+                session_id: Some(session.id),
                 author_id: human.id,
                 reply_to_id: None,
                 file_path: None,
@@ -90,7 +90,7 @@ mod when_creating_and_threading_comments {
             .comments
             .create_comment(line_comment(
                 review.id,
-                session.id,
+                Some(session.id),
                 human.id,
                 "src/lib.rs",
                 None,
@@ -104,7 +104,7 @@ mod when_creating_and_threading_comments {
             .comments
             .create_comment(line_comment(
                 review.id,
-                session.id,
+                Some(session.id),
                 human.id,
                 "src/client.rs",
                 Some(10),
@@ -127,7 +127,8 @@ mod when_creating_and_threading_comments {
     }
 
     #[tokio::test]
-    async fn should_create_reply_attached_to_root_comment_in_same_review() {
+    async fn should_reject_reply_to_comment_in_draft_session_and_allow_reply_once_published_or_direct()
+     {
         // Arrange
         let ctx = setup_db().await;
         let (human, review, session) = seed_human_review_and_draft_session(&ctx.db).await;
@@ -136,37 +137,93 @@ mod when_creating_and_threading_comments {
             .comments
             .create_comment(line_comment(
                 review.id,
-                session.id,
+                Some(session.id),
                 human.id,
                 "src/lib.rs",
                 None,
                 12,
-                "Root thread comment",
+                "Root thread comment in draft session",
             ))
             .await
             .expect("create root");
+        let direct_root = ctx
+            .db
+            .comments
+            .create_comment(line_comment(
+                review.id,
+                None,
+                human.id,
+                "src/lib.rs",
+                None,
+                20,
+                "Direct root comment without a session",
+            ))
+            .await
+            .expect("create direct root");
 
-        // Act
-        let reply = ctx
+        // Act: attempt reply while root's session is still Draft, then publish and reply
+        let draft_reply_attempt = ctx
             .db
             .comments
             .create_comment(NewComment {
                 review_id: review.id,
-                session_id: session.id,
+                session_id: None,
                 author_id: human.id,
                 reply_to_id: Some(root.id),
                 file_path: Some("src/lib.rs".to_string()),
                 start_line: None,
                 line: Some(12),
                 commit_sha: Some("2222222".to_string()),
-                body: "Follow-up reply".to_string(),
+                body: "Reply attempted before session is published".to_string(),
+            })
+            .await;
+
+        ctx.db
+            .sessions
+            .publish_session(session.id, ReviewOutcome::Request, None, None)
+            .await
+            .expect("publish session");
+
+        let reply_after_publish = ctx
+            .db
+            .comments
+            .create_comment(NewComment {
+                review_id: review.id,
+                session_id: None,
+                author_id: human.id,
+                reply_to_id: Some(root.id),
+                file_path: Some("src/lib.rs".to_string()),
+                start_line: None,
+                line: Some(12),
+                commit_sha: Some("2222222".to_string()),
+                body: "Follow-up reply after session was published".to_string(),
             })
             .await
-            .expect("create reply");
+            .expect("create reply after publish");
+
+        let reply_to_direct = ctx
+            .db
+            .comments
+            .create_comment(NewComment {
+                review_id: review.id,
+                session_id: None,
+                author_id: human.id,
+                reply_to_id: Some(direct_root.id),
+                file_path: Some("src/lib.rs".to_string()),
+                start_line: None,
+                line: Some(20),
+                commit_sha: Some("2222222".to_string()),
+                body: "Reply to direct comment without any session".to_string(),
+            })
+            .await
+            .expect("create reply to direct comment");
 
         // Assert
-        assert_eq!(reply.reply_to_id, Some(root.id));
-        assert_eq!(reply.number, 2);
+        assert!(matches!(draft_reply_attempt, Err(DbError::InvalidInput(_))));
+        assert_eq!(reply_after_publish.reply_to_id, Some(root.id));
+        assert_eq!(reply_after_publish.session_id, None);
+        assert_eq!(reply_to_direct.reply_to_id, Some(direct_root.id));
+        assert_eq!(reply_to_direct.session_id, None);
     }
 
     #[tokio::test]
@@ -179,7 +236,7 @@ mod when_creating_and_threading_comments {
             .comments
             .create_comment(line_comment(
                 review.id,
-                session.id,
+                Some(session.id),
                 human.id,
                 "src/lib.rs",
                 None,
@@ -188,12 +245,17 @@ mod when_creating_and_threading_comments {
             ))
             .await
             .expect("create root");
+        ctx.db
+            .sessions
+            .publish_session(session.id, ReviewOutcome::Comment, None, None)
+            .await
+            .expect("publish session");
         let reply = ctx
             .db
             .comments
             .create_comment(NewComment {
                 review_id: review.id,
-                session_id: session.id,
+                session_id: None,
                 author_id: human.id,
                 reply_to_id: Some(root.id),
                 file_path: Some("src/lib.rs".to_string()),
@@ -228,7 +290,7 @@ mod when_creating_and_threading_comments {
             .comments
             .create_comment(NewComment {
                 review_id: review.id,
-                session_id: session.id,
+                session_id: None,
                 author_id: human.id,
                 reply_to_id: Some(reply.id),
                 file_path: Some("src/lib.rs".to_string()),
@@ -243,7 +305,7 @@ mod when_creating_and_threading_comments {
             .comments
             .create_comment(NewComment {
                 review_id: other_review.id,
-                session_id: other_session.id,
+                session_id: Some(other_session.id),
                 author_id: human.id,
                 reply_to_id: Some(root.id),
                 file_path: None,
@@ -269,7 +331,7 @@ mod when_creating_and_threading_comments {
             .comments
             .create_comment(line_comment(
                 review.id,
-                session.id,
+                Some(session.id),
                 human.id,
                 "src/lib.rs",
                 None,
@@ -278,12 +340,17 @@ mod when_creating_and_threading_comments {
             ))
             .await
             .expect("create root");
+        ctx.db
+            .sessions
+            .publish_session(session.id, ReviewOutcome::Comment, None, None)
+            .await
+            .expect("publish session");
         let reply = ctx
             .db
             .comments
             .create_comment(NewComment {
                 review_id: review.id,
-                session_id: session.id,
+                session_id: None,
                 author_id: human.id,
                 reply_to_id: Some(root.id),
                 file_path: Some("src/lib.rs".to_string()),
@@ -347,7 +414,7 @@ mod when_querying_visibility_unsynced_drafts_and_shifting_anchors {
             .comments
             .create_comment(line_comment(
                 review.id,
-                human_session.id,
+                Some(human_session.id),
                 human.id,
                 "src/lib.rs",
                 None,
@@ -365,7 +432,7 @@ mod when_querying_visibility_unsynced_drafts_and_shifting_anchors {
             .comments
             .create_comment(line_comment(
                 review.id,
-                agent_draft_session.id,
+                Some(agent_draft_session.id),
                 agent.id,
                 "src/lib.rs",
                 None,
@@ -410,7 +477,7 @@ mod when_querying_visibility_unsynced_drafts_and_shifting_anchors {
             .comments
             .create_comment(line_comment(
                 review.id,
-                human_session.id,
+                Some(human_session.id),
                 human.id,
                 "src/lib.rs",
                 None,
@@ -435,7 +502,7 @@ mod when_querying_visibility_unsynced_drafts_and_shifting_anchors {
             .comments
             .create_comment(line_comment(
                 review.id,
-                new_human_draft_session.id,
+                Some(new_human_draft_session.id),
                 human.id,
                 "src/lib.rs",
                 None,
@@ -448,7 +515,7 @@ mod when_querying_visibility_unsynced_drafts_and_shifting_anchors {
             .comments
             .create_comment(line_comment(
                 review.id,
-                agent_draft_session.id,
+                Some(agent_draft_session.id),
                 agent.id,
                 "src/lib.rs",
                 None,
@@ -482,7 +549,7 @@ mod when_querying_visibility_unsynced_drafts_and_shifting_anchors {
             .comments
             .create_comment(line_comment(
                 review.id,
-                session.id,
+                Some(session.id),
                 human.id,
                 "src/lib.rs",
                 None,
@@ -507,7 +574,7 @@ mod when_querying_visibility_unsynced_drafts_and_shifting_anchors {
             .comments
             .create_comment(line_comment(
                 review.id,
-                session.id,
+                Some(session.id),
                 human.id,
                 "src/lib.rs",
                 None,
@@ -540,7 +607,7 @@ mod when_querying_visibility_unsynced_drafts_and_shifting_anchors {
             .comments
             .create_comment(line_comment(
                 review.id,
-                session.id,
+                Some(session.id),
                 human.id,
                 "src/lib.rs",
                 Some(10),
@@ -554,7 +621,7 @@ mod when_querying_visibility_unsynced_drafts_and_shifting_anchors {
             .comments
             .create_comment(line_comment(
                 review.id,
-                session.id,
+                Some(session.id),
                 human.id,
                 "src/lib.rs",
                 None,
@@ -570,6 +637,7 @@ mod when_querying_visibility_unsynced_drafts_and_shifting_anchors {
             .update_comment_anchors(&[
                 CommentAnchorShift {
                     comment_id: shifted.id,
+                    file_path: Some("src/extracted.rs".to_string()),
                     start_line: Some(14),
                     line: Some(19),
                     commit_sha: Some("3333333".to_string()),
@@ -577,6 +645,7 @@ mod when_querying_visibility_unsynced_drafts_and_shifting_anchors {
                 },
                 CommentAnchorShift {
                     comment_id: invalidated.id,
+                    file_path: None,
                     start_line: None,
                     line: Some(40),
                     commit_sha: Some("3333333".to_string()),
@@ -594,6 +663,7 @@ mod when_querying_visibility_unsynced_drafts_and_shifting_anchors {
             .await
             .unwrap()
             .unwrap();
+        assert_eq!(shifted_after.file_path.as_deref(), Some("src/extracted.rs"));
         assert_eq!(shifted_after.start_line, Some(14));
         assert_eq!(shifted_after.line, Some(19));
         assert_eq!(shifted_after.commit_sha.as_deref(), Some("3333333"));
@@ -626,7 +696,7 @@ mod when_querying_visibility_unsynced_drafts_and_shifting_anchors {
             .comments
             .upsert_forge_comment(UpsertForgeComment {
                 review_id: review.id,
-                session_id: session.id,
+                session_id: Some(session.id),
                 author_id: human.id,
                 reply_to_id: None,
                 forge_id: "PRRC_remote_99".to_string(),
@@ -650,7 +720,7 @@ mod when_querying_visibility_unsynced_drafts_and_shifting_anchors {
             .comments
             .upsert_forge_comment(UpsertForgeComment {
                 review_id: review.id,
-                session_id: session.id,
+                session_id: Some(session.id),
                 author_id: human.id,
                 reply_to_id: None,
                 forge_id: "PRRC_remote_99".to_string(),

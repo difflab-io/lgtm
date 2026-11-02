@@ -16,8 +16,8 @@ pub struct Model {
     pub number: i64,
     /// Foreign key referencing `reviews.id`.
     pub review_id: Uuid,
-    /// Foreign key referencing `sessions.id`.
-    pub session_id: Uuid,
+    /// Optional foreign key referencing `sessions.id` (`None` for comments posted directly on a review).
+    pub session_id: Option<Uuid>,
     /// Foreign key referencing `identities.id` for the comment author.
     pub author_id: Uuid,
     /// Optional foreign key referencing the root `comments.id` when this row is a reply.

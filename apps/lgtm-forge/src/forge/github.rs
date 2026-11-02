@@ -44,6 +44,18 @@ impl GitHubForge {
 
 #[async_trait::async_trait]
 impl RemoteForge for GitHubForge {
+    async fn push_branch(
+        &self,
+        repository_url: &str,
+        branch: &str,
+        payload: &crate::extensions::gitoxide::HeadCommitPayload,
+    ) -> Result<Option<String>> {
+        let (owner, repo) = parse_github_owner_repo(repository_url)?;
+        let client = self.client()?;
+        let sha = octocrab::push_commit_to_branch(&client, &owner, &repo, branch, payload).await?;
+        Ok(Some(sha))
+    }
+
     async fn get_pull_request_bundle(
         &self,
         repository_url: &str,

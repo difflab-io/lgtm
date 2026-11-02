@@ -47,7 +47,7 @@ mod when_executing_multi_repository_workflows_inside_a_transaction {
             .comments
             .create_comment(NewComment {
                 review_id: review.id,
-                session_id: session.id,
+                session_id: Some(session.id),
                 author_id: human.id,
                 reply_to_id: None,
                 file_path: Some("src/lib.rs".to_string()),
@@ -143,7 +143,7 @@ mod when_executing_multi_repository_workflows_inside_a_transaction {
             .comments
             .create_comment(NewComment {
                 review_id: review.id,
-                session_id: session.id,
+                session_id: Some(session.id),
                 author_id: human.id,
                 reply_to_id: None,
                 file_path: None,

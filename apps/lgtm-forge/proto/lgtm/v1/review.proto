@@ -16,7 +16,6 @@ service ReviewService {
   rpc UpdateComment(UpdateCommentRequest) returns (UpdateCommentResponse);
   rpc DeleteComment(DeleteCommentRequest) returns (DeleteCommentResponse);
   rpc SetFileReviewed(SetFileReviewedRequest) returns (SetFileReviewedResponse);
-  rpc HelloReview(HelloReviewRequest) returns (HelloReviewResponse);
 }
 
 enum ReviewStatus {
@@ -105,7 +104,7 @@ message CommentDetail {
   string id = 1;
   uint64 number = 2;
   string review_id = 3;
-  string session_id = 4;
+  optional string session_id = 4;
   IdentitySummary author = 5;
   optional uint64 reply_to_number = 6;
   optional CommentAnchorDetail anchor = 7;
@@ -142,8 +141,7 @@ message AddResponse {
 message CommitRequest {
   string git_dir = 1;
   optional string message = 2;
-  optional string as_agent = 3;
-  bool local = 4;
+  bool local = 3;
 }
 
 message CommitResponse {
@@ -178,6 +176,7 @@ message ListReviewsResponse {
 message CreateReviewRequest {
   string git_dir = 1;
   bool local = 2;
+  optional string as_agent = 3;
 }
 
 message CreateReviewResponse {
@@ -280,12 +279,4 @@ message SetFileReviewedResponse {
   string file_path = 1;
   bool viewed = 2;
   string commit_sha = 3;
-}
-
-message HelloReviewRequest {
-  string name = 1;
-}
-
-message HelloReviewResponse {
-  string message = 1;
 }

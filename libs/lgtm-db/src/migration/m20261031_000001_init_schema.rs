@@ -256,7 +256,7 @@ impl MigrationTrait for Migration {
                             .unique_key(),
                     )
                     .col(ColumnDef::new("review_id").uuid().not_null())
-                    .col(ColumnDef::new("session_id").uuid().not_null())
+                    .col(ColumnDef::new("session_id").uuid())
                     .col(ColumnDef::new("author_id").uuid().not_null())
                     .col(ColumnDef::new("reply_to_id").uuid())
                     .col(ColumnDef::new("file_path").text())

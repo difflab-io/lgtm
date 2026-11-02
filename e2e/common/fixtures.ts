@@ -7,8 +7,12 @@ export function useTestHarness(
   environment?: () => NodeJS.ProcessEnv,
 ) {
   let runtime: TestHarness | undefined
-  beforeEach(async () => {
-    runtime = await TestHarness.create(kind, environment?.())
+  beforeEach(async ({ task }) => {
+    runtime = await TestHarness.create(kind, environment?.(), {
+      filepath: task.file.filepath,
+      name: task.name,
+      fullName: task.fullName,
+    })
   })
   afterEach(async ({ task }) => {
     try {

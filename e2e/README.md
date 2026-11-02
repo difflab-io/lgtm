@@ -1,21 +1,17 @@
 # End-to-end specifications
 
-The active TypeScript/Vitest suites check the hello-review skeleton, CLI command shape and Neovim shell; each suite keeps its own Mise config, and there is no root `e2e/mise.toml`.
+The active TypeScript/Vitest suites check the `lgtm-forge` `ReviewService` RPCs, CLI review and comment workflows, and Neovim shell; each suite keeps its own Mise config, and there is no root `e2e/mise.toml`.
 
 ## Test boundaries
 
 | Suite | Behavior | Command |
 | --- | --- | --- |
-| Forge | Real hello-review RPC, name normalization, removed RPC rejection and existing DB file preservation | `premise run e2e:forge` |
-| CLI | Real hello-review demo, command parsing, harmless unimplemented operations, UI/daemon serving and shutdown | `premise run e2e:cli` |
+| Forge | `ReviewService` RPCs (`Add`, `Commit`, `CreateReview`, `ListReviews`, `CreateComment`, `ShowReview`, `CloseReview`) and removed RPC rejection | `premise run e2e:forge` |
+| CLI | Command parsing, local snapshot review lifecycle (`--local`), remote GitHub PR review lifecycle, local/remote diff output parity, UI/daemon serving and shutdown | `premise run e2e:cli` |
 | Neovim | Shell loading, Lua/Ex/key control, diagnostics and package-manager setup | `premise run e2e:nvim` |
 | Replay infrastructure | Strict HTTP snapshots, UUID binding, ordered mutation barriers, recording safety and retained Git reconstruction | `premise run e2e:fixtures:test` |
 
-All default checks run without GitHub credentials or remote forge writes; the dummy DB package opens no SQL database.
-
-
-
-The old notes, local-review, PR-review, identity and diff journeys have been removed; their JSON recordings remain inactive historical fixtures under `e2e/recordings/`, not evidence of supported application behavior.
+All default checks run without GitHub credentials or remote forge writes.
 
 ```text
 e2e/
@@ -28,12 +24,17 @@ e2e/
 │   ├── pr.fixtures.ts            # Reusable future provider journey setup
 │   ├── record.ts                 # Guard until recordable journeys return
 │   └── test-harness.ts            # Real application processes, RPC, CLI and Git
-├── forge/hello-review.spec.ts
+├── forge/review-service.spec.ts
 ├── cli/
 │   ├── commands.spec.ts
-│   └── daemon.spec.ts
+│   ├── daemon.spec.ts
+│   ├── local-review.fixtures.ts
+│   ├── local-review.spec.ts
+│   ├── parity.spec.ts
+│   ├── pr-review.fixtures.ts
+│   └── pr-review.spec.ts
 ├── nvim/                         # Retained editor setup, profiles, pins and shell tests
-└── recordings/                   # Historical cassettes, including captured Git bundles
+└── recordings/                   # Recorded cassettes, including captured Git bundles
 ```
 
 `github-cassette.ts` keeps exact request matching and consistent runtime UUID bindings; reads may reuse past observations, while future responses remain unavailable until the corresponding recorded write matches.
@@ -59,7 +60,7 @@ premise run e2e:format:check
 Suite tasks build their required binaries; after building, use the `:run` tasks for narrower checks:
 
 ```sh
-premise run e2e:forge:run -- hello-review.spec.ts
+premise run e2e:forge:run -- review-service.spec.ts
 premise run e2e:cli:run -- commands.spec.ts
 premise run e2e:nvim:run -- editor.spec.ts --tags-filter=required
 ```
@@ -68,7 +69,7 @@ Run focused cases during development and reserve the full suite for final valida
 
 Native Vitest `describe` groups identify `When ...` states, and `it` cases assert observable results with Arrange/Act/Assert sections; shared lifecycle hooks own application processes and temporary workspaces under `target/e2e/`.
 
-Successful runs remove temporary state; failed runs retain workspaces and process logs, and editor failures also include screen/window diagnostics.
+Successful runs remove temporary state; failed runs retain workspaces and process logs, and editor failures also include screen/window diagnostics. Each CLI E2E case also writes its full `lgtm` command transcript (`$ lgtm ...`, exit code, `stdout`, and `stderr`) to `e2e/outputs/<suite>/<spec>/<test>.log` (git-ignored) for inspection after both passing and failing runs.
 
 The CLI safety case uses a temporary checkout and bare upstream to verify that unimplemented commands leave file bytes, index, HEAD, refs and upstream refs unchanged.
 
@@ -86,10 +87,10 @@ Editor preflight checks dependency loading and a native CodeDiff operation; the 
 
 ## Record, replay and live validation
 
-The `e2e:record` entry point remains, but it currently exits with a clear “no recordable journeys” message before credentials or remote writes because no provider journey is active:
+The `e2e:record` entry point runs Vitest with `LGTM_E2E_GITHUB_MODE=record` for active provider suites (`cli`, `forge` or `all`):
 
 ```sh
-premise run e2e:record -- forge
+premise run e2e:record -- cli
 ```
 
 When replacement provider journeys are added, compose `common/pr.fixtures.ts` with the shared runtime and re-enable this entry point for eligible suites; do not repurpose historical cassettes as hello-review fixtures.
