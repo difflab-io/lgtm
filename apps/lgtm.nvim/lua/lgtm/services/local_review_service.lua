@@ -114,7 +114,7 @@ function LocalReviewService:create_thread(input)
   })
   local created = Thread.new(payload)
   local snapshot = self.state:get_value()
-  local next_threads = Private.clone_list(snapshot.threads)
+  local next_threads = vim.list_slice(snapshot.threads or {})
   table.insert(next_threads, created)
   Private.sort_threads(next_threads)
   self.state.threads = next_threads
@@ -270,16 +270,8 @@ function Private.normalize_path(path)
   if type(path) ~= "string" then
     return ""
   end
-  local trimmed = (path:gsub("^%s+", ""):gsub("%s+$", "")):gsub("^%./", "")
+  local trimmed = vim.trim(path):gsub("^%./", "")
   return trimmed
-end
-
-function Private.clone_list(items)
-  local copy = {}
-  for _, item in ipairs(items or {}) do
-    table.insert(copy, item)
-  end
-  return copy
 end
 
 function Private.sort_threads(threads)

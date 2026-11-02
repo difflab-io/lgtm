@@ -1,6 +1,7 @@
 local Notifications = require("lgtm.ui.notifications")
 
 local CodeDiffSession = {}
+local Private = {}
 
 local augroup = vim.api.nvim_create_augroup("LgtmCodeDiffSession", { clear = true })
 
@@ -10,13 +11,71 @@ local state = {
   pr_service = nil,
   overlay = nil,
   actions = nil,
-  pending_pr = nil,
   bound_buffers = {},
 }
 
--- Private ---------------------------------------------------------------------
+-- Lifecycle -------------------------------------------------------------------
 
-local Private = {}
+function CodeDiffSession.setup(opts)
+  opts = opts or {}
+  state.pr_service = opts.pr_service
+  state.overlay = opts.overlay
+  state.actions = opts.actions
+
+  vim.api.nvim_create_autocmd({ "TabNewEntered", "BufEnter", "WinEnter" }, {
+    group = augroup,
+    callback = function()
+      Private.sync_codediff_tabpage(vim.api.nvim_get_current_tabpage())
+    end,
+  })
+end
+
+-- Methods ---------------------------------------------------------------------
+
+function CodeDiffSession.open_pr(pr)
+  assert(state.pr_service, "CodeDiffSession.setup must be called before open_pr")
+  local pr_number = type(pr) == "table" and pr.number or pr
+  local selected = state.pr_service:select_pr(pr_number)
+  if not selected then
+    return nil
+  end
+
+  if Private.has_git_revisions(selected.base_revision, selected.head_revision) then
+    local first_path = selected.files and selected.files[1] and selected.files[1].path or nil
+    if
+      vim.api.nvim_buf_get_name(0) == ""
+      and first_path
+      and vim.fn.filereadable(first_path) == 1
+    then
+      vim.cmd.edit(vim.fn.fnameescape(first_path))
+    end
+    vim.cmd(string.format("CodeDiff %s %s", selected.base_revision, selected.head_revision))
+    vim.wait(600, function()
+      local _, ready = Private.sync_codediff_tabpage(vim.api.nvim_get_current_tabpage())
+      return ready == true
+    end, 20)
+    Private.sync_codediff_tabpage(vim.api.nvim_get_current_tabpage())
+    if state.overlay then
+      state.overlay:refresh_all()
+    end
+  else
+    Private.open_fallback_tabpage(selected)
+  end
+
+  Notifications.pr_selected(selected)
+  return selected
+end
+
+function CodeDiffSession.sync_current_tabpage()
+  local synced = Private.sync_codediff_tabpage(vim.api.nvim_get_current_tabpage())
+  return synced
+end
+
+function CodeDiffSession.reset()
+  state.bound_buffers = {}
+end
+
+-- Private ---------------------------------------------------------------------
 
 function Private.has_git_revisions(base_rev, head_rev)
   if type(base_rev) ~= "string" or type(head_rev) ~= "string" then
@@ -88,15 +147,15 @@ end
 
 function Private.sync_codediff_tabpage(tabpage)
   if not state.pr_service or not state.overlay then
-    return false
+    return false, false
   end
   local ok, lifecycle = pcall(require, "codediff.ui.lifecycle")
   if not ok or not lifecycle.get_session then
-    return false
+    return false, false
   end
   local session = lifecycle.get_session(tabpage)
   if not session then
-    return false
+    return false, false
   end
 
   local pr = state.pr_service.state:get_value().selected_pr
@@ -108,11 +167,13 @@ function Private.sync_codediff_tabpage(tabpage)
     state.overlay:register_diff_buffer(session.original_bufnr, orig_path, "LEFT")
     Private.attach_buffer_keymaps(session.original_bufnr)
   end
+  local modified_ready = false
   if session.modified_bufnr and vim.api.nvim_buf_is_valid(session.modified_bufnr) and mod_path then
     state.overlay:register_diff_buffer(session.modified_bufnr, mod_path, "RIGHT")
     Private.attach_buffer_keymaps(session.modified_bufnr)
+    modified_ready = vim.api.nvim_buf_line_count(session.modified_bufnr) > 1
   end
-  return true
+  return true, modified_ready
 end
 
 function Private.open_fallback_tabpage(pr)
@@ -147,81 +208,6 @@ function Private.open_fallback_tabpage(pr)
   state.overlay:register_diff_buffer(target_buf, first_path, "RIGHT")
   Private.attach_buffer_keymaps(target_buf)
   return tabpage
-end
-
--- Lifecycle -------------------------------------------------------------------
-
-function CodeDiffSession.setup(opts)
-  opts = opts or {}
-  state.pr_service = opts.pr_service
-  state.overlay = opts.overlay
-  state.actions = opts.actions
-
-  vim.api.nvim_create_autocmd({ "TabNewEntered", "BufEnter", "WinEnter" }, {
-    group = augroup,
-    callback = function()
-      local tabpage = vim.api.nvim_get_current_tabpage()
-      if Private.sync_codediff_tabpage(tabpage) then
-        state.pending_pr = nil
-      end
-    end,
-  })
-end
-
--- Methods ---------------------------------------------------------------------
-
-function CodeDiffSession.open_pr(pr)
-  assert(state.pr_service, "CodeDiffSession.setup must be called before open_pr")
-  local pr_number = type(pr) == "table" and pr.number or pr
-  local selected = state.pr_service:select_pr(pr_number)
-  if not selected then
-    return nil
-  end
-
-  state.pending_pr = selected
-  if Private.has_git_revisions(selected.base_revision, selected.head_revision) then
-    local first_path = selected.files and selected.files[1] and selected.files[1].path or nil
-    if
-      vim.api.nvim_buf_get_name(0) == ""
-      and first_path
-      and vim.fn.filereadable(first_path) == 1
-    then
-      vim.cmd.edit(vim.fn.fnameescape(first_path))
-    end
-    vim.cmd(string.format("CodeDiff %s %s", selected.base_revision, selected.head_revision))
-    vim.wait(600, function()
-      local synced = Private.sync_codediff_tabpage(vim.api.nvim_get_current_tabpage())
-      if not synced then
-        return false
-      end
-      local ok, lifecycle = pcall(require, "codediff.ui.lifecycle")
-      local sess = ok and lifecycle.get_session(vim.api.nvim_get_current_tabpage()) or nil
-      return sess ~= nil
-        and sess.modified_bufnr ~= nil
-        and vim.api.nvim_buf_is_valid(sess.modified_bufnr)
-        and vim.api.nvim_buf_line_count(sess.modified_bufnr) > 1
-    end, 20)
-    local current_tab = vim.api.nvim_get_current_tabpage()
-    state.pr_service:set_active_tabpage(current_tab)
-    Private.sync_codediff_tabpage(current_tab)
-    if state.overlay then
-      state.overlay:refresh_all()
-    end
-  else
-    Private.open_fallback_tabpage(selected)
-  end
-
-  Notifications.pr_selected(selected)
-  return selected
-end
-
-function CodeDiffSession.sync_current_tabpage()
-  return Private.sync_codediff_tabpage(vim.api.nvim_get_current_tabpage())
-end
-
-function CodeDiffSession.reset()
-  state.pending_pr = nil
-  state.bound_buffers = {}
 end
 
 return CodeDiffSession

@@ -277,12 +277,13 @@ function Private.read_current_body(session)
   local input_cmp = session.renderer:get_component_by_id("comment_body_input")
   if input_cmp and input_cmp.bufnr and vim.api.nvim_buf_is_valid(input_cmp.bufnr) then
     local lines = vim.api.nvim_buf_get_lines(input_cmp.bufnr, 0, -1, false)
-    local from_buf = Private.trim(table.concat(lines, "\n"))
+    local from_buf = vim.trim(table.concat(lines, "\n"))
     if from_buf ~= "" then
       return from_buf
     end
   end
-  return Private.trim(session.signal:get_value().body)
+  local body = session.signal:get_value().body
+  return type(body) == "string" and vim.trim(body) or ""
 end
 
 function Private.format_header_title(opts)
@@ -307,13 +308,6 @@ function Private.format_input_label(opts)
     return " Edit Comment "
   end
   return " Comment Body "
-end
-
-function Private.trim(value)
-  if type(value) ~= "string" then
-    return ""
-  end
-  return (value:gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
 return CommentEditor

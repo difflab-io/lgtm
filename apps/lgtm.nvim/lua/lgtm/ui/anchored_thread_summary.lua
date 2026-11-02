@@ -1,4 +1,3 @@
-local NuiLine = require("nui.line")
 local Thread = require("lgtm.models.thread")
 
 local AnchoredThreadSummary = {}
@@ -23,23 +22,6 @@ function AnchoredThreadSummary.render_virt_lines(thread, opts)
     table.insert(virt_lines, UI.footer_chunks(thread))
   end
   return virt_lines
-end
-
----Build `NuiLine` instances representing an anchored thread summary card.
----@param thread LgtmThread
----@param opts { is_selected?: boolean }|nil
----@return NuiLine[]
-function AnchoredThreadSummary.render_nui_lines(thread, opts)
-  local virt_lines = AnchoredThreadSummary.render_virt_lines(thread, opts)
-  local lines = {}
-  for _, chunks in ipairs(virt_lines) do
-    local line = NuiLine()
-    for _, chunk in ipairs(chunks) do
-      line:append(chunk[1], chunk[2])
-    end
-    table.insert(lines, line)
-  end
-  return lines
 end
 
 -- UI --------------------------------------------------------------------------
