@@ -1,15 +1,14 @@
-use anyhow::Context;
 use clap::{Args, Subcommand};
-use serde_json::json;
 
 use crate::{
-    backend::proto::lgtm::v1::{CreateCommentRequest, DeleteCommentRequest, UpdateCommentRequest},
-    commands::resolve_git_dir,
-    models::{
-        ActorArgs, LocalArgs, format_comment_json, format_identity_display, parse_comment_id,
-        parse_nonempty,
+    backend::{
+        extensions::git::get_cwd_git_dir,
+        proto::lgtm::v1::{CreateCommentRequest, DeleteCommentRequest, UpdateCommentRequest},
     },
-    rpc_client::Client,
+    models::{
+        ActorArgs, CommentView, DeletedCommentView, LocalArgs, parse_comment_id, parse_nonempty,
+    },
+    rpc_client,
     store::Store,
 };
 
@@ -71,8 +70,8 @@ pub struct CommentArgs {
 }
 
 pub async fn run(args: CommentArgs, store: &Store, json: bool) -> anyhow::Result<()> {
-    let git_dir = resolve_git_dir()?;
-    let client = Client::connect(store).await?;
+    let git_dir = get_cwd_git_dir()?;
+    let client = rpc_client::connect(store).await?;
 
     match args.command {
         CommentCommand::New {
@@ -98,20 +97,9 @@ pub async fn run(args: CommentArgs, store: &Store, json: bool) -> anyhow::Result
                     as_agent: actor.agent_name,
                     ..Default::default()
                 })
-                .await?;
-            let comment = response
-                .comment
-                .as_option()
-                .context("CreateComment response missing comment")?;
-            if json {
-                println!("{}", json!({ "comment": format_comment_json(comment) }));
-            } else {
-                println!(
-                    "Created comment [{}] by {}",
-                    comment.number,
-                    format_identity_display(comment.author.as_option()),
-                );
-            }
+                .await?
+                .into_owned();
+            CommentView::try_from(response)?.print_created(json);
             Ok(())
         }
         CommentCommand::Update {
@@ -137,16 +125,9 @@ pub async fn run(args: CommentArgs, store: &Store, json: bool) -> anyhow::Result
                     as_agent: actor.agent_name,
                     ..Default::default()
                 })
-                .await?;
-            let comment = response
-                .comment
-                .as_option()
-                .context("UpdateComment response missing comment")?;
-            if json {
-                println!("{}", json!({ "comment": format_comment_json(comment) }));
-            } else {
-                println!("Updated comment [{}]", comment.number);
-            }
+                .await?
+                .into_owned();
+            CommentView::try_from(response)?.print_updated(json);
             Ok(())
         }
         CommentCommand::Delete {
@@ -162,12 +143,9 @@ pub async fn run(args: CommentArgs, store: &Store, json: bool) -> anyhow::Result
                     as_agent: actor.agent_name,
                     ..Default::default()
                 })
-                .await?;
-            if json {
-                println!("{}", json!({ "deleted_number": response.deleted_number }));
-            } else {
-                println!("Deleted comment [{}]", response.deleted_number);
-            }
+                .await?
+                .into_owned();
+            DeletedCommentView::from(response).print(json);
             Ok(())
         }
     }

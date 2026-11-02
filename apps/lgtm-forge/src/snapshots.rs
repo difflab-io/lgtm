@@ -4,8 +4,8 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use crate::{
     error::Result,
-    extensions::gitoxide,
-    utils::{compute_repo_slug, default_snapshots_root},
+    extensions::{git::compute_repo_slug, gitoxide},
+    utils::default_snapshots_root,
 };
 
 /// Local shadow repository manager that isolates `--local` staging, commits, and blob reads under `~/.lgtm/snapshots/$repoSlug`.

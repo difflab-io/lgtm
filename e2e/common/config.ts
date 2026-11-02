@@ -17,7 +17,7 @@ export function suiteConfig(
           'cli',
           'nvim',
           'github',
-          'hello-review',
+          'review-service',
           'commands',
           'daemon',
           'local-review',

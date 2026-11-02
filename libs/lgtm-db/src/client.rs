@@ -162,11 +162,6 @@ impl Database<DatabaseConnection> {
         pool.close().await?;
         Ok(())
     }
-
-    /// Return the static greeting used by the legacy `HelloReview` demonstration RPC.
-    pub fn get_hello(&self) -> String {
-        "Hello".to_string()
-    }
 }
 
 impl Default for Database<DatabaseConnection> {

@@ -1,11 +1,9 @@
 use clap::Args;
-use serde_json::json;
 
 use crate::{
-    backend::proto::lgtm::v1::CommitRequest,
-    commands::resolve_git_dir,
-    models::{LocalArgs, format_identity_display, format_identity_json, short_sha},
-    rpc_client::Client,
+    backend::{extensions::git::get_cwd_git_dir, proto::lgtm::v1::CommitRequest},
+    models::{CommitView, LocalArgs},
+    rpc_client,
     store::Store,
 };
 
@@ -18,8 +16,8 @@ pub struct CommitArgs {
 }
 
 pub async fn run(args: CommitArgs, store: &Store, json: bool) -> anyhow::Result<()> {
-    let git_dir = resolve_git_dir()?;
-    let client = Client::connect(store).await?;
+    let git_dir = get_cwd_git_dir()?;
+    let client = rpc_client::connect(store).await?;
     let response = client
         .commit(CommitRequest {
             git_dir,
@@ -27,30 +25,9 @@ pub async fn run(args: CommitArgs, store: &Store, json: bool) -> anyhow::Result<
             local: args.location.local,
             ..Default::default()
         })
-        .await?;
+        .await?
+        .into_owned();
 
-    if json {
-        println!(
-            "{}",
-            json!({
-                "commit_sha": response.commit_sha,
-                "branch": response.branch,
-                "author": format_identity_json(response.author.as_option()),
-                "local": response.local,
-            })
-        );
-    } else {
-        let mode = if response.local {
-            "local snapshot"
-        } else {
-            "working tree"
-        };
-        println!(
-            "Committed {} on {} ({mode}) by {}",
-            short_sha(&response.commit_sha),
-            response.branch,
-            format_identity_display(response.author.as_option())
-        );
-    }
+    CommitView::from(response).print(json);
     Ok(())
 }

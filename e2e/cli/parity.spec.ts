@@ -27,7 +27,7 @@ describe(
   () => {
     const fixture = usePrFixture('cli')
 
-    it('should_produce_identical_diff_hunk_and_thread_output_between_local_and_remote_reviews_and_submit_session_to_github', async () => {
+    it('should produce identical diff hunk and thread output between local and remote reviews and submit session to github', async () => {
       // Arrange
       const { runtime, github } = fixture()
       const { prNumber, filePath } = await setupPrCheckout(runtime, github)

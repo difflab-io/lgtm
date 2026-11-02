@@ -1,21 +1,17 @@
 # End-to-end specifications
 
-The active TypeScript/Vitest suites check the hello-review skeleton, CLI command shape and Neovim shell; each suite keeps its own Mise config, and there is no root `e2e/mise.toml`.
+The active TypeScript/Vitest suites check the `lgtm-forge` `ReviewService` RPCs, CLI review and comment workflows, and Neovim shell; each suite keeps its own Mise config, and there is no root `e2e/mise.toml`.
 
 ## Test boundaries
 
 | Suite | Behavior | Command |
 | --- | --- | --- |
-| Forge | Real hello-review RPC, name normalization, removed RPC rejection and existing DB file preservation | `premise run e2e:forge` |
+| Forge | `ReviewService` RPCs (`Add`, `Commit`, `CreateReview`, `ListReviews`, `CreateComment`, `ShowReview`, `CloseReview`) and removed RPC rejection | `premise run e2e:forge` |
 | CLI | Command parsing, local snapshot review lifecycle (`--local`), remote GitHub PR review lifecycle, local/remote diff output parity, UI/daemon serving and shutdown | `premise run e2e:cli` |
 | Neovim | Shell loading, Lua/Ex/key control, diagnostics and package-manager setup | `premise run e2e:nvim` |
 | Replay infrastructure | Strict HTTP snapshots, UUID binding, ordered mutation barriers, recording safety and retained Git reconstruction | `premise run e2e:fixtures:test` |
 
-All default checks run without GitHub credentials or remote forge writes; the dummy DB package opens no SQL database.
-
-
-
-The old notes, local-review, PR-review, identity and diff journeys have been removed; their JSON recordings remain inactive historical fixtures under `e2e/recordings/`, not evidence of supported application behavior.
+All default checks run without GitHub credentials or remote forge writes.
 
 ```text
 e2e/
@@ -28,7 +24,7 @@ e2e/
 │   ├── pr.fixtures.ts            # Reusable future provider journey setup
 │   ├── record.ts                 # Guard until recordable journeys return
 │   └── test-harness.ts            # Real application processes, RPC, CLI and Git
-├── forge/hello-review.spec.ts
+├── forge/review-service.spec.ts
 ├── cli/
 │   ├── commands.spec.ts
 │   ├── daemon.spec.ts
@@ -64,7 +60,7 @@ premise run e2e:format:check
 Suite tasks build their required binaries; after building, use the `:run` tasks for narrower checks:
 
 ```sh
-premise run e2e:forge:run -- hello-review.spec.ts
+premise run e2e:forge:run -- review-service.spec.ts
 premise run e2e:cli:run -- commands.spec.ts
 premise run e2e:nvim:run -- editor.spec.ts --tags-filter=required
 ```

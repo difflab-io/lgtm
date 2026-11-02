@@ -10,9 +10,9 @@ use std::{
 
 use common::TestContext;
 use lgtm_forge::{
+    extensions::git::compute_repo_slug,
     models::{IdentityKind, ReviewGroupBy, ReviewOutcome, SessionState},
     services::{CreateCommentInput, UpdateCommentInput},
-    utils::compute_repo_slug,
 };
 
 // fixtures --------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import { helloReview } from '../rpc'
+import { sayHello } from '../rpc'
 
 /** Display fixtures for the skeleton UI, independent of backend storage. */
 export const reviewDemo = {
@@ -12,5 +12,5 @@ export async function getReviewDemo(
   baseUrl: string,
   fetchImplementation: typeof fetch = fetch,
 ): Promise<{ demo: true; message: string }> {
-  return { demo: true, message: await helloReview(name, baseUrl, fetchImplementation) }
+  return { demo: true, message: await sayHello(name, baseUrl, fetchImplementation) }
 }

@@ -18,7 +18,7 @@ describe(
     const fixture = usePrFixture('cli')
 
     it(
-      'should_commit_as_human_push_branch_and_create_or_refresh_remote_pr_review_without_shadow_snapshots',
+      'should commit as human, push branch, and create or refresh remote pr review without shadow snapshots',
       { tags: ['smoke'] },
       async () => {
         // Arrange
@@ -81,7 +81,7 @@ describe(
   () => {
     const fixture = usePrFixture('cli')
 
-    it('should_sync_draft_comments_and_agent_disclosure_footers_to_github_in_near_real_time', async () => {
+    it('should sync draft comments and agent disclosure footers to github in near real time', async () => {
       // Arrange
       const { runtime, github } = fixture()
       const { prNumber, filePath } = await setupPrCheckout(runtime, github)
@@ -217,7 +217,7 @@ describe(
   () => {
     const fixture = usePrFixture('cli')
 
-    it('should_pull_updated_pr_head_and_remap_comment_anchors_on_refresh', async () => {
+    it('should pull updated pr head and remap comment anchors on refresh', async () => {
       // Arrange
       const { runtime, github } = fixture()
       const { prNumber, filePath, initialHead } = await setupPrCheckout(runtime, github)
@@ -286,7 +286,7 @@ describe(
   () => {
     const fixture = usePrFixture('cli')
 
-    it('should_preserve_agent_comment_attribution_monotonically_across_remote_refresh', async () => {
+    it('should preserve agent comment attribution monotonically across remote refresh', async () => {
       // Arrange
       const { runtime, github } = fixture()
       const { prNumber, filePath } = await setupPrCheckout(runtime, github)

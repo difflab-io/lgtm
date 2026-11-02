@@ -13,7 +13,7 @@ describe(
     const fixture = useTestHarness('cli')
 
     it(
-      'should_expose_the_new_command_shape_and_reject_removed_commands_and_bad_outcomes',
+      'should expose the new command shape and reject removed commands and bad outcomes',
       { tags: ['smoke'] },
       async () => {
         // Arrange
@@ -51,7 +51,7 @@ describe(
       },
     )
 
-    it('should_fail_outside_a_git_repository_without_mutating_workspace_or_home', async () => {
+    it('should fail outside a git repository without mutating workspace or home', async () => {
       // Arrange
       const { runtime } = fixture()
 

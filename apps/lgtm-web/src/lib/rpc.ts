@@ -1,16 +1,16 @@
 import { createClient } from '@connectrpc/connect'
 import { createConnectTransport } from '@connectrpc/connect-web'
-import { ReviewService } from './gen/lgtm/v1/review_pb'
+import { GreeterService } from './gen/lgtm/v1/hello_pb'
 
-export async function helloReview(
+export async function sayHello(
   name: string,
   baseUrl: string,
   fetchImplementation: typeof fetch = fetch,
 ): Promise<string> {
   const client = createClient(
-    ReviewService,
+    GreeterService,
     createConnectTransport({ baseUrl, fetch: fetchImplementation }),
   )
-  const reply = await client.helloReview({ name }, { timeoutMs: 5000 })
+  const reply = await client.sayHello({ name }, { timeoutMs: 5000 })
   return reply.message
 }

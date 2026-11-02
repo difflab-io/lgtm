@@ -16,7 +16,6 @@ service ReviewService {
   rpc UpdateComment(UpdateCommentRequest) returns (UpdateCommentResponse);
   rpc DeleteComment(DeleteCommentRequest) returns (DeleteCommentResponse);
   rpc SetFileReviewed(SetFileReviewedRequest) returns (SetFileReviewedResponse);
-  rpc HelloReview(HelloReviewRequest) returns (HelloReviewResponse);
 }
 
 enum ReviewStatus {
@@ -280,12 +279,4 @@ message SetFileReviewedResponse {
   string file_path = 1;
   bool viewed = 2;
   string commit_sha = 3;
-}
-
-message HelloReviewRequest {
-  string name = 1;
-}
-
-message HelloReviewResponse {
-  string message = 1;
 }

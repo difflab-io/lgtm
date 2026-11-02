@@ -1,17 +1,151 @@
-//! Stateless `git` CLI adapter for working-checkout operations (`add`, `commit`, `push`) and `ForgeBacked` diff/blob reads.
+//! Stateless `git` CLI and repository path adapter for working-checkout operations (`add`, `commit`, `push`), worktree discovery, and `ForgeBacked` diff/blob reads.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
 };
+
+use sha2::{Digest, Sha256};
 
 use crate::{
     error::{Error, Result},
     extensions::gitoxide,
-    utils::resolve_git_paths,
 };
+
+/// Resolve the canonical `.git` directory for the current working checkout without mutating filesystem state.
+pub fn get_cwd_git_dir() -> Result<String> {
+    let cwd_raw = std::env::current_dir()
+        .map_err(|err| Error::Invalid(format!("failed to read current directory: {err}")))?;
+    let cwd = std::fs::canonicalize(&cwd_raw).map_err(|err| {
+        Error::Invalid(format!(
+            "failed to canonicalize current directory '{}': {err}",
+            cwd_raw.display()
+        ))
+    })?;
+    let ceilings: Vec<PathBuf> = std::env::var_os("GIT_CEILING_DIRECTORIES")
+        .map(|raw| {
+            std::env::split_paths(&raw)
+                .map(|p| std::fs::canonicalize(&p).unwrap_or(p))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut cursor = Some(cwd.as_path());
+    let mut found: Option<PathBuf> = None;
+    while let Some(dir) = cursor {
+        if dir != cwd && ceilings.iter().any(|c| c == dir) {
+            break;
+        }
+        if dir.file_name().is_some_and(|name| name == ".git") || dir.join(".git").exists() {
+            found = Some(dir.to_path_buf());
+            break;
+        }
+        if ceilings.iter().any(|c| c == dir) {
+            break;
+        }
+        cursor = dir.parent();
+    }
+    let Some(repo_root) = found else {
+        return Err(Error::Invalid(format!(
+            "not a git repository (or any of the parent directories): '{}'",
+            cwd.display()
+        )));
+    };
+    let (_, _, normalized_git_dir) = resolve_git_paths(&repo_root.to_string_lossy())?;
+    Ok(normalized_git_dir)
+}
+
+/// Normalize a working tree or `.git` path to the repository's canonical shared `common_dir` (for `$repoSlug` and DB scoping) and the active worktree's root directory.
+pub fn resolve_git_paths(git_dir_or_worktree: &str) -> Result<(PathBuf, PathBuf, String)> {
+    let trimmed = git_dir_or_worktree.trim();
+    if trimmed.is_empty() {
+        return Err(Error::Invalid("git_dir must not be empty".to_owned()));
+    }
+    let input_path = Path::new(trimmed);
+    let canonical = std::fs::canonicalize(input_path).map_err(|err| {
+        Error::Invalid(format!(
+            "failed to resolve git_dir '{}': {err}",
+            input_path.display()
+        ))
+    })?;
+
+    let (worktree_git_dir, worktree_dir) =
+        if canonical.file_name().is_some_and(|name| name == ".git") {
+            let worktree = canonical
+                .parent()
+                .ok_or_else(|| Error::Invalid("git_dir has no parent worktree".to_owned()))?
+                .to_path_buf();
+            let resolved_git = if canonical.is_file() {
+                resolve_gitdir_file(&canonical)?
+            } else {
+                canonical
+            };
+            (resolved_git, worktree)
+        } else if canonical.join(".git").exists() {
+            let dot_git = canonical.join(".git");
+            let resolved_git = if dot_git.is_file() {
+                resolve_gitdir_file(&dot_git)?
+            } else {
+                dot_git
+            };
+            (resolved_git, canonical)
+        } else if canonical.join("gitdir").is_file() && canonical.join("commondir").is_file() {
+            let wt_git_file = std::fs::read_to_string(canonical.join("gitdir")).map_err(|err| {
+                Error::Invalid(format!(
+                    "failed to read worktree gitdir '{}': {err}",
+                    canonical.display()
+                ))
+            })?;
+            let wt_dot_git = Path::new(wt_git_file.trim());
+            let wt_dir = wt_dot_git
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| canonical.clone());
+            (canonical, wt_dir)
+        } else {
+            (canonical.clone(), canonical)
+        };
+
+    let common_git_dir = resolve_common_git_dir(&worktree_git_dir)?;
+    let normalized_git_dir = common_git_dir.to_string_lossy().into_owned();
+    Ok((worktree_git_dir, worktree_dir, normalized_git_dir))
+}
+
+/// Compute a deterministic, filesystem-safe `$repoSlug` for a repository's shared `common_dir`.
+pub fn compute_repo_slug(git_dir: &str) -> Result<String> {
+    let (_, worktree_dir, normalized_git_dir) = resolve_git_paths(git_dir)?;
+    let common_path = Path::new(&normalized_git_dir);
+    let repo_root = if common_path.file_name().is_some_and(|name| name == ".git") {
+        common_path.parent().unwrap_or(&worktree_dir)
+    } else {
+        common_path
+    };
+    let repo_name = repo_root
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("repo")
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+
+    let mut hasher = Sha256::new();
+    hasher.update(normalized_git_dir.as_bytes());
+    let digest = hasher.finalize();
+    let short_hash = digest[..6]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+
+    Ok(format!("{repo_name}-{short_hash}"))
+}
 
 /// Stage worktree paths into the working checkout's native `.git/index` via `git add --`.
 pub fn stage_paths(git_dir_or_worktree: &str, paths: &[String]) -> Result<Vec<String>> {
@@ -250,4 +384,58 @@ pub fn get_commit_blobs_for_paths(
         }
     }
     Ok(blobs)
+}
+
+fn resolve_common_git_dir(worktree_git_dir: &Path) -> Result<PathBuf> {
+    let commondir_file = worktree_git_dir.join("commondir");
+    if commondir_file.is_file() {
+        let raw = std::fs::read_to_string(&commondir_file).map_err(|err| {
+            Error::Invalid(format!(
+                "failed to read commondir file '{}': {err}",
+                commondir_file.display()
+            ))
+        })?;
+        let rel = raw.trim();
+        let target = if Path::new(rel).is_absolute() {
+            PathBuf::from(rel)
+        } else {
+            worktree_git_dir.join(rel)
+        };
+        return std::fs::canonicalize(&target).map_err(|err| {
+            Error::Invalid(format!(
+                "failed to canonicalize commondir target '{}': {err}",
+                target.display()
+            ))
+        });
+    }
+    Ok(worktree_git_dir.to_path_buf())
+}
+
+fn resolve_gitdir_file(dot_git_file: &Path) -> Result<PathBuf> {
+    let contents = std::fs::read_to_string(dot_git_file).map_err(|err| {
+        Error::Invalid(format!(
+            "failed to read .git file '{}': {err}",
+            dot_git_file.display()
+        ))
+    })?;
+    let raw_target = contents
+        .trim()
+        .strip_prefix("gitdir:")
+        .ok_or_else(|| Error::Invalid(format!("malformed .git file '{}'", dot_git_file.display())))?
+        .trim();
+    let target_path = Path::new(raw_target);
+    let resolved = if target_path.is_absolute() {
+        target_path.to_path_buf()
+    } else {
+        dot_git_file
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(target_path)
+    };
+    std::fs::canonicalize(&resolved).map_err(|err| {
+        Error::Invalid(format!(
+            "failed to canonicalize gitdir target '{}': {err}",
+            resolved.display()
+        ))
+    })
 }

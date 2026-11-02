@@ -44,7 +44,7 @@ function cassette(...exchanges: [Exchange['request'], Record<string, unknown>][]
 // tests -----------------------------------------------------------------------
 
 describe('When replaying recorded GitHub requests', () => {
-  it('should_bind_runtime_UUIDs_consistently_without_ignoring_comment_content', () => {
+  it('should bind runtime UUIDs consistently without ignoring comment content', () => {
     // Arrange
     const original = '11111111-1111-4111-8111-111111111111',
       actual = '22222222-2222-4222-8222-222222222222'
@@ -71,7 +71,7 @@ describe('When replaying recorded GitHub requests', () => {
     expect(() => replay.verify()).not.toThrow()
   })
 
-  it('should_keep_recorded_fixture_paths_fixed', () => {
+  it('should keep recorded fixture paths fixed', () => {
     // Arrange
     const fixed = '11111111-1111-4111-8111-111111111111',
       wrong = '22222222-2222-4222-8222-222222222222'
@@ -89,7 +89,7 @@ describe('When replaying recorded GitHub requests', () => {
     expect(() => replay.verify()).not.toThrow()
   })
 
-  it('should_reuse_prior_reads_without_exposing_future_states_before_writes', () => {
+  it('should reuse prior reads without exposing future states before writes', () => {
     // Arrange
     const replay = new CassetteReplay(
       cassette(
@@ -109,7 +109,7 @@ describe('When replaying recorded GitHub requests', () => {
     expect(() => replay.respond(read('/unknown'))).toThrow('Unrecorded')
   })
 
-  it('should_tolerate_metadata_reads_interleaved_with_parallel_mutations', () => {
+  it('should tolerate metadata reads interleaved with parallel mutations', () => {
     // Arrange
     const first = write({ query: 'mutation', path: 'first' }),
       second = write({ query: 'mutation', path: 'second' })
@@ -133,7 +133,7 @@ describe('When replaying recorded GitHub requests', () => {
     expect(() => replay.verify()).not.toThrow()
   })
 
-  it('should_replay_eventual_consistency_then_repeat_the_last_recorded_observation', () => {
+  it('should replay eventual consistency then repeat the last recorded observation', () => {
     // Arrange
     const replay = new CassetteReplay(
       cassette([read('/pull'), { head: 'old' }], [read('/pull'), { head: 'new' }]),
@@ -144,7 +144,7 @@ describe('When replaying recorded GitHub requests', () => {
     expect(replay.respond(read('/pull')).body).toEqual({ head: 'new' })
   })
 
-  it('should_reject_unknown_paths_accounts_payloads_and_duplicate_writes', () => {
+  it('should reject unknown paths, accounts, payloads, and duplicate writes', () => {
     // Arrange
     const request = write({ query: 'mutation', input: { thread: 'THREAD_1', body: 'Exact text' } })
     const replay = new CassetteReplay(cassette([request, { saved: true }]))
@@ -161,7 +161,7 @@ describe('When replaying recorded GitHub requests', () => {
     expect(() => replay.respond(request)).toThrow('Unrecorded')
   })
 
-  it('should_fail_if_a_recorded_mutation_was_omitted', () => {
+  it('should fail if a recorded mutation was omitted', () => {
     // Arrange
     const replay = new CassetteReplay(cassette([write({ query: 'mutation' }), { saved: true }]))
     // Act and Assert
@@ -170,7 +170,7 @@ describe('When replaying recorded GitHub requests', () => {
 })
 
 describe('When refreshing a recording', () => {
-  it('should_redact_private_user_fields_and_replay_the_saved_HTTP_snapshot', async () => {
+  it('should redact private user fields and replay the saved HTTP snapshot', async () => {
     // Arrange
     const directory = await mkdtemp(join(tmpdir(), 'lgtm-recording-'))
     const file = join(directory, 'journey.json')
@@ -212,7 +212,7 @@ describe('When refreshing a recording', () => {
     }
   })
 
-  it('should_replace_only_selected_journeys_and_preserve_concurrent_sibling_updates', async () => {
+  it('should replace only selected journeys and preserve concurrent sibling updates', async () => {
     // Arrange
     const directory = await mkdtemp(join(tmpdir(), 'lgtm-recording-'))
     const file = join(directory, 'spec.json')
@@ -249,7 +249,7 @@ describe('When refreshing a recording', () => {
     }
   })
 
-  it('should_preserve_an_invalid_spec_file_instead_of_overwriting_its_journeys', async () => {
+  it('should preserve an invalid spec file instead of overwriting its journeys', async () => {
     // Arrange
     const directory = await mkdtemp(join(tmpdir(), 'lgtm-recording-'))
     const file = join(directory, 'spec.json')
@@ -267,7 +267,7 @@ describe('When refreshing a recording', () => {
     }
   })
 
-  it('should_preserve_the_existing_JSON_when_a_recorded_test_fails', async () => {
+  it('should preserve the existing JSON when a recorded test fails', async () => {
     // Arrange
     const directory = await mkdtemp(join(tmpdir(), 'lgtm-recording-'))
     const file = join(directory, 'journey.json')
@@ -286,7 +286,7 @@ describe('When refreshing a recording', () => {
     }
   })
 
-  it('should_ignore_an_incomplete_request_cancelled_before_upstream_dispatch', async () => {
+  it('should ignore an incomplete request cancelled before upstream dispatch', async () => {
     // Arrange
     const directory = await mkdtemp(join(tmpdir(), 'lgtm-recording-'))
     const file = join(directory, 'journey.json')
@@ -313,7 +313,7 @@ describe('When refreshing a recording', () => {
     }
   })
 
-  it('should_reject_credentials_without_replacing_the_existing_JSON', async () => {
+  it('should reject credentials without replacing the existing JSON', async () => {
     // Arrange
     const directory = await mkdtemp(join(tmpdir(), 'lgtm-recording-'))
     const file = join(directory, 'journey.json')
@@ -335,7 +335,7 @@ describe('When refreshing a recording', () => {
 })
 
 describe('When loading historical replay fixtures', () => {
-  it('should_reconstruct_the_recorded_Git_repository_without_application_RPCs', async () => {
+  it('should reconstruct the recorded Git repository without application RPCs', async () => {
     // Arrange
     const file = join(ROOT, 'e2e/recordings/nvim/pr-review.json')
     const recordings = JSON.parse(await readFile(file, 'utf8')) as Record<string, Cassette>

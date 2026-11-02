@@ -1,11 +1,9 @@
 use clap::Args;
-use serde_json::json;
 
 use crate::{
-    backend::proto::lgtm::v1::AddRequest,
-    commands::resolve_git_dir,
-    models::{LocalArgs, parse_nonempty},
-    rpc_client::Client,
+    backend::{extensions::git::get_cwd_git_dir, proto::lgtm::v1::AddRequest},
+    models::{AddView, LocalArgs, parse_nonempty},
+    rpc_client,
     store::Store,
 };
 
@@ -18,36 +16,19 @@ pub struct AddArgs {
 }
 
 pub async fn run(args: AddArgs, store: &Store, json: bool) -> anyhow::Result<()> {
-    let git_dir = resolve_git_dir()?;
-    let client = Client::connect(store).await?;
+    let git_dir = get_cwd_git_dir()?;
+    let client = rpc_client::connect(store).await?;
+    let local = args.location.local;
     let response = client
         .add(AddRequest {
             git_dir,
             paths: args.paths,
-            local: args.location.local,
+            local,
             ..Default::default()
         })
-        .await?;
+        .await?
+        .into_owned();
 
-    if json {
-        println!(
-            "{}",
-            json!({
-                "staged_paths": response.staged_paths,
-                "local": args.location.local,
-            })
-        );
-    } else {
-        let mode = if args.location.local {
-            "local snapshot"
-        } else {
-            "working tree"
-        };
-        println!(
-            "Staged {} path(s) ({mode}): {}",
-            response.staged_paths.len(),
-            response.staged_paths.join(", ")
-        );
-    }
+    AddView::from((response, local)).print(json);
     Ok(())
 }

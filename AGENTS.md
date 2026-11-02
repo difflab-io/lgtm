@@ -1,67 +1,164 @@
-# LGTM implementation conventions
+# LGTM Implementation Conventions
 
-## Repo Structure
+## Hard Rules
 
-- Keep backend domain models in `apps/lgtm-forge/src/models/`, services in `src/services/`, and application errors in `src/error.rs`.
-- Put general helpers in `src/utils.rs`. Keep forge import contracts in `src/forge/models.rs` and review export behavior with its domain model. Domain models represent application entities.
-- Keep database entities private; expose actual SeaORM models and the repositories required by backend workflows. Shared SeaORM entity types belong in `libs/lgtm-db/src/entities/common.rs`.
+- Run builds, formatters, linters, and tests through project [Mise tasks](mise.toml) invoked by Premise (`premise run format`, `premise run lint`, `premise run test`, `premise run e2e:smoke`). Keep task scripts tracked and generated outputs ignored.
+- During alpha, update branch-introduced contracts directly without compatibility shims or duplicate fields.
+- Expose database queries and mutations only through named repository methods in [`libs/lgtm-db`](libs/lgtm-db/src/lib.rs). Keep SeaORM `Entity` and `ActiveModel` types `pub(crate)`; never expose raw connections, query builders, or raw SQL to callers.
+- Models validate, map data, and implement pure domain behavior; services own persistence orchestration, transactions, and external I/O.
+- Keep CLI review and comment commands as thin RPC clients over `lgtm-forge`. Preserve daemon and health behavior; do not embed review persistence in `lgtm-cli`.
+- Establish tracing spans at CLI/RPC boundaries (`#[tracing::instrument]`). Services emit tracing events and never store request spans.
+- Preserve pinned Neovim dependencies in the plugin setup, source-switch installer, and E2E harness (including NuiComponents/NUI and optional Kak).
+- [Proposed] Preserve the Neovim development and release plugin installation tasks when resetting plugin features.
+- Never create, recreate, rename, archive, or delete GitHub repositories in tests. Use `LGTM_E2E_GITHUB_REPOSITORY`, verify private visibility before writes, and clean up only run-owned PRs and refs.
+
+## Organization
+
+```text
+├── apps/
+│   ├── lgtm-forge/src/
+│   │   ├── models/          # Pure domain entities, factories, validators, and proto From mappers
+│   │   ├── services/        # Stateful orchestration (ReviewService) with constructor injection
+│   │   ├── extensions/      # Stateless SDK/CLI adapters (git.rs, gitoxide.rs, octocrab.rs)
+│   │   ├── forge/           # RemoteForge trait and provider wire contracts (forge/models.rs)
+│   │   ├── rpc/             # Connect/gRPC transport handlers
+│   │   ├── snapshots.rs     # LGTM-managed local Git snapshot store
+│   │   ├── error.rs         # Application error enum
+│   │   └── utils.rs         # Cross-cutting non-SDK helpers (LGTM_HOME, URLs, agent descriptors)
+│   └── lgtm-cli/src/
+│       ├── commands/        # One file per command group (local types, Args, run callback, helpers)
+│       ├── models/          # CLI view models (From<Proto> + print) and shared args (common.rs)
+│       ├── rpc_client.rs    # Connect RPC client factory over generated ReviewServiceClient
+│       ├── daemon.rs        # Background daemon lifecycle
+│       └── store.rs         # Local runtime state store
+├── libs/
+│   └── lgtm-db/src/
+│       ├── entities/        # Private SeaORM table models and shared column enums (common.rs)
+│       ├── repositories/    # Named repository queries and explicit column mutations
+│       └── client.rs        # Database pool and Transaction handles
+└── e2e/
+    ├── common/              # Shared process, cassette, and GitHub PR fixtures
+    ├── forge/               # Backend RPC E2E specs
+    ├── cli/                 # CLI local-review, pr-review, parity, and daemon specs
+    └── nvim/                # Neovim plugin shell and installer specs
+```
+
+```mermaid
+flowchart LR
+    CLI["lgtm-cli: commands + view models"] --> RPC["lgtm-forge/rpc: transport handlers"]
+    RPC --> Service["services: stateful orchestration"]
+    Service --> Model["models: pure domain logic + mappers"]
+    Service --> Repo["lgtm-db/repositories: named queries"]
+    Repo --> Entity["lgtm-db/entities: private SeaORM rows"]
+    Service --> Ext["extensions: git, gitoxide, octocrab"]
+    Service --> Utils["utils: paths, URLs, descriptors"]
+```
+
 - [Proposed] Name architecture documentation and E2E suite directories for `lgtm-forge` as `forge` (`docs/architecture/forge/` and `e2e/forge/`) rather than `backend`.
+- [Proposed] Preserve existing documentation template headings and structure; use `NA/WIP` for unimplemented sections.
 
-- [Proposed] Preserve the Neovim development/release plugin installation tasks when resetting plugin features.
-- Preserve pinned Neovim dependencies in the existing plugin setup, source-switch installer and E2E setup, including NuiComponents/NUI and optional Kak, when resetting plugin features.
+## Style
 
-## Docs
+### Rust Layout & Naming
 
-- [Proposed] Preserve existing documentation template headings and structure; update valid content and use `NA/WIP` for sections whose implementation was removed.
-- Use soft wraps for documentation prose. Keep each paragraph on one source line and let the editor wrap it for display. Do not add manual line breaks between sentences or at a fixed column width. Preserve structural line breaks in lists, tables, code, and Mermaid diagrams.
-- Embed architecture diagrams as inline Mermaid fences so MmdToImg can preview the source in Neovim. Keep diagram source in the Markdown page, without separate diagram directories or tracked preview images.
+- Use one inherent `impl` block per type per file: constructors first, `// Public` operations next, `// Private` helpers last, and trait `impl` blocks after the inherent block. Pad section headers with hyphens to column 80.
+- Name public repository and service reads `get_*`. Name mutating operations and factories with imperative verbs (`promote`, `publish_session`).
+- Call library and generated client methods directly; do not add pass-through wrapper aliases.
+- Use `uuid::Uuid` for internal IDs, `repository_url` (with `_url` suffix only for full URLs) for normalized remote addresses, and `git_dir` for canonical local `.git` directories.
+- Humans require `email`; agents require `provider` and `model` and have no email. Model review contexts as `Local` or `ForgeBacked` and reject remote operations on `Local` contexts.
 
-## Code Style
+```rust
+impl CommentAnchor {
+    pub fn new(file_path: &str, start_line: Option<u32>, line: u32, commit_sha: &str) -> Result<Self> {
+        // constructor before // Public
+    }
 
-- During alpha, update branch-introduced contracts directly. Do not retain duplicate fields or add compatibility code for earlier versions of this branch.
+    // Public ------------------------------------------------------------------
 
-- Keep stateless SDK and CLI adapters in `apps/lgtm-forge/src/extensions/` (for example, `extensions/gh.rs`). Call existing library features directly and share external-tool wrappers here instead of duplicating them in services or providers. Keep domain mapping and review behavior in their existing model and service modules.
-- Name mutating operations and factories with imperative verbs (for example, `promote`, not `promoted`).
+    pub fn validate_line(blob: Option<&str>, file_path: &str, start_line: Option<u32>, line: u32) -> Result<()> {
+        // public operations
+    }
 
-- Name public repository and service reads `get_*`.
-- Use one inherent `impl` block per type per file. Put constructors and configuration methods first, then public operations, then private helpers. Put required trait implementations after the inherent block. Add `// Public` and `// Private` section headers, padded with hyphens to column 80, and use logical subsection headers such as `// Sessions`, `// Threads` and `// Comments` to group related methods.
-- Keep one main model type per file where practical. Keep validators and `from_*` / `to_*` / `into_*` conversions beside that type; RPC modules contain transport handlers, not model conversion functions.
-- Separate functions with a blank line. Keep unit tests last, after a `// tests ---` separator padded to column 80.
-- Use `// fixtures ---` and `// tests ---` separators padded to column 80 in test files.
-- Call standard/library functions directly. Do not add aliases that only forward one method call.
-- Document entity purpose, field scope, state semantics and public contracts. Omit filler and redundant implementation narration.
-- Name fields that contain complete URLs with a `_url` suffix. Do not label hostnames, filesystem paths, repository keys or opaque forge IDs as URLs.
-- Use `uuid::Uuid` for internal IDs and foreign keys. Keep external forge IDs as opaque scoped strings; name forge repository addresses `repository_url` and local Git directories `git_dir`.
-- Model contexts as `Local` with a notes/branch location or `ForgeBacked` with a validated repository URL and PR/MR number. Reject remote operations for local contexts.
-- Use enums for discriminators and state-dependent data; enforce essential shape rules with SQL constraints.
+    // Private -----------------------------------------------------------------
 
-## Test Organization
+    fn validate_coordinates(file_path: &str, start_line: Option<u32>, line: u32) -> Result<String> {
+        // private helpers
+    }
+}
+```
 
-These rules apply to every app and library in the workspace.
+### CLI View Models
 
-- Colocate private unit tests in the source file under `#[cfg(test)] mod tests`. Shared unit fixtures belong under `src/tests/`.
-- Use separate integration test files directly under `tests/` for each service or repository area (for example, `tests/review_service.rs`). Group cases with inline `mod name { ... }` blocks inside those files. Do not consolidate all integration tests into one file or add a nested `tests/integration/` directory or `#[path]` declarations. Shared integration fixtures belong under `tests/common/`; do not use `tests/support/` or `tests/test_support/`.
-- Name tests `should_<behavior>` and keep fixture helpers separate from test cases with the standard separators. Group integration and E2E tests using BDD `Given` / `When` clauses (`mod given_* { mod when_* { ... } }` in Rust integration tests and `describe('Given ... / When ...')` in Vitest specs) with `should_<behavior>` leaf cases.
-- Test multi-operation transactions and full review lifecycles against real SQLite and PostgreSQL. Use dummy external services.
-- Run checks through project Mise tasks invoked by Premise. Keep their source scripts tracked; generated output stays ignored.
-- Use `e2e/README.md` for PR E2E replay, recording refresh and live parity commands. Keep TypeScript E2E tests under e2e/, outside Rust app test directories.
-- During development, run only tests relevant to the changed behavior, feature or suite. Use `premise run e2e:smoke` for a quick check across features; use a spec path, test name or Vitest tag for narrower checks. Do not run the full E2E suite on each iteration. Reserve a full run for final validation or changes to shared fixtures or behavior that require all suites, and reuse passing evidence for unchanged code.
-- Write new E2E suites in TypeScript with Vitest. Use native Vitest `describe` and `it` groups for feature contexts and independent lifecycle journeys, with explicit assertions and shared runtime fixtures. Keep notes, local reviews, PR reviews and diffs in separate spec files where those boundaries exist; import Vitest `it` directly and use shared `beforeEach`/`afterEach` fixtures instead of custom step runners or test aliases. Keep each suite's Mise config; do not add a root `e2e/mise.toml`.
-- Use the permanent private GitHub fixture selected by `LGTM_E2E_GITHUB_REPOSITORY`. Test runners must never create, recreate, rename, archive or delete repositories. Verify private visibility before writes and clean up only run-owned PRs and refs.
-- Visually separate Arrange, Act and Assert blocks in E2E tests with section comments. Repeat the sections within long journeys when the next action needs another check.
-- Organize E2E specs by top-level `When ...` states and native `it` cases for individual observable behaviors. Put suite and feature labels in Vitest tags. A state group may share run-owned PRs through `beforeAll`/`afterAll`; reset relevant remote feedback between independent cases. Keep credentials scoped to test processes and never switch the user’s active GitHub account during tests.
-- Keep shared process and GitHub lifecycle fixtures in `e2e/common/`. Compose editor lifecycle hooks once under `e2e/nvim/`. Keep feature setup in adjacent `*.fixtures.ts` files, and keep small single-file helpers private in their spec. Export only helpers that another module uses.
+- Transform backend RPC responses into CLI view models under `apps/lgtm-cli/src/models/` using `From` conversions and render terminal/JSON output via view model `print` methods. Keep shared CLI argument types and formatting helpers in `apps/lgtm-cli/src/models/common.rs`.
 
-## CLI
+### Documentation
 
-- Keep each command group in its own file under `apps/lgtm-cli/src/commands/`. Order each file as local types, command argument struct, command callbacks, then private helpers. Keep shared command argument types in `src/models.rs` and transport in `src/rpc_client.rs`.
+- Use soft wraps for Markdown prose (one source line per paragraph). Keep diagrams as inline Mermaid fences and prefer file trees, tables, and short code snippets over long prose.
 
-## Backend
+## Testing
 
-- Models validate, map data and implement domain behavior. They must not query or mutate the database; services own persistence orchestration and relationship loading.
-- Keep pure entity factory methods with their domain model, not in services.
-- Humans require email; agents require model and provider and have no email. Forge account bindings are separate from model providers.
-- Expose database queries and mutations only through named repository methods. The DB client is the single source of truth for the persistence rules encapsulated by those operations. Do not expose raw connections, generic query builders or raw SQL escape hatches to callers.
-- Expose only operations needed by agreed backend workflows. Update explicit mutable columns.
-- Establish tracing spans at CLI/RPC boundaries. Services use tracing macros and do not store request spans.
-- Keep CLI review/session/comment commands as backend RPC clients. Preserve daemon and greeting/health behavior; do not embed review persistence in the CLI.
+### Rust BDD Unit & Integration Tests
+
+- Colocate unit tests in `#[cfg(test)] mod tests` after a `// tests ---` separator padded to column 80; place shared unit fixtures in `src/tests/`.
+- Put integration suites directly under `tests/<area>.rs` with shared fixtures in `tests/common/mod.rs` (never `tests/integration/` or `tests/support/`).
+- Structure all Rust unit and integration tests with nested `mod given_*` and `mod when_*` modules and `fn should_<behavior>()` leaf cases:
+
+```rust
+// tests -----------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // fixtures ----------------------------------------------------------------
+
+    fn sample_agent() -> Identity {
+        Identity::new_agent(Uuid::new_v4(), "claude-sonnet-4-5", "anthropic", "claude-sonnet-4-5").unwrap()
+    }
+
+    // tests -------------------------------------------------------------------
+
+    mod given_an_agent_identity {
+        use super::*;
+
+        mod when_formatting_export_body {
+            use super::*;
+
+            #[test]
+            fn should_append_agent_disclosure_footer() {
+                // Arrange
+                let agent = sample_agent();
+                // Act
+                let body = format_body_with_disclosure("Check invariant", &agent);
+                // Assert
+                assert!(body.ends_with("> Generated by AI agent `anthropic/claude-sonnet-4-5` via LGTM"));
+            }
+        }
+    }
+}
+```
+
+### TypeScript Vitest E2E Tests
+
+- Organize Vitest specs under `e2e/` using `describe('Given ... / When ...')` or `describe('When ...')` blocks and space-separated `it('should <behavior>')` titles (do not use `should_snake_case` in TypeScript).
+- Separate `// Arrange`, `// Act`, and `// Assert` blocks with comments. Keep feature setup in adjacent `*.fixtures.ts` files and export only helpers used across modules.
+
+```typescript
+describe('Given a local working tree / When staging and committing in local snapshot mode', { tags: ['e2e', 'cli', 'local-review'] }, () => {
+  const fixture = useTestHarness('cli')
+
+  it('should stage and shadow commit worktree changes without modifying checkout', { tags: ['smoke'] }, async () => {
+    // Arrange
+    const { runtime } = fixture()
+    await initLocalRepo(runtime)
+
+    // Act
+    const added = await runtime.json(['add', 'src/lib.rs', '--local'])
+
+    // Assert
+    expect(added).toEqual({ staged_paths: ['src/lib.rs'], local: true })
+  })
+})
+```
+
+- During development, run focused tests (`premise run e2e:smoke` or a single spec/test filter); reserve full E2E runs for final validation or shared fixture changes. See [`e2e/README.md`](e2e/README.md) for GitHub cassette replay and recording commands.

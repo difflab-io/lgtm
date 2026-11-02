@@ -16,7 +16,8 @@ use gix::{
 
 use crate::{
     error::{Error, Result},
-    utils::{normalize_repository_url, resolve_git_paths},
+    extensions::git::resolve_git_paths,
+    utils::normalize_repository_url,
 };
 
 /// Resolved metadata for a local Git working checkout or linked worktree.

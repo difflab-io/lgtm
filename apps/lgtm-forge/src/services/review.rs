@@ -841,11 +841,6 @@ impl ReviewService {
         })
     }
 
-    /// Format a greeting message for the `HelloReview` demonstration endpoint.
-    pub fn get_hello(&self, name: &str) -> String {
-        Review::format_hello(&self.database.get_hello(), name)
-    }
-
     // Private -----------------------------------------------------------------
 
     fn read_blob_at_commit(

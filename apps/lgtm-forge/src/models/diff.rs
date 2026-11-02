@@ -163,25 +163,38 @@ impl From<DiffHunk> for DiffHunkDetail {
 mod tests {
     use super::*;
 
-    #[test]
-    fn should_extract_unified_diff_hunk_around_comment_anchor_in_memory() {
-        let base = "fn alpha() -> i32 {\n    1\n}\n";
-        let head = "fn alpha() -> i32 {\n    10\n}\n";
-        let anchor = CommentAnchor::new("src/lib.rs", None, 2, "deadbeef").unwrap();
-        let hunks =
-            DiffHunk::from_blobs("src/lib.rs", "deadbeef", Some(base), Some(head), &[anchor]);
-        assert_eq!(hunks.len(), 1);
-        assert_eq!(hunks[0].file_path, "src/lib.rs");
-        assert!(
-            hunks[0].lines.iter().any(|l| l.kind == DiffLineKind::Added
-                && l.line_number == 2
-                && l.content == "    10")
-        );
-        assert!(
-            hunks[0]
-                .lines
-                .iter()
-                .any(|l| l.kind == DiffLineKind::Removed && l.content == "    1")
-        );
+    // tests -------------------------------------------------------------------
+
+    mod given_base_and_head_blobs {
+        use super::*;
+
+        mod when_extracting_diff_hunks_around_anchor {
+            use super::*;
+
+            #[test]
+            fn should_extract_unified_diff_hunk_around_comment_anchor_in_memory() {
+                let base = "fn alpha() -> i32 {\n    1\n}\n";
+                let head = "fn alpha() -> i32 {\n    10\n}\n";
+                let anchor = CommentAnchor::new("src/lib.rs", None, 2, "deadbeef").unwrap();
+                let hunks = DiffHunk::from_blobs(
+                    "src/lib.rs",
+                    "deadbeef",
+                    Some(base),
+                    Some(head),
+                    &[anchor],
+                );
+                assert_eq!(hunks.len(), 1);
+                assert_eq!(hunks[0].file_path, "src/lib.rs");
+                assert!(hunks[0].lines.iter().any(|l| {
+                    l.kind == DiffLineKind::Added && l.line_number == 2 && l.content == "    10"
+                }));
+                assert!(
+                    hunks[0]
+                        .lines
+                        .iter()
+                        .any(|l| l.kind == DiffLineKind::Removed && l.content == "    1")
+                );
+            }
+        }
     }
 }

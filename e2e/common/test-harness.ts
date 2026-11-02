@@ -171,8 +171,16 @@ export class TestHarness {
         else if (this.kind === 'cli')
           this.endpoint = `http://127.0.0.1:${(await readFile(join(this.home, 'server.port'), 'utf8')).trim()}/rpc`
         if (!this.endpoint) return false
-        const response = await this.response('HelloReview', { name: 'E2E' })
-        return response.status === 200
+        const probe = await fetch(`${this.endpoint}/lgtm.v1.GreeterService/SayHello`, {
+          method: 'POST',
+          signal: AbortSignal.timeout(this.rpcTimeoutMs),
+          body: JSON.stringify({ name: 'E2E' }),
+          headers: {
+            'Content-Type': 'application/json',
+            'Connect-Protocol-Version': '1',
+          },
+        })
+        return probe.status === 200
       },
       Boolean,
       20_000,

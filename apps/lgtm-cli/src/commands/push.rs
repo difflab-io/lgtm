@@ -1,11 +1,9 @@
 use clap::Args;
-use serde_json::json;
 
 use crate::{
-    backend::proto::lgtm::v1::PushRequest,
-    commands::resolve_git_dir,
-    models::{LocalArgs, short_sha},
-    rpc_client::Client,
+    backend::{extensions::git::get_cwd_git_dir, proto::lgtm::v1::PushRequest},
+    models::{LocalArgs, PushView},
+    rpc_client,
     store::Store,
 };
 
@@ -16,33 +14,17 @@ pub struct PushArgs {
 }
 
 pub async fn run(args: PushArgs, store: &Store, json: bool) -> anyhow::Result<()> {
-    let git_dir = resolve_git_dir()?;
-    let client = Client::connect(store).await?;
+    let git_dir = get_cwd_git_dir()?;
+    let client = rpc_client::connect(store).await?;
     let response = client
         .push(PushRequest {
             git_dir,
             local: args.location.local,
             ..Default::default()
         })
-        .await?;
+        .await?
+        .into_owned();
 
-    if json {
-        println!(
-            "{}",
-            json!({
-                "branch": response.branch,
-                "head_sha": response.head_sha,
-                "repository_url": response.repository_url,
-                "local": response.local,
-            })
-        );
-    } else {
-        println!(
-            "Pushed {} ({}) to {}",
-            response.branch,
-            short_sha(&response.head_sha),
-            response.repository_url
-        );
-    }
+    PushView::from(response).print(json);
     Ok(())
 }

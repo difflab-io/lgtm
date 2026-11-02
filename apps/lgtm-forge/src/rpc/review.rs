@@ -14,11 +14,11 @@ use crate::{
         AddRequest, AddResponse, CloseReviewRequest, CloseReviewResponse, CommentDetail,
         CommitRequest, CommitResponse, CreateCommentRequest, CreateCommentResponse,
         CreateReviewRequest, CreateReviewResponse, DeleteCommentRequest, DeleteCommentResponse,
-        DiffHunkDetail, HelloReviewRequest, HelloReviewResponse, IdentitySummary,
-        ListReviewsRequest, ListReviewsResponse, PushRequest, PushResponse, RefreshReviewRequest,
-        RefreshReviewResponse, ReviewOutcome as ProtoReviewOutcome, ReviewService, ReviewSummary,
-        SessionSummary, SetFileReviewedRequest, SetFileReviewedResponse, ShowReviewRequest,
-        ShowReviewResponse, UpdateCommentRequest, UpdateCommentResponse,
+        DiffHunkDetail, IdentitySummary, ListReviewsRequest, ListReviewsResponse, PushRequest,
+        PushResponse, RefreshReviewRequest, RefreshReviewResponse,
+        ReviewOutcome as ProtoReviewOutcome, ReviewService, ReviewSummary, SessionSummary,
+        SetFileReviewedRequest, SetFileReviewedResponse, ShowReviewRequest, ShowReviewResponse,
+        UpdateCommentRequest, UpdateCommentResponse,
     },
     services::{CreateCommentInput, ReviewService as DomainReviewService, UpdateCommentInput},
     snapshots::SnapshotStore,
@@ -334,18 +334,6 @@ impl ReviewService for ReviewApi {
             file_path: outcome.file_path,
             viewed: outcome.viewed,
             commit_sha: outcome.commit_sha,
-            ..Default::default()
-        })
-    }
-
-    #[tracing::instrument(name = "rpc_request", skip_all, fields(rpc.method = "lgtm.v1.ReviewService/HelloReview"))]
-    async fn hello_review<'a>(
-        &'a self,
-        _context: RequestContext,
-        request: ServiceRequest<'_, HelloReviewRequest>,
-    ) -> ServiceResult<impl Encodable<HelloReviewResponse> + Send + use<'a>> {
-        Response::ok(HelloReviewResponse {
-            message: self.reviews.get_hello(request.name),
             ..Default::default()
         })
     }

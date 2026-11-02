@@ -16,7 +16,7 @@ describe(
     const fixture = useTestHarness('cli')
 
     it(
-      'should_stage_and_shadow_commit_worktree_changes_as_human_without_modifying_checkout_or_origin',
+      'should stage and shadow commit worktree changes as human without modifying checkout or origin',
       { tags: ['smoke'] },
       async () => {
         // Arrange
@@ -60,7 +60,7 @@ describe(
       },
     )
 
-    it('should_reject_push_in_local_mode_without_contacting_origin', async () => {
+    it('should reject push in local mode without contacting origin', async () => {
       // Arrange
       const { runtime } = fixture()
       await initLocalRepo(runtime)
@@ -84,7 +84,7 @@ describe(
   () => {
     const fixture = useTestHarness('cli')
 
-    it('should_create_and_list_local_reviews_for_the_current_branch_and_all_branches', async () => {
+    it('should create and list local reviews for the current branch and all branches', async () => {
       // Arrange
       const { runtime } = fixture()
       const { baseSha } = await initLocalRepo(runtime, 'feature/alpha')
@@ -133,7 +133,7 @@ describe(
       ])
     })
 
-    it('should_shift_surviving_comment_anchors_and_mark_overwritten_lines_outdated_on_local_refresh', async () => {
+    it('should shift surviving comment anchors and mark overwritten lines outdated on local refresh', async () => {
       // Arrange
       const { runtime } = fixture()
       await initLocalRepo(runtime)
@@ -237,7 +237,7 @@ describe(
   () => {
     const fixture = useTestHarness('cli')
 
-    it('should_create_update_reply_resolve_and_delete_local_comments_as_human_and_agent', async () => {
+    it('should create, update, reply, resolve, and delete local comments as human and agent', async () => {
       // Arrange
       const { runtime } = fixture()
       await initLocalRepo(runtime)
@@ -373,7 +373,7 @@ describe(
       expect(remainingNumbers).not.toContain(generalNum)
     })
 
-    it('should_render_inline_diff_hunks_and_threads_grouped_by_file_or_session_and_close_review', async () => {
+    it('should render inline diff hunks and threads grouped by file or session and close review', async () => {
       // Arrange
       const { runtime } = fixture()
       await initLocalRepo(runtime)
@@ -493,7 +493,7 @@ describe(
   () => {
     const fixture = useTestHarness('cli')
 
-    it('should_relocate_comment_across_files_and_publish_agent_session_while_human_session_stays_draft', async () => {
+    it('should relocate comment across files and publish agent session while human session stays draft', async () => {
       // Arrange
       const { runtime } = fixture()
       await initLocalRepo(runtime)

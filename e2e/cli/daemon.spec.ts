@@ -8,7 +8,7 @@ import { useTestHarness } from '../common/fixtures.js'
 describe('When opening the bundled UI', { tags: ['e2e', 'cli', 'daemon'] }, () => {
   const fixture = useTestHarness('cli')
 
-  it('should_reuse_the_daemon_and_return_a_usable_UI_URL', { tags: ['smoke'] }, async () => {
+  it('should reuse the daemon and return a usable UI URL', { tags: ['smoke'] }, async () => {
     // Arrange
     const { runtime } = fixture()
 
@@ -25,7 +25,7 @@ describe('When opening the bundled UI', { tags: ['e2e', 'cli', 'daemon'] }, () =
     expect(status).toMatchObject({ running: true })
   })
 
-  it('should_serve_health_and_stop_the_application', async () => {
+  it('should serve health and stop the application', async () => {
     // Arrange
     const { runtime } = fixture()
     const base = runtime.endpoint.replace(/\/rpc$/, '')
@@ -41,7 +41,7 @@ describe('When opening the bundled UI', { tags: ['e2e', 'cli', 'daemon'] }, () =
     expect(status).toMatchObject({ running: false })
   })
 
-  it('should_start_a_new_daemon_for_ui_when_none_is_running', async () => {
+  it('should start a new daemon for ui when none is running', async () => {
     // Arrange
     const { runtime } = fixture()
     await runtime.cli(['down'])
