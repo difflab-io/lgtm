@@ -1,7 +1,7 @@
 use std::{
     fs,
     io::{Read, Write},
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 
 use crate::{
@@ -42,20 +42,23 @@ impl WorkspaceService {
                 self.workspace = self.default_workspace.clone();
                 self.custom_root = false;
             } else {
-                self.workspace = Workspace::from_path(candidate)?;
+                if !candidate.is_dir() {
+                    return Err(error("invalidWorkspace", "Choose an existing folder."));
+                }
+                self.workspace = Workspace::from_path(candidate);
                 self.custom_root = true;
             }
         }
         Ok(WorkspaceListing {
-            root: self.root()?.to_string_lossy().into_owned(),
-            entries: self.list("")?,
+            root: self.ensure_root()?.to_string_lossy().into_owned(),
+            entries: self.get_entries("")?,
         })
     }
 
     /// Lists visible entries inside a workspace-relative directory.
-    pub fn list(&self, relative: &str) -> Result<Vec<WorkspaceNode>> {
+    pub fn get_entries(&self, relative: &str) -> Result<Vec<WorkspaceNode>> {
         let directory = self.resolve(relative)?;
-        let root = self.root()?;
+        let root = self.ensure_root()?;
         let mut entries = Vec::new();
         for entry in fs::read_dir(directory)? {
             let entry = entry?;
@@ -89,7 +92,7 @@ impl WorkspaceService {
     }
 
     /// Reads UTF-8 text and revision hash for a workspace-relative file.
-    pub fn read(&self, relative: &str) -> Result<FileContent> {
+    pub fn get_file_content(&self, relative: &str) -> Result<FileContent> {
         if relative.is_empty() {
             return Err(error("unsupported", "Choose a file inside the workspace."));
         }
@@ -157,7 +160,7 @@ impl WorkspaceService {
     }
 
     /// Creates a new directory inside a workspace-relative directory.
-    pub fn create_folder_in(&self, name: &str, parent: &str) -> Result<WorkspaceNode> {
+    pub fn create_folder(&self, name: &str, parent: &str) -> Result<WorkspaceNode> {
         let name = WorkspaceNode::validate_name(name)?;
         fs::create_dir(self.resolve(parent)?.join(name)).map_err(|e| {
             if e.kind() == std::io::ErrorKind::AlreadyExists {
@@ -184,7 +187,7 @@ impl WorkspaceService {
     pub fn rename(&self, relative: &str, name: &str) -> Result<WorkspaceNode> {
         let name = WorkspaceNode::validate_name(name)?;
         let source = self.resolve(relative)?;
-        let root = self.root()?;
+        let root = self.ensure_root()?;
         let original = root.join(relative);
         if fs::symlink_metadata(&original)?.file_type().is_symlink() {
             return Err(error("unsupported", "Linked entries cannot be renamed."));
@@ -265,7 +268,7 @@ impl WorkspaceService {
             ));
         }
         let path = self.resolve(relative)?;
-        if fs::symlink_metadata(self.root()?.join(relative))?
+        if fs::symlink_metadata(self.ensure_root()?.join(relative))?
             .file_type()
             .is_symlink()
         {
@@ -276,7 +279,7 @@ impl WorkspaceService {
 
     // Private -----------------------------------------------------------------
 
-    fn root(&self) -> Result<PathBuf> {
+    fn ensure_root(&self) -> Result<PathBuf> {
         if !self.custom_root {
             fs::create_dir_all(&self.workspace.root)?;
         } else if !self.workspace.root.is_dir() {
@@ -286,19 +289,8 @@ impl WorkspaceService {
     }
 
     fn resolve(&self, relative: &str) -> Result<PathBuf> {
-        let path = Path::new(relative);
-        if path
-            .components()
-            .any(|c| !matches!(c, Component::Normal(_)))
-            || relative.contains('\\')
-            || relative.contains(':')
-        {
-            return Err(error(
-                "outsideWorkspace",
-                "Choose a file inside the workspace.",
-            ));
-        }
-        let root = self.root()?;
+        let path = WorkspaceNode::validate_relative_path(relative)?;
+        let root = self.ensure_root()?;
         let resolved = root.join(path).canonicalize()?;
         if !resolved.starts_with(&root) {
             return Err(error(
@@ -408,8 +400,8 @@ mod tests {
                 fixture.service.open(None).unwrap();
 
                 // Act
-                let list_escape = fixture.service.list("../outside");
-                let read_escape = fixture.service.read("../outside.md");
+                let list_escape = fixture.service.get_entries("../outside");
+                let read_escape = fixture.service.get_file_content("../outside.md");
 
                 // Assert
                 assert_eq!(list_escape.unwrap_err().code, "outsideWorkspace");
@@ -428,8 +420,8 @@ mod tests {
                 symlink(&outside, fixture.default_root().join("escape.md")).unwrap();
 
                 // Act
-                let entries = fixture.service.list("").unwrap();
-                let read_result = fixture.service.read("escape.md");
+                let entries = fixture.service.get_entries("").unwrap();
+                let read_result = fixture.service.get_file_content("escape.md");
 
                 // Assert
                 assert_eq!(entries.len(), 1);
@@ -448,15 +440,12 @@ mod tests {
                 fixture.service.open(None).unwrap();
 
                 // Act
-                let folder = fixture
-                    .service
-                    .create_folder_in("  Research  ", "")
-                    .unwrap();
+                let folder = fixture.service.create_folder("  Research  ", "").unwrap();
                 let file = fixture
                     .service
                     .create_file("Untitled.md", "Research")
                     .unwrap();
-                let duplicate_folder = fixture.service.create_folder_in("Research", "");
+                let duplicate_folder = fixture.service.create_folder("Research", "");
                 let duplicate_file = fixture.service.create_file("Untitled.md", "Research");
 
                 // Assert
@@ -473,18 +462,16 @@ mod tests {
                 // Arrange
                 let mut fixture = WorkspaceFixture::new();
                 fixture.service.open(None).unwrap();
+                let invalid_names = ["", " ", ".", "..", "a/b", "a\\b", "a:b", ".lgtm-save-1"];
 
-                // Act & Assert
-                for invalid in ["", " ", ".", "..", "a/b", "a\\b", "a:b", ".lgtm-save-1"] {
-                    assert_eq!(
-                        fixture
-                            .service
-                            .create_folder_in(invalid, "")
-                            .unwrap_err()
-                            .code,
-                        "invalidName"
-                    );
-                }
+                // Act
+                let codes: Vec<&str> = invalid_names
+                    .into_iter()
+                    .map(|invalid| fixture.service.create_folder(invalid, "").unwrap_err().code)
+                    .collect();
+
+                // Assert
+                assert!(codes.into_iter().all(|code| code == "invalidName"));
             }
         }
 
@@ -522,7 +509,7 @@ mod tests {
                 fixture.service.create_file("Notes.md", "").unwrap();
 
                 // Act
-                let read = fixture.service.read("Notes.md").unwrap();
+                let read = fixture.service.get_file_content("Notes.md").unwrap();
                 let delete_root = fixture.service.delete("");
                 let delete_outside = fixture.service.delete("../outside");
 

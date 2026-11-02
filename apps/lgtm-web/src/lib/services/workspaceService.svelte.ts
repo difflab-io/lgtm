@@ -181,7 +181,7 @@ export class WorkspaceService {
       while (siblings.some((entry) => entry.name === name)) name = `Untitled ${++number}.md`
       created = await this.client.createFile(name, parent)
       this.listed[created.path] = created
-      if (!parent) this.entries = [...this.entries, created]
+      if (!parent) this.entries = this.sortEntries([...this.entries, created])
       else this.refresh(parent)
     } catch (error) {
       this.creationError = errorMessage(error)
@@ -213,20 +213,11 @@ export class WorkspaceService {
     let openNext: WorkspaceNode | undefined
     try {
       if (this.pendingEntry?.path === path) {
-        const created =
-          this.pendingEntry.kind === 'directory'
-            ? await this.client.createFolder(name, this.pendingParent)
-            : await this.client.createFile(name, this.pendingParent)
+        const created = await this.client.createFolder(name, this.pendingParent)
         this.listed[created.path] = created
-        if (!this.pendingParent)
-          this.entries = [...this.entries, created].sort(
-            (a, b) =>
-              Number(a.kind !== 'directory') - Number(b.kind !== 'directory') ||
-              a.name.localeCompare(b.name),
-          )
+        if (!this.pendingParent) this.entries = this.sortEntries([...this.entries, created])
         else this.refresh(this.pendingParent)
         this.pendingEntry = null
-        if (created.kind === 'file') openNext = created
       } else {
         const renamed = await this.client.rename(path, name)
         this.listed[renamed.path] = renamed
@@ -239,7 +230,6 @@ export class WorkspaceService {
           }
           this.clearSelected()
         }
-        this.entries = this.entries.map((entry) => (entry.path === path ? renamed : entry))
         try {
           this.entries = await this.client.list('')
         } catch (error) {
@@ -267,7 +257,6 @@ export class WorkspaceService {
       if (selected && (selected.path === path || selected.path.startsWith(`${path}/`))) {
         this.clearSelected()
       }
-      this.entries = this.entries.filter((entry) => entry.path !== path)
       try {
         this.entries = await this.client.list('')
       } catch (error) {
@@ -296,6 +285,14 @@ export class WorkspaceService {
 
   dispose() {
     this.active = false
+  }
+
+  private sortEntries(entries: WorkspaceNode[]) {
+    return [...entries].sort(
+      (a, b) =>
+        Number(a.kind !== 'directory') - Number(b.kind !== 'directory') ||
+        a.name.localeCompare(b.name),
+    )
   }
 
   private refresh(path: string) {

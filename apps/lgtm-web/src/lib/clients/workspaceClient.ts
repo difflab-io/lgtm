@@ -1,4 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 
 export interface WorkspaceNode {
   path: string
@@ -12,6 +14,7 @@ export interface FileContent {
 }
 
 export interface WorkspaceClient {
+  isDesktop(): boolean
   open(path?: string): Promise<{ root: string; entries: WorkspaceNode[] }>
   pickFolder(): Promise<string | null>
   list(path: string): Promise<WorkspaceNode[]>
@@ -20,9 +23,13 @@ export interface WorkspaceClient {
   createFolder(name: string, parentPath?: string): Promise<WorkspaceNode>
   rename(path: string, name: string): Promise<WorkspaceNode>
   delete(path: string): Promise<void>
+  frontendReady(): Promise<void>
+  finishQuit(): Promise<void>
+  registerQuitHandlers(): Promise<(() => void)[]>
 }
 
 export const workspaceClient: WorkspaceClient = {
+  isDesktop: () => isTauri(),
   open: (path?: string) => {
     if (!isTauri())
       return Promise.reject(new Error('Open LGTM in the desktop app to access a local workspace.'))
@@ -35,6 +42,18 @@ export const workspaceClient: WorkspaceClient = {
   createFolder: (name, parentPath = '') => invoke('workspace_create_folder', { name, parentPath }),
   rename: (relativePath, name) => invoke('workspace_rename', { relativePath, name }),
   delete: (relativePath) => invoke('workspace_delete', { relativePath }),
+  frontendReady: () => invoke('workspace_frontend_ready'),
+  finishQuit: () => invoke('workspace_finish_quit'),
+  registerQuitHandlers: () =>
+    Promise.all([
+      getCurrentWindow().onCloseRequested((event) => {
+        event.preventDefault()
+        void getCurrentWindow().destroy()
+      }),
+      listen('workspace-quit-requested', () => {
+        void invoke('workspace_finish_quit')
+      }),
+    ]),
 }
 
 export function errorMessage(error: unknown): string {

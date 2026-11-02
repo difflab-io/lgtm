@@ -20,12 +20,9 @@ impl Workspace {
         }
     }
 
-    /// Builds a workspace for an existing directory on disk.
-    pub fn from_path(root: PathBuf) -> Result<Self> {
-        if !root.is_dir() {
-            return Err(error("invalidWorkspace", "Choose an existing folder."));
-        }
-        Ok(Self { root })
+    /// Builds a workspace for a chosen directory path without accessing the filesystem.
+    pub fn from_path(root: PathBuf) -> Self {
+        Self { root }
     }
 }
 
@@ -71,6 +68,23 @@ impl WorkspaceNode {
         }
         Ok(name)
     }
+
+    /// Rejects relative paths that contain parent traversal, root prefixes, or drive separators.
+    pub fn validate_relative_path(relative: &str) -> Result<&Path> {
+        let path = Path::new(relative);
+        if path
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_)))
+            || relative.contains('\\')
+            || relative.contains(':')
+        {
+            return Err(error(
+                "outsideWorkspace",
+                "Choose a file inside the workspace.",
+            ));
+        }
+        Ok(path)
+    }
 }
 
 /// UTF-8 file contents and revision hash read from the workspace.
@@ -103,5 +117,62 @@ impl FileContent {
             let _ = write!(&mut hex, "{byte:02x}");
         }
         hex
+    }
+}
+
+// tests -----------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // tests -------------------------------------------------------------------
+
+    mod given_workspace_domain_models {
+        use super::*;
+
+        mod when_validating_names_and_relative_paths {
+            use super::*;
+
+            #[test]
+            fn should_trim_valid_names_and_reject_traversal_or_reserved_names() {
+                // Arrange
+                let valid = "  Notes.md  ";
+                let invalid = ["", " ", ".", "..", "a/b", "a\\b", "a:b", ".lgtm-save-1"];
+
+                // Act
+                let trimmed = WorkspaceNode::validate_name(valid).unwrap();
+                let invalid_codes: Vec<&str> = invalid
+                    .into_iter()
+                    .map(|candidate| WorkspaceNode::validate_name(candidate).unwrap_err().code)
+                    .collect();
+                let traversal = WorkspaceNode::validate_relative_path("../escape");
+
+                // Assert
+                assert_eq!(trimmed, "Notes.md");
+                assert!(invalid_codes.into_iter().all(|code| code == "invalidName"));
+                assert_eq!(traversal.unwrap_err().code, "outsideWorkspace");
+            }
+        }
+
+        mod when_decoding_file_content_from_bytes {
+            use super::*;
+
+            #[test]
+            fn should_decode_utf8_with_sha256_revision_and_reject_non_utf8_bytes() {
+                // Arrange
+                let valid_bytes = b"# Review\n".to_vec();
+                let invalid_bytes = vec![0xff, 0xfe, 0xfd];
+
+                // Act
+                let decoded = FileContent::from_bytes(valid_bytes).unwrap();
+                let rejected = FileContent::from_bytes(invalid_bytes);
+
+                // Assert
+                assert_eq!(decoded.content, "# Review\n");
+                assert_eq!(decoded.revision.len(), 64);
+                assert_eq!(rejected.unwrap_err().code, "unsupported");
+            }
+        }
     }
 }

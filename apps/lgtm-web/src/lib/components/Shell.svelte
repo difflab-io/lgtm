@@ -17,9 +17,6 @@
     SelectItemText,
   } from '@cloudvoyant/helical-svelte'
   import { FilePlus2, FolderPlus, PanelLeft, ChevronDown } from 'lucide-svelte'
-  import { invoke, isTauri } from '@tauri-apps/api/core'
-  import { listen } from '@tauri-apps/api/event'
-  import { getCurrentWindow } from '@tauri-apps/api/window'
   import { errorMessage, workspaceClient, type WorkspaceClient } from '../clients/workspaceClient'
   import { WorkspaceService } from '../services/workspaceService.svelte'
   import WorkspaceExplorer from './WorkspaceExplorer.svelte'
@@ -39,24 +36,15 @@
     let active = true
     const unlisteners: (() => void)[] = []
     void workspace.open()
-    if (isTauri()) {
-      void Promise.all(
-        [
-          getCurrentWindow().onCloseRequested((event) => {
-            event.preventDefault()
-            void getCurrentWindow().destroy()
-          }),
-          listen('workspace-quit-requested', () => {
-            void invoke('workspace_finish_quit')
-          }),
-        ].map(async (registration) => {
-          const stop = await registration
-          if (active) unlisteners.push(stop)
-          else stop()
-        }),
-      )
-        .then(async () => {
-          if (active) await invoke('workspace_frontend_ready')
+    if (client.isDesktop()) {
+      void client
+        .registerQuitHandlers()
+        .then(async (stops) => {
+          for (const stop of stops) {
+            if (active) unlisteners.push(stop)
+            else stop()
+          }
+          if (active) await client.frontendReady()
         })
         .catch((error) => {
           if (active) workspace.openingError = errorMessage(error)
@@ -145,7 +133,7 @@
           <p class="sidebar-message" role="status">Opening workspace…</p>
         {:else if workspace.error}
           <p class="sidebar-message error" role="alert">{workspace.error}</p>
-          {#if isTauri()}<Button variant="text" size="sm" onclick={() => workspace.open()}
+          {#if client.isDesktop()}<Button variant="text" size="sm" onclick={() => workspace.open()}
               >Retry</Button
             >{/if}
         {:else if !workspace.entries.length && !workspace.pendingEntry}

@@ -13,6 +13,7 @@ export interface Workspace {
   destroyed: boolean
   quit: boolean
   emit: (event: string) => Promise<void>
+  createExternalDir: () => Promise<string>
 }
 
 interface CommandArgs {
@@ -49,6 +50,11 @@ export const test = base.extend<{ workspace: Workspace; initialWorkspace: 'empty
         destroyed: false,
         quit: false,
         emit: (event) => emit(page, event),
+        createExternalDir: async () => {
+          const dir = await mkdtemp(join(tmpdir(), 'lgtm-external-repo-'))
+          extraDirs.push(dir)
+          return dir
+        },
       }
       function location(...parts: string[]) {
         const target = resolve(workspace.root, ...parts)
@@ -193,10 +199,61 @@ export const test = base.extend<{ workspace: Workspace; initialWorkspace: 'empty
   ],
 })
 
+export function entry(page: Page, path: string) {
+  return page.locator(`[role="treeitem"][data-value=${JSON.stringify(path)}]`)
+}
+
 export async function createFile(page: Page) {
   const selected = page.locator('[role="treeitem"][aria-selected="true"]')
   const previous = (await selected.count()) ? await selected.getAttribute('data-value') : null
   await page.getByRole('button', { name: 'New file', exact: true }).click()
   await expect.poll(() => selected.getAttribute('data-value')).not.toBe(previous)
   await expect(page.locator('.cm-content')).toBeVisible()
+}
+
+export async function contextAction(page: Page, path: string, action: string) {
+  const parts = path.split('/')
+  for (let depth = 1; depth < parts.length; depth++) {
+    const parent = entry(page, parts.slice(0, depth).join('/'))
+    if ((await parent.getAttribute('aria-expanded')) === 'false') {
+      await parent.getByRole('button', { name: parts[depth - 1]!, exact: true }).click()
+    }
+  }
+  const node = entry(page, path)
+  const control = node.getByRole('button', { name: path.split('/').at(-1)!, exact: true })
+  await ((await control.count()) ? control : node).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: action, exact: action !== 'Rename' }).click()
+}
+
+export async function renameEntry(page: Page, path: string, name: string) {
+  await contextAction(page, path, 'Rename')
+  const input = page.getByRole('textbox', { name: 'Name', exact: true })
+  await expect(input).toBeFocused()
+  await input.fill(name)
+  await input.press('Enter')
+  await expect(input).toHaveCount(0)
+}
+
+export async function createFolder(page: Page, name: string) {
+  await page.getByRole('button', { name: 'New folder', exact: true }).click()
+  const input = page.getByRole('textbox', { name: 'Name', exact: true })
+  await expect(input).toBeFocused()
+  await input.fill(name)
+  await input.press('Enter')
+  await expect(input).toHaveCount(0)
+}
+
+export async function deleteEntry(page: Page, path: string) {
+  await contextAction(page, path, 'Move to Trash')
+  await expect(entry(page, path)).toHaveCount(0)
+}
+
+export async function exists(path: string) {
+  return stat(path).then(
+    () => true,
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return false
+      throw error
+    },
+  )
 }
