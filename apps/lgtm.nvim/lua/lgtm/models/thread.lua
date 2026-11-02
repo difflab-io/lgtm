@@ -21,9 +21,34 @@
 ---@field comments LgtmComment[]
 
 local Thread = {}
-local Private = {}
 
--- Methods ---------------------------------------------------------------------
+local sequence = 0
+
+local function next_id(prefix)
+  sequence = sequence + 1
+  return string.format("%s-%d", prefix, sequence)
+end
+
+local function iso_now()
+  return os.date("!%Y-%m-%dT%H:%M:%SZ")
+end
+
+local function normalize_path(path)
+  if type(path) ~= "string" then
+    return ""
+  end
+  return (vim.trim(path):gsub("^%./", ""))
+end
+
+local function copy_thread(thread)
+  local comments = {}
+  for _, comment in ipairs(thread.comments or {}) do
+    table.insert(comments, vim.tbl_extend("force", {}, comment))
+  end
+  return vim.tbl_extend("force", {}, thread, {
+    comments = comments,
+  })
+end
 
 ---Construct a normalized comment entity.
 ---@param input table
@@ -33,7 +58,7 @@ function Thread.new_comment(input)
   local body = type(input.body) == "string" and vim.trim(input.body) or ""
   assert(body ~= "", "comment body is required")
   local thread_id = assert(input.thread_id, "comment thread_id is required")
-  local now = input.created_at or Private.iso_now()
+  local now = input.created_at or iso_now()
   local state = input.state or "DRAFT"
   assert(
     state == "DRAFT" or state == "PENDING" or state == "PUBLISHED",
@@ -41,7 +66,7 @@ function Thread.new_comment(input)
   )
   local author = type(input.author) == "string" and vim.trim(input.author) or ""
   return {
-    id = input.id or Private.next_id("comment"),
+    id = input.id or next_id("comment"),
     thread_id = tostring(thread_id),
     author = author ~= "" and author or "you",
     body = body,
@@ -51,12 +76,41 @@ function Thread.new_comment(input)
   }
 end
 
+local function build_comments(thread_id, mode, input)
+  local list = {}
+  if type(input.comments) == "table" and #input.comments > 0 then
+    for _, raw in ipairs(input.comments) do
+      local comment_input = vim.tbl_extend("force", {}, raw, {
+        thread_id = thread_id,
+        state = raw.state or (mode == "pr" and "PENDING" or "DRAFT"),
+      })
+      table.insert(list, Thread.new_comment(comment_input))
+    end
+    return list
+  end
+  if type(input.body) == "string" and vim.trim(input.body) ~= "" then
+    table.insert(
+      list,
+      Thread.new_comment({
+        id = input.comment_id,
+        thread_id = thread_id,
+        author = input.author,
+        body = input.body,
+        state = input.state or (mode == "pr" and "PENDING" or "DRAFT"),
+        created_at = input.created_at,
+        updated_at = input.updated_at,
+      })
+    )
+  end
+  return list
+end
+
 ---Construct a normalized review thread entity with at least one comment or initial body.
 ---@param input table
 ---@return LgtmThread
 function Thread.new(input)
   assert(type(input) == "table", "thread input must be a table")
-  local path = Private.normalize_path(input.path)
+  local path = normalize_path(input.path)
   assert(path ~= "", "thread path is required")
   local line = tonumber(input.line)
   assert(line and line >= 1, "thread line must be >= 1")
@@ -68,8 +122,8 @@ function Thread.new(input)
   assert(mode == "local" or mode == "pr", "invalid thread mode: " .. tostring(mode))
   local side = input.side or "RIGHT"
   assert(side == "LEFT" or side == "RIGHT", "invalid thread side: " .. tostring(side))
-  local thread_id = tostring(input.id or Private.next_id("thread"))
-  local comments = Private.build_comments(thread_id, mode, input)
+  local thread_id = tostring(input.id or next_id("thread"))
+  local comments = build_comments(thread_id, mode, input)
   assert(#comments >= 1, "thread must contain at least one comment")
 
   return {
@@ -92,7 +146,7 @@ end
 ---@param resolved boolean
 ---@return LgtmThread
 function Thread.with_resolved(thread, resolved)
-  local copy = Private.copy_thread(thread)
+  local copy = copy_thread(thread)
   copy.resolved = resolved == true
   return copy
 end
@@ -102,7 +156,7 @@ end
 ---@param collapsed boolean
 ---@return LgtmThread
 function Thread.with_collapsed(thread, collapsed)
-  local copy = Private.copy_thread(thread)
+  local copy = copy_thread(thread)
   copy.collapsed = collapsed == true
   return copy
 end
@@ -112,7 +166,7 @@ end
 ---@param reply_input table|string
 ---@return LgtmThread, LgtmComment
 function Thread.with_reply(thread, reply_input)
-  local copy = Private.copy_thread(thread)
+  local copy = copy_thread(thread)
   local payload = type(reply_input) == "string" and { body = reply_input }
     or vim.tbl_extend("force", {}, reply_input or {})
   payload.thread_id = copy.id
@@ -130,13 +184,13 @@ end
 function Thread.with_edited_comment(thread, comment_id, new_body)
   local body = type(new_body) == "string" and vim.trim(new_body) or ""
   assert(body ~= "", "edited comment body is required")
-  local copy = Private.copy_thread(thread)
+  local copy = copy_thread(thread)
   local updated = nil
   for index, comment in ipairs(copy.comments) do
     if comment.id == comment_id then
       updated = vim.tbl_extend("force", {}, comment, {
         body = body,
-        updated_at = Private.iso_now(),
+        updated_at = iso_now(),
       })
       copy.comments[index] = updated
       break
@@ -151,7 +205,7 @@ end
 ---@param comment_id string
 ---@return LgtmThread|nil
 function Thread.without_comment(thread, comment_id)
-  local copy = Private.copy_thread(thread)
+  local copy = copy_thread(thread)
   local kept = {}
   local found = false
   for _, comment in ipairs(copy.comments) do
@@ -186,66 +240,6 @@ function Thread.format_anchor(thread)
     return string.format("%s:%d-%d", thread.path, thread.start_line, thread.line)
   end
   return string.format("%s:%d", thread.path, thread.line)
-end
-
--- Private ---------------------------------------------------------------------
-
-local sequence = 0
-
-function Private.next_id(prefix)
-  sequence = sequence + 1
-  return string.format("%s-%d", prefix, sequence)
-end
-
-function Private.iso_now()
-  return os.date("!%Y-%m-%dT%H:%M:%SZ")
-end
-
-function Private.normalize_path(path)
-  if type(path) ~= "string" then
-    return ""
-  end
-  local trimmed = vim.trim(path):gsub("^%./", "")
-  return trimmed
-end
-
-function Private.build_comments(thread_id, mode, input)
-  local list = {}
-  if type(input.comments) == "table" and #input.comments > 0 then
-    for _, raw in ipairs(input.comments) do
-      local comment_input = vim.tbl_extend("force", {}, raw, {
-        thread_id = thread_id,
-        state = raw.state or (mode == "pr" and "PENDING" or "DRAFT"),
-      })
-      table.insert(list, Thread.new_comment(comment_input))
-    end
-    return list
-  end
-  if type(input.body) == "string" and vim.trim(input.body) ~= "" then
-    table.insert(
-      list,
-      Thread.new_comment({
-        id = input.comment_id,
-        thread_id = thread_id,
-        author = input.author,
-        body = input.body,
-        state = input.state or (mode == "pr" and "PENDING" or "DRAFT"),
-        created_at = input.created_at,
-        updated_at = input.updated_at,
-      })
-    )
-  end
-  return list
-end
-
-function Private.copy_thread(thread)
-  local comments = {}
-  for _, comment in ipairs(thread.comments or {}) do
-    table.insert(comments, vim.tbl_extend("force", {}, comment))
-  end
-  return vim.tbl_extend("force", {}, thread, {
-    comments = comments,
-  })
 end
 
 return Thread

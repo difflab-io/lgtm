@@ -2,8 +2,6 @@ local App = require("lgtm.app")
 
 local M = {}
 
--- Lifecycle -------------------------------------------------------------------
-
 ---Configure LGTM UI scaffolding and load required dependencies.
 function M.setup(opts)
   require("codediff")
@@ -19,8 +17,6 @@ end
 function M.reset(opts)
   return App.reset(opts)
 end
-
--- Methods ---------------------------------------------------------------------
 
 function M.get_mode()
   return App.get_mode()

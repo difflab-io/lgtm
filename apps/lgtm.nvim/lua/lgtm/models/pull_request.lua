@@ -20,9 +20,61 @@
 ---@field files LgtmPullRequestFile[]
 
 local PullRequest = {}
-local Private = {}
 
--- Methods ---------------------------------------------------------------------
+local function extract_author(author)
+  if type(author) == "table" then
+    local raw = author.login or author.name or "unknown"
+    return type(raw) == "string" and vim.trim(raw) or "unknown"
+  end
+  local trimmed = type(author) == "string" and vim.trim(author) or ""
+  return trimmed ~= "" and trimmed or "unknown"
+end
+
+local function normalize_state(state, is_draft)
+  if is_draft == true then
+    return "draft"
+  end
+  local normalized = (type(state) == "string" and vim.trim(state) or ""):lower()
+  if normalized == "draft" then
+    return "draft"
+  end
+  return "open"
+end
+
+local function normalize_description(text)
+  if type(text) ~= "string" then
+    return ""
+  end
+  return (text:gsub("\r\n", "\n"):gsub("%s+$", ""))
+end
+
+local function normalize_files(files)
+  local normalized = {}
+  if type(files) ~= "table" then
+    return normalized
+  end
+  for _, entry in ipairs(files) do
+    if type(entry) == "string" then
+      table.insert(normalized, { path = entry, status = "M" })
+    elseif
+      type(entry) == "table"
+      and type(entry.path) == "string"
+      and vim.trim(entry.path) ~= ""
+    then
+      local raw_status = type(entry.status) == "string" and vim.trim(entry.status) or "M"
+      local status = raw_status:upper():sub(1, 1)
+      if status ~= "A" and status ~= "M" and status ~= "D" and status ~= "R" then
+        status = "M"
+      end
+      table.insert(normalized, {
+        path = vim.trim(entry.path),
+        old_path = type(entry.old_path) == "string" and vim.trim(entry.old_path) or nil,
+        status = status,
+      })
+    end
+  end
+  return normalized
+end
 
 ---Construct and validate a PullRequest model from normalized or `gh pr list` JSON fields.
 ---@param input table
@@ -39,8 +91,8 @@ function PullRequest.new(input)
   assert(source_branch ~= "", "pull request source_branch is required")
   local raw_target = input.target_branch or input.baseRefName or "main"
   local target_branch = type(raw_target) == "string" and vim.trim(raw_target) or "main"
-  local author = Private.extract_author(input.author)
-  local state = Private.normalize_state(input.state, input.isDraft)
+  local author = extract_author(input.author)
+  local state = normalize_state(input.state, input.isDraft)
   local raw_base = input.base_revision or input.baseRefOid or target_branch
   local raw_head = input.head_revision or input.headRefOid or source_branch
   local raw_updated = input.updated_at or input.updatedAt or "just now"
@@ -49,7 +101,7 @@ function PullRequest.new(input)
     id = tostring(input.id or string.format("pr-%d", number)),
     number = number,
     title = title,
-    description = Private.normalize_description(input.description or input.body),
+    description = normalize_description(input.description or input.body),
     author = author,
     source_branch = source_branch,
     target_branch = target_branch,
@@ -59,7 +111,7 @@ function PullRequest.new(input)
     updated_at = type(raw_updated) == "string" and vim.trim(raw_updated) or "just now",
     lines_added = tonumber(input.lines_added or input.additions) or 0,
     lines_removed = tonumber(input.lines_removed or input.deletions) or 0,
-    files = Private.normalize_files(input.files),
+    files = normalize_files(input.files),
   }
 end
 
@@ -117,63 +169,6 @@ function PullRequest.format_preview_lines(pr)
     end
   end
   return lines
-end
-
--- Private ---------------------------------------------------------------------
-
-function Private.extract_author(author)
-  if type(author) == "table" then
-    local raw = author.login or author.name or "unknown"
-    return type(raw) == "string" and vim.trim(raw) or "unknown"
-  end
-  local trimmed = type(author) == "string" and vim.trim(author) or ""
-  return trimmed ~= "" and trimmed or "unknown"
-end
-
-function Private.normalize_state(state, is_draft)
-  if is_draft == true then
-    return "draft"
-  end
-  local normalized = (type(state) == "string" and vim.trim(state) or ""):lower()
-  if normalized == "draft" then
-    return "draft"
-  end
-  return "open"
-end
-
-function Private.normalize_description(text)
-  if type(text) ~= "string" then
-    return ""
-  end
-  return (text:gsub("\r\n", "\n"):gsub("%s+$", ""))
-end
-
-function Private.normalize_files(files)
-  local normalized = {}
-  if type(files) ~= "table" then
-    return normalized
-  end
-  for _, entry in ipairs(files) do
-    if type(entry) == "string" then
-      table.insert(normalized, { path = entry, status = "M" })
-    elseif
-      type(entry) == "table"
-      and type(entry.path) == "string"
-      and vim.trim(entry.path) ~= ""
-    then
-      local raw_status = type(entry.status) == "string" and vim.trim(entry.status) or "M"
-      local status = raw_status:upper():sub(1, 1)
-      if status ~= "A" and status ~= "M" and status ~= "D" and status ~= "R" then
-        status = "M"
-      end
-      table.insert(normalized, {
-        path = vim.trim(entry.path),
-        old_path = type(entry.old_path) == "string" and vim.trim(entry.old_path) or nil,
-        status = status,
-      })
-    end
-  end
-  return normalized
 end
 
 return PullRequest

@@ -6,9 +6,25 @@
 ---@field submitted_at string
 
 local ReviewSubmission = {}
-local Private = {}
 
--- Methods ---------------------------------------------------------------------
+local sequence = 0
+
+local function next_id()
+  sequence = sequence + 1
+  return string.format("review-%d", sequence)
+end
+
+local function normalize_outcome(outcome)
+  local value = (type(outcome) == "string" and vim.trim(outcome) or ""):lower()
+  if value == "" then
+    value = "comment"
+  end
+  assert(
+    value == "comment" or value == "approve" or value == "request_changes",
+    "invalid review outcome: " .. tostring(outcome)
+  )
+  return value
+end
 
 ---Validate and construct an overall PR review submission entity.
 ---@param input table
@@ -17,14 +33,14 @@ function ReviewSubmission.new(input)
   assert(type(input) == "table", "review submission input must be a table")
   local pr_number = tonumber(input.pr_number)
   assert(pr_number and pr_number >= 1, "review submission pr_number must be >= 1")
-  local outcome = Private.normalize_outcome(input.outcome)
+  local outcome = normalize_outcome(input.outcome)
   local body = type(input.body) == "string" and vim.trim(input.body) or ""
   if outcome == "comment" or outcome == "request_changes" then
     assert(body ~= "", string.format("review body is required for %s submissions", outcome))
   end
 
   return {
-    id = tostring(input.id or Private.next_id()),
+    id = tostring(input.id or next_id()),
     pr_number = pr_number,
     outcome = outcome,
     body = body,
@@ -36,34 +52,13 @@ end
 ---@param outcome string
 ---@return string
 function ReviewSubmission.outcome_label(outcome)
-  local normalized = Private.normalize_outcome(outcome)
+  local normalized = normalize_outcome(outcome)
   if normalized == "approve" then
     return "Approve"
   elseif normalized == "request_changes" then
     return "Request Changes"
   end
   return "Comment"
-end
-
--- Private ---------------------------------------------------------------------
-
-local sequence = 0
-
-function Private.next_id()
-  sequence = sequence + 1
-  return string.format("review-%d", sequence)
-end
-
-function Private.normalize_outcome(outcome)
-  local value = (type(outcome) == "string" and vim.trim(outcome) or ""):lower()
-  if value == "" then
-    value = "comment"
-  end
-  assert(
-    value == "comment" or value == "approve" or value == "request_changes",
-    "invalid review outcome: " .. tostring(outcome)
-  )
-  return value
 end
 
 return ReviewSubmission

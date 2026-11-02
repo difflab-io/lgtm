@@ -13,7 +13,7 @@ local function it(_title, fn)
 end
 
 local function make_pr_service()
-  return PrService.new({
+  return PrService({
     seed_prs = {
       {
         number = 101,

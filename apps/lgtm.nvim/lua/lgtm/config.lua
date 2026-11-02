@@ -1,7 +1,5 @@
 local Config = {}
 
--- State -----------------------------------------------------------------------
-
 local defaults = {
   seed_prs = nil,
   keymaps = {
@@ -20,8 +18,6 @@ local defaults = {
 }
 
 local current = vim.deepcopy(defaults)
-
--- Methods ---------------------------------------------------------------------
 
 function Config.setup(opts)
   current = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})

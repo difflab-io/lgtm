@@ -2,13 +2,31 @@ local ReviewSubmission = require("lgtm.models.review_submission")
 local Thread = require("lgtm.models.thread")
 
 local Notifications = {}
-local Private = {}
-
--- State -----------------------------------------------------------------------
 
 local history = {}
 
--- Methods ---------------------------------------------------------------------
+local function resolve_level(level)
+  if type(level) == "number" then
+    return level
+  end
+  if level == "warn" or level == "WARN" then
+    return vim.log.levels.WARN
+  end
+  if level == "error" or level == "ERROR" then
+    return vim.log.levels.ERROR
+  end
+  return vim.log.levels.INFO
+end
+
+local function dispatch_to_notify(message, level, title)
+  local ok, notify = pcall(require, "notify")
+  if ok and type(notify) == "function" then
+    pcall(notify, message, level, {
+      title = title,
+      timeout = 1500,
+    })
+  end
+end
 
 ---Emit a notification through `nvim-notify` and record it in history.
 ---@param message string
@@ -17,7 +35,7 @@ local history = {}
 ---@return table
 function Notifications.notify(message, level, opts)
   opts = opts or {}
-  local resolved_level = Private.resolve_level(level)
+  local resolved_level = resolve_level(level)
   local title = opts.title or "LGTM"
   local entry = {
     message = tostring(message),
@@ -27,7 +45,7 @@ function Notifications.notify(message, level, opts)
     timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
   }
   table.insert(history, entry)
-  Private.dispatch_to_notify(entry.message, resolved_level, title)
+  dispatch_to_notify(entry.message, resolved_level, title)
   return entry
 end
 
@@ -148,31 +166,6 @@ end
 ---Clear recorded notification history.
 function Notifications.clear()
   history = {}
-end
-
--- Private ---------------------------------------------------------------------
-
-function Private.resolve_level(level)
-  if type(level) == "number" then
-    return level
-  end
-  if level == "warn" or level == "WARN" then
-    return vim.log.levels.WARN
-  end
-  if level == "error" or level == "ERROR" then
-    return vim.log.levels.ERROR
-  end
-  return vim.log.levels.INFO
-end
-
-function Private.dispatch_to_notify(message, level, title)
-  local ok, notify = pcall(require, "notify")
-  if ok and type(notify) == "function" then
-    pcall(notify, message, level, {
-      title = title,
-      timeout = 1500,
-    })
-  end
 end
 
 return Notifications

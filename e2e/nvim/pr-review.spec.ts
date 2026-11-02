@@ -217,7 +217,7 @@ for (const profile of profiles) {
           local services = require("lgtm").get_services()
           local pane = require("lgtm.features.threads_pane").get_active()
           local Notifications = require("lgtm.ui.notifications")
-          local lines = vim.api.nvim_buf_get_lines(pane.split.bufnr, 0, -1, false)
+          local lines = vim.api.nvim_buf_get_lines(pane:get_bufnr(), 0, -1, false)
           local pr_threads = services.pr_service:get_threads()
           local local_threads = services.local_service:get_threads()
           return {

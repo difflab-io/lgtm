@@ -1,17 +1,47 @@
+local Object = require("nui.object")
 local n = require("nui-components")
 local Thread = require("lgtm.models.thread")
 
-local LocalReviewService = {}
-LocalReviewService.__index = LocalReviewService
+---@class LgtmLocalReviewService
+local LocalReviewService = Object("LocalReviewService")
 
-local Private = {}
+local function normalize_path(path)
+  if type(path) ~= "string" then
+    return ""
+  end
+  return (vim.trim(path):gsub("^%./", ""))
+end
 
--- State -----------------------------------------------------------------------
+local function sort_threads(threads)
+  table.sort(threads, function(a, b)
+    if a.path == b.path then
+      if a.line == b.line then
+        return a.id < b.id
+      end
+      return a.line < b.line
+    end
+    return a.path < b.path
+  end)
+end
 
----Construct a reactive LocalReviewService managing always-on local review threads.
+local function map_thread(threads, thread_id, transform)
+  local next_threads = {}
+  local found = false
+  for _, thread in ipairs(threads or {}) do
+    if thread.id == thread_id then
+      found = true
+      table.insert(next_threads, transform(thread))
+    else
+      table.insert(next_threads, thread)
+    end
+  end
+  assert(found, "thread not found: " .. tostring(thread_id))
+  return next_threads
+end
+
+---Initialize a reactive LocalReviewService managing always-on local review threads.
 ---@param opts table|nil
----@return table
-function LocalReviewService.new(opts)
+function LocalReviewService:init(opts)
   opts = opts or {}
   local initial_threads = {}
   for _, raw in ipairs(opts.initial_threads or {}) do
@@ -19,19 +49,20 @@ function LocalReviewService.new(opts)
     table.insert(initial_threads, Thread.new(payload))
   end
 
-  local self = setmetatable({
-    state = n.create_signal({
-      threads = initial_threads,
-      selected_thread_id = initial_threads[1] and initial_threads[1].id or nil,
-      active_view = "summary",
-      error = nil,
-    }),
-  }, LocalReviewService)
-
-  return self
+  self.state = n.create_signal({
+    threads = initial_threads,
+    selected_thread_id = initial_threads[1] and initial_threads[1].id or nil,
+    active_view = "summary",
+    error = nil,
+  })
 end
 
--- Methods ---------------------------------------------------------------------
+---Construct a reactive LocalReviewService instance.
+---@param opts table|nil
+---@return LgtmLocalReviewService
+function LocalReviewService.create(opts)
+  return LocalReviewService(opts)
+end
 
 ---Reset all local review threads and view state.
 function LocalReviewService:reset()
@@ -47,7 +78,7 @@ end
 function LocalReviewService:get_threads(opts)
   opts = opts or {}
   local snapshot = self.state:get_value()
-  local normalized_path = opts.path and Private.normalize_path(opts.path) or nil
+  local normalized_path = opts.path and normalize_path(opts.path) or nil
   local include_resolved = opts.include_resolved ~= false
   local list = {}
   for _, thread in ipairs(snapshot.threads) do
@@ -116,7 +147,7 @@ function LocalReviewService:create_thread(input)
   local snapshot = self.state:get_value()
   local next_threads = vim.list_slice(snapshot.threads or {})
   table.insert(next_threads, created)
-  Private.sort_threads(next_threads)
+  sort_threads(next_threads)
   self.state.threads = next_threads
   self.state.selected_thread_id = created.id
   self.state.error = nil
@@ -131,18 +162,14 @@ end
 function LocalReviewService:reply_to_thread(thread_id, body, author)
   local updated_thread = nil
   local created_comment = nil
-  self.state.threads = Private.map_thread(
-    self.state:get_value().threads,
-    thread_id,
-    function(thread)
-      updated_thread, created_comment = Thread.with_reply(thread, {
-        body = body,
-        author = author,
-        state = "DRAFT",
-      })
-      return updated_thread
-    end
-  )
+  self.state.threads = map_thread(self.state:get_value().threads, thread_id, function(thread)
+    updated_thread, created_comment = Thread.with_reply(thread, {
+      body = body,
+      author = author,
+      state = "DRAFT",
+    })
+    return updated_thread
+  end)
   self.state.selected_thread_id = thread_id
   return updated_thread, created_comment
 end
@@ -155,14 +182,10 @@ end
 function LocalReviewService:edit_comment(thread_id, comment_id, body)
   local updated_thread = nil
   local updated_comment = nil
-  self.state.threads = Private.map_thread(
-    self.state:get_value().threads,
-    thread_id,
-    function(thread)
-      updated_thread, updated_comment = Thread.with_edited_comment(thread, comment_id, body)
-      return updated_thread
-    end
-  )
+  self.state.threads = map_thread(self.state:get_value().threads, thread_id, function(thread)
+    updated_thread, updated_comment = Thread.with_edited_comment(thread, comment_id, body)
+    return updated_thread
+  end)
   return updated_thread, updated_comment
 end
 
@@ -202,14 +225,10 @@ end
 ---@return LgtmThread
 function LocalReviewService:toggle_resolved(thread_id)
   local updated_thread = nil
-  self.state.threads = Private.map_thread(
-    self.state:get_value().threads,
-    thread_id,
-    function(thread)
-      updated_thread = Thread.with_resolved(thread, not thread.resolved)
-      return updated_thread
-    end
-  )
+  self.state.threads = map_thread(self.state:get_value().threads, thread_id, function(thread)
+    updated_thread = Thread.with_resolved(thread, not thread.resolved)
+    return updated_thread
+  end)
   return updated_thread
 end
 
@@ -218,14 +237,10 @@ end
 ---@return LgtmThread
 function LocalReviewService:toggle_collapsed(thread_id)
   local updated_thread = nil
-  self.state.threads = Private.map_thread(
-    self.state:get_value().threads,
-    thread_id,
-    function(thread)
-      updated_thread = Thread.with_collapsed(thread, not thread.collapsed)
-      return updated_thread
-    end
-  )
+  self.state.threads = map_thread(self.state:get_value().threads, thread_id, function(thread)
+    updated_thread = Thread.with_collapsed(thread, not thread.collapsed)
+    return updated_thread
+  end)
   return updated_thread
 end
 
@@ -262,43 +277,6 @@ end
 ---Return the threads pane state from `detail` view back to `summary` view.
 function LocalReviewService:close_thread_detail()
   self.state.active_view = "summary"
-end
-
--- Private ---------------------------------------------------------------------
-
-function Private.normalize_path(path)
-  if type(path) ~= "string" then
-    return ""
-  end
-  local trimmed = vim.trim(path):gsub("^%./", "")
-  return trimmed
-end
-
-function Private.sort_threads(threads)
-  table.sort(threads, function(a, b)
-    if a.path == b.path then
-      if a.line == b.line then
-        return a.id < b.id
-      end
-      return a.line < b.line
-    end
-    return a.path < b.path
-  end)
-end
-
-function Private.map_thread(threads, thread_id, transform)
-  local next_threads = {}
-  local found = false
-  for _, thread in ipairs(threads or {}) do
-    if thread.id == thread_id then
-      found = true
-      table.insert(next_threads, transform(thread))
-    else
-      table.insert(next_threads, thread)
-    end
-  end
-  assert(found, "thread not found: " .. tostring(thread_id))
-  return next_threads
 end
 
 return LocalReviewService

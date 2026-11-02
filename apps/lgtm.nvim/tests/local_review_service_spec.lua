@@ -13,7 +13,7 @@ local function it(_title, fn)
 end
 
 local function make_service()
-  return LocalReviewService.new()
+  return LocalReviewService()
 end
 
 -- tests -----------------------------------------------------------------------

@@ -168,7 +168,7 @@ for (const profile of profiles) {
           local ThreadsPane = require("lgtm.features.threads_pane")
           local Notifications = require("lgtm.ui.notifications")
           local pane = ThreadsPane.get_active()
-          local bufnr = pane.split.bufnr
+          local bufnr = pane:get_bufnr()
           local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
           return {
             activeView = lgtm.get_services().local_service.state:get_value().active_view,
@@ -216,7 +216,7 @@ for (const profile of profiles) {
         const collapsedAfterFold = await editor.lua<{ collapsed: boolean; text: string }>(`
           local service = require("lgtm").get_services().local_service
           local pane = require("lgtm.features.threads_pane").get_active()
-          local lines = vim.api.nvim_buf_get_lines(pane.split.bufnr, 0, -1, false)
+          local lines = vim.api.nvim_buf_get_lines(pane:get_bufnr(), 0, -1, false)
           return {
             collapsed = service:get_threads()[1].collapsed,
             text = table.concat(lines, "\\n"),
@@ -230,7 +230,7 @@ for (const profile of profiles) {
         await editor.keys('za')
         await editor.keys('<CR>')
         await editor.wait(
-          'require("lgtm").get_services().local_service.state:get_value().active_view == "detail"',
+          'require("lgtm").get_services().local_service.state:get_value().active_view == "detail" and vim.bo[require("lgtm.features.threads_pane").get_active():get_bufnr() or 0].filetype == "lgtm-thread-detail"',
           'switched to thread-detail-view',
         )
 

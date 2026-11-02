@@ -1,37 +1,6 @@
 local Keymaps = {}
-local Private = {}
 
--- Methods ---------------------------------------------------------------------
-
-function Keymaps.setup(config, actions)
-  local keys = (config and config.keymaps) or {}
-  local specs = Private.build_specs(keys, actions)
-  local ok, wk = pcall(require, "which-key")
-  if ok and type(wk.add) == "function" then
-    wk.add(specs)
-  end
-
-  for _, spec in ipairs(specs) do
-    if type(spec[2]) == "function" then
-      vim.keymap.set(spec.mode or "n", spec[1], spec[2], {
-        silent = true,
-        desc = spec.desc,
-      })
-    end
-  end
-
-  Private.attach_normal_buffer_cr(vim.api.nvim_get_current_buf(), actions)
-  vim.api.nvim_create_autocmd("BufEnter", {
-    group = vim.api.nvim_create_augroup("LgtmBufferKeymaps", { clear = true }),
-    callback = function(ev)
-      Private.attach_normal_buffer_cr(ev.buf, actions)
-    end,
-  })
-end
-
--- Private ---------------------------------------------------------------------
-
-function Private.attach_normal_buffer_cr(bufnr, actions)
+local function attach_normal_buffer_cr(bufnr, actions)
   if not vim.api.nvim_buf_is_valid(bufnr) or vim.bo[bufnr].buftype ~= "" then
     return
   end
@@ -46,7 +15,7 @@ function Private.attach_normal_buffer_cr(bufnr, actions)
   })
 end
 
-function Private.build_specs(keys, actions)
+local function build_specs(keys, actions)
   return {
     {
       keys.prefix,
@@ -133,6 +102,32 @@ function Private.build_specs(keys, actions)
       mode = "n",
     },
   }
+end
+
+function Keymaps.setup(config, actions)
+  local keys = (config and config.keymaps) or {}
+  local specs = build_specs(keys, actions)
+  local ok, wk = pcall(require, "which-key")
+  if ok and type(wk.add) == "function" then
+    wk.add(specs)
+  end
+
+  for _, spec in ipairs(specs) do
+    if type(spec[2]) == "function" then
+      vim.keymap.set(spec.mode or "n", spec[1], spec[2], {
+        silent = true,
+        desc = spec.desc,
+      })
+    end
+  end
+
+  attach_normal_buffer_cr(vim.api.nvim_get_current_buf(), actions)
+  vim.api.nvim_create_autocmd("BufEnter", {
+    group = vim.api.nvim_create_augroup("LgtmBufferKeymaps", { clear = true }),
+    callback = function(ev)
+      attach_normal_buffer_cr(ev.buf, actions)
+    end,
+  })
 end
 
 return Keymaps

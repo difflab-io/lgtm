@@ -1,52 +1,148 @@
+local Object = require("nui.object")
 local n = require("nui-components")
 local PullRequest = require("lgtm.models.pull_request")
 local ReviewSubmission = require("lgtm.models.review_submission")
 local Thread = require("lgtm.models.thread")
 
-local PrService = {}
-PrService.__index = PrService
+---@class LgtmPrService
+local PrService = Object("PrService")
 
-local Private = {}
-
--- State -----------------------------------------------------------------------
-
----Construct a reactive PrService for branch PR discovery, PR-scoped threads, and review submissions.
----@param opts { seed_prs?: table[], pr_fetcher?: fun(branch: string|nil): table[] }|nil
----@return table
-function PrService.new(opts)
-  opts = opts or {}
-  local seed_prs = Private.normalize_prs(opts.seed_prs or {})
-
-  local self = setmetatable({
-    pr_fetcher = opts.pr_fetcher,
-    seed_prs = seed_prs,
-    threads_by_pr = {},
-    reviewed_by_pr = {},
-    submissions_by_pr = {},
-    state = n.create_signal({
-      open_prs = seed_prs,
-      selected_pr = nil,
-      active_tabpage = nil,
-      threads = {},
-      selected_thread_id = nil,
-      active_view = "summary",
-      reviewed_files = {},
-      submissions = {},
-      is_loading = false,
-      error = nil,
-    }),
-  }, PrService)
-
-  return self
+local function normalize_path(path)
+  if type(path) ~= "string" then
+    return ""
+  end
+  return (vim.trim(path):gsub("^%./", ""))
 end
 
--- Methods ---------------------------------------------------------------------
+local function normalize_prs(raw_prs)
+  local list = {}
+  for _, raw in ipairs(raw_prs or {}) do
+    table.insert(list, PullRequest.new(raw))
+  end
+  return list
+end
+
+local function filter_prs_by_branch(prs, branch)
+  if branch == "" then
+    return vim.list_slice(prs or {})
+  end
+  local matched = {}
+  for _, pr in ipairs(prs) do
+    if pr.source_branch == branch or pr.target_branch == branch then
+      table.insert(matched, pr)
+    end
+  end
+  if #matched > 0 then
+    return matched
+  end
+  return vim.list_slice(prs or {})
+end
+
+local function current_git_branch()
+  local output = vim.fn.systemlist({ "git", "rev-parse", "--abbrev-ref", "HEAD" })
+  if vim.v.shell_error ~= 0 or not output[1] then
+    return ""
+  end
+  return vim.trim(output[1])
+end
+
+local function fetch_prs_via_gh(branch)
+  local fields = table.concat({
+    "number",
+    "title",
+    "body",
+    "author",
+    "headRefName",
+    "baseRefName",
+    "state",
+    "isDraft",
+    "baseRefOid",
+    "headRefOid",
+    "updatedAt",
+    "additions",
+    "deletions",
+    "files",
+  }, ",")
+  local cmd = { "gh", "pr", "list", "--state", "open", "--json", fields }
+  if branch ~= "" and branch ~= "HEAD" then
+    table.insert(cmd, "--head")
+    table.insert(cmd, branch)
+  end
+  local raw = vim.fn.system(cmd)
+  if vim.v.shell_error ~= 0 then
+    return {}
+  end
+  local ok, decoded = pcall(vim.json.decode, raw)
+  if not ok or type(decoded) ~= "table" then
+    return {}
+  end
+  return normalize_prs(decoded)
+end
+
+local function sort_threads(threads)
+  table.sort(threads, function(a, b)
+    if a.path == b.path then
+      if a.line == b.line then
+        return a.id < b.id
+      end
+      return a.line < b.line
+    end
+    return a.path < b.path
+  end)
+end
+
+local function map_thread(threads, thread_id, transform)
+  local next_threads = {}
+  local found = false
+  for _, thread in ipairs(threads or {}) do
+    if thread.id == thread_id then
+      found = true
+      table.insert(next_threads, transform(thread))
+    else
+      table.insert(next_threads, thread)
+    end
+  end
+  assert(found, "thread not found: " .. tostring(thread_id))
+  return next_threads
+end
+
+---Initialize a reactive PrService for branch PR discovery, PR-scoped threads, and review submissions.
+---@param opts { seed_prs?: table[], pr_fetcher?: fun(branch: string|nil): table[] }|nil
+function PrService:init(opts)
+  opts = opts or {}
+  local seed_prs = normalize_prs(opts.seed_prs or {})
+
+  self.pr_fetcher = opts.pr_fetcher
+  self.seed_prs = seed_prs
+  self.threads_by_pr = {}
+  self.reviewed_by_pr = {}
+  self.submissions_by_pr = {}
+  self.state = n.create_signal({
+    open_prs = seed_prs,
+    selected_pr = nil,
+    active_tabpage = nil,
+    threads = {},
+    selected_thread_id = nil,
+    active_view = "summary",
+    reviewed_files = {},
+    submissions = {},
+    is_loading = false,
+    error = nil,
+  })
+end
+
+---Construct a reactive PrService instance.
+---@param opts { seed_prs?: table[], pr_fetcher?: fun(branch: string|nil): table[] }|nil
+---@return LgtmPrService
+function PrService.create(opts)
+  return PrService(opts)
+end
 
 ---Replace the configured seed PRs and refresh `state.open_prs`.
 ---@param raw_prs table[]
 ---@return LgtmPullRequest[]
 function PrService:set_seed_prs(raw_prs)
-  self.seed_prs = Private.normalize_prs(raw_prs or {})
+  self.seed_prs = normalize_prs(raw_prs or {})
   self.state.open_prs = vim.list_slice(self.seed_prs)
   return self.state:get_value().open_prs
 end
@@ -78,17 +174,17 @@ function PrService:get_open_prs(branch, callback)
 
   local resolved_branch = type(branch) == "string" and vim.trim(branch) or ""
   if resolved_branch == "" then
-    resolved_branch = Private.current_git_branch()
+    resolved_branch = current_git_branch()
   end
 
   local ok, result = pcall(function()
     if self.pr_fetcher then
-      return Private.normalize_prs(self.pr_fetcher(resolved_branch) or {})
+      return normalize_prs(self.pr_fetcher(resolved_branch) or {})
     end
     if #self.seed_prs > 0 then
-      return Private.filter_prs_by_branch(self.seed_prs, resolved_branch)
+      return filter_prs_by_branch(self.seed_prs, resolved_branch)
     end
-    return Private.fetch_prs_via_gh(resolved_branch)
+    return fetch_prs_via_gh(resolved_branch)
   end)
 
   self.state.is_loading = false
@@ -185,7 +281,7 @@ end
 function PrService:get_threads(opts)
   opts = opts or {}
   local snapshot = self.state:get_value()
-  local normalized_path = opts.path and Private.normalize_path(opts.path) or nil
+  local normalized_path = opts.path and normalize_path(opts.path) or nil
   local include_resolved = opts.include_resolved ~= false
   local list = {}
   for _, thread in ipairs(snapshot.threads) do
@@ -259,7 +355,7 @@ function PrService:create_thread(input)
   local created = Thread.new(payload)
   local next_threads = vim.list_slice(self.state:get_value().threads or {})
   table.insert(next_threads, created)
-  Private.sort_threads(next_threads)
+  sort_threads(next_threads)
   self.threads_by_pr[selected_pr.number] = next_threads
   self.state.threads = next_threads
   self.state.selected_thread_id = created.id
@@ -276,18 +372,14 @@ function PrService:reply_to_thread(thread_id, body, author)
   local selected_pr = assert(self.state:get_value().selected_pr, "no active pull request selected")
   local updated_thread = nil
   local created_comment = nil
-  local next_threads = Private.map_thread(
-    self.state:get_value().threads,
-    thread_id,
-    function(thread)
-      updated_thread, created_comment = Thread.with_reply(thread, {
-        body = body,
-        author = author,
-        state = "PENDING",
-      })
-      return updated_thread
-    end
-  )
+  local next_threads = map_thread(self.state:get_value().threads, thread_id, function(thread)
+    updated_thread, created_comment = Thread.with_reply(thread, {
+      body = body,
+      author = author,
+      state = "PENDING",
+    })
+    return updated_thread
+  end)
   self.threads_by_pr[selected_pr.number] = next_threads
   self.state.threads = next_threads
   self.state.selected_thread_id = thread_id
@@ -303,14 +395,10 @@ function PrService:edit_comment(thread_id, comment_id, body)
   local selected_pr = assert(self.state:get_value().selected_pr, "no active pull request selected")
   local updated_thread = nil
   local updated_comment = nil
-  local next_threads = Private.map_thread(
-    self.state:get_value().threads,
-    thread_id,
-    function(thread)
-      updated_thread, updated_comment = Thread.with_edited_comment(thread, comment_id, body)
-      return updated_thread
-    end
-  )
+  local next_threads = map_thread(self.state:get_value().threads, thread_id, function(thread)
+    updated_thread, updated_comment = Thread.with_edited_comment(thread, comment_id, body)
+    return updated_thread
+  end)
   self.threads_by_pr[selected_pr.number] = next_threads
   self.state.threads = next_threads
   return updated_thread, updated_comment
@@ -355,14 +443,10 @@ end
 function PrService:toggle_resolved(thread_id)
   local selected_pr = assert(self.state:get_value().selected_pr, "no active pull request selected")
   local updated_thread = nil
-  local next_threads = Private.map_thread(
-    self.state:get_value().threads,
-    thread_id,
-    function(thread)
-      updated_thread = Thread.with_resolved(thread, not thread.resolved)
-      return updated_thread
-    end
-  )
+  local next_threads = map_thread(self.state:get_value().threads, thread_id, function(thread)
+    updated_thread = Thread.with_resolved(thread, not thread.resolved)
+    return updated_thread
+  end)
   self.threads_by_pr[selected_pr.number] = next_threads
   self.state.threads = next_threads
   return updated_thread
@@ -374,14 +458,10 @@ end
 function PrService:toggle_collapsed(thread_id)
   local selected_pr = assert(self.state:get_value().selected_pr, "no active pull request selected")
   local updated_thread = nil
-  local next_threads = Private.map_thread(
-    self.state:get_value().threads,
-    thread_id,
-    function(thread)
-      updated_thread = Thread.with_collapsed(thread, not thread.collapsed)
-      return updated_thread
-    end
-  )
+  local next_threads = map_thread(self.state:get_value().threads, thread_id, function(thread)
+    updated_thread = Thread.with_collapsed(thread, not thread.collapsed)
+    return updated_thread
+  end)
   self.threads_by_pr[selected_pr.number] = next_threads
   self.state.threads = next_threads
   return updated_thread
@@ -406,7 +486,7 @@ end
 function PrService:toggle_file_reviewed(path)
   local snapshot = self.state:get_value()
   local selected_pr = assert(snapshot.selected_pr, "no active pull request selected")
-  local normalized = Private.normalize_path(path)
+  local normalized = normalize_path(path)
   assert(normalized ~= "", "file path is required")
   local next_reviewed = vim.tbl_extend("force", {}, snapshot.reviewed_files)
   local is_reviewed = not next_reviewed[normalized]
@@ -488,107 +568,6 @@ function PrService:submit_review(input, callback)
     callback(submission, nil)
   end
   return submission
-end
-
--- Private ---------------------------------------------------------------------
-
-function Private.normalize_path(path)
-  if type(path) ~= "string" then
-    return ""
-  end
-  return vim.trim(path):gsub("^%./", "")
-end
-
-function Private.normalize_prs(raw_prs)
-  local list = {}
-  for _, raw in ipairs(raw_prs or {}) do
-    table.insert(list, PullRequest.new(raw))
-  end
-  return list
-end
-
-function Private.filter_prs_by_branch(prs, branch)
-  if branch == "" then
-    return vim.list_slice(prs or {})
-  end
-  local matched = {}
-  for _, pr in ipairs(prs) do
-    if pr.source_branch == branch or pr.target_branch == branch then
-      table.insert(matched, pr)
-    end
-  end
-  if #matched > 0 then
-    return matched
-  end
-  return vim.list_slice(prs or {})
-end
-
-function Private.current_git_branch()
-  local output = vim.fn.systemlist({ "git", "rev-parse", "--abbrev-ref", "HEAD" })
-  if vim.v.shell_error ~= 0 or not output[1] then
-    return ""
-  end
-  return vim.trim(output[1])
-end
-
-function Private.fetch_prs_via_gh(branch)
-  local fields = table.concat({
-    "number",
-    "title",
-    "body",
-    "author",
-    "headRefName",
-    "baseRefName",
-    "state",
-    "isDraft",
-    "baseRefOid",
-    "headRefOid",
-    "updatedAt",
-    "additions",
-    "deletions",
-    "files",
-  }, ",")
-  local cmd = { "gh", "pr", "list", "--state", "open", "--json", fields }
-  if branch ~= "" and branch ~= "HEAD" then
-    table.insert(cmd, "--head")
-    table.insert(cmd, branch)
-  end
-  local raw = vim.fn.system(cmd)
-  if vim.v.shell_error ~= 0 then
-    return {}
-  end
-  local ok, decoded = pcall(vim.json.decode, raw)
-  if not ok or type(decoded) ~= "table" then
-    return {}
-  end
-  return Private.normalize_prs(decoded)
-end
-
-function Private.sort_threads(threads)
-  table.sort(threads, function(a, b)
-    if a.path == b.path then
-      if a.line == b.line then
-        return a.id < b.id
-      end
-      return a.line < b.line
-    end
-    return a.path < b.path
-  end)
-end
-
-function Private.map_thread(threads, thread_id, transform)
-  local next_threads = {}
-  local found = false
-  for _, thread in ipairs(threads or {}) do
-    if thread.id == thread_id then
-      found = true
-      table.insert(next_threads, transform(thread))
-    else
-      table.insert(next_threads, thread)
-    end
-  end
-  assert(found, "thread not found: " .. tostring(thread_id))
-  return next_threads
 end
 
 return PrService

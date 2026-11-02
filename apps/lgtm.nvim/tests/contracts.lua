@@ -43,6 +43,7 @@ local function should_load_all_plugin_modules_and_pass_headless_unit_specs()
   require("models_spec").run()
   require("local_review_service_spec").run()
   require("pr_service_spec").run()
+  require("ui_components_spec").run()
 
   vim.cmd("runtime plugin/lgtm.lua")
   require("lgtm").setup()
