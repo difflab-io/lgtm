@@ -1,0 +1,34 @@
+[package]
+name = "lgtm-desktop"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "LGTM desktop application shell and local workspace service."
+license = "MIT"
+publish = false
+
+[lib]
+name = "premise_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.6.3", features = [] }
+
+[dependencies]
+rfd = "0.15"
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+tauri = { version = "=2.11.6", features = [] }
+trash = "=5.2.9"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

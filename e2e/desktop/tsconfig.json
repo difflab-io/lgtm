@@ -1,0 +1,5 @@
+{
+  "extends": "../../apps/lgtm-web/tsconfig.json",
+  "compilerOptions": { "types": ["bun", "vite/client"], "noUnusedLocals": true },
+  "include": ["./**/*.ts"]
+}

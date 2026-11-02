@@ -1,0 +1,50 @@
+[tools]
+bun = "1.4.2"
+
+[tasks.install]
+description = "Install the pinned Playwright browser engines"
+depends = ["//:install"]
+dir = "{{config_root}}/../.."
+run = '''
+set -eu
+if [ "$(uname -s)" = "Linux" ] && command -v apt-get >/dev/null 2>&1; then
+  bunx --no-install playwright install --with-deps chromium webkit
+else
+  bunx --no-install playwright install chromium webkit
+fi
+'''
+
+[tasks.test]
+description = "Run desktop workspace and file explorer browser journeys"
+depends = ["install"]
+dir = "{{config_root}}/../.."
+run = "bunx --no-install playwright test --config e2e/desktop/playwright.config.ts"
+
+[tasks.smoke]
+description = "Run representative desktop workspace and file explorer journeys"
+depends = ["install"]
+dir = "{{config_root}}/../.."
+run = "bunx --no-install playwright test --config e2e/desktop/playwright.config.ts --grep @smoke"
+
+[tasks.list]
+description = "List desktop browser journeys without running them"
+depends = ["//:install"]
+dir = "{{config_root}}/../.."
+run = "bunx --no-install playwright test --config e2e/desktop/playwright.config.ts --list"
+
+[tasks.lint]
+description = "Lint and type-check desktop E2E sources"
+depends = ["//:install", "//apps/lgtm-web:build"]
+dir = "{{config_root}}/../.."
+run = [
+  "bunx --no-install eslint e2e/desktop",
+  "bunx --no-install tsc --project e2e/desktop/tsconfig.json",
+]
+
+[tasks.format]
+dir = "{{config_root}}/../.."
+run = "bunx --no-install prettier --write e2e/desktop"
+
+[tasks."format:check"]
+dir = "{{config_root}}/../.."
+run = "bunx --no-install prettier --check e2e/desktop"

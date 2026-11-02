@@ -16,27 +16,55 @@ workspace:
           template: cloudvoyant/premise-cargo:premise-clap-cli
           path: apps/lgtm-cli
           ci:
-              check_platforms: [linux, macos]
+            check_platforms:
+                - linux
+                - macos
           answers:
             name: lgtm-cli
-        - name: lgtm-web
-          template: cloudvoyant/premise-bun:premise-sveltekit-app
-          path: apps/lgtm-web
+        - name: lgtm-desktop
+          template: cloudvoyant/premise-cargo:premise-tauri-app
+          path: apps/lgtm-desktop
           ci:
-              check_platforms: [linux]
+            check_platforms:
+                - linux
+                - macos
+                - windows
+            release_platforms:
+                - linux
+                - macos
+                - windows
           answers:
-            name: lgtm-web
+            identifier: com.lgtm.desktop
+            name: lgtm-desktop
         - name: lgtm-forge
           template: cloudvoyant/premise-cargo:premise-rust-lib
           path: apps/lgtm-forge
           ci:
-              check_platforms: [linux]
+            check_platforms:
+                - linux
           answers:
             name: lgtm-forge
+        - name: lgtm-web
+          template: cloudvoyant/premise-bun:premise-sveltekit-app
+          path: apps/lgtm-web
+          ci:
+            check_platforms:
+                - linux
+          answers:
+            name: lgtm-web
         - name: lgtm-db
           template: cloudvoyant/premise-cargo:premise-rust-lib
           path: libs/lgtm-db
           ci:
-              check_platforms: [linux]
+            check_platforms:
+                - linux
           answers:
             name: lgtm-db
+        - name: lgtm-ui
+          template: cloudvoyant/premise-bun:premise-ts-lib
+          path: libs/lgtm-ui
+          ci:
+            check_platforms:
+                - linux
+          answers:
+            name: lgtm-ui
