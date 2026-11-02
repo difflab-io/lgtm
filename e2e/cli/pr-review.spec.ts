@@ -85,22 +85,12 @@ describe(
       // Arrange
       const { runtime, github } = fixture()
       const { prNumber, filePath } = await setupPrCheckout(runtime, github)
-      await runtime.json(['review', 'new'])
 
-      // Act
-      const humanComment = await runtime.json([
-        'comment',
-        'new',
-        'Verify changed line behavior',
-        '--file',
-        filePath,
-        '--line',
-        '2',
-      ])
+      // Act 1: comment directly on the remote PR without calling review new first
       const agentComment = await runtime.json([
         'comment',
         'new',
-        'Check context range invariants',
+        'Ensure the context range invariants across lines 3 through 5 hold when keys are reordered.',
         '--file',
         filePath,
         '--start-line',
@@ -110,15 +100,38 @@ describe(
         '--as',
         'anthropic/claude-sonnet-4-5',
       ])
-      const humanNum = (humanComment.comment as { number: number }).number
       const agentNum = (agentComment.comment as { number: number }).number
+
+      // Act 2: open a draft session, add a draft comment, and verify replies to draft comments are rejected until published
+      await runtime.json(['review', 'new'])
+      const humanComment = await runtime.json([
+        'comment',
+        'new',
+        'Please verify that the updated line 2 configuration value matches our production default.',
+        '--file',
+        filePath,
+        '--line',
+        '2',
+      ])
+      const humanNum = (humanComment.comment as { number: number }).number
+
+      const draftReplyAttempt = await runtime.cli([
+        'comment',
+        'new',
+        'Attempting to reply to a comment in an unpublished draft session must be rejected.',
+        '--reply-to',
+        String(humanNum),
+        '--as',
+        'anthropic/claude-sonnet-4-5',
+        '--json',
+      ])
 
       const updatedHuman = await runtime.json([
         'comment',
         'update',
         String(humanNum),
         '--body',
-        'Verify changed line behavior (updated)',
+        'Please verify that the updated line 2 configuration value matches our production default before release.',
         '--resolved',
         'true',
       ])
@@ -140,17 +153,22 @@ describe(
       )
 
       // Assert
+      expect(draftReplyAttempt.code).not.toBe(0)
+      expect(JSON.parse(draftReplyAttempt.stdout).error.code).toBe('invalid_argument')
+
       expect(shownBeforeDelete.code).toBe(0)
       expect(shownAfterDelete.code).toBe(0)
       expect(humanComment.comment).toMatchObject({
         number: humanNum,
-        body: 'Verify changed line behavior',
+        body: 'Please verify that the updated line 2 configuration value matches our production default.',
         author: { kind: 'human' },
       })
+      expect((humanComment.comment as { session_id: string | null }).session_id).toBeTruthy()
       expect((humanComment.comment as { forge_id: string | null }).forge_id).toBeTruthy()
       expect(agentComment.comment).toMatchObject({
         number: agentNum,
-        body: 'Check context range invariants',
+        session_id: null,
+        body: 'Ensure the context range invariants across lines 3 through 5 hold when keys are reordered.',
         author: {
           name: 'claude-sonnet-4-5',
           kind: 'agent',
@@ -160,12 +178,14 @@ describe(
       })
       expect(updatedHuman.comment).toMatchObject({
         number: humanNum,
-        body: 'Verify changed line behavior (updated)',
+        body: 'Please verify that the updated line 2 configuration value matches our production default before release.',
         resolved: true,
       })
 
       const remoteAgentComment = remoteCommentsBeforeDelete.find((c) =>
-        String(c.body).includes('Check context range invariants'),
+        String(c.body).includes(
+          'Ensure the context range invariants across lines 3 through 5 hold when keys are reordered.',
+        ),
       )
       expect(remoteAgentComment).toBeDefined()
       expect(String(remoteAgentComment!.body)).toContain(
@@ -173,14 +193,18 @@ describe(
       )
 
       const remoteHumanComment = remoteCommentsBeforeDelete.find((c) =>
-        String(c.body).includes('Verify changed line behavior (updated)'),
+        String(c.body).includes(
+          'Please verify that the updated line 2 configuration value matches our production default before release.',
+        ),
       )
       expect(remoteHumanComment).toBeDefined()
 
       expect(deleted).toEqual({ deleted_number: agentNum })
       expect(
         remoteCommentsAfterDelete.some((c) =>
-          String(c.body).includes('Check context range invariants'),
+          String(c.body).includes(
+            'Ensure the context range invariants across lines 3 through 5 hold when keys are reordered.',
+          ),
         ),
       ).toBe(false)
     })

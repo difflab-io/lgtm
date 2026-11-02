@@ -101,7 +101,9 @@ fn format_review_detail_transcript(detail: &lgtm_forge::services::ReviewDetail) 
             out,
             "  - C{} [session={}] by {} ({kind}) reply_to={:?} resolved={} outdated={} anchor=[{anchor_desc}]: {}",
             c.number,
-            c.session_id,
+            c.session_id
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "direct".to_owned()),
             c.author.name,
             c.reply_to_number,
             c.resolved,
@@ -465,7 +467,7 @@ mod given_an_active_local_review {
                 "extracted line in src/lib.rs must be marked outdated"
             );
 
-            // Act 2 (And the agent relocates the comment anchor to src/tax.rs:3, replies in its own overlapping session, and closes its session)
+            // Act 2 (And the agent relocates the comment anchor to src/tax.rs:3, cannot reply to the human's draft comment, opens its own overlapping session to comment, and closes its session)
             let relocated = ctx
                 .service
                 .update_comment(UpdateCommentInput {
@@ -481,16 +483,42 @@ mod given_an_active_local_review {
                 })
                 .await
                 .unwrap();
-            let agent_reply = ctx
+            let draft_reply_err = ctx
                 .service
                 .create_comment(CreateCommentInput {
                     git_dir: ctx.git_dir.clone(),
                     review_selector: Some(review.name.clone()),
-                    body: "Moved to src/tax.rs:2-3 with non-negative assertion".to_owned(),
+                    body: "Attempting to reply before the human session is published should be rejected."
+                        .to_owned(),
                     file_path: None,
                     start_line: None,
                     line: None,
                     reply_to: Some(root_comment.number),
+                    local: true,
+                    as_agent: Some("anthropic/claude-sonnet-4-5".into()),
+                })
+                .await
+                .unwrap_err();
+            assert!(
+                draft_reply_err.to_string().contains("draft"),
+                "unexpected error: {draft_reply_err}"
+            );
+            let (_, agent_draft_session) = ctx
+                .service
+                .create_review(&ctx.git_dir, true, Some("anthropic/claude-sonnet-4-5"))
+                .await
+                .unwrap();
+            let agent_comment = ctx
+                .service
+                .create_comment(CreateCommentInput {
+                    git_dir: ctx.git_dir.clone(),
+                    review_selector: Some(review.name.clone()),
+                    body: "I extracted compute_tax into src/tax.rs:2-3 and added the non-negative assertion."
+                        .to_owned(),
+                    file_path: None,
+                    start_line: None,
+                    line: None,
+                    reply_to: None,
                     local: true,
                     as_agent: Some("anthropic/claude-sonnet-4-5".into()),
                 })
@@ -503,7 +531,7 @@ mod given_an_active_local_review {
                     Some(&review.name),
                     true,
                     ReviewOutcome::Comment,
-                    Some("Addressed extraction and relocated anchor".to_owned()),
+                    Some("Addressed the compute_tax extraction and relocated the original review anchor.".to_owned()),
                     Some("anthropic/claude-sonnet-4-5"),
                 )
                 .await
@@ -538,7 +566,8 @@ mod given_an_active_local_review {
             assert_eq!(anchor.original_line, 6);
             assert_eq!(anchor.original_commit_sha, initial_snap_sha);
 
-            assert_ne!(agent_reply.session_id, human_session.id);
+            assert_eq!(agent_comment.session_id, Some(agent_draft_session.id));
+            assert_ne!(agent_comment.session_id, Some(human_session.id));
             assert_eq!(published_agent_session.state, SessionState::Published);
 
             let human_sess_after = final_detail

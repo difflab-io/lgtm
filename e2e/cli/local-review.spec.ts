@@ -145,7 +145,7 @@ describe(
       const betaComment = await runtime.json([
         'comment',
         'new',
-        'Beta return value will be overwritten',
+        'We should replace the hardcoded 20 in beta() with a named configuration constant.',
         '--file',
         'src/lib.rs',
         '--line',
@@ -155,7 +155,7 @@ describe(
       const gammaComment = await runtime.json([
         'comment',
         'new',
-        'Gamma signature will shift down by 2 lines',
+        'Document the return range invariants on the gamma() function signature.',
         '--file',
         'src/lib.rs',
         '--line',
@@ -242,23 +242,12 @@ describe(
       const { runtime } = fixture()
       await initLocalRepo(runtime)
       await runtime.write('src/lib.rs', EDITED_LIB_RS)
-      await runtime.json(['review', 'new', '--local'])
 
-      // Act
-      const inline = await runtime.json([
-        'comment',
-        'new',
-        'Inline finding on alpha',
-        '--file',
-        'src/lib.rs',
-        '--line',
-        '2',
-        '--local',
-      ])
+      // Act 1: comment and reply directly on the local review without opening a session first
       const range = await runtime.json([
         'comment',
         'new',
-        'Range finding across beta function',
+        'We should verify that beta() handles negative inputs before scaling the return value.',
         '--file',
         'src/lib.rs',
         '--start-line',
@@ -269,20 +258,63 @@ describe(
         '--as',
         'claude-sonnet-4-5',
       ])
+      const rangeNum = (range.comment as { number: number }).number
+      const directReply = await runtime.json([
+        'comment',
+        'new',
+        'Good catch; I will add a non-negative guard in beta() right after this pass.',
+        '--reply-to',
+        String(rangeNum),
+        '--local',
+      ])
+
+      // Act 2: open a draft session, add draft comments, verify replies to draft comments are rejected until published
+      await runtime.json(['review', 'new', '--local'])
+      const inline = await runtime.json([
+        'comment',
+        'new',
+        'Consider exposing the alpha() base offset as a public constant for callers.',
+        '--file',
+        'src/lib.rs',
+        '--line',
+        '2',
+        '--local',
+      ])
       const general = await runtime.json([
         'comment',
         'new',
-        'General architectural note',
+        'Overall module layout looks clean, Pending one naming pass on the helper constants.',
         '--local',
       ])
       const inlineNum = (inline.comment as { number: number }).number
-      const rangeNum = (range.comment as { number: number }).number
       const generalNum = (general.comment as { number: number }).number
+
+      const draftReplyAttempt = await runtime.cli([
+        'comment',
+        'new',
+        'Attempting to reply to a comment in a draft session must be rejected.',
+        '--reply-to',
+        String(inlineNum),
+        '--local',
+        '--as',
+        'claude-sonnet-4-5',
+        '--json',
+      ])
+
+      await runtime.json([
+        'review',
+        'close',
+        '--local',
+        '--with',
+        'comment',
+        '--body',
+        'Published initial human review session on src/lib.rs.',
+      ])
 
       const reply = await runtime.json([
         'comment',
         'new',
-        'Addressed in follow-up',
+        'I extracted ALPHA_BASE_OFFSET as a public constant and updated alpha() to return it.',
         '--reply-to',
         String(inlineNum),
         '--local',
@@ -294,7 +326,7 @@ describe(
         'update',
         String(inlineNum),
         '--body',
-        'Updated inline finding on alpha',
+        'Consider exposing the alpha() base offset as a public constant for external callers.',
         '--resolved',
         'true',
         '--local',
@@ -304,20 +336,34 @@ describe(
       const shownText = await runtime.cli(['review', 'show', '--local'])
 
       // Assert
+      expect(draftReplyAttempt.code).not.toBe(0)
+      expect(JSON.parse(draftReplyAttempt.stdout).error.code).toBe('invalid_argument')
+
       expect(shownText.code).toBe(0)
+      expect(shownText.stdout).toContain('    ↳ claude-sonnet-4-5 (agent)')
+      expect(shownText.stdout).toContain(
+        'I extracted ALPHA_BASE_OFFSET as a public constant and updated alpha() to return it.',
+      )
       expect(range.comment).toMatchObject({
         number: rangeNum,
-        body: 'Range finding across beta function',
+        session_id: null,
+        body: 'We should verify that beta() handles negative inputs before scaling the return value.',
         author: { name: 'claude-sonnet-4-5', kind: 'agent' },
         anchor: { file_path: 'src/lib.rs', start_line: 5, line: 7 },
       })
+      expect(directReply.comment).toMatchObject({
+        session_id: null,
+        reply_to_number: rangeNum,
+        author: { name: 'Ada Lovelace', kind: 'human' },
+      })
       expect(reply.comment).toMatchObject({
+        session_id: null,
         reply_to_number: inlineNum,
         author: { name: 'claude-sonnet-4-5', kind: 'agent' },
       })
       expect(updated.comment).toMatchObject({
         number: inlineNum,
-        body: 'Updated inline finding on alpha',
+        body: 'Consider exposing the alpha() base offset as a public constant for external callers.',
         resolved: true,
       })
       expect(deleted).toEqual({ deleted_number: generalNum })
@@ -338,17 +384,18 @@ describe(
       const alphaComment = await runtime.json([
         'comment',
         'new',
-        'Alpha return constant check',
+        'Verify that alpha() returns the expected baseline constant of 10.',
         '--file',
         'src/lib.rs',
         '--line',
         '2',
         '--local',
       ])
+      await runtime.json(['review', 'new', '--local', '--as', 'claude-sonnet-4-5'])
       const betaComment = await runtime.json([
         'comment',
         'new',
-        'Beta range check',
+        'Ensure the beta() range implementation stays aligned with the alpha() baseline.',
         '--file',
         'src/lib.rs',
         '--start-line',
@@ -401,7 +448,7 @@ describe(
         '--with',
         'approve',
         '--body',
-        'Local review approved',
+        'Approved local review after verifying alpha() and beta() implementations.',
       ])
 
       // Assert
@@ -412,8 +459,12 @@ describe(
       expect(fileText.stdout).toContain('── lines 5-7 • unresolved')
       expect(fileText.stdout).toContain('+  2 │     10')
       expect(fileText.stdout).toContain('+  6 │     20')
-      expect(fileText.stdout).toContain('Alpha return constant check')
-      expect(fileText.stdout).toContain('Beta range check')
+      expect(fileText.stdout).toContain(
+        'Verify that alpha() returns the expected baseline constant of 10.',
+      )
+      expect(fileText.stdout).toContain(
+        'Ensure the beta() range implementation stays aligned with the alpha() baseline.',
+      )
 
       expect(sessionText.code).toBe(0)
       expect(sessionText.stdout).toContain('══ Session #1 • Ada Lovelace')
@@ -430,7 +481,7 @@ describe(
       expect(closed.session).toMatchObject({
         state: 'published',
         outcome: 'approve',
-        body: 'Local review approved',
+        body: 'Approved local review after verifying alpha() and beta() implementations.',
       })
     })
   },
@@ -447,6 +498,7 @@ describe(
       const { runtime } = fixture()
       await initLocalRepo(runtime)
       await runtime.write('src/lib.rs', EDITED_LIB_RS)
+      await runtime.json(['review', 'new', '--local'])
       const created = await runtime.json([
         'review',
         'new',
@@ -460,7 +512,7 @@ describe(
       const humanComment = await runtime.json([
         'comment',
         'new',
-        'Extract beta into its own module',
+        'Please extract beta() into a dedicated src/beta.rs module so its logic is isolated.',
         '--file',
         'src/lib.rs',
         '--line',
@@ -469,7 +521,7 @@ describe(
       ])
       const commentNum = (humanComment.comment as { number: number }).number
 
-      // Act: extract beta() into src/beta.rs, refresh review, relocate comment across files as agent, reply, and close agent session
+      // Act: extract beta() into src/beta.rs, refresh review, relocate comment across files as agent, add agent session note, and close agent session
       await runtime.write(
         'src/lib.rs',
         [
@@ -503,9 +555,11 @@ describe(
       await runtime.json([
         'comment',
         'new',
-        'Extracted beta() to src/beta.rs:2 and relocated anchor',
-        '--reply-to',
-        String(commentNum),
+        'I extracted beta() into src/beta.rs:2 and relocated the original review anchor to the new module.',
+        '--file',
+        'src/beta.rs',
+        '--line',
+        '2',
         '--local',
         '--as',
         'anthropic/claude-sonnet-4-5',
@@ -518,7 +572,7 @@ describe(
         '--with',
         'comment',
         '--body',
-        'Completed extraction and anchor relocation',
+        'Completed extraction of beta() into src/beta.rs and relocated the review anchor.',
         '--as',
         'anthropic/claude-sonnet-4-5',
       ])

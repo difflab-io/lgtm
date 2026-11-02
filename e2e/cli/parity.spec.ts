@@ -16,8 +16,6 @@ function normalizeDiffAndThreadsOutput(stdout: string): string {
     .split('\n')
     .slice(2)
     .join('\n')
-    .replace(/\[\d+\]/g, '[#]')
-    .replace(/reply to #\d+/g, 'reply to #N')
     .replace(/session #\d+/gi, (match) =>
       match.startsWith('Session') ? 'Session #S' : 'session #S',
     )
@@ -34,15 +32,12 @@ describe(
       const { runtime, github } = fixture()
       const { prNumber, filePath } = await setupPrCheckout(runtime, github)
 
-      // Create both a local snapshot review (--local) and a remote PR review on the exact same checkout
-      await runtime.json(['review', 'new', '--local'])
-      await runtime.json(['review', 'new'])
-
       for (const localArgs of [['--local'], []] as const) {
+        // Comment directly on the review without opening a session first, then reply directly
         const root = await runtime.json([
           'comment',
           'new',
-          'Verify changed line 2 parity',
+          'Please verify that the changed configuration value on line 2 matches the expected baseline.',
           '--file',
           filePath,
           '--line',
@@ -50,16 +45,19 @@ describe(
           ...localArgs,
         ])
         const rootNum = (root.comment as { number: number }).number
-        await runtime.json([
+        const reply = await runtime.json([
           'comment',
           'new',
-          'Follow-up reply in thread',
+          'I verified that line 2 matches the baseline configuration and added a regression assertion.',
           '--reply-to',
           String(rootNum),
           '--as',
           'claude-sonnet-4-5',
           ...localArgs,
         ])
+        expect((root.comment as { session_id: string | null }).session_id).toBeNull()
+        expect((reply.comment as { session_id: string | null }).session_id).toBeNull()
+
         await runtime.json([
           'comment',
           'update',
@@ -68,10 +66,13 @@ describe(
           'true',
           ...localArgs,
         ])
+
+        // Open an agent review session and record an unresolved range comment in that session
+        await runtime.json(['review', 'new', '--as', 'claude-sonnet-4-5', ...localArgs])
         await runtime.json([
           'comment',
           'new',
-          'Unresolved range comment on lines 3-5',
+          'Ensure the surrounding context lines 3 through 5 remain ordered when additional keys are inserted.',
           '--file',
           filePath,
           '--start-line',
@@ -157,12 +158,18 @@ describe(
       // Assert: terminal diff & thread output parity across --group-by file, --group-by session, and --unresolved
       expect(localFileText.code).toBe(0)
       expect(remoteFileText.code).toBe(0)
+      expect(localFileText.stdout).toContain('    ↳ claude-sonnet-4-5 (agent)')
+      expect(remoteFileText.stdout).toContain('    ↳ claude-sonnet-4-5 (agent)')
       expect(normalizeDiffAndThreadsOutput(remoteFileText.stdout)).toBe(
         normalizeDiffAndThreadsOutput(localFileText.stdout),
       )
 
       expect(localSessionText.code).toBe(0)
       expect(remoteSessionText.code).toBe(0)
+      expect(localSessionText.stdout).toContain('══ Direct Comments')
+      expect(remoteSessionText.stdout).toContain('══ Direct Comments')
+      expect(localSessionText.stdout).toContain('    ↳ claude-sonnet-4-5 (agent)')
+      expect(remoteSessionText.stdout).toContain('    ↳ claude-sonnet-4-5 (agent)')
       expect(normalizeDiffAndThreadsOutput(remoteSessionText.stdout)).toBe(
         normalizeDiffAndThreadsOutput(localSessionText.stdout),
       )

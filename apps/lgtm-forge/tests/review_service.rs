@@ -580,7 +580,8 @@ mod given_a_local_snapshot_review {
                 .create_comment(CreateCommentInput {
                     git_dir: ctx.git_dir.clone(),
                     review_selector: Some(review.name.clone()),
-                    body: "Root inline comment".to_owned(),
+                    body: "We should return a typed error when alpha receives a negative input."
+                        .to_owned(),
                     file_path: Some("src/lib.rs".into()),
                     start_line: None,
                     line: Some(2),
@@ -591,13 +592,45 @@ mod given_a_local_snapshot_review {
                 .await
                 .unwrap();
 
-            // Act
+            // Act: attempt reply while session is still Draft (must fail), then publish session and reply
+            let reply_while_draft = ctx
+                .service
+                .create_comment(CreateCommentInput {
+                    git_dir: ctx.git_dir.clone(),
+                    review_selector: Some(review.name.clone()),
+                    body: "Attempted reply before session is published.".to_owned(),
+                    file_path: None,
+                    start_line: None,
+                    line: None,
+                    reply_to: Some(root.number),
+                    local: true,
+                    as_agent: Some("claude-sonnet-4-5".into()),
+                })
+                .await;
+            assert!(
+                reply_while_draft.is_err(),
+                "replying to a comment in a Draft session must be rejected"
+            );
+
+            ctx.service
+                .close_review(
+                    &ctx.git_dir,
+                    Some(&review.name),
+                    true,
+                    ReviewOutcome::Request,
+                    Some("Please address the inline finding before merging.".to_owned()),
+                    None,
+                )
+                .await
+                .unwrap();
+
             let reply = ctx
                 .service
                 .create_comment(CreateCommentInput {
                     git_dir: ctx.git_dir.clone(),
                     review_selector: Some(review.name.clone()),
-                    body: "Agent reply".to_owned(),
+                    body: "Added a guard clause in alpha that returns an InvalidInput error for negative values."
+                        .to_owned(),
                     file_path: None,
                     start_line: None,
                     line: None,
@@ -641,9 +674,71 @@ mod given_a_local_snapshot_review {
 
             // Assert
             assert_eq!(reply.reply_to_number, Some(root.number));
+            assert!(
+                reply.session_id.is_none(),
+                "agent reply without an open draft session should be posted directly on the review"
+            );
             assert!(resolved_root.resolved);
             assert_eq!(deleted_num, root.number);
             assert!(detail.comments.is_empty());
+        }
+
+        #[tokio::test]
+        async fn should_comment_and_reply_directly_on_local_review_without_creating_a_session() {
+            // Arrange
+            let ctx = TestContext::setup().await;
+            ctx.write_file(
+                "src/lib.rs",
+                "pub fn alpha() -> i32 {\n    10\n}\n\npub fn beta() -> i32 {\n    20\n}\n",
+            );
+
+            // Act: comment directly without calling create_review first
+            let direct_root = ctx
+                .service
+                .create_comment(CreateCommentInput {
+                    git_dir: ctx.git_dir.clone(),
+                    review_selector: None,
+                    body: "Can we document why alpha now returns 10 instead of 1?".to_owned(),
+                    file_path: Some("src/lib.rs".into()),
+                    start_line: None,
+                    line: Some(2),
+                    reply_to: None,
+                    local: true,
+                    as_agent: None,
+                })
+                .await
+                .unwrap();
+            let direct_reply = ctx
+                .service
+                .create_comment(CreateCommentInput {
+                    git_dir: ctx.git_dir.clone(),
+                    review_selector: None,
+                    body: "Added a doc comment on alpha explaining the base multiplier change."
+                        .to_owned(),
+                    file_path: None,
+                    start_line: None,
+                    line: None,
+                    reply_to: Some(direct_root.number),
+                    local: true,
+                    as_agent: Some("anthropic/claude-sonnet-4-5".into()),
+                })
+                .await
+                .unwrap();
+            let detail = ctx
+                .service
+                .get_review_detail(&ctx.git_dir, None, true, ReviewGroupBy::File, false)
+                .await
+                .unwrap();
+
+            // Assert
+            assert!(direct_root.session_id.is_none());
+            assert!(direct_reply.session_id.is_none());
+            assert_eq!(direct_reply.reply_to_number, Some(direct_root.number));
+            assert!(
+                detail.sessions.is_empty(),
+                "direct review comments must not create any review sessions"
+            );
+            assert_eq!(detail.comments.len(), 2);
         }
 
         #[tokio::test]
@@ -709,7 +804,7 @@ mod given_a_remote_forge_review {
                 }],
                 vec![ForgeReviewComment {
                     forge_id: "PRRC_200".to_owned(),
-                    session_forge_id: "PRR_100".to_owned(),
+                    session_forge_id: Some("PRR_100".to_owned()),
                     reply_to_forge_id: None,
                     author_name: "Grace Hopper".to_owned(),
                     author_email: "grace@example.com".to_owned(),
@@ -975,6 +1070,133 @@ mod given_a_remote_forge_review {
                     .contains("> Generated by AI agent `anthropic/claude-sonnet-4-5` via LGTM")
             );
         }
+
+        #[tokio::test]
+        async fn should_comment_and_reply_directly_on_remote_review_without_a_session_and_reject_draft_replies()
+         {
+            // Arrange
+            let ctx = TestContext::setup().await;
+            let head_sha = ctx.checkout_head_sha();
+            let bundle = ctx.sample_pr_bundle(42, &head_sha, &head_sha, Vec::new(), Vec::new());
+            ctx.forge.set_bundle(bundle);
+
+            // Act 1: comment directly on the remote PR without calling create_review first
+            let direct_root = ctx
+                .service
+                .create_comment(CreateCommentInput {
+                    git_dir: ctx.git_dir.clone(),
+                    review_selector: None,
+                    body: "Please verify that the retry backoff caps at thirty seconds.".to_owned(),
+                    file_path: Some("src/lib.rs".into()),
+                    start_line: None,
+                    line: Some(2),
+                    reply_to: None,
+                    local: false,
+                    as_agent: None,
+                })
+                .await
+                .unwrap();
+            let direct_reply = ctx
+                .service
+                .create_comment(CreateCommentInput {
+                    git_dir: ctx.git_dir.clone(),
+                    review_selector: None,
+                    body: "Confirmed that the exponential backoff clamps to thirty seconds in the config builder."
+                        .to_owned(),
+                    file_path: None,
+                    start_line: None,
+                    line: None,
+                    reply_to: Some(direct_root.number),
+                    local: false,
+                    as_agent: Some("anthropic/claude-sonnet-4-5".into()),
+                })
+                .await
+                .unwrap();
+            let detail_before_session = ctx
+                .service
+                .get_review_detail(&ctx.git_dir, None, false, ReviewGroupBy::File, false)
+                .await
+                .unwrap();
+
+            // Act 2: start a Draft session, add a draft comment, and verify replies are blocked until published
+            let (review, draft_session) = ctx
+                .service
+                .create_review(&ctx.git_dir, false, None)
+                .await
+                .unwrap();
+            let session_comment = ctx
+                .service
+                .create_comment(CreateCommentInput {
+                    git_dir: ctx.git_dir.clone(),
+                    review_selector: Some(review.name.clone()),
+                    body: "Let us also add a unit test covering the thirty-second backoff cap."
+                        .to_owned(),
+                    file_path: Some("src/lib.rs".into()),
+                    start_line: None,
+                    line: Some(5),
+                    reply_to: None,
+                    local: false,
+                    as_agent: None,
+                })
+                .await
+                .unwrap();
+            let reply_while_draft = ctx
+                .service
+                .create_comment(CreateCommentInput {
+                    git_dir: ctx.git_dir.clone(),
+                    review_selector: Some(review.name.clone()),
+                    body: "Attempted reply while parent session is still in draft.".to_owned(),
+                    file_path: None,
+                    start_line: None,
+                    line: None,
+                    reply_to: Some(session_comment.number),
+                    local: false,
+                    as_agent: Some("anthropic/claude-sonnet-4-5".into()),
+                })
+                .await;
+
+            ctx.service
+                .close_review(
+                    &ctx.git_dir,
+                    Some(&review.name),
+                    false,
+                    ReviewOutcome::Request,
+                    Some("Requesting unit test coverage for backoff clamping.".to_owned()),
+                    None,
+                )
+                .await
+                .unwrap();
+
+            let reply_after_publish = ctx
+                .service
+                .create_comment(CreateCommentInput {
+                    git_dir: ctx.git_dir.clone(),
+                    review_selector: Some(review.name.clone()),
+                    body: "Added a unit test asserting that backoff delays never exceed thirty seconds."
+                        .to_owned(),
+                    file_path: None,
+                    start_line: None,
+                    line: None,
+                    reply_to: Some(session_comment.number),
+                    local: false,
+                    as_agent: Some("anthropic/claude-sonnet-4-5".into()),
+                })
+                .await
+                .unwrap();
+
+            // Assert
+            assert!(direct_root.session_id.is_none());
+            assert!(direct_reply.session_id.is_none());
+            assert!(detail_before_session.sessions.is_empty());
+            assert_eq!(detail_before_session.comments.len(), 2);
+            assert_eq!(session_comment.session_id, Some(draft_session.id));
+            assert!(reply_while_draft.is_err());
+            assert_eq!(
+                reply_after_publish.reply_to_number,
+                Some(session_comment.number)
+            );
+            assert!(reply_after_publish.session_id.is_none());
+        }
     }
 
     pub mod when_refreshing_after_remote_disclosure_banner_is_removed {
@@ -1028,7 +1250,7 @@ mod given_a_remote_forge_review {
                 }],
                 vec![ForgeReviewComment {
                     forge_id: comment_forge_id,
-                    session_forge_id: "PRR_dummy_42_1".to_owned(),
+                    session_forge_id: Some("PRR_dummy_42_1".to_owned()),
                     reply_to_forge_id: None,
                     author_name: "Ada Lovelace".to_owned(),
                     author_email: "ada@example.com".to_owned(),

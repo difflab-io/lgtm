@@ -119,7 +119,7 @@ mod review_commands {
         let comment = ws.lgtm_json(&[
             "comment",
             "new",
-            "Extract constant",
+            "We should extract the hardcoded multiplier in beta() into a named domain constant so callers understand its unit.",
             "--file",
             "src/lib.rs",
             "--line",
@@ -129,15 +129,44 @@ mod review_commands {
             "claude-sonnet-4-5",
         ]);
         let comment_num = comment["comment"]["number"].as_u64().unwrap();
+
+        let draft_reply = ws.lgtm(&[
+            "comment",
+            "new",
+            "Attempting to reply before the session is closed should be rejected.",
+            "--reply-to",
+            &comment_num.to_string(),
+            "--local",
+            "--json",
+        ]);
+        assert!(!draft_reply.status.success());
+        let draft_reply_err: serde_json::Value =
+            serde_json::from_slice(&draft_reply.stdout).unwrap();
+        assert_eq!(draft_reply_err["error"]["code"], "invalid_argument");
+
+        let closed = ws.lgtm_json(&[
+            "review",
+            "close",
+            &review_name,
+            "--local",
+            "--with",
+            "approve",
+            "--body",
+            "Completed initial agent pass over src/lib.rs.",
+            "--as",
+            "claude-sonnet-4-5",
+        ]);
+
         let reply = ws.lgtm_json(&[
             "comment",
             "new",
-            "Will extract in next pass",
+            "That makes sense; I will extract the constant into a module-level definition in the next commit.",
             "--reply-to",
             &comment_num.to_string(),
             "--local",
         ]);
         let reply_num = reply["comment"]["number"].as_u64().unwrap();
+        assert!(reply["comment"]["session_id"].is_null());
 
         std::fs::write(
             ws.repo.join("src/lib.rs"),
@@ -174,18 +203,6 @@ mod review_commands {
             "--local",
         ]);
         let deleted = ws.lgtm_json(&["comment", "delete", &reply_num.to_string(), "--local"]);
-        let closed = ws.lgtm_json(&[
-            "review",
-            "close",
-            &review_name,
-            "--local",
-            "--with",
-            "approve",
-            "--body",
-            "LGTM local pass",
-            "--as",
-            "claude-sonnet-4-5",
-        ]);
 
         // Assert
         assert_eq!(added["staged_paths"], serde_json::json!(["src/lib.rs"]));
@@ -203,7 +220,13 @@ mod review_commands {
         assert!(!show_json["diff_hunks"].as_array().unwrap().is_empty());
         assert!(show_text.contains("══ src/lib.rs"));
         assert!(show_text.contains("── line 7"));
-        assert!(show_text.contains("Extract constant"));
+        assert!(show_text.contains(
+            "We should extract the hardcoded multiplier in beta() into a named domain constant"
+        ));
+        assert!(show_text.contains("    ↳ Ada Lovelace\n"));
+        assert!(show_text.contains(
+            "      That makes sense; I will extract the constant into a module-level definition"
+        ));
         assert_eq!(updated["comment"]["resolved"], true);
         assert_eq!(deleted["deleted_number"], reply_num);
         assert_eq!(closed["session"]["state"], "published");

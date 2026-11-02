@@ -385,8 +385,7 @@ fn render_review_show(
                 out.push_str(&format_comment_in_file_group(root, &session_by_id));
                 if let Some(replies) = replies_by_root.get(&root.number) {
                     for reply in replies {
-                        out.push('\n');
-                        out.push_str(&format_comment_in_file_group(reply, &session_by_id));
+                        out.push_str(&format_reply_in_file_group(reply, &session_by_id));
                     }
                 }
             }
@@ -395,7 +394,7 @@ fn render_review_show(
             for session in sessions {
                 let session_comments: Vec<&CommentDetail> = comments
                     .iter()
-                    .filter(|c| c.session_id == session.id)
+                    .filter(|c| c.session_id.as_deref() == Some(session.id.as_str()))
                     .collect();
                 if session_comments.is_empty() && session.body.as_deref().is_none_or(str::is_empty)
                 {
@@ -418,46 +417,29 @@ fn render_review_show(
                     out.push_str(&format!("  {}\n", body.trim()));
                 }
 
-                for comment in session_comments {
-                    out.push('\n');
-                    let effective_anchor = comment.anchor.as_option().or_else(|| {
-                        comment
-                            .reply_to_number
-                            .and_then(|num| comment_by_num.get(&num))
-                            .and_then(|root| root.anchor.as_option())
-                    });
-                    let effective_root = comment
-                        .reply_to_number
-                        .and_then(|num| comment_by_num.get(&num).copied())
-                        .unwrap_or(comment);
+                render_session_or_direct_group(
+                    &mut out,
+                    &session_comments,
+                    &comment_by_num,
+                    &hunk_by_root_num,
+                    diff_hunks,
+                );
+            }
 
-                    if let Some(anchor) = effective_anchor {
-                        out.push_str(&format_session_anchor_header(anchor, effective_root));
-                        out.push('\n');
-                        if comment.reply_to_number.is_none()
-                            && let Some(hunk) = hunk_by_root_num
-                                .get(&comment.number)
-                                .copied()
-                                .or_else(|| find_matching_hunk(diff_hunks, anchor))
-                        {
-                            out.push_str(&format_hunk_lines(hunk));
-                            out.push('\n');
-                        }
-                    }
+            let direct_comments: Vec<&CommentDetail> =
+                comments.iter().filter(|c| c.session_id.is_none()).collect();
+            if !direct_comments.is_empty() {
+                out.push('\n');
+                out.push_str(&format_section_banner("Direct Comments"));
+                out.push('\n');
 
-                    let author_str = format_identity_display(comment.author.as_option());
-                    if let Some(reply_num) = comment.reply_to_number {
-                        out.push_str(&format!(
-                            "  [{}] {author_str} (reply to #{reply_num})\n",
-                            comment.number
-                        ));
-                    } else {
-                        out.push_str(&format!("  [{}] {author_str}\n", comment.number));
-                    }
-                    for line in comment.body.lines() {
-                        out.push_str(&format!("    {line}\n"));
-                    }
-                }
+                render_session_or_direct_group(
+                    &mut out,
+                    &direct_comments,
+                    &comment_by_num,
+                    &hunk_by_root_num,
+                    diff_hunks,
+                );
             }
         }
     }
@@ -537,13 +519,93 @@ fn format_hunk_lines(hunk: &DiffHunkDetail) -> String {
     lines.join("\n")
 }
 
+fn render_session_or_direct_group(
+    out: &mut String,
+    group_comments: &[&CommentDetail],
+    comment_by_num: &HashMap<u64, &CommentDetail>,
+    hunk_by_root_num: &HashMap<u64, &DiffHunkDetail>,
+    diff_hunks: &[DiffHunkDetail],
+) {
+    let root_nums_in_group: std::collections::HashSet<u64> = group_comments
+        .iter()
+        .filter(|c| c.reply_to_number.is_none())
+        .map(|c| c.number)
+        .collect();
+    let mut replies_in_group_by_root: HashMap<u64, Vec<&CommentDetail>> = HashMap::new();
+    for comment in group_comments {
+        if let Some(root_num) = comment.reply_to_number {
+            replies_in_group_by_root
+                .entry(root_num)
+                .or_default()
+                .push(comment);
+        }
+    }
+
+    for comment in group_comments {
+        if let Some(reply_num) = comment.reply_to_number {
+            if root_nums_in_group.contains(&reply_num) {
+                continue;
+            }
+            out.push('\n');
+            let effective_root = comment_by_num.get(&reply_num).copied().unwrap_or(comment);
+            if let Some(anchor) = effective_root.anchor.as_option() {
+                out.push_str(&format_session_anchor_header(anchor, effective_root));
+                out.push('\n');
+            }
+            if let Some(parent) = comment_by_num.get(&reply_num) {
+                let parent_author = format_identity_display(parent.author.as_option());
+                out.push_str(&format!("  {parent_author}\n"));
+                for line in parent.body.lines() {
+                    out.push_str(&format!("    {line}\n"));
+                }
+            }
+            let author_str = format_identity_display(comment.author.as_option());
+            out.push_str(&format!("    ↳ {author_str}\n"));
+            for line in comment.body.lines() {
+                out.push_str(&format!("      {line}\n"));
+            }
+            continue;
+        }
+
+        out.push('\n');
+        if let Some(anchor) = comment.anchor.as_option() {
+            out.push_str(&format_session_anchor_header(anchor, comment));
+            out.push('\n');
+            if let Some(hunk) = hunk_by_root_num
+                .get(&comment.number)
+                .copied()
+                .or_else(|| find_matching_hunk(diff_hunks, anchor))
+            {
+                out.push_str(&format_hunk_lines(hunk));
+                out.push('\n');
+            }
+        }
+        let author_str = format_identity_display(comment.author.as_option());
+        out.push_str(&format!("  {author_str}\n"));
+        for line in comment.body.lines() {
+            out.push_str(&format!("    {line}\n"));
+        }
+        if let Some(replies) = replies_in_group_by_root.get(&comment.number) {
+            for reply in replies {
+                let reply_author = format_identity_display(reply.author.as_option());
+                out.push_str(&format!("    ↳ {reply_author}\n"));
+                for line in reply.body.lines() {
+                    out.push_str(&format!("      {line}\n"));
+                }
+            }
+        }
+    }
+}
+
 fn format_comment_in_file_group(
     comment: &CommentDetail,
     session_by_id: &HashMap<&str, &SessionSummary>,
 ) -> String {
     let author_label = format_identity_display(comment.author.as_option());
-    let session_info = session_by_id
-        .get(comment.session_id.as_str())
+    let session_info = comment
+        .session_id
+        .as_deref()
+        .and_then(|id| session_by_id.get(id))
         .map(|s| {
             format!(
                 " • session #{} ({})",
@@ -552,9 +614,33 @@ fn format_comment_in_file_group(
             )
         })
         .unwrap_or_default();
-    let mut out = format!("  [{}] {author_label}{session_info}\n", comment.number);
+    let mut out = format!("  {author_label}{session_info}\n");
     for line in comment.body.lines() {
         out.push_str(&format!("    {line}\n"));
+    }
+    out
+}
+
+fn format_reply_in_file_group(
+    reply: &CommentDetail,
+    session_by_id: &HashMap<&str, &SessionSummary>,
+) -> String {
+    let author_label = format_identity_display(reply.author.as_option());
+    let session_info = reply
+        .session_id
+        .as_deref()
+        .and_then(|id| session_by_id.get(id))
+        .map(|s| {
+            format!(
+                " • session #{} ({})",
+                s.number,
+                format_session_state(s.state.as_known())
+            )
+        })
+        .unwrap_or_default();
+    let mut out = format!("    ↳ {author_label}{session_info}\n");
+    for line in reply.body.lines() {
+        out.push_str(&format!("      {line}\n"));
     }
     out
 }

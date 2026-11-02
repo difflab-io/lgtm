@@ -11,7 +11,8 @@ use crate::{
 };
 use chrono::Utc;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter,
+    QueryOrder, Set,
 };
 use std::{collections::HashSet, sync::Arc};
 use uuid::Uuid;
@@ -21,8 +22,8 @@ use uuid::Uuid;
 pub struct NewComment {
     /// Target `reviews.id`.
     pub review_id: Uuid,
-    /// Owning `sessions.id`.
-    pub session_id: Uuid,
+    /// Optional owning `sessions.id` (`None` when commenting directly on a review without a session).
+    pub session_id: Option<Uuid>,
     /// Comment author `identities.id`.
     pub author_id: Uuid,
     /// Root comment UUID when creating a reply (`None` for root comments).
@@ -74,8 +75,8 @@ pub struct CommentAnchorShift {
 pub struct UpsertForgeComment {
     /// Target `reviews.id`.
     pub review_id: Uuid,
-    /// Owning `sessions.id`.
-    pub session_id: Uuid,
+    /// Optional owning `sessions.id` (`None` for direct review comments).
+    pub session_id: Option<Uuid>,
     /// Comment author `identities.id`.
     pub author_id: Uuid,
     /// Root comment UUID when importing a reply (`None` for root comments).
@@ -158,7 +159,16 @@ impl<C: ConnectionTrait> CommentsRepository<C> {
             .await?)
     }
 
-    /// List visible comments for `review_id`: all comments in `Published` sessions plus `viewer_id`'s own `Draft` session comments.
+    /// List all comments belonging to `review_id` (both session-bound and direct), ordered by sequential `number` ascending.
+    pub async fn get_all_comments_by_review(&self, review_id: Uuid) -> Result<Vec<Comment>> {
+        Ok(Entity::find()
+            .filter(Column::ReviewId.eq(review_id))
+            .order_by_asc(Column::Number)
+            .all(self.pool.as_ref())
+            .await?)
+    }
+
+    /// List visible comments for `review_id`: all direct comments (`session_id IS NULL`), all comments in `Published` sessions, plus `viewer_id`'s own `Draft` session comments.
     pub async fn get_comments_by_review(
         &self,
         review_id: Uuid,
@@ -178,13 +188,17 @@ impl<C: ConnectionTrait> CommentsRepository<C> {
             .map(|sess| sess.id)
             .collect();
 
-        if visible_session_ids.is_empty() {
-            return Ok(Vec::new());
-        }
+        let session_condition = if visible_session_ids.is_empty() {
+            Condition::any().add(Column::SessionId.is_null())
+        } else {
+            Condition::any()
+                .add(Column::SessionId.is_null())
+                .add(Column::SessionId.is_in(visible_session_ids))
+        };
 
         Ok(Entity::find()
             .filter(Column::ReviewId.eq(review_id))
-            .filter(Column::SessionId.is_in(visible_session_ids))
+            .filter(session_condition)
             .order_by_asc(Column::Number)
             .all(self.pool.as_ref())
             .await?)
@@ -393,7 +407,14 @@ impl<C: ConnectionTrait> CommentsRepository<C> {
         Ok(latest.map_or(1, |row| row.number + 1))
     }
 
-    async fn validate_session_review(&self, session_id: Uuid, review_id: Uuid) -> Result<()> {
+    async fn validate_session_review(
+        &self,
+        session_id: Option<Uuid>,
+        review_id: Uuid,
+    ) -> Result<()> {
+        let Some(session_id) = session_id else {
+            return Ok(());
+        };
         let sess = session::Entity::find_by_id(session_id)
             .one(self.pool.as_ref())
             .await?
@@ -429,6 +450,21 @@ impl<C: ConnectionTrait> CommentsRepository<C> {
             return Err(DbError::invalid_input(
                 "cannot reply to a reply; reply_to_id must reference a root comment",
             ));
+        }
+        if let Some(parent_session_id) = parent.session_id {
+            let parent_session = session::Entity::find_by_id(parent_session_id)
+                .one(self.pool.as_ref())
+                .await?
+                .ok_or_else(|| {
+                    DbError::invalid_input(format!(
+                        "parent comment session {parent_session_id} not found"
+                    ))
+                })?;
+            if parent_session.state == SessionState::Draft {
+                return Err(DbError::invalid_input(
+                    "cannot reply to a comment in a draft session; publish the session first",
+                ));
+            }
         }
         Ok(())
     }

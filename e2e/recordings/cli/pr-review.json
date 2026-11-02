@@ -9130,29 +9130,29 @@
     "fixture": {
       "repository": "skapoor8/lgtm-e2e",
       "repositoryUrl": "https://github.com/skapoor8/lgtm-e2e",
-      "run": "lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5",
-      "nodeId": "PR_kwDOVRkyoM8AAAABMCMfOw",
-      "base": "48eb862c98588ad55dc025beac87b1c2b4f4acdb",
-      "head": "2356965f6cd76a1dcd230c870442ca7c2a439960",
-      "initialHead": "2356965f6cd76a1dcd230c870442ca7c2a439960",
-      "number": 1074
+      "run": "lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e",
+      "nodeId": "PR_kwDOVRkyoM8AAAABMOfvNA",
+      "base": "b75062c329d7957aa8fb51e07bd66748686c0736",
+      "head": "2fb8745284c69835570d13830818b910be941a80",
+      "initialHead": "2fb8745284c69835570d13830818b910be941a80",
+      "number": 1088
     },
     "responses": [
       {
         "status": 200,
         "body": [
           {
-            "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074",
-            "id": 5102575419,
-            "node_id": "PR_kwDOVRkyoM8AAAABMCMfOw",
-            "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1074",
-            "diff_url": "https://github.com/skapoor8/lgtm-e2e/pull/1074.diff",
-            "patch_url": "https://github.com/skapoor8/lgtm-e2e/pull/1074.patch",
-            "issue_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1074",
-            "number": 1074,
+            "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088",
+            "id": 5115473716,
+            "node_id": "PR_kwDOVRkyoM8AAAABMOfvNA",
+            "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1088",
+            "diff_url": "https://github.com/skapoor8/lgtm-e2e/pull/1088.diff",
+            "patch_url": "https://github.com/skapoor8/lgtm-e2e/pull/1088.patch",
+            "issue_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1088",
+            "number": 1088,
             "state": "open",
             "locked": false,
-            "title": "LGTM E2E · lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5",
+            "title": "LGTM E2E · lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e",
             "user": {
               "login": "skapoor8",
               "id": 14297543,
@@ -9175,26 +9175,26 @@
               "site_admin": false
             },
             "body": "Isolated review lifecycle test in the permanent private fixture repository. Closed after this run.",
-            "created_at": "2026-10-31T23:36:56Z",
-            "updated_at": "2026-10-31T23:36:56Z",
+            "created_at": "2026-11-02T05:29:56Z",
+            "updated_at": "2026-11-02T05:29:56Z",
             "closed_at": null,
             "merged_at": null,
-            "merge_commit_sha": "795a7d93a3e4e4dd67eab1673c3c90e71daf351b",
+            "merge_commit_sha": "498e3529064d1852017fad8bfaccb906944353ce",
             "assignees": [],
             "requested_reviewers": [],
             "requested_teams": [],
             "labels": [],
             "milestone": null,
             "draft": false,
-            "commits_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074/commits",
-            "review_comments_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074/comments",
+            "commits_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088/commits",
+            "review_comments_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088/comments",
             "review_comment_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments{/number}",
-            "comments_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1074/comments",
-            "statuses_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/statuses/2356965f6cd76a1dcd230c870442ca7c2a439960",
+            "comments_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1088/comments",
+            "statuses_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/statuses/2fb8745284c69835570d13830818b910be941a80",
             "head": {
-              "label": "skapoor8:lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5-head",
-              "ref": "lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5-head",
-              "sha": "2356965f6cd76a1dcd230c870442ca7c2a439960",
+              "label": "skapoor8:lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e-head",
+              "ref": "lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e-head",
+              "sha": "2fb8745284c69835570d13830818b910be941a80",
               "user": {
                 "login": "skapoor8",
                 "id": 14297543,
@@ -9285,7 +9285,7 @@
                 "deployments_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/deployments",
                 "created_at": "2026-10-21T00:44:34Z",
                 "updated_at": "2026-10-21T01:05:26Z",
-                "pushed_at": "2026-10-31T23:36:55Z",
+                "pushed_at": "2026-11-02T05:29:55Z",
                 "git_url": "git://github.com/skapoor8/lgtm-e2e.git",
                 "ssh_url": "git@github.com:skapoor8/lgtm-e2e.git",
                 "clone_url": "https://github.com/skapoor8/lgtm-e2e.git",
@@ -9321,9 +9321,9 @@
               }
             },
             "base": {
-              "label": "skapoor8:lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5-base",
-              "ref": "lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5-base",
-              "sha": "48eb862c98588ad55dc025beac87b1c2b4f4acdb",
+              "label": "skapoor8:lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e-base",
+              "ref": "lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e-base",
+              "sha": "b75062c329d7957aa8fb51e07bd66748686c0736",
               "user": {
                 "login": "skapoor8",
                 "id": 14297543,
@@ -9414,7 +9414,7 @@
                 "deployments_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/deployments",
                 "created_at": "2026-10-21T00:44:34Z",
                 "updated_at": "2026-10-21T01:05:26Z",
-                "pushed_at": "2026-10-31T23:36:55Z",
+                "pushed_at": "2026-11-02T05:29:55Z",
                 "git_url": "git://github.com/skapoor8/lgtm-e2e.git",
                 "ssh_url": "git@github.com:skapoor8/lgtm-e2e.git",
                 "clone_url": "https://github.com/skapoor8/lgtm-e2e.git",
@@ -9451,28 +9451,28 @@
             },
             "_links": {
               "self": {
-                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074"
+                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088"
               },
               "html": {
-                "href": "https://github.com/skapoor8/lgtm-e2e/pull/1074"
+                "href": "https://github.com/skapoor8/lgtm-e2e/pull/1088"
               },
               "issue": {
-                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1074"
+                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1088"
               },
               "comments": {
-                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1074/comments"
+                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1088/comments"
               },
               "review_comments": {
-                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074/comments"
+                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088/comments"
               },
               "review_comment": {
                 "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments{/number}"
               },
               "commits": {
-                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074/commits"
+                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088/commits"
               },
               "statuses": {
-                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/statuses/2356965f6cd76a1dcd230c870442ca7c2a439960"
+                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/statuses/2fb8745284c69835570d13830818b910be941a80"
               }
             },
             "author_association": "OWNER",
@@ -9488,17 +9488,17 @@
       {
         "status": 200,
         "body": {
-          "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074",
-          "id": 5102575419,
-          "node_id": "PR_kwDOVRkyoM8AAAABMCMfOw",
-          "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1074",
-          "diff_url": "https://github.com/skapoor8/lgtm-e2e/pull/1074.diff",
-          "patch_url": "https://github.com/skapoor8/lgtm-e2e/pull/1074.patch",
-          "issue_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1074",
-          "number": 1074,
+          "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088",
+          "id": 5115473716,
+          "node_id": "PR_kwDOVRkyoM8AAAABMOfvNA",
+          "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1088",
+          "diff_url": "https://github.com/skapoor8/lgtm-e2e/pull/1088.diff",
+          "patch_url": "https://github.com/skapoor8/lgtm-e2e/pull/1088.patch",
+          "issue_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1088",
+          "number": 1088,
           "state": "open",
           "locked": false,
-          "title": "LGTM E2E · lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5",
+          "title": "LGTM E2E · lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e",
           "user": {
             "login": "skapoor8",
             "id": 14297543,
@@ -9521,26 +9521,26 @@
             "site_admin": false
           },
           "body": "Isolated review lifecycle test in the permanent private fixture repository. Closed after this run.",
-          "created_at": "2026-10-31T23:36:56Z",
-          "updated_at": "2026-10-31T23:36:56Z",
+          "created_at": "2026-11-02T05:29:56Z",
+          "updated_at": "2026-11-02T05:29:56Z",
           "closed_at": null,
           "merged_at": null,
-          "merge_commit_sha": "795a7d93a3e4e4dd67eab1673c3c90e71daf351b",
+          "merge_commit_sha": "498e3529064d1852017fad8bfaccb906944353ce",
           "assignees": [],
           "requested_reviewers": [],
           "requested_teams": [],
           "labels": [],
           "milestone": null,
           "draft": false,
-          "commits_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074/commits",
-          "review_comments_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074/comments",
+          "commits_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088/commits",
+          "review_comments_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088/comments",
           "review_comment_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments{/number}",
-          "comments_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1074/comments",
-          "statuses_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/statuses/2356965f6cd76a1dcd230c870442ca7c2a439960",
+          "comments_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1088/comments",
+          "statuses_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/statuses/2fb8745284c69835570d13830818b910be941a80",
           "head": {
-            "label": "skapoor8:lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5-head",
-            "ref": "lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5-head",
-            "sha": "2356965f6cd76a1dcd230c870442ca7c2a439960",
+            "label": "skapoor8:lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e-head",
+            "ref": "lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e-head",
+            "sha": "2fb8745284c69835570d13830818b910be941a80",
             "user": {
               "login": "skapoor8",
               "id": 14297543,
@@ -9631,7 +9631,7 @@
               "deployments_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/deployments",
               "created_at": "2026-10-21T00:44:34Z",
               "updated_at": "2026-10-21T01:05:26Z",
-              "pushed_at": "2026-10-31T23:36:55Z",
+              "pushed_at": "2026-11-02T05:29:55Z",
               "git_url": "git://github.com/skapoor8/lgtm-e2e.git",
               "ssh_url": "git@github.com:skapoor8/lgtm-e2e.git",
               "clone_url": "https://github.com/skapoor8/lgtm-e2e.git",
@@ -9667,9 +9667,9 @@
             }
           },
           "base": {
-            "label": "skapoor8:lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5-base",
-            "ref": "lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5-base",
-            "sha": "48eb862c98588ad55dc025beac87b1c2b4f4acdb",
+            "label": "skapoor8:lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e-base",
+            "ref": "lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e-base",
+            "sha": "b75062c329d7957aa8fb51e07bd66748686c0736",
             "user": {
               "login": "skapoor8",
               "id": 14297543,
@@ -9760,7 +9760,7 @@
               "deployments_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/deployments",
               "created_at": "2026-10-21T00:44:34Z",
               "updated_at": "2026-10-21T01:05:26Z",
-              "pushed_at": "2026-10-31T23:36:55Z",
+              "pushed_at": "2026-11-02T05:29:55Z",
               "git_url": "git://github.com/skapoor8/lgtm-e2e.git",
               "ssh_url": "git@github.com:skapoor8/lgtm-e2e.git",
               "clone_url": "https://github.com/skapoor8/lgtm-e2e.git",
@@ -9797,28 +9797,28 @@
           },
           "_links": {
             "self": {
-              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074"
+              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088"
             },
             "html": {
-              "href": "https://github.com/skapoor8/lgtm-e2e/pull/1074"
+              "href": "https://github.com/skapoor8/lgtm-e2e/pull/1088"
             },
             "issue": {
-              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1074"
+              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1088"
             },
             "comments": {
-              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1074/comments"
+              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1088/comments"
             },
             "review_comments": {
-              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074/comments"
+              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088/comments"
             },
             "review_comment": {
               "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments{/number}"
             },
             "commits": {
-              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074/commits"
+              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088/commits"
             },
             "statuses": {
-              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/statuses/2356965f6cd76a1dcd230c870442ca7c2a439960"
+              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/statuses/2fb8745284c69835570d13830818b910be941a80"
             }
           },
           "author_association": "OWNER",
@@ -9852,92 +9852,14 @@
       {
         "status": 201,
         "body": {
-          "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4433704093",
-          "pull_request_review_id": 5725467868,
-          "id": 4433704093,
-          "node_id": "PRRC_kwDOVRkyoM8AAAABCET0nQ",
-          "diff_hunk": "@@ -1,5 +1,5 @@\n first\n-second\n+changed",
-          "path": "lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5.txt",
-          "commit_id": "2356965f6cd76a1dcd230c870442ca7c2a439960",
-          "original_commit_id": "2356965f6cd76a1dcd230c870442ca7c2a439960",
-          "user": {
-            "login": "skapoor8",
-            "id": 14297543,
-            "node_id": "MDQ6VXNlcjE0Mjk3NTQz",
-            "avatar_url": "https://avatars.githubusercontent.com/u/14297543?v=4",
-            "gravatar_id": "",
-            "url": "https://api.github.com/users/skapoor8",
-            "html_url": "https://github.com/skapoor8",
-            "followers_url": "https://api.github.com/users/skapoor8/followers",
-            "following_url": "https://api.github.com/users/skapoor8/following{/other_user}",
-            "gists_url": "https://api.github.com/users/skapoor8/gists{/gist_id}",
-            "starred_url": "https://api.github.com/users/skapoor8/starred{/owner}{/repo}",
-            "subscriptions_url": "https://api.github.com/users/skapoor8/subscriptions",
-            "organizations_url": "https://api.github.com/users/skapoor8/orgs",
-            "repos_url": "https://api.github.com/users/skapoor8/repos",
-            "events_url": "https://api.github.com/users/skapoor8/events{/privacy}",
-            "received_events_url": "https://api.github.com/users/skapoor8/received_events",
-            "type": "User",
-            "user_view_type": "public",
-            "site_admin": false
-          },
-          "body": "Verify changed line behavior",
-          "created_at": "2026-10-31T23:36:59Z",
-          "updated_at": "2026-10-31T23:36:59Z",
-          "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1074#discussion_r4433704093",
-          "pull_request_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074",
-          "_links": {
-            "self": {
-              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4433704093"
-            },
-            "html": {
-              "href": "https://github.com/skapoor8/lgtm-e2e/pull/1074#discussion_r4433704093"
-            },
-            "pull_request": {
-              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074"
-            }
-          },
-          "reactions": {
-            "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4433704093/reactions",
-            "total_count": 0,
-            "+1": 0,
-            "-1": 0,
-            "laugh": 0,
-            "hooray": 0,
-            "confused": 0,
-            "heart": 0,
-            "rocket": 0,
-            "eyes": 0
-          },
-          "start_line": null,
-          "original_start_line": null,
-          "start_side": null,
-          "line": 2,
-          "original_line": 2,
-          "side": "RIGHT",
-          "author_association": "OWNER",
-          "original_position": 3,
-          "position": 3,
-          "subject_type": "line",
-          "is_copilot_code_review": false,
-          "copilot_code_review_sources": []
-        },
-        "headers": {
-          "content-type": "application/json; charset=utf-8",
-          "location": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4433704093"
-        }
-      },
-      {
-        "status": 201,
-        "body": {
-          "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4433704136",
-          "pull_request_review_id": 5725467910,
-          "id": 4433704136,
-          "node_id": "PRRC_kwDOVRkyoM8AAAABCET0yA",
+          "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200568",
+          "pull_request_review_id": 5732448151,
+          "id": 4439200568,
+          "node_id": "PRRC_kwDOVRkyoM8AAAABCJjTOA",
           "diff_hunk": "@@ -1,5 +1,5 @@\n first\n-second\n+changed\n stable context 1\n stable context 2\n stable context 3",
-          "path": "lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5.txt",
-          "commit_id": "2356965f6cd76a1dcd230c870442ca7c2a439960",
-          "original_commit_id": "2356965f6cd76a1dcd230c870442ca7c2a439960",
+          "path": "lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e.txt",
+          "commit_id": "2fb8745284c69835570d13830818b910be941a80",
+          "original_commit_id": "2fb8745284c69835570d13830818b910be941a80",
           "user": {
             "login": "skapoor8",
             "id": 14297543,
@@ -9959,24 +9881,24 @@
             "user_view_type": "public",
             "site_admin": false
           },
-          "body": "Check context range invariants\n\n> Generated by AI agent `anthropic/claude-sonnet-4-5` via LGTM",
-          "created_at": "2026-10-31T23:37:00Z",
-          "updated_at": "2026-10-31T23:37:00Z",
-          "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1074#discussion_r4433704136",
-          "pull_request_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074",
+          "body": "Ensure the context range invariants across lines 3 through 5 hold when keys are reordered.\n\n> Generated by AI agent `anthropic/claude-sonnet-4-5` via LGTM",
+          "created_at": "2026-11-02T05:29:59Z",
+          "updated_at": "2026-11-02T05:29:59Z",
+          "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1088#discussion_r4439200568",
+          "pull_request_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088",
           "_links": {
             "self": {
-              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4433704136"
+              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200568"
             },
             "html": {
-              "href": "https://github.com/skapoor8/lgtm-e2e/pull/1074#discussion_r4433704136"
+              "href": "https://github.com/skapoor8/lgtm-e2e/pull/1088#discussion_r4439200568"
             },
             "pull_request": {
-              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074"
+              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088"
             }
           },
           "reactions": {
-            "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4433704136/reactions",
+            "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200568/reactions",
             "total_count": 0,
             "+1": 0,
             "-1": 0,
@@ -10002,334 +9924,23 @@
         },
         "headers": {
           "content-type": "application/json; charset=utf-8",
-          "location": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4433704136"
+          "location": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200568"
         }
       },
       {
         "status": 200,
         "body": {
-          "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4433704093",
-          "pull_request_review_id": 5725467868,
-          "id": 4433704093,
-          "node_id": "PRRC_kwDOVRkyoM8AAAABCET0nQ",
-          "diff_hunk": "@@ -1,5 +1,5 @@\n first\n-second\n+changed",
-          "path": "lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5.txt",
-          "commit_id": "2356965f6cd76a1dcd230c870442ca7c2a439960",
-          "original_commit_id": "2356965f6cd76a1dcd230c870442ca7c2a439960",
-          "user": {
-            "login": "skapoor8",
-            "id": 14297543,
-            "node_id": "MDQ6VXNlcjE0Mjk3NTQz",
-            "avatar_url": "https://avatars.githubusercontent.com/u/14297543?v=4",
-            "gravatar_id": "",
-            "url": "https://api.github.com/users/skapoor8",
-            "html_url": "https://github.com/skapoor8",
-            "followers_url": "https://api.github.com/users/skapoor8/followers",
-            "following_url": "https://api.github.com/users/skapoor8/following{/other_user}",
-            "gists_url": "https://api.github.com/users/skapoor8/gists{/gist_id}",
-            "starred_url": "https://api.github.com/users/skapoor8/starred{/owner}{/repo}",
-            "subscriptions_url": "https://api.github.com/users/skapoor8/subscriptions",
-            "organizations_url": "https://api.github.com/users/skapoor8/orgs",
-            "repos_url": "https://api.github.com/users/skapoor8/repos",
-            "events_url": "https://api.github.com/users/skapoor8/events{/privacy}",
-            "received_events_url": "https://api.github.com/users/skapoor8/received_events",
-            "type": "User",
-            "user_view_type": "public",
-            "site_admin": false
-          },
-          "body": "Verify changed line behavior (updated)",
-          "created_at": "2026-10-31T23:36:59Z",
-          "updated_at": "2026-10-31T23:37:01Z",
-          "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1074#discussion_r4433704093",
-          "pull_request_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074",
-          "_links": {
-            "self": {
-              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4433704093"
-            },
-            "html": {
-              "href": "https://github.com/skapoor8/lgtm-e2e/pull/1074#discussion_r4433704093"
-            },
-            "pull_request": {
-              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074"
-            }
-          },
-          "reactions": {
-            "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4433704093/reactions",
-            "total_count": 0,
-            "+1": 0,
-            "-1": 0,
-            "laugh": 0,
-            "hooray": 0,
-            "confused": 0,
-            "heart": 0,
-            "rocket": 0,
-            "eyes": 0
-          },
-          "start_line": null,
-          "original_start_line": null,
-          "start_side": null,
-          "line": 2,
-          "original_line": 2,
-          "side": "RIGHT",
-          "author_association": "OWNER",
-          "original_position": 3,
-          "position": 3,
-          "subject_type": "line",
-          "is_copilot_code_review": false,
-          "copilot_code_review_sources": []
-        },
-        "headers": {
-          "content-type": "application/json; charset=utf-8"
-        }
-      },
-      {
-        "status": 200,
-        "body": [
-          {
-            "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4433704093",
-            "pull_request_review_id": 5725467868,
-            "id": 4433704093,
-            "node_id": "PRRC_kwDOVRkyoM8AAAABCET0nQ",
-            "diff_hunk": "@@ -1,5 +1,5 @@\n first\n-second\n+changed",
-            "path": "lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5.txt",
-            "commit_id": "2356965f6cd76a1dcd230c870442ca7c2a439960",
-            "original_commit_id": "2356965f6cd76a1dcd230c870442ca7c2a439960",
-            "user": {
-              "login": "skapoor8",
-              "id": 14297543,
-              "node_id": "MDQ6VXNlcjE0Mjk3NTQz",
-              "avatar_url": "https://avatars.githubusercontent.com/u/14297543?v=4",
-              "gravatar_id": "",
-              "url": "https://api.github.com/users/skapoor8",
-              "html_url": "https://github.com/skapoor8",
-              "followers_url": "https://api.github.com/users/skapoor8/followers",
-              "following_url": "https://api.github.com/users/skapoor8/following{/other_user}",
-              "gists_url": "https://api.github.com/users/skapoor8/gists{/gist_id}",
-              "starred_url": "https://api.github.com/users/skapoor8/starred{/owner}{/repo}",
-              "subscriptions_url": "https://api.github.com/users/skapoor8/subscriptions",
-              "organizations_url": "https://api.github.com/users/skapoor8/orgs",
-              "repos_url": "https://api.github.com/users/skapoor8/repos",
-              "events_url": "https://api.github.com/users/skapoor8/events{/privacy}",
-              "received_events_url": "https://api.github.com/users/skapoor8/received_events",
-              "type": "User",
-              "user_view_type": "public",
-              "site_admin": false
-            },
-            "body": "Verify changed line behavior (updated)",
-            "created_at": "2026-10-31T23:36:59Z",
-            "updated_at": "2026-10-31T23:37:01Z",
-            "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1074#discussion_r4433704093",
-            "pull_request_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074",
-            "_links": {
-              "self": {
-                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4433704093"
-              },
-              "html": {
-                "href": "https://github.com/skapoor8/lgtm-e2e/pull/1074#discussion_r4433704093"
-              },
-              "pull_request": {
-                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074"
-              }
-            },
-            "reactions": {
-              "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4433704093/reactions",
-              "total_count": 0,
-              "+1": 0,
-              "-1": 0,
-              "laugh": 0,
-              "hooray": 0,
-              "confused": 0,
-              "heart": 0,
-              "rocket": 0,
-              "eyes": 0
-            },
-            "start_line": null,
-            "original_start_line": null,
-            "start_side": null,
-            "line": 2,
-            "original_line": 2,
-            "side": "RIGHT",
-            "author_association": "OWNER",
-            "original_position": 3,
-            "position": 3,
-            "subject_type": "line",
-            "is_copilot_code_review": false,
-            "copilot_code_review_sources": []
-          },
-          {
-            "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4433704136",
-            "pull_request_review_id": 5725467910,
-            "id": 4433704136,
-            "node_id": "PRRC_kwDOVRkyoM8AAAABCET0yA",
-            "diff_hunk": "@@ -1,5 +1,5 @@\n first\n-second\n+changed\n stable context 1\n stable context 2\n stable context 3",
-            "path": "lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5.txt",
-            "commit_id": "2356965f6cd76a1dcd230c870442ca7c2a439960",
-            "original_commit_id": "2356965f6cd76a1dcd230c870442ca7c2a439960",
-            "user": {
-              "login": "skapoor8",
-              "id": 14297543,
-              "node_id": "MDQ6VXNlcjE0Mjk3NTQz",
-              "avatar_url": "https://avatars.githubusercontent.com/u/14297543?v=4",
-              "gravatar_id": "",
-              "url": "https://api.github.com/users/skapoor8",
-              "html_url": "https://github.com/skapoor8",
-              "followers_url": "https://api.github.com/users/skapoor8/followers",
-              "following_url": "https://api.github.com/users/skapoor8/following{/other_user}",
-              "gists_url": "https://api.github.com/users/skapoor8/gists{/gist_id}",
-              "starred_url": "https://api.github.com/users/skapoor8/starred{/owner}{/repo}",
-              "subscriptions_url": "https://api.github.com/users/skapoor8/subscriptions",
-              "organizations_url": "https://api.github.com/users/skapoor8/orgs",
-              "repos_url": "https://api.github.com/users/skapoor8/repos",
-              "events_url": "https://api.github.com/users/skapoor8/events{/privacy}",
-              "received_events_url": "https://api.github.com/users/skapoor8/received_events",
-              "type": "User",
-              "user_view_type": "public",
-              "site_admin": false
-            },
-            "body": "Check context range invariants\n\n> Generated by AI agent `anthropic/claude-sonnet-4-5` via LGTM",
-            "created_at": "2026-10-31T23:37:00Z",
-            "updated_at": "2026-10-31T23:37:00Z",
-            "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1074#discussion_r4433704136",
-            "pull_request_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074",
-            "_links": {
-              "self": {
-                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4433704136"
-              },
-              "html": {
-                "href": "https://github.com/skapoor8/lgtm-e2e/pull/1074#discussion_r4433704136"
-              },
-              "pull_request": {
-                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074"
-              }
-            },
-            "reactions": {
-              "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4433704136/reactions",
-              "total_count": 0,
-              "+1": 0,
-              "-1": 0,
-              "laugh": 0,
-              "hooray": 0,
-              "confused": 0,
-              "heart": 0,
-              "rocket": 0,
-              "eyes": 0
-            },
-            "start_line": 3,
-            "original_start_line": 3,
-            "start_side": "RIGHT",
-            "line": 5,
-            "original_line": 5,
-            "side": "RIGHT",
-            "author_association": "OWNER",
-            "original_position": 6,
-            "position": 6,
-            "subject_type": "line",
-            "is_copilot_code_review": false,
-            "copilot_code_review_sources": []
-          }
-        ],
-        "headers": {
-          "content-type": "application/json; charset=utf-8"
-        }
-      },
-      {
-        "status": 204,
-        "body": null,
-        "headers": {}
-      },
-      {
-        "status": 200,
-        "body": [
-          {
-            "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4433704093",
-            "pull_request_review_id": 5725467868,
-            "id": 4433704093,
-            "node_id": "PRRC_kwDOVRkyoM8AAAABCET0nQ",
-            "diff_hunk": "@@ -1,5 +1,5 @@\n first\n-second\n+changed",
-            "path": "lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5.txt",
-            "commit_id": "2356965f6cd76a1dcd230c870442ca7c2a439960",
-            "original_commit_id": "2356965f6cd76a1dcd230c870442ca7c2a439960",
-            "user": {
-              "login": "skapoor8",
-              "id": 14297543,
-              "node_id": "MDQ6VXNlcjE0Mjk3NTQz",
-              "avatar_url": "https://avatars.githubusercontent.com/u/14297543?v=4",
-              "gravatar_id": "",
-              "url": "https://api.github.com/users/skapoor8",
-              "html_url": "https://github.com/skapoor8",
-              "followers_url": "https://api.github.com/users/skapoor8/followers",
-              "following_url": "https://api.github.com/users/skapoor8/following{/other_user}",
-              "gists_url": "https://api.github.com/users/skapoor8/gists{/gist_id}",
-              "starred_url": "https://api.github.com/users/skapoor8/starred{/owner}{/repo}",
-              "subscriptions_url": "https://api.github.com/users/skapoor8/subscriptions",
-              "organizations_url": "https://api.github.com/users/skapoor8/orgs",
-              "repos_url": "https://api.github.com/users/skapoor8/repos",
-              "events_url": "https://api.github.com/users/skapoor8/events{/privacy}",
-              "received_events_url": "https://api.github.com/users/skapoor8/received_events",
-              "type": "User",
-              "user_view_type": "public",
-              "site_admin": false
-            },
-            "body": "Verify changed line behavior (updated)",
-            "created_at": "2026-10-31T23:36:59Z",
-            "updated_at": "2026-10-31T23:37:01Z",
-            "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1074#discussion_r4433704093",
-            "pull_request_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074",
-            "_links": {
-              "self": {
-                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4433704093"
-              },
-              "html": {
-                "href": "https://github.com/skapoor8/lgtm-e2e/pull/1074#discussion_r4433704093"
-              },
-              "pull_request": {
-                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074"
-              }
-            },
-            "reactions": {
-              "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4433704093/reactions",
-              "total_count": 0,
-              "+1": 0,
-              "-1": 0,
-              "laugh": 0,
-              "hooray": 0,
-              "confused": 0,
-              "heart": 0,
-              "rocket": 0,
-              "eyes": 0
-            },
-            "start_line": null,
-            "original_start_line": null,
-            "start_side": null,
-            "line": 2,
-            "original_line": 2,
-            "side": "RIGHT",
-            "author_association": "OWNER",
-            "original_position": 3,
-            "position": 3,
-            "subject_type": "line",
-            "is_copilot_code_review": false,
-            "copilot_code_review_sources": []
-          }
-        ],
-        "headers": {
-          "content-type": "application/json; charset=utf-8"
-        }
-      },
-      {
-        "status": 200,
-        "body": {
-          "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074",
-          "id": 5102575419,
-          "node_id": "PR_kwDOVRkyoM8AAAABMCMfOw",
-          "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1074",
-          "diff_url": "https://github.com/skapoor8/lgtm-e2e/pull/1074.diff",
-          "patch_url": "https://github.com/skapoor8/lgtm-e2e/pull/1074.patch",
-          "issue_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1074",
-          "number": 1074,
+          "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088",
+          "id": 5115473716,
+          "node_id": "PR_kwDOVRkyoM8AAAABMOfvNA",
+          "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1088",
+          "diff_url": "https://github.com/skapoor8/lgtm-e2e/pull/1088.diff",
+          "patch_url": "https://github.com/skapoor8/lgtm-e2e/pull/1088.patch",
+          "issue_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1088",
+          "number": 1088,
           "state": "open",
           "locked": false,
-          "title": "LGTM E2E · lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5",
+          "title": "LGTM E2E · lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e",
           "user": {
             "login": "skapoor8",
             "id": 14297543,
@@ -10352,26 +9963,26 @@
             "site_admin": false
           },
           "body": "Isolated review lifecycle test in the permanent private fixture repository. Closed after this run.",
-          "created_at": "2026-10-31T23:36:56Z",
-          "updated_at": "2026-10-31T23:36:56Z",
+          "created_at": "2026-11-02T05:29:56Z",
+          "updated_at": "2026-11-02T05:29:56Z",
           "closed_at": null,
           "merged_at": null,
-          "merge_commit_sha": "795a7d93a3e4e4dd67eab1673c3c90e71daf351b",
+          "merge_commit_sha": "498e3529064d1852017fad8bfaccb906944353ce",
           "assignees": [],
           "requested_reviewers": [],
           "requested_teams": [],
           "labels": [],
           "milestone": null,
           "draft": false,
-          "commits_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074/commits",
-          "review_comments_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074/comments",
+          "commits_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088/commits",
+          "review_comments_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088/comments",
           "review_comment_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments{/number}",
-          "comments_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1074/comments",
-          "statuses_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/statuses/2356965f6cd76a1dcd230c870442ca7c2a439960",
+          "comments_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1088/comments",
+          "statuses_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/statuses/2fb8745284c69835570d13830818b910be941a80",
           "head": {
-            "label": "skapoor8:lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5-head",
-            "ref": "lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5-head",
-            "sha": "2356965f6cd76a1dcd230c870442ca7c2a439960",
+            "label": "skapoor8:lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e-head",
+            "ref": "lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e-head",
+            "sha": "2fb8745284c69835570d13830818b910be941a80",
             "user": {
               "login": "skapoor8",
               "id": 14297543,
@@ -10462,7 +10073,7 @@
               "deployments_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/deployments",
               "created_at": "2026-10-21T00:44:34Z",
               "updated_at": "2026-10-21T01:05:26Z",
-              "pushed_at": "2026-10-31T23:36:55Z",
+              "pushed_at": "2026-11-02T05:29:55Z",
               "git_url": "git://github.com/skapoor8/lgtm-e2e.git",
               "ssh_url": "git@github.com:skapoor8/lgtm-e2e.git",
               "clone_url": "https://github.com/skapoor8/lgtm-e2e.git",
@@ -10498,9 +10109,9 @@
             }
           },
           "base": {
-            "label": "skapoor8:lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5-base",
-            "ref": "lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5-base",
-            "sha": "48eb862c98588ad55dc025beac87b1c2b4f4acdb",
+            "label": "skapoor8:lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e-base",
+            "ref": "lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e-base",
+            "sha": "b75062c329d7957aa8fb51e07bd66748686c0736",
             "user": {
               "login": "skapoor8",
               "id": 14297543,
@@ -10591,7 +10202,7 @@
               "deployments_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/deployments",
               "created_at": "2026-10-21T00:44:34Z",
               "updated_at": "2026-10-21T01:05:26Z",
-              "pushed_at": "2026-10-31T23:36:55Z",
+              "pushed_at": "2026-11-02T05:29:55Z",
               "git_url": "git://github.com/skapoor8/lgtm-e2e.git",
               "ssh_url": "git@github.com:skapoor8/lgtm-e2e.git",
               "clone_url": "https://github.com/skapoor8/lgtm-e2e.git",
@@ -10628,28 +10239,28 @@
           },
           "_links": {
             "self": {
-              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074"
+              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088"
             },
             "html": {
-              "href": "https://github.com/skapoor8/lgtm-e2e/pull/1074"
+              "href": "https://github.com/skapoor8/lgtm-e2e/pull/1088"
             },
             "issue": {
-              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1074"
+              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1088"
             },
             "comments": {
-              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1074/comments"
+              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/issues/1088/comments"
             },
             "review_comments": {
-              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074/comments"
+              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088/comments"
             },
             "review_comment": {
               "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments{/number}"
             },
             "commits": {
-              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074/commits"
+              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088/commits"
             },
             "statuses": {
-              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/statuses/2356965f6cd76a1dcd230c870442ca7c2a439960"
+              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/statuses/2fb8745284c69835570d13830818b910be941a80"
             }
           },
           "author_association": "OWNER",
@@ -10677,8 +10288,8 @@
         "status": 200,
         "body": [
           {
-            "id": 5725467868,
-            "node_id": "PRR_kwDOVRkyoM8AAAABVUO03A",
+            "id": 5732448151,
+            "node_id": "PRR_kwDOVRkyoM8AAAABVa43lw",
             "user": {
               "login": "skapoor8",
               "id": 14297543,
@@ -10702,21 +10313,539 @@
             },
             "body": "",
             "state": "COMMENTED",
-            "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1074#pullrequestreview-5725467868",
-            "pull_request_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074",
+            "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1088#pullrequestreview-5732448151",
+            "pull_request_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088",
             "author_association": "OWNER",
             "_links": {
               "html": {
-                "href": "https://github.com/skapoor8/lgtm-e2e/pull/1074#pullrequestreview-5725467868"
+                "href": "https://github.com/skapoor8/lgtm-e2e/pull/1088#pullrequestreview-5732448151"
               },
               "pull_request": {
-                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1074"
+                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088"
               }
             },
             "is_copilot_code_review": false,
             "copilot_code_review_effort": null,
-            "submitted_at": "2026-10-31T23:36:59Z",
-            "commit_id": "2356965f6cd76a1dcd230c870442ca7c2a439960"
+            "submitted_at": "2026-11-02T05:29:58Z",
+            "commit_id": "2fb8745284c69835570d13830818b910be941a80"
+          }
+        ],
+        "headers": {
+          "content-type": "application/json; charset=utf-8"
+        }
+      },
+      {
+        "status": 200,
+        "body": [
+          {
+            "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200568",
+            "pull_request_review_id": 5732448151,
+            "id": 4439200568,
+            "node_id": "PRRC_kwDOVRkyoM8AAAABCJjTOA",
+            "diff_hunk": "@@ -1,5 +1,5 @@\n first\n-second\n+changed\n stable context 1\n stable context 2\n stable context 3",
+            "path": "lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e.txt",
+            "commit_id": "2fb8745284c69835570d13830818b910be941a80",
+            "original_commit_id": "2fb8745284c69835570d13830818b910be941a80",
+            "user": {
+              "login": "skapoor8",
+              "id": 14297543,
+              "node_id": "MDQ6VXNlcjE0Mjk3NTQz",
+              "avatar_url": "https://avatars.githubusercontent.com/u/14297543?v=4",
+              "gravatar_id": "",
+              "url": "https://api.github.com/users/skapoor8",
+              "html_url": "https://github.com/skapoor8",
+              "followers_url": "https://api.github.com/users/skapoor8/followers",
+              "following_url": "https://api.github.com/users/skapoor8/following{/other_user}",
+              "gists_url": "https://api.github.com/users/skapoor8/gists{/gist_id}",
+              "starred_url": "https://api.github.com/users/skapoor8/starred{/owner}{/repo}",
+              "subscriptions_url": "https://api.github.com/users/skapoor8/subscriptions",
+              "organizations_url": "https://api.github.com/users/skapoor8/orgs",
+              "repos_url": "https://api.github.com/users/skapoor8/repos",
+              "events_url": "https://api.github.com/users/skapoor8/events{/privacy}",
+              "received_events_url": "https://api.github.com/users/skapoor8/received_events",
+              "type": "User",
+              "user_view_type": "public",
+              "site_admin": false
+            },
+            "body": "Ensure the context range invariants across lines 3 through 5 hold when keys are reordered.\n\n> Generated by AI agent `anthropic/claude-sonnet-4-5` via LGTM",
+            "created_at": "2026-11-02T05:29:59Z",
+            "updated_at": "2026-11-02T05:29:59Z",
+            "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1088#discussion_r4439200568",
+            "pull_request_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088",
+            "_links": {
+              "self": {
+                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200568"
+              },
+              "html": {
+                "href": "https://github.com/skapoor8/lgtm-e2e/pull/1088#discussion_r4439200568"
+              },
+              "pull_request": {
+                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088"
+              }
+            },
+            "reactions": {
+              "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200568/reactions",
+              "total_count": 0,
+              "+1": 0,
+              "-1": 0,
+              "laugh": 0,
+              "hooray": 0,
+              "confused": 0,
+              "heart": 0,
+              "rocket": 0,
+              "eyes": 0
+            },
+            "start_line": 3,
+            "original_start_line": 3,
+            "start_side": "RIGHT",
+            "line": 5,
+            "original_line": 5,
+            "side": "RIGHT",
+            "author_association": "OWNER",
+            "original_position": 6,
+            "position": 6,
+            "subject_type": "line",
+            "is_copilot_code_review": false,
+            "copilot_code_review_sources": []
+          }
+        ],
+        "headers": {
+          "content-type": "application/json; charset=utf-8"
+        }
+      },
+      {
+        "status": 201,
+        "body": {
+          "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200784",
+          "pull_request_review_id": 5732448418,
+          "id": 4439200784,
+          "node_id": "PRRC_kwDOVRkyoM8AAAABCJjUEA",
+          "diff_hunk": "@@ -1,5 +1,5 @@\n first\n-second\n+changed",
+          "path": "lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e.txt",
+          "commit_id": "2fb8745284c69835570d13830818b910be941a80",
+          "original_commit_id": "2fb8745284c69835570d13830818b910be941a80",
+          "user": {
+            "login": "skapoor8",
+            "id": 14297543,
+            "node_id": "MDQ6VXNlcjE0Mjk3NTQz",
+            "avatar_url": "https://avatars.githubusercontent.com/u/14297543?v=4",
+            "gravatar_id": "",
+            "url": "https://api.github.com/users/skapoor8",
+            "html_url": "https://github.com/skapoor8",
+            "followers_url": "https://api.github.com/users/skapoor8/followers",
+            "following_url": "https://api.github.com/users/skapoor8/following{/other_user}",
+            "gists_url": "https://api.github.com/users/skapoor8/gists{/gist_id}",
+            "starred_url": "https://api.github.com/users/skapoor8/starred{/owner}{/repo}",
+            "subscriptions_url": "https://api.github.com/users/skapoor8/subscriptions",
+            "organizations_url": "https://api.github.com/users/skapoor8/orgs",
+            "repos_url": "https://api.github.com/users/skapoor8/repos",
+            "events_url": "https://api.github.com/users/skapoor8/events{/privacy}",
+            "received_events_url": "https://api.github.com/users/skapoor8/received_events",
+            "type": "User",
+            "user_view_type": "public",
+            "site_admin": false
+          },
+          "body": "Please verify that the updated line 2 configuration value matches our production default.",
+          "created_at": "2026-11-02T05:30:01Z",
+          "updated_at": "2026-11-02T05:30:01Z",
+          "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1088#discussion_r4439200784",
+          "pull_request_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088",
+          "_links": {
+            "self": {
+              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200784"
+            },
+            "html": {
+              "href": "https://github.com/skapoor8/lgtm-e2e/pull/1088#discussion_r4439200784"
+            },
+            "pull_request": {
+              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088"
+            }
+          },
+          "reactions": {
+            "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200784/reactions",
+            "total_count": 0,
+            "+1": 0,
+            "-1": 0,
+            "laugh": 0,
+            "hooray": 0,
+            "confused": 0,
+            "heart": 0,
+            "rocket": 0,
+            "eyes": 0
+          },
+          "start_line": null,
+          "original_start_line": null,
+          "start_side": null,
+          "line": 2,
+          "original_line": 2,
+          "side": "RIGHT",
+          "author_association": "OWNER",
+          "original_position": 3,
+          "position": 3,
+          "subject_type": "line",
+          "is_copilot_code_review": false,
+          "copilot_code_review_sources": []
+        },
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "location": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200784"
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200784",
+          "pull_request_review_id": 5732448418,
+          "id": 4439200784,
+          "node_id": "PRRC_kwDOVRkyoM8AAAABCJjUEA",
+          "diff_hunk": "@@ -1,5 +1,5 @@\n first\n-second\n+changed",
+          "path": "lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e.txt",
+          "commit_id": "2fb8745284c69835570d13830818b910be941a80",
+          "original_commit_id": "2fb8745284c69835570d13830818b910be941a80",
+          "user": {
+            "login": "skapoor8",
+            "id": 14297543,
+            "node_id": "MDQ6VXNlcjE0Mjk3NTQz",
+            "avatar_url": "https://avatars.githubusercontent.com/u/14297543?v=4",
+            "gravatar_id": "",
+            "url": "https://api.github.com/users/skapoor8",
+            "html_url": "https://github.com/skapoor8",
+            "followers_url": "https://api.github.com/users/skapoor8/followers",
+            "following_url": "https://api.github.com/users/skapoor8/following{/other_user}",
+            "gists_url": "https://api.github.com/users/skapoor8/gists{/gist_id}",
+            "starred_url": "https://api.github.com/users/skapoor8/starred{/owner}{/repo}",
+            "subscriptions_url": "https://api.github.com/users/skapoor8/subscriptions",
+            "organizations_url": "https://api.github.com/users/skapoor8/orgs",
+            "repos_url": "https://api.github.com/users/skapoor8/repos",
+            "events_url": "https://api.github.com/users/skapoor8/events{/privacy}",
+            "received_events_url": "https://api.github.com/users/skapoor8/received_events",
+            "type": "User",
+            "user_view_type": "public",
+            "site_admin": false
+          },
+          "body": "Please verify that the updated line 2 configuration value matches our production default before release.",
+          "created_at": "2026-11-02T05:30:01Z",
+          "updated_at": "2026-11-02T05:30:02Z",
+          "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1088#discussion_r4439200784",
+          "pull_request_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088",
+          "_links": {
+            "self": {
+              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200784"
+            },
+            "html": {
+              "href": "https://github.com/skapoor8/lgtm-e2e/pull/1088#discussion_r4439200784"
+            },
+            "pull_request": {
+              "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088"
+            }
+          },
+          "reactions": {
+            "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200784/reactions",
+            "total_count": 0,
+            "+1": 0,
+            "-1": 0,
+            "laugh": 0,
+            "hooray": 0,
+            "confused": 0,
+            "heart": 0,
+            "rocket": 0,
+            "eyes": 0
+          },
+          "start_line": null,
+          "original_start_line": null,
+          "start_side": null,
+          "line": 2,
+          "original_line": 2,
+          "side": "RIGHT",
+          "author_association": "OWNER",
+          "original_position": 3,
+          "position": 3,
+          "subject_type": "line",
+          "is_copilot_code_review": false,
+          "copilot_code_review_sources": []
+        },
+        "headers": {
+          "content-type": "application/json; charset=utf-8"
+        }
+      },
+      {
+        "status": 200,
+        "body": [
+          {
+            "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200568",
+            "pull_request_review_id": 5732448151,
+            "id": 4439200568,
+            "node_id": "PRRC_kwDOVRkyoM8AAAABCJjTOA",
+            "diff_hunk": "@@ -1,5 +1,5 @@\n first\n-second\n+changed\n stable context 1\n stable context 2\n stable context 3",
+            "path": "lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e.txt",
+            "commit_id": "2fb8745284c69835570d13830818b910be941a80",
+            "original_commit_id": "2fb8745284c69835570d13830818b910be941a80",
+            "user": {
+              "login": "skapoor8",
+              "id": 14297543,
+              "node_id": "MDQ6VXNlcjE0Mjk3NTQz",
+              "avatar_url": "https://avatars.githubusercontent.com/u/14297543?v=4",
+              "gravatar_id": "",
+              "url": "https://api.github.com/users/skapoor8",
+              "html_url": "https://github.com/skapoor8",
+              "followers_url": "https://api.github.com/users/skapoor8/followers",
+              "following_url": "https://api.github.com/users/skapoor8/following{/other_user}",
+              "gists_url": "https://api.github.com/users/skapoor8/gists{/gist_id}",
+              "starred_url": "https://api.github.com/users/skapoor8/starred{/owner}{/repo}",
+              "subscriptions_url": "https://api.github.com/users/skapoor8/subscriptions",
+              "organizations_url": "https://api.github.com/users/skapoor8/orgs",
+              "repos_url": "https://api.github.com/users/skapoor8/repos",
+              "events_url": "https://api.github.com/users/skapoor8/events{/privacy}",
+              "received_events_url": "https://api.github.com/users/skapoor8/received_events",
+              "type": "User",
+              "user_view_type": "public",
+              "site_admin": false
+            },
+            "body": "Ensure the context range invariants across lines 3 through 5 hold when keys are reordered.\n\n> Generated by AI agent `anthropic/claude-sonnet-4-5` via LGTM",
+            "created_at": "2026-11-02T05:29:59Z",
+            "updated_at": "2026-11-02T05:29:59Z",
+            "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1088#discussion_r4439200568",
+            "pull_request_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088",
+            "_links": {
+              "self": {
+                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200568"
+              },
+              "html": {
+                "href": "https://github.com/skapoor8/lgtm-e2e/pull/1088#discussion_r4439200568"
+              },
+              "pull_request": {
+                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088"
+              }
+            },
+            "reactions": {
+              "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200568/reactions",
+              "total_count": 0,
+              "+1": 0,
+              "-1": 0,
+              "laugh": 0,
+              "hooray": 0,
+              "confused": 0,
+              "heart": 0,
+              "rocket": 0,
+              "eyes": 0
+            },
+            "start_line": 3,
+            "original_start_line": 3,
+            "start_side": "RIGHT",
+            "line": 5,
+            "original_line": 5,
+            "side": "RIGHT",
+            "author_association": "OWNER",
+            "original_position": 6,
+            "position": 6,
+            "subject_type": "line",
+            "is_copilot_code_review": false,
+            "copilot_code_review_sources": []
+          },
+          {
+            "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200784",
+            "pull_request_review_id": 5732448418,
+            "id": 4439200784,
+            "node_id": "PRRC_kwDOVRkyoM8AAAABCJjUEA",
+            "diff_hunk": "@@ -1,5 +1,5 @@\n first\n-second\n+changed",
+            "path": "lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e.txt",
+            "commit_id": "2fb8745284c69835570d13830818b910be941a80",
+            "original_commit_id": "2fb8745284c69835570d13830818b910be941a80",
+            "user": {
+              "login": "skapoor8",
+              "id": 14297543,
+              "node_id": "MDQ6VXNlcjE0Mjk3NTQz",
+              "avatar_url": "https://avatars.githubusercontent.com/u/14297543?v=4",
+              "gravatar_id": "",
+              "url": "https://api.github.com/users/skapoor8",
+              "html_url": "https://github.com/skapoor8",
+              "followers_url": "https://api.github.com/users/skapoor8/followers",
+              "following_url": "https://api.github.com/users/skapoor8/following{/other_user}",
+              "gists_url": "https://api.github.com/users/skapoor8/gists{/gist_id}",
+              "starred_url": "https://api.github.com/users/skapoor8/starred{/owner}{/repo}",
+              "subscriptions_url": "https://api.github.com/users/skapoor8/subscriptions",
+              "organizations_url": "https://api.github.com/users/skapoor8/orgs",
+              "repos_url": "https://api.github.com/users/skapoor8/repos",
+              "events_url": "https://api.github.com/users/skapoor8/events{/privacy}",
+              "received_events_url": "https://api.github.com/users/skapoor8/received_events",
+              "type": "User",
+              "user_view_type": "public",
+              "site_admin": false
+            },
+            "body": "Please verify that the updated line 2 configuration value matches our production default before release.",
+            "created_at": "2026-11-02T05:30:01Z",
+            "updated_at": "2026-11-02T05:30:02Z",
+            "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1088#discussion_r4439200784",
+            "pull_request_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088",
+            "_links": {
+              "self": {
+                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200784"
+              },
+              "html": {
+                "href": "https://github.com/skapoor8/lgtm-e2e/pull/1088#discussion_r4439200784"
+              },
+              "pull_request": {
+                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088"
+              }
+            },
+            "reactions": {
+              "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200784/reactions",
+              "total_count": 0,
+              "+1": 0,
+              "-1": 0,
+              "laugh": 0,
+              "hooray": 0,
+              "confused": 0,
+              "heart": 0,
+              "rocket": 0,
+              "eyes": 0
+            },
+            "start_line": null,
+            "original_start_line": null,
+            "start_side": null,
+            "line": 2,
+            "original_line": 2,
+            "side": "RIGHT",
+            "author_association": "OWNER",
+            "original_position": 3,
+            "position": 3,
+            "subject_type": "line",
+            "is_copilot_code_review": false,
+            "copilot_code_review_sources": []
+          }
+        ],
+        "headers": {
+          "content-type": "application/json; charset=utf-8"
+        }
+      },
+      {
+        "status": 204,
+        "body": null,
+        "headers": {}
+      },
+      {
+        "status": 200,
+        "body": [
+          {
+            "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200784",
+            "pull_request_review_id": 5732448418,
+            "id": 4439200784,
+            "node_id": "PRRC_kwDOVRkyoM8AAAABCJjUEA",
+            "diff_hunk": "@@ -1,5 +1,5 @@\n first\n-second\n+changed",
+            "path": "lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e.txt",
+            "commit_id": "2fb8745284c69835570d13830818b910be941a80",
+            "original_commit_id": "2fb8745284c69835570d13830818b910be941a80",
+            "user": {
+              "login": "skapoor8",
+              "id": 14297543,
+              "node_id": "MDQ6VXNlcjE0Mjk3NTQz",
+              "avatar_url": "https://avatars.githubusercontent.com/u/14297543?v=4",
+              "gravatar_id": "",
+              "url": "https://api.github.com/users/skapoor8",
+              "html_url": "https://github.com/skapoor8",
+              "followers_url": "https://api.github.com/users/skapoor8/followers",
+              "following_url": "https://api.github.com/users/skapoor8/following{/other_user}",
+              "gists_url": "https://api.github.com/users/skapoor8/gists{/gist_id}",
+              "starred_url": "https://api.github.com/users/skapoor8/starred{/owner}{/repo}",
+              "subscriptions_url": "https://api.github.com/users/skapoor8/subscriptions",
+              "organizations_url": "https://api.github.com/users/skapoor8/orgs",
+              "repos_url": "https://api.github.com/users/skapoor8/repos",
+              "events_url": "https://api.github.com/users/skapoor8/events{/privacy}",
+              "received_events_url": "https://api.github.com/users/skapoor8/received_events",
+              "type": "User",
+              "user_view_type": "public",
+              "site_admin": false
+            },
+            "body": "Please verify that the updated line 2 configuration value matches our production default before release.",
+            "created_at": "2026-11-02T05:30:01Z",
+            "updated_at": "2026-11-02T05:30:02Z",
+            "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1088#discussion_r4439200784",
+            "pull_request_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088",
+            "_links": {
+              "self": {
+                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200784"
+              },
+              "html": {
+                "href": "https://github.com/skapoor8/lgtm-e2e/pull/1088#discussion_r4439200784"
+              },
+              "pull_request": {
+                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088"
+              }
+            },
+            "reactions": {
+              "url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/comments/4439200784/reactions",
+              "total_count": 0,
+              "+1": 0,
+              "-1": 0,
+              "laugh": 0,
+              "hooray": 0,
+              "confused": 0,
+              "heart": 0,
+              "rocket": 0,
+              "eyes": 0
+            },
+            "start_line": null,
+            "original_start_line": null,
+            "start_side": null,
+            "line": 2,
+            "original_line": 2,
+            "side": "RIGHT",
+            "author_association": "OWNER",
+            "original_position": 3,
+            "position": 3,
+            "subject_type": "line",
+            "is_copilot_code_review": false,
+            "copilot_code_review_sources": []
+          }
+        ],
+        "headers": {
+          "content-type": "application/json; charset=utf-8"
+        }
+      },
+      {
+        "status": 200,
+        "body": [
+          {
+            "id": 5732448418,
+            "node_id": "PRR_kwDOVRkyoM8AAAABVa44og",
+            "user": {
+              "login": "skapoor8",
+              "id": 14297543,
+              "node_id": "MDQ6VXNlcjE0Mjk3NTQz",
+              "avatar_url": "https://avatars.githubusercontent.com/u/14297543?v=4",
+              "gravatar_id": "",
+              "url": "https://api.github.com/users/skapoor8",
+              "html_url": "https://github.com/skapoor8",
+              "followers_url": "https://api.github.com/users/skapoor8/followers",
+              "following_url": "https://api.github.com/users/skapoor8/following{/other_user}",
+              "gists_url": "https://api.github.com/users/skapoor8/gists{/gist_id}",
+              "starred_url": "https://api.github.com/users/skapoor8/starred{/owner}{/repo}",
+              "subscriptions_url": "https://api.github.com/users/skapoor8/subscriptions",
+              "organizations_url": "https://api.github.com/users/skapoor8/orgs",
+              "repos_url": "https://api.github.com/users/skapoor8/repos",
+              "events_url": "https://api.github.com/users/skapoor8/events{/privacy}",
+              "received_events_url": "https://api.github.com/users/skapoor8/received_events",
+              "type": "User",
+              "user_view_type": "public",
+              "site_admin": false
+            },
+            "body": "",
+            "state": "COMMENTED",
+            "html_url": "https://github.com/skapoor8/lgtm-e2e/pull/1088#pullrequestreview-5732448418",
+            "pull_request_url": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088",
+            "author_association": "OWNER",
+            "_links": {
+              "html": {
+                "href": "https://github.com/skapoor8/lgtm-e2e/pull/1088#pullrequestreview-5732448418"
+              },
+              "pull_request": {
+                "href": "https://api.github.com/repos/skapoor8/lgtm-e2e/pulls/1088"
+              }
+            },
+            "is_copilot_code_review": false,
+            "copilot_code_review_effort": null,
+            "submitted_at": "2026-11-02T05:30:01Z",
+            "commit_id": "2fb8745284c69835570d13830818b910be941a80"
           }
         ],
         "headers": {
@@ -10729,7 +10858,7 @@
         "request": {
           "actor": "primary",
           "method": "GET",
-          "path": "/repos/skapoor8/lgtm-e2e/pulls?head=skapoor8%3Algtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5-head&state=all",
+          "path": "/repos/skapoor8/lgtm-e2e/pulls?head=skapoor8%3Algtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e-head&state=all",
           "body": null
         },
         "response": 0
@@ -10738,7 +10867,7 @@
         "request": {
           "actor": "primary",
           "method": "GET",
-          "path": "/repos/skapoor8/lgtm-e2e/pulls/1074",
+          "path": "/repos/skapoor8/lgtm-e2e/pulls/1088",
           "body": null
         },
         "response": 1
@@ -10747,7 +10876,7 @@
         "request": {
           "actor": "primary",
           "method": "GET",
-          "path": "/repos/skapoor8/lgtm-e2e/pulls/1074/reviews",
+          "path": "/repos/skapoor8/lgtm-e2e/pulls/1088/reviews",
           "body": null
         },
         "response": 2
@@ -10756,7 +10885,7 @@
         "request": {
           "actor": "primary",
           "method": "GET",
-          "path": "/repos/skapoor8/lgtm-e2e/pulls/1074/comments",
+          "path": "/repos/skapoor8/lgtm-e2e/pulls/1088/comments",
           "body": null
         },
         "response": 2
@@ -10765,13 +10894,15 @@
         "request": {
           "actor": "primary",
           "method": "POST",
-          "path": "/repos/skapoor8/lgtm-e2e/pulls/1074/comments",
+          "path": "/repos/skapoor8/lgtm-e2e/pulls/1088/comments",
           "body": {
-            "body": "Verify changed line behavior",
-            "commit_id": "2356965f6cd76a1dcd230c870442ca7c2a439960",
-            "line": 2,
-            "path": "lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5.txt",
-            "side": "RIGHT"
+            "body": "Ensure the context range invariants across lines 3 through 5 hold when keys are reordered.\n\n> Generated by AI agent `anthropic/claude-sonnet-4-5` via LGTM",
+            "commit_id": "2fb8745284c69835570d13830818b910be941a80",
+            "line": 5,
+            "path": "lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e.txt",
+            "side": "RIGHT",
+            "start_line": 3,
+            "start_side": "RIGHT"
           }
         },
         "response": 3
@@ -10779,28 +10910,27 @@
       {
         "request": {
           "actor": "primary",
-          "method": "POST",
-          "path": "/repos/skapoor8/lgtm-e2e/pulls/1074/comments",
-          "body": {
-            "body": "Check context range invariants\n\n> Generated by AI agent `anthropic/claude-sonnet-4-5` via LGTM",
-            "commit_id": "2356965f6cd76a1dcd230c870442ca7c2a439960",
-            "line": 5,
-            "path": "lgtm-e2e-23da8e13-5a8c-4cc9-a675-e0c308df53d5.txt",
-            "side": "RIGHT",
-            "start_line": 3,
-            "start_side": "RIGHT"
-          }
+          "method": "GET",
+          "path": "/repos/skapoor8/lgtm-e2e/pulls?head=skapoor8%3Algtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e-head&state=all",
+          "body": null
+        },
+        "response": 0
+      },
+      {
+        "request": {
+          "actor": "primary",
+          "method": "GET",
+          "path": "/repos/skapoor8/lgtm-e2e/pulls/1088",
+          "body": null
         },
         "response": 4
       },
       {
         "request": {
           "actor": "primary",
-          "method": "PATCH",
-          "path": "/repos/skapoor8/lgtm-e2e/pulls/comments/4433704093",
-          "body": {
-            "body": "Verify changed line behavior (updated)"
-          }
+          "method": "GET",
+          "path": "/repos/skapoor8/lgtm-e2e/pulls/1088/reviews",
+          "body": null
         },
         "response": 5
       },
@@ -10808,7 +10938,7 @@
         "request": {
           "actor": "primary",
           "method": "GET",
-          "path": "/repos/skapoor8/lgtm-e2e/pulls/1074/comments?per_page=100",
+          "path": "/repos/skapoor8/lgtm-e2e/pulls/1088/comments",
           "body": null
         },
         "response": 6
@@ -10816,18 +10946,26 @@
       {
         "request": {
           "actor": "primary",
-          "method": "DELETE",
-          "path": "/repos/skapoor8/lgtm-e2e/pulls/comments/4433704136",
-          "body": null
+          "method": "POST",
+          "path": "/repos/skapoor8/lgtm-e2e/pulls/1088/comments",
+          "body": {
+            "body": "Please verify that the updated line 2 configuration value matches our production default.",
+            "commit_id": "2fb8745284c69835570d13830818b910be941a80",
+            "line": 2,
+            "path": "lgtm-e2e-e1ee486f-0005-40bc-9606-682353c6803e.txt",
+            "side": "RIGHT"
+          }
         },
         "response": 7
       },
       {
         "request": {
           "actor": "primary",
-          "method": "GET",
-          "path": "/repos/skapoor8/lgtm-e2e/pulls/1074/comments?per_page=100",
-          "body": null
+          "method": "PATCH",
+          "path": "/repos/skapoor8/lgtm-e2e/pulls/comments/4439200784",
+          "body": {
+            "body": "Please verify that the updated line 2 configuration value matches our production default before release."
+          }
         },
         "response": 8
       },
@@ -10835,7 +10973,7 @@
         "request": {
           "actor": "primary",
           "method": "GET",
-          "path": "/repos/skapoor8/lgtm-e2e/pulls/1074",
+          "path": "/repos/skapoor8/lgtm-e2e/pulls/1088/comments?per_page=100",
           "body": null
         },
         "response": 9
@@ -10843,8 +10981,8 @@
       {
         "request": {
           "actor": "primary",
-          "method": "GET",
-          "path": "/repos/skapoor8/lgtm-e2e/pulls/1074/reviews?per_page=100",
+          "method": "DELETE",
+          "path": "/repos/skapoor8/lgtm-e2e/pulls/comments/4439200568",
           "body": null
         },
         "response": 10
@@ -10853,31 +10991,58 @@
         "request": {
           "actor": "primary",
           "method": "GET",
-          "path": "/repos/skapoor8/lgtm-e2e/pulls/1074/comments?per_page=100",
+          "path": "/repos/skapoor8/lgtm-e2e/pulls/1088/comments?per_page=100",
           "body": null
         },
-        "response": 8
-      },
-      {
-        "request": {
-          "actor": "primary",
-          "method": "DELETE",
-          "path": "/repos/skapoor8/lgtm-e2e/pulls/comments/4433704093",
-          "body": null
-        },
-        "response": 7
+        "response": 11
       },
       {
         "request": {
           "actor": "primary",
           "method": "GET",
-          "path": "/repos/skapoor8/lgtm-e2e/issues/1074/comments?per_page=100",
+          "path": "/repos/skapoor8/lgtm-e2e/pulls/1088",
+          "body": null
+        },
+        "response": 4
+      },
+      {
+        "request": {
+          "actor": "primary",
+          "method": "GET",
+          "path": "/repos/skapoor8/lgtm-e2e/pulls/1088/reviews?per_page=100",
+          "body": null
+        },
+        "response": 12
+      },
+      {
+        "request": {
+          "actor": "primary",
+          "method": "GET",
+          "path": "/repos/skapoor8/lgtm-e2e/pulls/1088/comments?per_page=100",
+          "body": null
+        },
+        "response": 11
+      },
+      {
+        "request": {
+          "actor": "primary",
+          "method": "DELETE",
+          "path": "/repos/skapoor8/lgtm-e2e/pulls/comments/4439200784",
+          "body": null
+        },
+        "response": 10
+      },
+      {
+        "request": {
+          "actor": "primary",
+          "method": "GET",
+          "path": "/repos/skapoor8/lgtm-e2e/issues/1088/comments?per_page=100",
           "body": null
         },
         "response": 2
       }
     ],
-    "gitBundle": "IyB2MiBnaXQgYnVuZGxlCjQ4ZWI4NjJjOTg1ODhhZDU1ZGMwMjViZWFjODdiMWMyYjRmNGFjZGIgcmVmcy9oZWFkcy9sZ3RtLWUyZS0yM2RhOGUxMy01YThjLTRjYzktYTY3NS1lMGMzMDhkZjUzZDUtYmFzZQoyMzU2OTY1ZjZjZDc2YTFkY2QyMzBjODcwNDQyY2E3YzJhNDM5OTYwIHJlZnMvaGVhZHMvbGd0bS1lMmUtMjNkYThlMTMtNWE4Yy00Y2M5LWE2NzUtZTBjMzA4ZGY1M2Q1LWhlYWQKClBBQ0sAAAACAAAACZAOeJyNjksOgzAMBfc5hS/QKiQOcaqq6oaDOI5RkaAgSD/Hb47Q7dPM6NVdFdSV4L12nJKLvfckyITigpBN7L34MUqP2Wy867MCkmbqnSQKRFxCKGJdyMpCMXfiMo7IUrLhV32sOwxugKs6veuXl23Wc9Wj3qCLySMl6hBOFq01si7LVKv+b5gGXmA61pmrFtj1PekHWqc9bevT/AChxEKIkA54nI2OSQ7CMBAE737FfADk8ZLYCCEueYid9IhICYkcszwfP4FrqarVtQAktuvEY0peOLngTXTCurdZNCabo0lGHPdB7angWYk5di4kDzMha47eigTpTcd9hM5j5mzFASq96mMrNJiBrjC445vWfcG54qg3arZ1IQa2dNJOazVu6zrXiv8L1cQLzce2pIqJCt4zPtR22tNGn+oHn5lCV5IOeJytzEEKwjAQAMB7X7EfsKQxaVoQ8SoefcEm2dqlxpR0K+LrLYI/8DqHkUIE1hC11pu2tSZqcgGtVr6J1OigvI5950IMg69wlTEXuHKMIxYZ4YJz3uCw/KSevqLN6ZaQ73XI6QiN67U1e+M62CmjVLVpYhH6Q1WdHyyMd34TzIWfKARLyhPBwC9ZC30APXxJ2aQHeJwzNDAwMzFRSMusKCktStUrqShhSFuq93zhDeY74a1z7KaumXv2RA1jiiFEWU56Sa5uqlGqrpFxSqJFqqGxrmmiRbKuSXKypW6imbmpbqpBsrGBRUqaqXGKKdiwmTvePtWR+R35KK81J2vO9ViHGeVvAHlXK2c9eJxLyywqLuEqTk3Oz0vhAgAjOQS5tS14nGXSQQ6CQBBE0f2cgiPQVYh4HMQBTAgmMguP777/9q9eKrW+v1cryz6fW32Vq83Po3bL52z117rIQTk4hyGHWw5jDvccphwegPUosAawAW2AG/AGwAFxgBwwC2ZxX5gFs2AWzIJZMAtmwWyYDbN5CpgNs2E2zIbZMBvmoS9/ajr62+kBgRR4nCspmZAgcmP1saPL97yuYjmzRe/yiSM5lmznzQC1Ww2E5AGAK3icu8p6hZU7LbOouISrODU5P28jz0kmAFBuB5GnAnicMzQwMDMxUUjLrCgpLUrVK6koYUhbqvd84Q3mO+Gtc+ymrpl79kQNYwoAHEQQZ7cVEX32ZNPxHBkkZVhvDGX93uOA"
+    "gitBundle": "IyB2MiBnaXQgYnVuZGxlCmI3NTA2MmMzMjlkNzk1N2FhOGZiNTFlMDdiZDY2NzQ4Njg2YzA3MzYgcmVmcy9oZWFkcy9sZ3RtLWUyZS1lMWVlNDg2Zi0wMDA1LTQwYmMtOTYwNi02ODIzNTNjNjgwM2UtYmFzZQoyZmI4NzQ1Mjg0YzY5ODM1NTcwZDEzODMwODE4YjkxMGJlOTQxYTgwIHJlZnMvaGVhZHMvbGd0bS1lMmUtZTFlZTQ4NmYtMDAwNS00MGJjLTk2MDYtNjgyMzUzYzY4MDNlLWhlYWQKClBBQ0sAAAACAAAACZAOeJyNjksOwjAMBfc5hS8Acr5OEEJsehCncUSlllZt+ByfHIHt08zotV0EdOVqtdMj14xIQsX5wt5VHwNqE3NxubAYtfEuzwaZPAYzWpMKJU/MsWavBSmXEMjFEMOIZIPiV3usOwxmgKsYucuXl22Wc5Oj3UBTsj6RTQ5O6BHVuC7L1Jr8b6gOXmA61pmbFNjlPckHeqc/7etT/QCDrkH4kA54nI2OSQ7DIBAE77xiPpCIAWMgiqJc/BCWRrHkTTZZnh/yg1xbVaWuO0Cs+s46qUoomZ1hDl12VvUcYTVMSIhaW5XEFnYslZh937lgoDKiZG90Ka78BOshY4ocdekAEZ71se40qIGuULjjE+ZtwrniqDdqtDbeaq/oJI2UIq3zPNaK/w3RwAuNxzqFikw7XiPe1DrtaVsX8QViikIfkg54nK3MQQrCMBAAwHtfsR+wpDFpWhDxKh59wSbZ2qXGlHQr4ustgj/wOoeRQgTWELXWm7a1JmpyAa1WvonU6KC8jn3nQgyDr3CVMRe4cowjFhnhgnPe4LD8pJ6+os3plpDvdcjpCI3rtTV74zrYKaNUtWliEfpDVZ0fLIx3fhPMhZ8oBEvKE8HAL1kLfQA9fEnZpAd4nDM0MDAzMVFIy6woKS1K1SupKGFIW6r3fOEN5jvhrXPspq6Ze/ZEDWOKIURZTnpJrm6qUapuqmFqqomFWZqugYGBqa6JQVKyrqWZgZmumYWRsalxspmFgTHEsJk73j7Vkfkd+SivNSdrzvVYhxnlbwBWHSp2PXicS8ssKi7hKk5Nzs9L4QIAIzkEubUteJxl0kEOgkAQRNH9nIIj0FWIeBzEAUwIJjILj+++//avXiq1vr9XK8s+n1t9lavNz6N2y+ds9de6yEE5OIchh1sOYw73HKYcHoD1KLAGsAFtgBvwBsABcYAcMAtmcV+YBbNgFsyCWTALZsFsmA2zeQqYDbNhNsyG2TAb5qEvf2o6+tvpAYETeJwrKZmQIHJj9bGjy/e8rmI5s0Xv8okjOZZs580AtVsNhOQBgCt4nLvKeoWVOy2zqLiEqzg1OT9vI89JJgBQbgeRpwJ4nDM0MDAzMVFIy6woKS1K1SupKGFIW6r3fOEN5jvhrXPspq6Ze/ZEDWMKABxEEGdbI02dltgqUtpraBE5so/RFOyo+Q=="
   },
   "user-can-edit-and-delete-their-draft-without-a-placeholder-in-exports-83630d67": {
     "version": 1,

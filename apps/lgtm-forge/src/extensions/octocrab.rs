@@ -304,8 +304,7 @@ pub async fn fetch_pull_request_bundle(
         let session_forge_id = item
             .get("pull_request_review_id")
             .map(|v| v.to_string().trim_matches('"').to_owned())
-            .filter(|v| v != "null" && !v.is_empty())
-            .unwrap_or_else(|| format!("default-session-{pr_number}"));
+            .filter(|v| v != "null" && !v.is_empty());
         let reply_to_forge_id = item
             .get("in_reply_to_id")
             .map(|v| v.to_string().trim_matches('"').to_owned())
