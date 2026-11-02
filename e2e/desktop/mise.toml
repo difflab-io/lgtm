@@ -1,5 +1,6 @@
 [tools]
 bun = "1.4.2"
+node = "24"
 
 [tasks.install]
 description = "Install the pinned Playwright browser engines"
