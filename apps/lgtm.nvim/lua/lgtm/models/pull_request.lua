@@ -31,14 +31,19 @@ function PullRequest.new(input)
   assert(type(input) == "table", "pull request input must be a table")
   local number = tonumber(input.number)
   assert(number and number >= 1, "pull request number must be >= 1")
-  local title = Private.trim(input.title)
+  local title = type(input.title) == "string" and vim.trim(input.title) or ""
   assert(title ~= "", "pull request title is required")
 
-  local source_branch = Private.trim(input.source_branch or input.headRefName)
+  local raw_source = input.source_branch or input.headRefName
+  local source_branch = type(raw_source) == "string" and vim.trim(raw_source) or ""
   assert(source_branch ~= "", "pull request source_branch is required")
-  local target_branch = Private.trim(input.target_branch or input.baseRefName or "main")
+  local raw_target = input.target_branch or input.baseRefName or "main"
+  local target_branch = type(raw_target) == "string" and vim.trim(raw_target) or "main"
   local author = Private.extract_author(input.author)
   local state = Private.normalize_state(input.state, input.isDraft)
+  local raw_base = input.base_revision or input.baseRefOid or target_branch
+  local raw_head = input.head_revision or input.headRefOid or source_branch
+  local raw_updated = input.updated_at or input.updatedAt or "just now"
 
   return {
     id = tostring(input.id or string.format("pr-%d", number)),
@@ -49,9 +54,9 @@ function PullRequest.new(input)
     source_branch = source_branch,
     target_branch = target_branch,
     state = state,
-    base_revision = Private.trim(input.base_revision or input.baseRefOid or target_branch),
-    head_revision = Private.trim(input.head_revision or input.headRefOid or source_branch),
-    updated_at = Private.trim(input.updated_at or input.updatedAt or "just now"),
+    base_revision = type(raw_base) == "string" and vim.trim(raw_base) or target_branch,
+    head_revision = type(raw_head) == "string" and vim.trim(raw_head) or source_branch,
+    updated_at = type(raw_updated) == "string" and vim.trim(raw_updated) or "just now",
     lines_added = tonumber(input.lines_added or input.additions) or 0,
     lines_removed = tonumber(input.lines_removed or input.deletions) or 0,
     files = Private.normalize_files(input.files),
@@ -63,7 +68,7 @@ end
 ---@param query string|nil
 ---@return boolean
 function PullRequest.matches_query(pr, query)
-  local needle = Private.trim(query):lower()
+  local needle = (type(query) == "string" and vim.trim(query) or ""):lower()
   if needle == "" then
     return true
   end
@@ -116,18 +121,12 @@ end
 
 -- Private ---------------------------------------------------------------------
 
-function Private.trim(value)
-  if type(value) ~= "string" then
-    return ""
-  end
-  return (value:gsub("^%s+", ""):gsub("%s+$", ""))
-end
-
 function Private.extract_author(author)
   if type(author) == "table" then
-    return Private.trim(author.login or author.name or "unknown")
+    local raw = author.login or author.name or "unknown"
+    return type(raw) == "string" and vim.trim(raw) or "unknown"
   end
-  local trimmed = Private.trim(author)
+  local trimmed = type(author) == "string" and vim.trim(author) or ""
   return trimmed ~= "" and trimmed or "unknown"
 end
 
@@ -135,7 +134,7 @@ function Private.normalize_state(state, is_draft)
   if is_draft == true then
     return "draft"
   end
-  local normalized = Private.trim(state):lower()
+  local normalized = (type(state) == "string" and vim.trim(state) or ""):lower()
   if normalized == "draft" then
     return "draft"
   end
@@ -157,14 +156,19 @@ function Private.normalize_files(files)
   for _, entry in ipairs(files) do
     if type(entry) == "string" then
       table.insert(normalized, { path = entry, status = "M" })
-    elseif type(entry) == "table" and Private.trim(entry.path) ~= "" then
-      local status = Private.trim(entry.status or "M"):upper():sub(1, 1)
+    elseif
+      type(entry) == "table"
+      and type(entry.path) == "string"
+      and vim.trim(entry.path) ~= ""
+    then
+      local raw_status = type(entry.status) == "string" and vim.trim(entry.status) or "M"
+      local status = raw_status:upper():sub(1, 1)
       if status ~= "A" and status ~= "M" and status ~= "D" and status ~= "R" then
         status = "M"
       end
       table.insert(normalized, {
-        path = Private.trim(entry.path),
-        old_path = entry.old_path and Private.trim(entry.old_path) or nil,
+        path = vim.trim(entry.path),
+        old_path = type(entry.old_path) == "string" and vim.trim(entry.old_path) or nil,
         status = status,
       })
     end

@@ -30,7 +30,7 @@ local Private = {}
 ---@return LgtmComment
 function Thread.new_comment(input)
   assert(type(input) == "table", "comment input must be a table")
-  local body = Private.trim(input.body)
+  local body = type(input.body) == "string" and vim.trim(input.body) or ""
   assert(body ~= "", "comment body is required")
   local thread_id = assert(input.thread_id, "comment thread_id is required")
   local now = input.created_at or Private.iso_now()
@@ -39,10 +39,11 @@ function Thread.new_comment(input)
     state == "DRAFT" or state == "PENDING" or state == "PUBLISHED",
     "invalid comment state: " .. tostring(state)
   )
+  local author = type(input.author) == "string" and vim.trim(input.author) or ""
   return {
     id = input.id or Private.next_id("comment"),
     thread_id = tostring(thread_id),
-    author = Private.trim(input.author) ~= "" and Private.trim(input.author) or "you",
+    author = author ~= "" and author or "you",
     body = body,
     state = state,
     created_at = now,
@@ -127,7 +128,7 @@ end
 ---@param new_body string
 ---@return LgtmThread, LgtmComment
 function Thread.with_edited_comment(thread, comment_id, new_body)
-  local body = Private.trim(new_body)
+  local body = type(new_body) == "string" and vim.trim(new_body) or ""
   assert(body ~= "", "edited comment body is required")
   local copy = Private.copy_thread(thread)
   local updated = nil
@@ -200,16 +201,11 @@ function Private.iso_now()
   return os.date("!%Y-%m-%dT%H:%M:%SZ")
 end
 
-function Private.trim(value)
-  if type(value) ~= "string" then
+function Private.normalize_path(path)
+  if type(path) ~= "string" then
     return ""
   end
-  return (value:gsub("^%s+", ""):gsub("%s+$", ""))
-end
-
-function Private.normalize_path(path)
-  local trimmed = Private.trim(path)
-  trimmed = trimmed:gsub("^%./", "")
+  local trimmed = vim.trim(path):gsub("^%./", "")
   return trimmed
 end
 
@@ -225,7 +221,7 @@ function Private.build_comments(thread_id, mode, input)
     end
     return list
   end
-  if Private.trim(input.body) ~= "" then
+  if type(input.body) == "string" and vim.trim(input.body) ~= "" then
     table.insert(
       list,
       Thread.new_comment({

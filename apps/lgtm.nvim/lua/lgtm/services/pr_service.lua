@@ -47,7 +47,7 @@ end
 ---@return LgtmPullRequest[]
 function PrService:set_seed_prs(raw_prs)
   self.seed_prs = Private.normalize_prs(raw_prs or {})
-  self.state.open_prs = Private.clone_list(self.seed_prs)
+  self.state.open_prs = vim.list_slice(self.seed_prs)
   return self.state:get_value().open_prs
 end
 
@@ -56,7 +56,7 @@ function PrService:reset()
   self.threads_by_pr = {}
   self.reviewed_by_pr = {}
   self.submissions_by_pr = {}
-  self.state.open_prs = Private.clone_list(self.seed_prs)
+  self.state.open_prs = vim.list_slice(self.seed_prs)
   self.state.selected_pr = nil
   self.state.active_tabpage = nil
   self.state.threads = {}
@@ -76,7 +76,7 @@ function PrService:get_open_prs(branch, callback)
   self.state.is_loading = true
   self.state.error = nil
 
-  local resolved_branch = Private.trim(branch)
+  local resolved_branch = type(branch) == "string" and vim.trim(branch) or ""
   if resolved_branch == "" then
     resolved_branch = Private.current_git_branch()
   end
@@ -132,9 +132,9 @@ function PrService:select_pr(pr_number, callback)
   end
   assert(matched ~= nil, "pull request not found: #" .. tostring(pr_number))
 
-  local pr_threads = Private.clone_list(self.threads_by_pr[matched.number] or {})
+  local pr_threads = vim.list_slice(self.threads_by_pr[matched.number] or {})
   local pr_reviewed = vim.tbl_extend("force", {}, self.reviewed_by_pr[matched.number] or {})
-  local pr_submissions = Private.clone_list(self.submissions_by_pr[matched.number] or {})
+  local pr_submissions = vim.list_slice(self.submissions_by_pr[matched.number] or {})
 
   self.state.selected_pr = matched
   self.state.threads = pr_threads
@@ -257,7 +257,7 @@ function PrService:create_thread(input)
     state = "PENDING",
   })
   local created = Thread.new(payload)
-  local next_threads = Private.clone_list(self.state:get_value().threads)
+  local next_threads = vim.list_slice(self.state:get_value().threads or {})
   table.insert(next_threads, created)
   Private.sort_threads(next_threads)
   self.threads_by_pr[selected_pr.number] = next_threads
@@ -457,7 +457,7 @@ function PrService:submit_review(input, callback)
     body = input and input.body or "",
   })
 
-  local next_submissions = Private.clone_list(snapshot.submissions)
+  local next_submissions = vim.list_slice(snapshot.submissions or {})
   table.insert(next_submissions, submission)
   self.submissions_by_pr[selected_pr.number] = next_submissions
   self.state.submissions = next_submissions
@@ -492,23 +492,11 @@ end
 
 -- Private ---------------------------------------------------------------------
 
-function Private.trim(value)
-  if type(value) ~= "string" then
+function Private.normalize_path(path)
+  if type(path) ~= "string" then
     return ""
   end
-  return (value:gsub("^%s+", ""):gsub("%s+$", ""))
-end
-
-function Private.normalize_path(path)
-  return Private.trim(path):gsub("^%./", "")
-end
-
-function Private.clone_list(items)
-  local copy = {}
-  for _, item in ipairs(items or {}) do
-    table.insert(copy, item)
-  end
-  return copy
+  return vim.trim(path):gsub("^%./", "")
 end
 
 function Private.normalize_prs(raw_prs)
@@ -521,7 +509,7 @@ end
 
 function Private.filter_prs_by_branch(prs, branch)
   if branch == "" then
-    return Private.clone_list(prs)
+    return vim.list_slice(prs or {})
   end
   local matched = {}
   for _, pr in ipairs(prs) do
@@ -532,7 +520,7 @@ function Private.filter_prs_by_branch(prs, branch)
   if #matched > 0 then
     return matched
   end
-  return Private.clone_list(prs)
+  return vim.list_slice(prs or {})
 end
 
 function Private.current_git_branch()
@@ -540,7 +528,7 @@ function Private.current_git_branch()
   if vim.v.shell_error ~= 0 or not output[1] then
     return ""
   end
-  return Private.trim(output[1])
+  return vim.trim(output[1])
 end
 
 function Private.fetch_prs_via_gh(branch)

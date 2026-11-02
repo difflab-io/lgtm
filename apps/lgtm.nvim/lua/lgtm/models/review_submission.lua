@@ -18,7 +18,7 @@ function ReviewSubmission.new(input)
   local pr_number = tonumber(input.pr_number)
   assert(pr_number and pr_number >= 1, "review submission pr_number must be >= 1")
   local outcome = Private.normalize_outcome(input.outcome)
-  local body = Private.trim(input.body)
+  local body = type(input.body) == "string" and vim.trim(input.body) or ""
   if outcome == "comment" or outcome == "request_changes" then
     assert(body ~= "", string.format("review body is required for %s submissions", outcome))
   end
@@ -54,15 +54,8 @@ function Private.next_id()
   return string.format("review-%d", sequence)
 end
 
-function Private.trim(value)
-  if type(value) ~= "string" then
-    return ""
-  end
-  return (value:gsub("^%s+", ""):gsub("%s+$", ""))
-end
-
 function Private.normalize_outcome(outcome)
-  local value = Private.trim(outcome):lower()
+  local value = (type(outcome) == "string" and vim.trim(outcome) or ""):lower()
   if value == "" then
     value = "comment"
   end

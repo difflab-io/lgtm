@@ -11,6 +11,7 @@ local ThreadsOverlay = require("lgtm.ui.threads_overlay")
 local ThreadsPane = require("lgtm.features.threads_pane")
 
 local App = {}
+local Private = {}
 
 -- State -----------------------------------------------------------------------
 
@@ -21,119 +22,6 @@ local state = {
   overlay = nil,
   initialized = false,
 }
-
--- Private ---------------------------------------------------------------------
-
-local Private = {}
-
-function Private.ensure_initialized()
-  if not state.initialized then
-    App.setup()
-  end
-end
-
-function Private.active_service(mode)
-  local resolved_mode = mode or App.get_mode()
-  if resolved_mode == "pr" then
-    return state.pr_service
-  end
-  return state.local_service
-end
-
-function Private.resolve_cursor_target()
-  local bufnr = vim.api.nvim_get_current_buf()
-  local winid = vim.api.nvim_get_current_win()
-  local line = vim.api.nvim_win_get_cursor(winid)[1]
-  local path, side = state.overlay:get_buffer_target(bufnr)
-  return {
-    bufnr = bufnr,
-    winid = winid,
-    line = line,
-    path = path,
-    side = side,
-  }
-end
-
-function Private.get_thread_at_target(target)
-  local from_overlay = state.overlay:get_thread_at_cursor(target.winid)
-  if from_overlay then
-    return from_overlay
-  end
-  if not target.path or target.path == "" then
-    return nil
-  end
-  if App.get_mode() == "pr" then
-    return state.pr_service:get_thread_at_line(target.path, target.line, target.side)
-  end
-  return state.local_service:get_thread_at_line(target.path, target.line)
-end
-
-function Private.jump_to_thread_location(thread)
-  if not thread or not thread.path then
-    return
-  end
-  for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-    local bufnr = vim.api.nvim_win_get_buf(winid)
-    local path = state.overlay:get_buffer_target(bufnr)
-    if path == thread.path then
-      vim.api.nvim_set_current_win(winid)
-      local max_line = math.max(1, vim.api.nvim_buf_line_count(bufnr))
-      vim.api.nvim_win_set_cursor(winid, { math.min(thread.line, max_line), 0 })
-      return
-    end
-  end
-end
-
-function Private.refresh_ui()
-  if state.overlay then
-    state.overlay:refresh_all()
-  end
-end
-
-function Private.create_thread_from_editor(mode, target, body)
-  local service = Private.active_service(mode)
-  local thread = service:create_thread({
-    path = target.path,
-    line = target.line,
-    side = target.side,
-    body = body,
-  })
-  Notifications.thread_created(thread)
-  Private.refresh_ui()
-  return thread
-end
-
-function Private.reply_thread_from_editor(mode, thread, body)
-  local service = Private.active_service(mode)
-  local updated = service:reply_to_thread(thread.id, body)
-  if updated then
-    Notifications.reply_added(updated)
-    Private.refresh_ui()
-  end
-  return updated
-end
-
-function Private.register_user_command()
-  pcall(vim.api.nvim_del_user_command, "Lgtm")
-  vim.api.nvim_create_user_command("Lgtm", function(cmd_opts)
-    App.dispatch_command(cmd_opts.fargs)
-  end, {
-    nargs = "*",
-    desc = "LGTM review commands",
-    complete = function()
-      return {
-        "pr",
-        "threads",
-        "comment",
-        "thread",
-        "resolve",
-        "submit",
-        "approve",
-        "request_changes",
-      }
-    end,
-  })
-end
 
 -- Lifecycle -------------------------------------------------------------------
 
@@ -384,6 +272,117 @@ function App.dispatch_command(fargs)
   else
     Notifications.notify(string.format("Unknown :Lgtm subcommand '%s'", tostring(subcmd)), "warn")
   end
+end
+
+-- Private ---------------------------------------------------------------------
+
+function Private.ensure_initialized()
+  if not state.initialized then
+    App.setup()
+  end
+end
+
+function Private.active_service(mode)
+  local resolved_mode = mode or App.get_mode()
+  if resolved_mode == "pr" then
+    return state.pr_service
+  end
+  return state.local_service
+end
+
+function Private.resolve_cursor_target()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local winid = vim.api.nvim_get_current_win()
+  local line = vim.api.nvim_win_get_cursor(winid)[1]
+  local path, side = state.overlay:get_buffer_target(bufnr)
+  return {
+    bufnr = bufnr,
+    winid = winid,
+    line = line,
+    path = path,
+    side = side,
+  }
+end
+
+function Private.get_thread_at_target(target)
+  local from_overlay = state.overlay:get_thread_at_cursor(target.winid)
+  if from_overlay then
+    return from_overlay
+  end
+  if not target.path or target.path == "" then
+    return nil
+  end
+  if App.get_mode() == "pr" then
+    return state.pr_service:get_thread_at_line(target.path, target.line, target.side)
+  end
+  return state.local_service:get_thread_at_line(target.path, target.line)
+end
+
+function Private.jump_to_thread_location(thread)
+  if not thread or not thread.path then
+    return
+  end
+  for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    local bufnr = vim.api.nvim_win_get_buf(winid)
+    local path = state.overlay:get_buffer_target(bufnr)
+    if path == thread.path then
+      vim.api.nvim_set_current_win(winid)
+      local max_line = math.max(1, vim.api.nvim_buf_line_count(bufnr))
+      vim.api.nvim_win_set_cursor(winid, { math.min(thread.line, max_line), 0 })
+      return
+    end
+  end
+end
+
+function Private.refresh_ui()
+  if state.overlay then
+    state.overlay:refresh_all()
+  end
+end
+
+function Private.create_thread_from_editor(mode, target, body)
+  local service = Private.active_service(mode)
+  local thread = service:create_thread({
+    path = target.path,
+    line = target.line,
+    side = target.side,
+    body = body,
+  })
+  Notifications.thread_created(thread)
+  Private.refresh_ui()
+  return thread
+end
+
+function Private.reply_thread_from_editor(mode, thread, body)
+  local service = Private.active_service(mode)
+  local updated = service:reply_to_thread(thread.id, body)
+  if updated then
+    Notifications.reply_added(updated)
+    Private.refresh_ui()
+  end
+  return updated
+end
+
+function Private.register_user_command()
+  pcall(vim.api.nvim_del_user_command, "Lgtm")
+  vim.api.nvim_create_user_command("Lgtm", function(cmd_opts)
+    App.dispatch_command(cmd_opts.fargs)
+  end, {
+    nargs = "*",
+    desc = "LGTM review commands",
+    complete = function()
+      return {
+        "pr",
+        "threads",
+        "comment",
+        "thread",
+        "resolve",
+        "submit",
+        "approve",
+        "request_changes",
+      }
+    end,
+  })
 end
 
 return App
