@@ -49,6 +49,18 @@
         .catch((error) => {
           if (active) workspace.openingError = errorMessage(error)
         })
+      void client
+        .registerLspHandlers({
+          onStatus: (event) => workspace.handleLspStatus(event),
+          onDiagnostics: (event) => workspace.handleLspDiagnostics(event),
+        })
+        .then((stops) => {
+          for (const stop of stops) {
+            if (active) unlisteners.push(stop)
+            else stop()
+          }
+        })
+        .catch(() => {})
     }
     return () => {
       active = false

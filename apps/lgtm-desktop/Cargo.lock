@@ -1960,9 +1960,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "lgtm-config"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "toml 0.8.2",
+ "tracing",
+]
+
+[[package]]
 name = "lgtm-desktop"
 version = "0.1.0"
 dependencies = [
+ "lgtm-config",
+ "lgtm-lsp",
  "rfd",
  "rustix",
  "serde",
@@ -1972,6 +1986,18 @@ dependencies = [
  "tempfile",
  "trash",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "lgtm-lsp"
+version = "0.1.0"
+dependencies = [
+ "lgtm-config",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tracing",
+ "url",
 ]
 
 [[package]]

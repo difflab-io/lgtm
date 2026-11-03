@@ -12,7 +12,7 @@ export interface Workspace {
   failLists: boolean
   destroyed: boolean
   quit: boolean
-  emit: (event: string) => Promise<void>
+  emit: (event: string, payload?: unknown) => Promise<void>
   createExternalDir: () => Promise<string>
 }
 
@@ -22,16 +22,82 @@ interface CommandArgs {
   parentPath?: string
   relativePath?: string
   content?: string
+  offset?: number
+  languageId?: string
+}
+
+interface MockDiagnostic {
+  from: number
+  to: number
+  line: number
+  character: number
+  endLine: number
+  endCharacter: number
+  severity: 'error' | 'warning' | 'info' | 'hint'
+  message: string
+  source?: string
+  code?: string
+}
+
+interface MockServer {
+  workspaceRoot: string
+  languageId: string
+  projectRoot: string
+  status: 'starting' | 'ready' | 'unavailable' | 'error'
+  command: string
+  message?: string | null
+  errorCount: number
+  warningCount: number
 }
 
 const revision = (content: string) => createHash('sha256').update(content).digest('hex')
 
-async function emit(page: Page, event: string) {
-  await page.evaluate(async (name) => {
-    await (
-      window as unknown as { workspaceTestEmit: (event: string) => Promise<void> }
-    ).workspaceTestEmit(name)
-  }, event)
+async function emit(page: Page, event: string, payload?: unknown) {
+  await page.evaluate(
+    async ({ name, data }) => {
+      await (
+        window as unknown as {
+          workspaceTestEmit: (event: string, payload?: unknown) => Promise<void>
+        }
+      ).workspaceTestEmit(name, data)
+    },
+    { name: event, data: payload },
+  )
+}
+
+function detectLanguage(relativePath: string): { languageId: string; command: string } | null {
+  if (relativePath.endsWith('.rs')) return { languageId: 'rust', command: 'rust-analyzer' }
+  if (relativePath.endsWith('.ts') || relativePath.endsWith('.tsx'))
+    return { languageId: 'typescript', command: 'typescript-language-server' }
+  if (relativePath.endsWith('.py')) return { languageId: 'python', command: 'pyright-langserver' }
+  if (relativePath.endsWith('.go')) return { languageId: 'go', command: 'gopls' }
+  return null
+}
+
+function computeDiagnostics(text: string): MockDiagnostic[] {
+  const diagnostics: MockDiagnostic[] = []
+  const lines = text.split('\n')
+  let lineStartOffset = 0
+  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+    const lineText = lines[lineIdx]!
+    const brokenIdx = lineText.indexOf('BROKEN')
+    if (brokenIdx !== -1) {
+      diagnostics.push({
+        from: lineStartOffset + brokenIdx,
+        to: lineStartOffset + brokenIdx + 6,
+        line: lineIdx,
+        character: brokenIdx,
+        endLine: lineIdx,
+        endCharacter: brokenIdx + 6,
+        severity: 'error',
+        message: 'cannot find value `BROKEN` in this scope',
+        source: 'rustc',
+        code: 'E0425',
+      })
+    }
+    lineStartOffset += lineText.length + 1
+  }
+  return diagnostics
 }
 
 // Fixtures --------------------------------------------------------------------
@@ -45,6 +111,10 @@ export const test = base.extend<{ workspace: Workspace; initialWorkspace: 'empty
       const initialRoot =
         initialWorkspace === 'empty' ? join(homeRoot, '.lgtm', 'workspace') : homeRoot
       const extraDirs: string[] = []
+      const servers = new Map<string, MockServer>()
+      const diagnosticsByPath = new Map<string, { languageId: string; items: MockDiagnostic[] }>()
+      const openDocs = new Map<string, string>()
+
       const workspace: Workspace = {
         root: initialRoot,
         pickedFolder: null,
@@ -52,7 +122,7 @@ export const test = base.extend<{ workspace: Workspace; initialWorkspace: 'empty
         failWrites: false,
         destroyed: false,
         quit: false,
-        emit: (event) => emit(page, event),
+        emit: (event, payload) => emit(page, event, payload),
         createExternalDir: async () => {
           const dir = await mkdtemp(join(tmpdir(), 'lgtm-external-repo-'))
           extraDirs.push(dir)
@@ -65,6 +135,31 @@ export const test = base.extend<{ workspace: Workspace; initialWorkspace: 'empty
           throw new Error('Test path leaves its workspace')
         return target
       }
+      function syncServerCounts(languageId: string, command: string): MockServer {
+        let errorCount = 0
+        let warningCount = 0
+        for (const entry of diagnosticsByPath.values()) {
+          if (entry.languageId === languageId) {
+            for (const d of entry.items) {
+              if (d.severity === 'error') errorCount++
+              if (d.severity === 'warning') warningCount++
+            }
+          }
+        }
+        const srv: MockServer = {
+          workspaceRoot: workspace.root,
+          languageId,
+          projectRoot: workspace.root,
+          status: 'ready',
+          command,
+          message: null,
+          errorCount,
+          warningCount,
+        }
+        servers.set(languageId, srv)
+        return srv
+      }
+
       try {
         if (initialWorkspace === 'existing') {
           await mkdir(location('Drafts'))
@@ -78,6 +173,7 @@ export const test = base.extend<{ workspace: Workspace; initialWorkspace: 'empty
         async function list(path: string) {
           const entries = await readdir(location(path), { withFileTypes: true })
           return entries
+            .filter((entry) => entry.name !== '.lgtm' && !entry.name.startsWith('.lgtm-save-'))
             .map((entry) => ({
               name: entry.name,
               path: path ? `${path}/${entry.name}` : entry.name,
@@ -102,6 +198,9 @@ export const test = base.extend<{ workspace: Workspace; initialWorkspace: 'empty
               } else {
                 await mkdir(workspace.root, { recursive: true })
               }
+              servers.clear()
+              diagnosticsByPath.clear()
+              openDocs.clear()
               return { root: workspace.root, entries: await list('') }
             }
             if (command === 'workspace_pick_folder') {
@@ -142,11 +241,11 @@ export const test = base.extend<{ workspace: Workspace; initialWorkspace: 'empty
               const parent = before.includes('/') ? before.slice(0, before.lastIndexOf('/')) : ''
               const path = parent ? `${parent}/${args.name}` : args.name!
               if (before !== path) {
-                const exists = await stat(location(path)).then(
+                const targetExists = await stat(location(path)).then(
                   () => true,
                   () => false,
                 )
-                if (exists) throw new Error('A file or folder with this name already exists.')
+                if (targetExists) throw new Error('A file or folder with this name already exists.')
                 await rename(location(before), location(path))
               }
               return {
@@ -158,17 +257,149 @@ export const test = base.extend<{ workspace: Workspace; initialWorkspace: 'empty
             if (command === 'workspace_delete') {
               if (workspace.failWrites) throw new Error('Disk unavailable')
               await rm(location(args.relativePath!), { recursive: true })
+              diagnosticsByPath.delete(args.relativePath!)
+              openDocs.delete(args.relativePath!)
               return null
             }
             if (command === 'workspace_read') {
-              const content = await readFile(location(args.relativePath!), 'utf8')
-              return { content, revision: revision(content) }
+              const rel = args.relativePath!
+              const content = await readFile(location(rel), 'utf8')
+              openDocs.set(rel, content)
+              const detected = detectLanguage(rel)
+              if (!detected) {
+                return { content, revision: revision(content) }
+              }
+              const items = computeDiagnostics(content)
+              diagnosticsByPath.set(rel, { languageId: detected.languageId, items })
+              const lspStatus = syncServerCounts(detected.languageId, detected.command)
+              return {
+                content,
+                revision: revision(content),
+                languageId: detected.languageId,
+                lspStatus,
+              }
             }
             if (command === 'workspace_write') {
               if (workspace.failWrites) throw new Error('Disk unavailable')
+              const rel = args.relativePath!
               const content = args.content ?? ''
-              await writeFile(location(args.relativePath!), content, 'utf8')
+              await writeFile(location(rel), content, 'utf8')
+              openDocs.set(rel, content)
               return { content, revision: revision(content) }
+            }
+            if (command === 'lsp_did_change') {
+              const rel = args.relativePath!
+              const content = args.content ?? ''
+              openDocs.set(rel, content)
+              const detected = detectLanguage(rel)
+              if (detected) {
+                const items = computeDiagnostics(content)
+                diagnosticsByPath.set(rel, { languageId: detected.languageId, items })
+                const lspStatus = syncServerCounts(detected.languageId, detected.command)
+                await emit(page, 'lsp-diagnostics', {
+                  workspaceRoot: workspace.root,
+                  path: rel,
+                  languageId: detected.languageId,
+                  diagnostics: items,
+                })
+                await emit(page, 'lsp-status', lspStatus)
+              }
+              return null
+            }
+            if (command === 'lsp_hover') {
+              const rel = args.relativePath!
+              const offset = args.offset ?? 0
+              const text = openDocs.get(rel) ?? (await readFile(location(rel), 'utf8'))
+              const slice = text.slice(Math.max(0, offset - 12), Math.min(text.length, offset + 12))
+              if (slice.includes('helper')) {
+                const idx = text.indexOf('helper')
+                return {
+                  contents: 'fn helper() -> i32\nComputes the workspace answer.',
+                  from: idx,
+                  to: idx + 6,
+                }
+              }
+              return null
+            }
+            if (command === 'lsp_goto_definition') {
+              const rel = args.relativePath!
+              const text = openDocs.get(rel) ?? (await readFile(location(rel), 'utf8'))
+              const localDef = text.indexOf('fn helper')
+              if (localDef !== -1) {
+                return [
+                  {
+                    path: rel,
+                    offset: localDef + 3,
+                    endOffset: localDef + 9,
+                    line: 0,
+                    character: 3,
+                  },
+                ]
+              }
+              for (const [otherPath, otherText] of openDocs.entries()) {
+                const idx = otherText.indexOf('pub fn helper')
+                if (idx !== -1) {
+                  return [
+                    {
+                      path: otherPath,
+                      offset: idx + 7,
+                      endOffset: idx + 13,
+                      line: 0,
+                      character: 7,
+                    },
+                  ]
+                }
+              }
+              return []
+            }
+            if (command === 'lsp_get_state') {
+              const diagRecord: Record<string, MockDiagnostic[]> = {}
+              for (const [path, entry] of diagnosticsByPath.entries()) {
+                if (entry.items.length > 0) {
+                  diagRecord[path] = entry.items
+                }
+              }
+              return {
+                workspaceRoot: workspace.root,
+                servers: Array.from(servers.values()),
+                diagnosticsByPath: diagRecord,
+              }
+            }
+            if (command === 'lsp_get_diagnostics_buffer') {
+              const langFilter = args.languageId
+              const title = langFilter ? `LSP Diagnostics (${langFilter})` : 'LSP Diagnostics'
+              const lines = [`# ${title}`, `Workspace: ${workspace.root}`, '', '## Servers']
+              const filteredServers = Array.from(servers.values()).filter(
+                (s) => !langFilter || s.languageId === langFilter,
+              )
+              if (filteredServers.length === 0) {
+                lines.push('No active language servers.')
+              } else {
+                for (const s of filteredServers) {
+                  lines.push(
+                    `- ${s.languageId} [${s.status}] (cmd: \`${s.command}\`, ${s.errorCount} error(s), ${s.warningCount} warning(s))`,
+                  )
+                }
+              }
+              lines.push('', '## Diagnostics')
+              let count = 0
+              for (const [path, entry] of diagnosticsByPath.entries()) {
+                if (langFilter && entry.languageId !== langFilter) continue
+                for (const d of entry.items) {
+                  count++
+                  lines.push(
+                    `${path}:${d.line + 1}:${d.character + 1} [${d.severity.toUpperCase()}] [${d.code ?? ''}] (${d.source ?? 'lsp'}) ${d.message}`,
+                  )
+                }
+              }
+              if (count === 0) {
+                lines.push('No diagnostics reported.')
+              }
+              return {
+                title,
+                languageId: langFilter ?? null,
+                content: lines.join('\n'),
+              }
             }
             if (command === 'workspace_frontend_ready') return null
             if (command === 'plugin:window|destroy') {

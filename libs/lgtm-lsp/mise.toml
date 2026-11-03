@@ -1,0 +1,15 @@
+[tasks."test"]
+description = "Run lgtm-lsp tests"
+run = "cargo test --manifest-path {{config_root}}/Cargo.toml -p lgtm-lsp"
+
+[tasks."format"]
+description = "Format lgtm-lsp Rust files"
+run = "cargo fmt --manifest-path {{config_root}}/Cargo.toml -p lgtm-lsp"
+
+[tasks."format:check"]
+description = "Check lgtm-lsp Rust formatting"
+run = "cargo fmt --manifest-path {{config_root}}/Cargo.toml -p lgtm-lsp -- --check"
+
+[tasks."lint"]
+description = "Lint lgtm-lsp with clippy"
+run = "cargo clippy --manifest-path {{config_root}}/Cargo.toml -p lgtm-lsp --all-targets -- -D warnings"

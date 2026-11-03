@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 
 export default defineConfig({
   testDir: '.',
-  testMatch: ['workspace-file-tree.spec.ts'],
+  testMatch: ['workspace-file-tree.spec.ts', 'workspace-lsp.spec.ts'],
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,

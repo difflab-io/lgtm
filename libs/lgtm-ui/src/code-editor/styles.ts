@@ -14,3 +14,8 @@ export const codeEditorRootVariants = cva(
   },
 )
 export type CodeEditorRootVariants = VariantProps<typeof codeEditorRootVariants>
+
+export const codeEditorHoverTooltipVariants = cva(
+  'helical-code-editor-hover max-w-md rounded-md border border-border bg-popover px-3 py-2 font-mono text-xs text-popover-foreground shadow-md whitespace-pre-wrap',
+)
+export type CodeEditorHoverTooltipVariants = VariantProps<typeof codeEditorHoverTooltipVariants>

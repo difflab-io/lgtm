@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { codeEditorRootVariants } from './code-editor/styles'
+import { codeEditorHoverTooltipVariants, codeEditorRootVariants } from './code-editor/styles'
 import { contextMenuItemVariants } from './context-menu/styles'
 import { treeViewMessageVariants, treeViewRowVariants } from './tree-view/styles'
 
@@ -15,11 +15,13 @@ describe('When importing lgtm-ui Helical style variants', () => {
     const messageClass = treeViewMessageVariants(errorVariant)
     const itemClass = contextMenuItemVariants(destructiveItem)
     const editorClass = codeEditorRootVariants(smallEditor)
+    const hoverClass = codeEditorHoverTooltipVariants()
 
     // Assert
     expect(rowClass).toContain('helical-tree-row')
     expect(messageClass).toContain('text-destructive')
     expect(itemClass).toContain('text-destructive')
     expect(editorClass).toContain('helical-code-editor')
+    expect(hoverClass).toContain('helical-code-editor-hover')
   })
 })

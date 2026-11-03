@@ -8,9 +8,70 @@ export interface WorkspaceNode {
   kind: 'directory' | 'file' | 'unavailable'
 }
 
+export type LspServerStatus = 'starting' | 'ready' | 'unavailable' | 'error'
+
+export interface LspServerStatusEvent {
+  workspaceRoot: string
+  languageId: string
+  projectRoot: string
+  status: LspServerStatus
+  command: string
+  message?: string | null
+  errorCount: number
+  warningCount: number
+}
+
+export interface LspDiagnostic {
+  from: number
+  to: number
+  line: number
+  character: number
+  endLine: number
+  endCharacter: number
+  severity: 'error' | 'warning' | 'info' | 'hint'
+  message: string
+  source?: string | null
+  code?: string | null
+}
+
+export interface LspFileDiagnosticsEvent {
+  workspaceRoot: string
+  path: string
+  languageId: string
+  diagnostics: LspDiagnostic[]
+}
+
+export interface LspHoverResult {
+  contents: string
+  from?: number | null
+  to?: number | null
+}
+
+export interface LspLocation {
+  path: string
+  offset: number
+  endOffset: number
+  line: number
+  character: number
+}
+
+export interface LspWorkspaceSnapshot {
+  workspaceRoot: string
+  servers: LspServerStatusEvent[]
+  diagnosticsByPath: Record<string, LspDiagnostic[]>
+}
+
+export interface LspDiagnosticsBuffer {
+  title: string
+  languageId?: string | null
+  content: string
+}
+
 export interface FileContent {
   content: string
   revision: string
+  languageId?: string | null
+  lspStatus?: LspServerStatusEvent | null
 }
 
 export interface WorkspaceClient {
@@ -27,6 +88,15 @@ export interface WorkspaceClient {
   frontendReady(): Promise<void>
   finishQuit(): Promise<void>
   registerQuitHandlers(onBeforeQuit?: () => Promise<void>): Promise<(() => void)[]>
+  lspDidChange(path: string, content: string): Promise<void>
+  lspHover(path: string, offset: number): Promise<LspHoverResult | null>
+  lspGotoDefinition(path: string, offset: number): Promise<LspLocation[]>
+  lspGetState(): Promise<LspWorkspaceSnapshot>
+  lspGetDiagnosticsBuffer(languageId?: string): Promise<LspDiagnosticsBuffer>
+  registerLspHandlers(handlers: {
+    onStatus: (event: LspServerStatusEvent) => void
+    onDiagnostics: (event: LspFileDiagnosticsEvent) => void
+  }): Promise<(() => void)[]>
 }
 
 export const workspaceClient: WorkspaceClient = {
@@ -58,6 +128,22 @@ export const workspaceClient: WorkspaceClient = {
         void Promise.resolve(onBeforeQuit?.()).finally(() => {
           void invoke('workspace_finish_quit')
         })
+      }),
+    ]),
+  lspDidChange: (relativePath, content) => invoke('lsp_did_change', { relativePath, content }),
+  lspHover: (relativePath, offset) => invoke('lsp_hover', { relativePath, offset }),
+  lspGotoDefinition: (relativePath, offset) =>
+    invoke('lsp_goto_definition', { relativePath, offset }),
+  lspGetState: () => invoke('lsp_get_state'),
+  lspGetDiagnosticsBuffer: (languageId?: string) =>
+    invoke('lsp_get_diagnostics_buffer', languageId ? { languageId } : {}),
+  registerLspHandlers: (handlers) =>
+    Promise.all([
+      listen<LspServerStatusEvent>('lsp-status', (event) => {
+        handlers.onStatus(event.payload)
+      }),
+      listen<LspFileDiagnosticsEvent>('lsp-diagnostics', (event) => {
+        handlers.onDiagnostics(event.payload)
       }),
     ]),
 }

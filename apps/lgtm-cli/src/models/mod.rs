@@ -6,7 +6,9 @@ pub mod common;
 pub mod diff;
 pub mod review;
 
-pub use command_output::{AddCommandOutput, CommitCommandOutput, PushCommandOutput};
+pub use command_output::{
+    AddCommandOutput, CommitCommandOutput, PushCommandOutput, RunCommandOutput,
+};
 pub use comment::{Comment, DeleteCommentCommandOutput};
 pub use common::{
     ActorArgs, LocalArgs, ReviewGroupBy, ReviewOutcome, parse_comment_id, parse_nonempty,

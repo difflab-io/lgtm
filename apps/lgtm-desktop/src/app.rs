@@ -1,7 +1,13 @@
 //! Tauri application state, lifecycle, and IPC command handlers.
+use std::path::PathBuf;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
+};
+
+use lgtm_config::ConfigService;
+use lgtm_lsp::{
+    LspDiagnosticsBuffer, LspEvent, LspHoverResult, LspLocation, LspService, LspWorkspaceSnapshot,
 };
 use tauri::{Emitter, Manager, State};
 
@@ -17,6 +23,12 @@ pub struct WorkspaceState(
     pub Arc<Mutex<WorkspaceService>>,
 );
 
+/// Shared LSP service access for Tauri command handlers.
+pub struct LspState(
+    /// The shared LSP orchestration service across all Tauri workspace and editor commands.
+    pub Arc<LspService>,
+);
+
 /// Tracks whether the frontend has registered its quit lifecycle handlers.
 #[derive(Default)]
 pub struct FrontendReady(
@@ -25,7 +37,7 @@ pub struct FrontendReady(
 );
 
 /// Construct the app; an explicit home is used by the isolated desktop smoke harness.
-pub fn builder(workspace_home: Option<std::path::PathBuf>) -> tauri::Builder<tauri::Wry> {
+pub fn builder(workspace_home: Option<PathBuf>) -> tauri::Builder<tauri::Wry> {
     tauri::Builder::default()
         .manage(FrontendReady::default())
         .setup(move |app| {
@@ -33,9 +45,21 @@ pub fn builder(workspace_home: Option<std::path::PathBuf>) -> tauri::Builder<tau
                 Some(home) => home,
                 None => app.path().home_dir()?,
             };
+            let global_config_path = home.join(".lgtm").join("config.toml");
+            let config_service = ConfigService::with_global_config_path(global_config_path);
+            let app_handle = app.handle().clone();
+            let lsp_service = LspService::new(config_service, move |event| match event {
+                LspEvent::Status(payload) => {
+                    let _ = app_handle.emit("lsp-status", payload);
+                }
+                LspEvent::Diagnostics(payload) => {
+                    let _ = app_handle.emit("lsp-diagnostics", payload);
+                }
+            });
             app.manage(WorkspaceState(Arc::new(Mutex::new(
                 WorkspaceService::from_home(home),
             ))));
+            app.manage(LspState(Arc::new(lsp_service)));
             Ok(())
         })
         .invoke_handler(commands)
@@ -55,6 +79,11 @@ pub fn commands(invoke: tauri::ipc::Invoke) -> bool {
         workspace_delete,
         workspace_frontend_ready,
         workspace_finish_quit,
+        lsp_did_change,
+        lsp_hover,
+        lsp_goto_definition,
+        lsp_get_state,
+        lsp_get_diagnostics_buffer,
     ];
     handler(invoke)
 }
@@ -98,9 +127,18 @@ async fn run_blocking<T: Send + 'static>(
 #[tauri::command]
 pub async fn workspace_open(
     state: State<'_, WorkspaceState>,
+    lsp: State<'_, LspState>,
     path: Option<String>,
 ) -> Result<WorkspaceListing> {
-    run_blocking(state, move |w| w.open(path.as_deref())).await
+    let lsp_service = lsp.0.clone();
+    run_blocking(state, move |w| {
+        let listing = w.open(path.as_deref())?;
+        if let Ok(root) = w.get_root() {
+            let _ = lsp_service.prepare_workspace(&root);
+        }
+        Ok(listing)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -122,18 +160,37 @@ pub async fn workspace_list(
 #[tauri::command]
 pub async fn workspace_read(
     state: State<'_, WorkspaceState>,
+    lsp: State<'_, LspState>,
     relative_path: String,
 ) -> Result<FileContent> {
-    run_blocking(state, move |w| w.get_file_content(&relative_path)).await
+    let lsp_service = lsp.0.clone();
+    run_blocking(state, move |w| {
+        let content = w.get_file_content(&relative_path)?;
+        let root = w.get_root()?;
+        let file_path = w.get_entry_path(&relative_path)?;
+        let (language_id, lsp_status) =
+            lsp_service.open_or_sync_file(&root, &file_path, &content.content);
+        Ok(content.with_lsp(language_id, lsp_status))
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn workspace_write(
     state: State<'_, WorkspaceState>,
+    lsp: State<'_, LspState>,
     relative_path: String,
     content: String,
 ) -> Result<FileContent> {
-    run_blocking(state, move |w| w.write_file(&relative_path, &content)).await
+    let lsp_service = lsp.0.clone();
+    run_blocking(state, move |w| {
+        let written = w.write_file(&relative_path, &content)?;
+        if let (Ok(root), Ok(file_path)) = (w.get_root(), w.get_entry_path(&relative_path)) {
+            let _ = lsp_service.did_save(&root, &file_path, &content);
+        }
+        Ok(written)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -163,18 +220,38 @@ pub async fn workspace_create_folder(
 #[tauri::command]
 pub async fn workspace_rename(
     state: State<'_, WorkspaceState>,
+    lsp: State<'_, LspState>,
     relative_path: String,
     name: String,
 ) -> Result<WorkspaceNode> {
-    run_blocking(state, move |w| w.rename(&relative_path, &name)).await
+    let lsp_service = lsp.0.clone();
+    run_blocking(state, move |w| {
+        let old_coords = w.get_root().ok().zip(w.get_entry_path(&relative_path).ok());
+        let renamed = w.rename(&relative_path, &name)?;
+        if let Some((root, old_path)) = old_coords {
+            let _ = lsp_service.did_close(&root, &old_path);
+        }
+        Ok(renamed)
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn workspace_delete(
     state: State<'_, WorkspaceState>,
+    lsp: State<'_, LspState>,
     relative_path: String,
 ) -> Result<()> {
-    run_blocking(state, move |w| w.delete(&relative_path)).await
+    let lsp_service = lsp.0.clone();
+    run_blocking(state, move |w| {
+        let old_coords = w.get_root().ok().zip(w.get_entry_path(&relative_path).ok());
+        w.delete(&relative_path)?;
+        if let Some((root, old_path)) = old_coords {
+            let _ = lsp_service.did_close(&root, &old_path);
+        }
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -183,6 +260,92 @@ pub fn workspace_frontend_ready(state: State<'_, FrontendReady>) {
 }
 
 #[tauri::command]
-pub fn workspace_finish_quit(app: tauri::AppHandle) {
+pub fn workspace_finish_quit(app: tauri::AppHandle, lsp: State<'_, LspState>) {
+    lsp.0.shutdown_all();
     app.exit(0);
+}
+
+#[tauri::command]
+pub async fn lsp_did_change(
+    state: State<'_, WorkspaceState>,
+    lsp: State<'_, LspState>,
+    relative_path: String,
+    content: String,
+) -> Result<()> {
+    let lsp_service = lsp.0.clone();
+    run_blocking(state, move |w| {
+        let root = w.get_root()?;
+        let file_path = w.get_entry_path(&relative_path)?;
+        lsp_service
+            .did_change(&root, &file_path, &content)
+            .map_err(|e| error("lsp", e.to_string()))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn lsp_hover(
+    state: State<'_, WorkspaceState>,
+    lsp: State<'_, LspState>,
+    relative_path: String,
+    offset: u32,
+) -> Result<Option<LspHoverResult>> {
+    let lsp_service = lsp.0.clone();
+    run_blocking(state, move |w| {
+        let root = w.get_root()?;
+        let file_path = w.get_entry_path(&relative_path)?;
+        lsp_service
+            .get_hover(&root, &file_path, offset)
+            .map_err(|e| error("lsp", e.to_string()))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn lsp_goto_definition(
+    state: State<'_, WorkspaceState>,
+    lsp: State<'_, LspState>,
+    relative_path: String,
+    offset: u32,
+) -> Result<Vec<LspLocation>> {
+    let lsp_service = lsp.0.clone();
+    run_blocking(state, move |w| {
+        let root = w.get_root()?;
+        let file_path = w.get_entry_path(&relative_path)?;
+        lsp_service
+            .get_definition(&root, &file_path, offset)
+            .map_err(|e| error("lsp", e.to_string()))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn lsp_get_state(
+    state: State<'_, WorkspaceState>,
+    lsp: State<'_, LspState>,
+) -> Result<LspWorkspaceSnapshot> {
+    let lsp_service = lsp.0.clone();
+    run_blocking(state, move |w| {
+        let root = w.get_root()?;
+        lsp_service
+            .get_workspace_snapshot(&root)
+            .map_err(|e| error("lsp", e.to_string()))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn lsp_get_diagnostics_buffer(
+    state: State<'_, WorkspaceState>,
+    lsp: State<'_, LspState>,
+    language_id: Option<String>,
+) -> Result<LspDiagnosticsBuffer> {
+    let lsp_service = lsp.0.clone();
+    run_blocking(state, move |w| {
+        let root = w.get_root()?;
+        lsp_service
+            .get_diagnostics_buffer(&root, language_id.as_deref())
+            .map_err(|e| error("lsp", e.to_string()))
+    })
+    .await
 }

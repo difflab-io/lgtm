@@ -42,10 +42,18 @@
 │       ├── services/        # Reactive Svelte 5 state orchestration (workspaceService.svelte.ts)
 │       └── components/      # Shell, WorkspaceExplorer, and ContentPane
 ├── libs/
+│   ├── lgtm-config/src/
+│   │   ├── models/          # Global/workspace config structs, language presets, and MiseFile builder
+│   │   ├── services/        # ConfigService (.lgtm/config.toml) and MiseService (.lgtm/mise.toml + tasks)
+│   │   └── error.rs         # Typed ConfigError
 │   ├── lgtm-db/src/
 │   │   ├── entities/        # Private SeaORM table models and shared column enums (common.rs)
 │   │   ├── repositories/    # Named repository queries and explicit column mutations
 │   │   └── client.rs        # Database pool and Transaction handles
+│   ├── lgtm-lsp/src/
+│   │   ├── models/          # Flat-offset diagnostics, hover, definition, and workspace snapshot types
+│   │   ├── services/        # LspService stdio JSON-RPC 2.0 server lifecycle and document sync
+│   │   └── error.rs         # Typed LspError
 │   └── lgtm-ui/src/
 │       ├── tree-view/       # Portable Ark UI TreeView + Helical CVA styles
 │       ├── context-menu/    # Portable Ark UI Menu + Helical CVA styles

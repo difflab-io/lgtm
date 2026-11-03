@@ -95,6 +95,12 @@ pub struct FileContent {
     pub content: String,
     /// The SHA-256 hex digest of the file bytes.
     pub revision: String,
+    /// Optional detected language identifier for the file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language_id: Option<String>,
+    /// Optional active LSP server status for the file's language and project root.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lsp_status: Option<lgtm_lsp::LspServerStatusEvent>,
 }
 
 impl FileContent {
@@ -103,10 +109,26 @@ impl FileContent {
         let revision = Self::revision_for(&bytes);
         let content = String::from_utf8(bytes)
             .map_err(|_| error("unsupported", "Only UTF-8 text files can be opened."))?;
-        Ok(Self { content, revision })
+        Ok(Self {
+            content,
+            revision,
+            language_id: None,
+            lsp_status: None,
+        })
     }
 
     // Public ------------------------------------------------------------------
+
+    /// Attaches detected language and LSP server status metadata to the file content.
+    pub fn with_lsp(
+        mut self,
+        language_id: Option<String>,
+        lsp_status: Option<lgtm_lsp::LspServerStatusEvent>,
+    ) -> Self {
+        self.language_id = language_id;
+        self.lsp_status = lsp_status;
+        self
+    }
 
     /// Computes a stable SHA-256 hex digest for a byte slice.
     pub fn revision_for(bytes: &[u8]) -> String {

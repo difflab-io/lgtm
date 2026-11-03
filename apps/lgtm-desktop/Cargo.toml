@@ -11,6 +11,8 @@ publish = false
 tauri-build = { version = "=2.6.3", features = [] }
 
 [dependencies]
+lgtm-config = { path = "../../libs/lgtm-config" }
+lgtm-lsp = { path = "../../libs/lgtm-lsp" }
 rfd = "0.15"
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"

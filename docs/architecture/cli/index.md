@@ -109,6 +109,7 @@ sequenceDiagram
 | `down` | Stop the running background server |
 | `status [--json]` | Report daemon PID, port, and endpoint URLs |
 | `ui [--port PORT] [--no-open] [--json]` | Ensure server readiness and print/open the web UI URL |
+| `run [--list] [<task>] [<args>...] [--json]` | Synchronize `<workspace>/.lgtm/mise.toml` and list or proxy tasks via `mise` |
 | `add <paths>... [--local] [--json]` | Stage paths in the working checkout or in `~/.lgtm/snapshots/$repoSlug` (`--local`) |
 | `commit [--as <agent-name>] [--local] [-m <message>] [--json]` | Create a checkout commit or a shadow snapshot commit (`--local`) |
 | `push [--local] [--json]` | Push committed history to the remote repository or update local snapshot refs (`--local`) |

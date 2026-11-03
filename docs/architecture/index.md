@@ -147,7 +147,9 @@ lgtm/
 │   ├── lgtm-forge/     Rust services and shared Protobuf schema
 │   └── lgtm-web/       SvelteKit desktop/web shell and generated client
 ├── libs/
+│   ├── lgtm-config/    Global/workspace TOML config and hidden .lgtm/mise.toml synthesis SDK
 │   ├── lgtm-db/        Private Rust library
+│   ├── lgtm-lsp/       Stdio JSON-RPC 2.0 language server orchestration SDK
 │   └── lgtm-ui/        Shared Helical UI + Ark UI + CodeMirror 6 Svelte library
 └── e2e/
     └── desktop/        Playwright Chromium and WebKit desktop E2E suite
@@ -164,6 +166,8 @@ The installed CLI serves backend RPCs and embedded frontend assets in one proces
 - [Review RPC architecture](forge/reviews.md).
 - [Database architecture](db/index.md).
 - [CLI architecture](cli/index.md).
+- [Config & Mise SDK architecture](config/index.md).
+- [LSP SDK architecture](lsp/index.md).
 - [Editor setup and usage](../../apps/lgtm.nvim/README.md).
 - [Development guide](../development.md).
 - [Architecture decision](../../adr/0001-initial-architecture/ADR.md).

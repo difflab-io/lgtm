@@ -7,6 +7,8 @@ The `lgtm` executable bundles the hello-review backend, dummy DB package and Sve
 ```sh
 lgtm up --no-open
 lgtm status --json
+lgtm run --list
+lgtm run <task> [args...]
 lgtm ui
 lgtm ui --no-open --json
 lgtm down

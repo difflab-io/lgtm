@@ -66,7 +66,7 @@ impl WorkspaceService {
                 .file_name()
                 .into_string()
                 .map_err(|_| error("invalidName", "A workspace filename is not valid Unicode."))?;
-            if name.starts_with(".lgtm-save-") {
+            if name == ".lgtm" || name.starts_with(".lgtm-save-") {
                 continue;
             }
             let path = if relative.is_empty() {
@@ -304,6 +304,16 @@ impl WorkspaceService {
             return Err(error("unsupported", "Linked entries cannot be deleted."));
         }
         trash::delete(path).map_err(|e| error("io", e.to_string()))
+    }
+
+    /// Returns the canonical root directory of the active workspace.
+    pub fn get_root(&self) -> Result<PathBuf> {
+        self.ensure_root()
+    }
+
+    /// Resolves a workspace-relative path to a canonical path inside the active workspace.
+    pub fn get_entry_path(&self, relative: &str) -> Result<PathBuf> {
+        self.resolve(relative)
     }
 
     // Private -----------------------------------------------------------------

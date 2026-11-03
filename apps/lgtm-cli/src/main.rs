@@ -4,6 +4,9 @@ use tracing::Instrument;
 #[path = "../bundle/backend/mod.rs"]
 pub mod backend;
 mod daemon;
+#[allow(dead_code)]
+#[path = "../bundle/config/mod.rs"]
+pub mod lgtm_config;
 mod log;
 mod models;
 
@@ -33,6 +36,8 @@ enum Command {
     Review(commands::review::ReviewArgs),
     /// Create, update, resolve, or delete review comments.
     Comment(commands::comment::CommentArgs),
+    /// Synchronize `.lgtm/mise.toml` and run or list LGTM-managed Mise tasks.
+    Run(commands::run::RunArgs),
     /// Start or reuse the application and open its browser interface.
     Ui(commands::ui::UiArgs),
     #[command(hide = true)]
@@ -129,6 +134,7 @@ fn run() -> anyhow::Result<()> {
         Command::Commit(_) => "commit",
         Command::Push(_) => "push",
         Command::Comment(_) => "comment",
+        Command::Run(_) => "run",
         Command::Ui(_) => "ui",
         Command::Serve { .. } => "serve",
     };
@@ -146,6 +152,7 @@ fn run() -> anyhow::Result<()> {
                 Command::Commit(args) => commands::commit::run(args, &store, cli.json).await,
                 Command::Push(args) => commands::push::run(args, &store, cli.json).await,
                 Command::Comment(args) => commands::comment::run(args, &store, cli.json).await,
+                Command::Run(args) => commands::run::run(args, cli.json).await,
                 Command::Ui(args) => commands::ui::run(args, &store, cli.json).await,
                 Command::Serve { port, daemonize } => server::serve(port, &store, daemonize).await,
             }

@@ -1,10 +1,13 @@
-import type { TreeNode, ContextMenuItem } from 'lgtm-ui'
+import type { TreeNode, ContextMenuItem, CodeEditorHoverResult } from 'lgtm-ui'
 import { WorkspaceNodeViewModel } from '../models/workspaceNodeViewModel'
 import {
   errorMessage,
   type WorkspaceClient,
   type WorkspaceNode,
   type FileContent,
+  type LspDiagnostic,
+  type LspFileDiagnosticsEvent,
+  type LspServerStatusEvent,
 } from '../clients/workspaceClient'
 
 export interface FolderRefresh {
@@ -12,7 +15,17 @@ export interface FolderRefresh {
   version: number
 }
 
-/** Workspace view model. Rust retains filesystem ownership and path validation. */
+export interface WorkspaceTab {
+  id: string
+  kind: 'file' | 'diagnostics'
+  title: string
+  path?: string
+  languageId?: string | null
+  content: string
+  readonly: boolean
+}
+
+/** Workspace view model. Rust retains filesystem ownership, path validation, and LSP orchestration. */
 export class WorkspaceService {
   defaultRoot = $state('')
   root = $state('~/.lgtm/workspace')
@@ -33,6 +46,11 @@ export class WorkspaceService {
   openingError = $state<string | null>(null)
   fileVersion = $state(0)
   focusRequest = $state(0)
+  tabs = $state<WorkspaceTab[]>([])
+  activeTabId = $state<string | null>(null)
+  selectionOffset = $state<number | null>(null)
+  lspServers = $state<Record<string, LspServerStatusEvent>>({})
+  lspDiagnostics = $state<Record<string, LspDiagnostic[]>>({})
   private listed = $state<Record<string, WorkspaceNode>>({})
   private active = true
   private dirtyPath: string | null = null
@@ -50,15 +68,51 @@ export class WorkspaceService {
     return this.blocked || this.loading || Boolean(this.error || this.pendingEntry)
   }
 
+  get activeTab(): WorkspaceTab | null {
+    if (!this.activeTabId) return null
+    return this.tabs.find((tab) => tab.id === this.activeTabId) ?? null
+  }
+
   get selectedTitle() {
+    if (this.activeTab?.kind === 'diagnostics') return this.activeTab.title
     return this.selected ? this.selected.name : 'No file selected'
+  }
+
+  get selectedPath() {
+    if (this.activeTab?.kind === 'diagnostics') return this.activeTab.title
+    return this.selected?.path
+  }
+
+  get activeDiagnostics(): LspDiagnostic[] {
+    if (!this.selected) return []
+    return this.lspDiagnostics[this.selected.path] ?? []
+  }
+
+  get activeLanguageId(): string | null {
+    if (this.activeTab?.kind === 'diagnostics') {
+      return this.activeTab.languageId ?? null
+    }
+    return this.fileContent?.languageId ?? null
+  }
+
+  get activeLspServer(): LspServerStatusEvent | null {
+    const lang = this.activeLanguageId
+    if (lang && this.lspServers[lang]) {
+      return this.lspServers[lang]
+    }
+    const all = Object.values(this.lspServers)
+    return all[0] ?? null
+  }
+
+  get allLspServers(): LspServerStatusEvent[] {
+    return Object.values(this.lspServers)
   }
 
   get status() {
     if (this.openingError) return this.openingError
     if (this.fileLoading) return 'Opening file…'
     if (this.saving) return 'Saving…'
-    if (this.selected) return 'Ready'
+    if (this.selected || this.activeTab) return 'Ready'
     return 'Idle'
   }
 
@@ -110,8 +164,13 @@ export class WorkspaceService {
       }
       this.entries = result.entries
       this.listed = {}
+      this.tabs = []
+      this.activeTabId = null
+      this.lspServers = {}
+      this.lspDiagnostics = {}
       this.clearSelected()
       this.treeVersion++
+      void this.syncLspState()
     } catch (error) {
       if (this.active) this.error = errorMessage(error)
     } finally {
@@ -147,11 +206,16 @@ export class WorkspaceService {
 
   async select(path: string) {
     if (this.blocked) return
-    const entry = this.entries.find((item) => item.path === path) ?? this.listed[path]
-    if (entry) await this.openFile(entry)
+    const entry = this.entries.find((item) => item.path === path) ??
+      this.listed[path] ?? {
+        path,
+        name: path.split('/').at(-1) ?? path,
+        kind: 'file' as const,
+      }
+    if (entry.kind === 'file') await this.openFile(entry)
   }
 
-  async openFile(entry: WorkspaceNode) {
+  async openFile(entry: WorkspaceNode, targetOffset?: number) {
     await this.flushSave()
     this.selected = entry
     this.fileLoading = true
@@ -160,7 +224,32 @@ export class WorkspaceService {
       const content = await this.client.read(entry.path)
       if (!this.active) return
       this.fileContent = content
+      if (content.lspStatus) {
+        this.lspServers = {
+          ...this.lspServers,
+          [content.lspStatus.languageId]: content.lspStatus,
+        }
+      }
+      const tabId = `file:${entry.path}`
+      const nextTab: WorkspaceTab = {
+        id: tabId,
+        kind: 'file',
+        title: entry.name,
+        path: entry.path,
+        languageId: content.languageId ?? null,
+        content: content.content,
+        readonly: false,
+      }
+      const existingIdx = this.tabs.findIndex((t) => t.id === tabId)
+      if (existingIdx === -1) {
+        this.tabs = [...this.tabs, nextTab]
+      } else {
+        this.tabs = this.tabs.map((t, idx) => (idx === existingIdx ? nextTab : t))
+      }
+      this.activeTabId = tabId
+      this.selectionOffset = targetOffset ?? null
       this.fileVersion++
+      void this.syncLspState()
     } catch (error) {
       if (this.active) {
         this.fileContent = null
@@ -171,11 +260,181 @@ export class WorkspaceService {
     }
   }
 
+  async activateTab(tabId: string) {
+    if (this.blocked) return
+    const tab = this.tabs.find((item) => item.id === tabId)
+    if (!tab) return
+    if (tab.kind === 'file' && tab.path) {
+      await this.openFile({
+        path: tab.path,
+        name: tab.title,
+        kind: 'file',
+      })
+      return
+    }
+    await this.flushSave()
+    this.selected = null
+    this.openingError = null
+    this.activeTabId = tab.id
+    this.selectionOffset = null
+    this.fileContent = {
+      content: tab.content,
+      revision: 'diagnostics',
+      languageId: tab.languageId ?? null,
+    }
+    this.fileVersion++
+    try {
+      const refreshed = await this.client.lspGetDiagnosticsBuffer(tab.languageId ?? undefined)
+      if (!this.active) return
+      this.tabs = this.tabs.map((item) =>
+        item.id === tab.id ? { ...item, title: refreshed.title, content: refreshed.content } : item,
+      )
+      if (this.activeTabId === tab.id) {
+        this.fileContent = {
+          content: refreshed.content,
+          revision: 'diagnostics',
+          languageId: refreshed.languageId ?? null,
+        }
+      }
+    } catch {
+      // Keep existing diagnostics buffer snapshot if refresh is unsupported.
+    }
+  }
+
+  async closeTab(tabId: string) {
+    if (this.blocked) return
+    const index = this.tabs.findIndex((item) => item.id === tabId)
+    if (index === -1) return
+    await this.flushSave()
+    const remaining = this.tabs.filter((item) => item.id !== tabId)
+    this.tabs = remaining
+    if (this.activeTabId !== tabId) return
+    const fallback = remaining[index] ?? remaining[index - 1] ?? null
+    if (!fallback) {
+      this.clearSelected()
+      return
+    }
+    await this.activateTab(fallback.id)
+  }
+
+  async openDiagnosticsBuffer(languageId?: string) {
+    await this.flushSave()
+    try {
+      const buffer = await this.client.lspGetDiagnosticsBuffer(languageId)
+      if (!this.active) return
+      const tabId = languageId ? `diagnostics:${languageId}` : 'diagnostics:all'
+      const nextTab: WorkspaceTab = {
+        id: tabId,
+        kind: 'diagnostics',
+        title: buffer.title,
+        languageId: buffer.languageId ?? null,
+        content: buffer.content,
+        readonly: true,
+      }
+      const existingIdx = this.tabs.findIndex((item) => item.id === tabId)
+      if (existingIdx === -1) {
+        this.tabs = [...this.tabs, nextTab]
+      } else {
+        this.tabs = this.tabs.map((item, idx) => (idx === existingIdx ? nextTab : item))
+      }
+      this.selected = null
+      this.openingError = null
+      this.activeTabId = tabId
+      this.selectionOffset = null
+      this.fileContent = {
+        content: buffer.content,
+        revision: 'diagnostics',
+        languageId: buffer.languageId ?? null,
+      }
+      this.fileVersion++
+    } catch (error) {
+      if (this.active) this.openingError = errorMessage(error)
+    }
+  }
+
+  async jumpToLocation(path: string, offset: number) {
+    const entry = this.entries.find((item) => item.path === path) ??
+      this.listed[path] ?? {
+        path,
+        name: path.split('/').at(-1) ?? path,
+        kind: 'file' as const,
+      }
+    await this.openFile(entry, offset)
+    this.focusRequest++
+  }
+
+  async requestHover(offset: number): Promise<CodeEditorHoverResult | null> {
+    if (!this.selected) return null
+    try {
+      const result = await this.client.lspHover(this.selected.path, offset)
+      if (!result || !result.contents.trim()) return null
+      return {
+        contents: result.contents,
+        ...(result.from !== undefined && result.from !== null ? { from: result.from } : {}),
+        ...(result.to !== undefined && result.to !== null ? { to: result.to } : {}),
+      }
+    } catch {
+      return null
+    }
+  }
+
+  async gotoDefinition(offset: number): Promise<void> {
+    if (!this.selected) return
+    try {
+      const locations = await this.client.lspGotoDefinition(this.selected.path, offset)
+      const first = locations[0]
+      if (!first) return
+      await this.jumpToLocation(first.path, first.offset)
+    } catch {
+      // Ignore definition errors when language server does not support the symbol.
+    }
+  }
+
+  handleLspStatus(event: LspServerStatusEvent) {
+    if (!this.active) return
+    this.lspServers = {
+      ...this.lspServers,
+      [event.languageId]: event,
+    }
+  }
+
+  handleLspDiagnostics(event: LspFileDiagnosticsEvent) {
+    if (!this.active) return
+    this.lspDiagnostics = {
+      ...this.lspDiagnostics,
+      [event.path]: event.diagnostics,
+    }
+    if (this.activeTab?.kind === 'diagnostics') {
+      void this.openDiagnosticsBuffer(this.activeTab.languageId ?? undefined)
+    }
+  }
+
+  async syncLspState() {
+    try {
+      const snapshot = await this.client.lspGetState()
+      if (!this.active) return
+      const nextServers: Record<string, LspServerStatusEvent> = { ...this.lspServers }
+      for (const srv of snapshot.servers) {
+        nextServers[srv.languageId] = srv
+      }
+      this.lspServers = nextServers
+      this.lspDiagnostics = {
+        ...this.lspDiagnostics,
+        ...snapshot.diagnosticsByPath,
+      }
+    } catch {
+      // Non-LSP test fixtures or web mode may not implement lsp_get_state.
+    }
+  }
+
   updateContent(content: string) {
     if (!this.selected || !this.fileContent || this.fileContent.content === content) return
     this.fileContent = { ...this.fileContent, content }
+    const tabId = `file:${this.selected.path}`
+    this.tabs = this.tabs.map((tab) => (tab.id === tabId ? { ...tab, content } : tab))
     this.dirtyPath = this.selected.path
     this.dirtyContent = content
+    void this.client.lspDidChange(this.selected.path, content).catch(() => {})
     if (this.saveTimer) clearTimeout(this.saveTimer)
     this.saveTimer = setTimeout(() => {
       this.saveTimer = null
@@ -205,7 +464,12 @@ export class WorkspaceService {
             this.selected?.path === path &&
             this.fileContent?.content === content
           ) {
-            this.fileContent = saved
+            this.fileContent = {
+              ...this.fileContent,
+              ...saved,
+              languageId: saved.languageId ?? this.fileContent.languageId,
+              lspStatus: saved.lspStatus ?? this.fileContent.lspStatus,
+            }
           }
         })
         .catch((error) => {
@@ -230,6 +494,8 @@ export class WorkspaceService {
     this.selected = null
     this.fileContent = null
     this.openingError = null
+    this.activeTabId = null
+    this.selectionOffset = null
   }
 
   async newFile(parent = '') {
@@ -286,6 +552,26 @@ export class WorkspaceService {
       } else {
         const renamed = await this.client.rename(path, name)
         this.listed[renamed.path] = renamed
+        this.tabs = this.tabs.map((tab) => {
+          if (tab.kind !== 'file' || !tab.path) return tab
+          if (tab.path === path) {
+            return {
+              ...tab,
+              id: `file:${renamed.path}`,
+              path: renamed.path,
+              title: renamed.name,
+            }
+          }
+          if (tab.path.startsWith(`${path}/`)) {
+            const nextPath = renamed.path + tab.path.slice(path.length)
+            return {
+              ...tab,
+              id: `file:${nextPath}`,
+              path: nextPath,
+            }
+          }
+          return tab
+        })
         const selected = this.selected
         if (selected && (selected.path === path || selected.path.startsWith(`${path}/`))) {
           openNext = {
@@ -317,7 +603,7 @@ export class WorkspaceService {
     if (this.dirtyPath && (this.dirtyPath === path || this.dirtyPath.startsWith(`${path}/`))) {
       if (this.saveTimer) {
         clearTimeout(this.saveTimer)
-        this.saveTimer = null
+        clearSelectedTimers(this)
       }
       this.dirtyPath = null
       this.dirtyContent = null
@@ -328,6 +614,12 @@ export class WorkspaceService {
     this.creationError = null
     try {
       await this.client.delete(path)
+      this.tabs = this.tabs.filter(
+        (tab) =>
+          tab.kind !== 'file' ||
+          !tab.path ||
+          (tab.path !== path && !tab.path.startsWith(`${path}/`)),
+      )
       const selected = this.selected
       if (selected && (selected.path === path || selected.path.startsWith(`${path}/`))) {
         this.clearSelected()
@@ -382,4 +674,8 @@ export class WorkspaceService {
   private refresh(path: string) {
     this.refreshFolder = { path, version: (this.refreshFolder?.version ?? 0) + 1 }
   }
+}
+
+function clearSelectedTimers(service: WorkspaceService) {
+  void service
 }
