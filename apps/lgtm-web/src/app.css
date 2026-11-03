@@ -208,9 +208,10 @@ button:focus-visible {
 }
 .document-tabs {
   display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 4px 12px 0;
+  align-items: stretch;
+  gap: 0;
+  height: 34px;
+  padding: 0;
   background: #f8fafc;
   border-bottom: 1px solid #e2e8f0;
   overflow-x: auto;
@@ -218,33 +219,36 @@ button:focus-visible {
 }
 .document-tab {
   display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border: 1px solid transparent;
-  border-bottom: 0;
-  border-radius: 6px 6px 0 0;
+  align-items: stretch;
+  height: 100%;
+  border-right: 1px solid #e2e8f0;
   font-size: 11px;
   color: #64748b;
   background: transparent;
+  flex-shrink: 0;
 }
 .document-tab.active {
   background: #fff;
-  border-color: #e2e8f0;
   color: #0f172a;
   font-weight: 500;
 }
 .document-tab-trigger {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
   border: 0;
   background: transparent;
-  padding: 0;
+  padding: 0 6px 0 12px;
   color: inherit;
   font: inherit;
+  white-space: nowrap;
 }
 .document-tab-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  align-self: center;
+  margin-right: 6px;
   border: 0;
   background: transparent;
   padding: 2px;
