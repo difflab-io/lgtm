@@ -155,7 +155,10 @@ impl LgtmConfig {
                 enabled: true,
                 extensions: vec!["py".to_string(), "pyi".to_string()],
                 root_markers: vec!["pyproject.toml".to_string(), "requirements.txt".to_string()],
-                mise_tools: BTreeMap::from([("npm:pyright".to_string(), "latest".to_string())]),
+                mise_tools: BTreeMap::from([
+                    ("node".to_string(), "lts".to_string()),
+                    ("npm:pyright".to_string(), "latest".to_string()),
+                ]),
                 command: "pyright-langserver".to_string(),
                 args: vec!["--stdio".to_string()],
                 env: BTreeMap::new(),
@@ -244,8 +247,8 @@ impl Default for LspSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            auto_install: false,
-            request_timeout_ms: 5_000,
+            auto_install: true,
+            request_timeout_ms: 15_000,
         }
     }
 }

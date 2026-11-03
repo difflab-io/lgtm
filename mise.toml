@@ -98,8 +98,8 @@ description = "Publish only lgtm-cli to crates.io"
 run = "cargo publish -p lgtm-cli --locked"
 
 [tasks.dev]
-description = "Run the backend watcher and web development server together"
-depends = ["//apps/lgtm-forge:dev", "//apps/lgtm-web:dev"]
+description = "Run the backend watcher and desktop development application together"
+depends = ["//apps/lgtm-forge:dev", "//apps/lgtm-desktop:dev"]
 
 [tasks."e2e:forge"]
 description = "Run forge E2E tests"

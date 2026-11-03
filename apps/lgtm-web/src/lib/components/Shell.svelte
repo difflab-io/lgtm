@@ -59,6 +59,7 @@
             if (active) unlisteners.push(stop)
             else stop()
           }
+          if (active) void workspace.syncLspState()
         })
         .catch(() => {})
     }

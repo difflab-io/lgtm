@@ -50,6 +50,7 @@ bun.lock
 dist/
 **/dist/
 **/dist-e2e/
+**/.vite/
 .output/
 **/.output/
 .svelte-kit/

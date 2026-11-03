@@ -15,15 +15,21 @@ else
 fi
 '''
 
+[tasks.build-bridge]
+description = "Build the lgtm-desktop binary for IPC bridge execution"
+depends = ["//:install", "//apps/lgtm-web:build"]
+dir = "{{config_root}}/../.."
+run = "cargo build --manifest-path apps/lgtm-desktop/Cargo.toml --bin lgtm-desktop"
+
 [tasks.test]
 description = "Run desktop workspace and file explorer browser journeys"
-depends = ["install"]
+depends = ["install", "build-bridge"]
 dir = "{{config_root}}/../.."
 run = "bunx --no-install playwright test --config e2e/desktop/playwright.config.ts"
 
 [tasks.smoke]
 description = "Run representative desktop workspace and file explorer journeys"
-depends = ["install"]
+depends = ["install", "build-bridge"]
 dir = "{{config_root}}/../.."
 run = "bunx --no-install playwright test --config e2e/desktop/playwright.config.ts --grep @smoke"
 

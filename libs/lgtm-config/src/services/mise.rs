@@ -44,6 +44,7 @@ impl MiseService {
         let mut cmd = Command::new("mise");
         cmd.current_dir(workspace_root)
             .env("MISE_CONFIG_FILE", &mise_file)
+            .env("MISE_GLOBAL_CONFIG_FILE", &mise_file)
             .env("MISE_TRUSTED_CONFIG_PATHS", &mise_file)
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
@@ -76,9 +77,17 @@ impl MiseService {
         let mise_file = self
             .config_service
             .ensure_workspace_layout(workspace_root)?;
+        let _ = Command::new("mise")
+            .arg("trust")
+            .arg(&mise_file)
+            .current_dir(workspace_root)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
         let mut cmd = Command::new("mise");
         cmd.current_dir(workspace_root)
             .env("MISE_CONFIG_FILE", &mise_file)
+            .env("MISE_GLOBAL_CONFIG_FILE", &mise_file)
             .env("MISE_TRUSTED_CONFIG_PATHS", &mise_file)
             .arg("install");
         for (tool, version) in tools {

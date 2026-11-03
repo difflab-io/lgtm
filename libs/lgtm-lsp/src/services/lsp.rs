@@ -49,6 +49,7 @@ pub struct LspService {
     mise_service: MiseService,
     event_sink: EventSink,
     state: Arc<Mutex<LspServiceState>>,
+    init_locks: Arc<Mutex<BTreeMap<SessionKey, Arc<Mutex<()>>>>>,
 }
 
 impl LspService {
@@ -62,6 +63,7 @@ impl LspService {
             mise_service,
             event_sink: Arc::new(event_sink),
             state: Arc::new(Mutex::new(LspServiceState::default())),
+            init_locks: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 
@@ -73,6 +75,61 @@ impl LspService {
         let detected = ConfigService::detect_workspace_languages(&config, &canonical);
         if !detected.is_empty() || ConfigService::get_project_config_path(&canonical).is_file() {
             let _ = self.config_service.ensure_workspace_layout(&canonical)?;
+        }
+        if config.lsp.enabled && !detected.is_empty() {
+            let timeout = Duration::from_millis(config.lsp.request_timeout_ms);
+            let auto_install = config.lsp.auto_install;
+            for language_id in detected {
+                let Some(lang_cfg) = config.languages.get(&language_id).cloned() else {
+                    continue;
+                };
+                if !lang_cfg.enabled {
+                    continue;
+                }
+                let key = (canonical.clone(), language_id.clone(), canonical.clone());
+                let should_announce = {
+                    let mut guard = self.state.lock().unwrap();
+                    if guard.sessions.contains_key(&key) || guard.statuses.contains_key(&key) {
+                        false
+                    } else {
+                        let starting_event = LspServerStatusEvent {
+                            workspace_root: canonical.to_string_lossy().to_string(),
+                            language_id: language_id.clone(),
+                            project_root: canonical.to_string_lossy().to_string(),
+                            status: LspServerStatus::Starting,
+                            command: lang_cfg.command.clone(),
+                            message: None,
+                            error_count: 0,
+                            warning_count: 0,
+                        };
+                        guard.statuses.insert(key, starting_event);
+                        true
+                    }
+                };
+                if should_announce {
+                    (self.event_sink)(LspEvent::Status(LspServerStatusEvent {
+                        workspace_root: canonical.to_string_lossy().to_string(),
+                        language_id: language_id.clone(),
+                        project_root: canonical.to_string_lossy().to_string(),
+                        status: LspServerStatus::Starting,
+                        command: lang_cfg.command.clone(),
+                        message: None,
+                        error_count: 0,
+                        warning_count: 0,
+                    }));
+                }
+                let service = self.clone();
+                let ws_root = canonical.clone();
+                std::thread::spawn(move || {
+                    service.warmup_workspace_language(
+                        &ws_root,
+                        &language_id,
+                        &lang_cfg,
+                        auto_install,
+                        timeout,
+                    );
+                });
+            }
         }
         Ok(())
     }
@@ -451,6 +508,83 @@ impl LspService {
             .unwrap_or_else(|_| path.to_string_lossy().to_string())
     }
 
+    fn warmup_workspace_language(
+        &self,
+        workspace_root: &Path,
+        language_id: &str,
+        language_config: &LanguageConfig,
+        auto_install: bool,
+        timeout: Duration,
+    ) {
+        let Some(_session) = self.ensure_session(
+            workspace_root,
+            workspace_root,
+            language_id,
+            language_config,
+            auto_install,
+            timeout,
+        ) else {
+            return;
+        };
+
+        let mut candidates = Vec::new();
+        Self::collect_language_files(
+            workspace_root,
+            &language_config.extensions,
+            &mut candidates,
+            1,
+            8,
+        );
+        for file_path in candidates {
+            let already_open = {
+                let guard = self.state.lock().unwrap();
+                guard.documents.contains_key(&file_path)
+            };
+            if already_open {
+                continue;
+            }
+            if let Ok(content) = std::fs::read_to_string(&file_path) {
+                let _ = self.open_or_sync_file(workspace_root, &file_path, &content);
+            }
+        }
+    }
+
+    fn collect_language_files(
+        dir: &Path,
+        extensions: &[String],
+        out: &mut Vec<PathBuf>,
+        remaining_depth: usize,
+        limit: usize,
+    ) {
+        if out.len() >= limit {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            if out.len() >= limit {
+                break;
+            }
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    let ext_lower = ext.to_ascii_lowercase();
+                    if extensions.iter().any(|candidate| candidate == &ext_lower) {
+                        out.push(Self::canonical_or_owned(&path));
+                    }
+                }
+            } else if remaining_depth > 0 && path.is_dir() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if name_str.starts_with('.') || name_str == "node_modules" || name_str == "target" {
+                    continue;
+                }
+                Self::collect_language_files(&path, extensions, out, remaining_depth - 1, limit);
+            }
+        }
+    }
+
     fn ensure_session(
         &self,
         workspace_root: &Path,
@@ -471,8 +605,25 @@ impl LspService {
             if let Some(existing) = guard.sessions.get(&key) {
                 return Some(existing.clone());
             }
+        }
+
+        let key_lock = {
+            let mut locks = self.init_locks.lock().unwrap();
+            locks
+                .entry(key.clone())
+                .or_insert_with(|| Arc::new(Mutex::new(())))
+                .clone()
+        };
+        let _init_guard = key_lock.lock().unwrap();
+
+        {
+            let guard = self.state.lock().unwrap();
+            if let Some(existing) = guard.sessions.get(&key) {
+                return Some(existing.clone());
+            }
             if let Some(status) = guard.statuses.get(&key)
                 && status.status == LspServerStatus::Unavailable
+                && status.command == language_config.command
             {
                 return None;
             }
@@ -495,38 +646,34 @@ impl LspService {
         (self.event_sink)(LspEvent::Status(starting_event));
 
         let _ = self.config_service.ensure_workspace_layout(workspace_root);
-        if auto_install && !language_config.mise_tools.is_empty() {
-            let tools: Vec<(&str, &str)> = language_config
-                .mise_tools
-                .iter()
-                .map(|(k, v)| (k.as_str(), v.as_str()))
-                .collect();
-            let _ = self.mise_service.install_tools(workspace_root, &tools);
-        }
 
         match self.spawn_and_initialize_session(
             workspace_root,
             project_root,
             language_id,
             language_config,
+            auto_install,
             timeout,
         ) {
             Ok(session) => {
-                let ready_event = LspServerStatusEvent {
-                    workspace_root: workspace_root.to_string_lossy().to_string(),
-                    language_id: language_id.to_string(),
-                    project_root: project_root.to_string_lossy().to_string(),
-                    status: LspServerStatus::Ready,
-                    command: language_config.command.clone(),
-                    message: None,
-                    error_count: 0,
-                    warning_count: 0,
-                };
-                {
+                let ready_event = {
                     let mut guard = self.state.lock().unwrap();
+                    let (error_count, warning_count) =
+                        Self::count_workspace_diagnostics(&guard, workspace_root, language_id);
+                    let evt = LspServerStatusEvent {
+                        workspace_root: workspace_root.to_string_lossy().to_string(),
+                        language_id: language_id.to_string(),
+                        project_root: project_root.to_string_lossy().to_string(),
+                        status: LspServerStatus::Ready,
+                        command: language_config.command.clone(),
+                        message: None,
+                        error_count,
+                        warning_count,
+                    };
                     guard.sessions.insert(key.clone(), session.clone());
-                    guard.statuses.insert(key, ready_event.clone());
-                }
+                    guard.statuses.insert(key, evt.clone());
+                    evt
+                };
                 (self.event_sink)(LspEvent::Status(ready_event));
                 Some(session)
             }
@@ -551,28 +698,88 @@ impl LspService {
         }
     }
 
+    fn count_workspace_diagnostics(
+        guard: &LspServiceState,
+        workspace_root: &Path,
+        language_id: &str,
+    ) -> (usize, usize) {
+        let (mut total_errors, mut total_warnings) = (0usize, 0usize);
+        for (ws, lang, diags) in guard.diagnostics.values() {
+            if ws == workspace_root && lang == language_id {
+                for d in diags {
+                    match d.severity {
+                        LspDiagnosticSeverity::Error => total_errors += 1,
+                        LspDiagnosticSeverity::Warning => total_warnings += 1,
+                        _ => {}
+                    }
+                }
+            }
+        }
+        (total_errors, total_warnings)
+    }
+
     fn spawn_and_initialize_session(
         &self,
         workspace_root: &Path,
         project_root: &Path,
         language_id: &str,
         language_config: &LanguageConfig,
+        auto_install: bool,
         timeout: Duration,
     ) -> Result<Arc<LspServerSession>> {
         let prefer_direct =
             language_config.mise_tools.is_empty() || Path::new(&language_config.command).is_file();
 
-        if !prefer_direct
-            && let Ok(session) = self.try_spawn_session(
+        if prefer_direct {
+            return self.try_spawn_session(
+                workspace_root,
+                project_root,
+                language_id,
+                language_config,
+                timeout,
+                false,
+            );
+        }
+
+        if let Ok(session) = self.try_spawn_session(
+            workspace_root,
+            project_root,
+            language_id,
+            language_config,
+            timeout,
+            true,
+        ) {
+            return Ok(session);
+        }
+
+        if let Ok(session) = self.try_spawn_session(
+            workspace_root,
+            project_root,
+            language_id,
+            language_config,
+            timeout,
+            false,
+        ) {
+            return Ok(session);
+        }
+
+        if auto_install && !language_config.mise_tools.is_empty() {
+            let tools: Vec<(&str, &str)> = language_config
+                .mise_tools
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+            let _ = self.mise_service.install_tools(workspace_root, &tools);
+            if let Ok(session) = self.try_spawn_session(
                 workspace_root,
                 project_root,
                 language_id,
                 language_config,
                 timeout,
                 true,
-            )
-        {
-            return Ok(session);
+            ) {
+                return Ok(session);
+            }
         }
 
         self.try_spawn_session(
@@ -604,6 +811,11 @@ impl LspService {
             cmd.arg("--")
                 .arg(&language_config.command)
                 .args(&language_config.args);
+            cmd.env("MISE_CONFIG_FILE", &mise_file)
+                .env("MISE_GLOBAL_CONFIG_FILE", &mise_file)
+                .env("MISE_TRUSTED_CONFIG_PATHS", &mise_file)
+                .env("MISE_NOT_FOUND_AUTO_INSTALL", "false")
+                .env("MISE_EXEC_AUTO_INSTALL", "false");
             cmd
         } else {
             let mut cmd = Command::new(&language_config.command);
@@ -613,8 +825,6 @@ impl LspService {
 
         command
             .current_dir(project_root)
-            .env("MISE_CONFIG_FILE", &mise_file)
-            .env("MISE_TRUSTED_CONFIG_PATHS", &mise_file)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());

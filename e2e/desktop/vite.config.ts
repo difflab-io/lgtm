@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 // Compile the actual application shell and its CSS; this entry exists only in the test build.
 export default defineConfig({
   root: fileURLToPath(new URL('../..', import.meta.url)),
+  cacheDir: 'e2e/desktop/.vite',
   plugins: [tailwindcss(), svelte()],
   resolve: {
     alias: {

@@ -1,8 +1,47 @@
-import { test, expect, entry, createFile, renameEntry } from './fixtures'
+import { test, expect, entry, createFile, renameEntry, exists } from './fixtures'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 // Tests -----------------------------------------------------------------------
+test.describe('Given a new workspace', { tag: ['@desktop', '@lsp'] }, () => {
+  test.use({ initialWorkspace: 'default-seeded' })
+
+  test.describe('When opening the default workspace containing loose source files', () => {
+    test(
+      'should automatically warm up workspace language servers and open the diagnostics buffer',
+      { tag: '@smoke' },
+      async ({ page, workspace }) => {
+        // Arrange
+        const lspButton = page.getByRole('button', { name: 'LSP status', exact: true })
+
+        // Assert
+        expect(await exists(join(workspace.root, '.lgtm/mise.toml'))).toBe(true)
+        await expect(lspButton).toContainText('LSP: python (ready, 1 error)')
+
+        // Act
+        await lspButton.click()
+        const popover = page.getByRole('dialog', { name: 'LSP servers and diagnostics' })
+        await expect(popover).toBeVisible()
+        await expect(popover).toContainText('python')
+        await expect(popover).toContainText('typescript')
+        await popover.getByRole('button', { name: 'Open diagnostics buffer', exact: true }).click()
+
+        // Assert
+        const tablist = page.getByRole('tablist', { name: 'Open editors' })
+        await expect(
+          tablist.getByRole('tab', { name: 'LSP Diagnostics', exact: true }),
+        ).toHaveAttribute('aria-selected', 'true')
+        await expect(page.locator('.cm-content')).toContainText('# LSP Diagnostics')
+        await expect(page.locator('.cm-content')).toContainText('python [ready]')
+        await expect(page.locator('.cm-content')).toContainText('typescript [ready]')
+        await expect(page.locator('.cm-content')).toContainText(
+          'hello.py:2:5 [ERROR] [E0425] (rustc) cannot find value `BROKEN` in this scope',
+        )
+      },
+    )
+  })
+})
+
 test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () => {
   test.use({ initialWorkspace: 'existing' })
 

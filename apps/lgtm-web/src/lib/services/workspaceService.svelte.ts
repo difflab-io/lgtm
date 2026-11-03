@@ -57,6 +57,7 @@ export class WorkspaceService {
   private dirtyContent: string | null = null
   private saveTimer: ReturnType<typeof setTimeout> | null = null
   private inFlightSave: Promise<void> | null = null
+  private openRequestSeq = 0
 
   constructor(private client: WorkspaceClient) {}
 
@@ -205,21 +206,23 @@ export class WorkspaceService {
   }
 
   async select(path: string) {
-    if (this.blocked) return
+    if (this.busy) return
     const entry = this.resolveFileEntry(path)
     if (entry.kind === 'file') await this.openFile(entry)
   }
 
   async openFile(entry: WorkspaceNode, targetOffset?: number) {
+    const requestId = ++this.openRequestSeq
     await this.flushSave()
+    if (requestId !== this.openRequestSeq) return
     this.selected = entry
     this.fileLoading = true
     this.openingError = null
     try {
       const content = await this.client.read(entry.path)
-      if (!this.active) return
+      if (!this.active || requestId !== this.openRequestSeq) return
       this.fileContent = content
-      if (content.lspStatus) {
+      if (content.lspStatus && !this.lspServers[content.lspStatus.languageId]) {
         this.lspServers = {
           ...this.lspServers,
           [content.lspStatus.languageId]: content.lspStatus,
@@ -240,12 +243,12 @@ export class WorkspaceService {
       this.fileVersion++
       void this.syncLspState()
     } catch (error) {
-      if (this.active) {
+      if (this.active && requestId === this.openRequestSeq) {
         this.fileContent = null
         this.openingError = errorMessage(error)
       }
     } finally {
-      if (this.active) this.fileLoading = false
+      if (this.active && requestId === this.openRequestSeq) this.fileLoading = false
     }
   }
 
