@@ -1,5 +1,5 @@
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::collections::BTreeMap;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -51,13 +51,6 @@ pub struct LanguageConfig {
     pub initialization_options: Option<serde_json::Value>,
     #[serde(default)]
     pub default_tasks: BTreeMap<String, MiseTaskConfig>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DetectedProject {
-    pub language_id: String,
-    pub project_root: PathBuf,
-    pub root_marker: Option<String>,
 }
 
 impl LgtmConfig {
@@ -239,98 +232,6 @@ impl LgtmConfig {
             }
         })
     }
-
-    pub fn detect_project_root(
-        &self,
-        workspace_root: &Path,
-        file_path: &Path,
-        language: &LanguageConfig,
-    ) -> (PathBuf, Option<String>) {
-        let mut cursor = if file_path.is_dir() {
-            file_path.to_path_buf()
-        } else {
-            file_path.parent().unwrap_or(workspace_root).to_path_buf()
-        };
-
-        loop {
-            for marker in &language.root_markers {
-                if cursor.join(marker).exists() {
-                    return (cursor, Some(marker.clone()));
-                }
-            }
-            if cursor == workspace_root {
-                break;
-            }
-            let Some(parent) = cursor.parent() else {
-                break;
-            };
-            if !parent.starts_with(workspace_root) {
-                break;
-            }
-            cursor = parent.to_path_buf();
-        }
-
-        (workspace_root.to_path_buf(), None)
-    }
-
-    pub fn detect_workspace_languages(&self, workspace_root: &Path) -> Vec<String> {
-        let mut detected = BTreeSet::new();
-
-        for (id, cfg) in &self.languages {
-            if !cfg.enabled {
-                continue;
-            }
-            if cfg
-                .root_markers
-                .iter()
-                .any(|marker| workspace_root.join(marker).exists())
-            {
-                detected.insert(id.clone());
-            }
-        }
-
-        if let Ok(entries) = std::fs::read_dir(workspace_root) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file() {
-                    if let Some((lang_id, _)) = self.detect_file_language(&path) {
-                        detected.insert(lang_id);
-                    }
-                } else if path.is_dir() {
-                    let name = entry.file_name();
-                    let name_str = name.to_string_lossy();
-                    if name_str.starts_with('.')
-                        || name_str == "node_modules"
-                        || name_str == "target"
-                    {
-                        continue;
-                    }
-                    for (id, cfg) in &self.languages {
-                        if cfg.enabled
-                            && cfg
-                                .root_markers
-                                .iter()
-                                .any(|marker| path.join(marker).exists())
-                        {
-                            detected.insert(id.clone());
-                        }
-                    }
-                    if let Ok(sub_entries) = std::fs::read_dir(&path) {
-                        for sub_entry in sub_entries.flatten() {
-                            let sub_path = sub_entry.path();
-                            if sub_path.is_file()
-                                && let Some((lang_id, _)) = self.detect_file_language(&sub_path)
-                            {
-                                detected.insert(lang_id);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        detected.into_iter().collect()
-    }
 }
 
 impl Default for LgtmConfig {
@@ -440,67 +341,6 @@ mod tests {
                 assert_eq!(
                     base.mise.tasks.get("custom"),
                     Some(&MiseTaskConfig::Command("echo hi".to_string()))
-                );
-            }
-        }
-    }
-
-    mod given_a_workspace_directory {
-        use super::*;
-
-        mod when_detecting_project_root {
-            use super::*;
-
-            #[test]
-            fn should_walk_up_to_nearest_root_marker() {
-                // Arrange
-                let temp = tempfile::tempdir().unwrap();
-                let workspace_root = temp.path();
-                let crate_root = workspace_root.join("crates/core");
-                let file_path = crate_root.join("src/lib.rs");
-                std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
-                std::fs::write(
-                    crate_root.join("Cargo.toml"),
-                    "[package]\nname = \"core\"\n",
-                )
-                .unwrap();
-                std::fs::write(&file_path, "pub fn add() {}\n").unwrap();
-                let config = LgtmConfig::default();
-                let rust_cfg = config.languages.get("rust").unwrap();
-
-                // Act
-                let (project_root, marker) =
-                    config.detect_project_root(workspace_root, &file_path, rust_cfg);
-
-                // Assert
-                assert_eq!(project_root, crate_root);
-                assert_eq!(marker, Some("Cargo.toml".to_string()));
-            }
-        }
-
-        mod when_detecting_workspace_languages {
-            use super::*;
-
-            #[test]
-            fn should_return_sorted_detected_languages() {
-                // Arrange
-                let temp = tempfile::tempdir().unwrap();
-                let workspace_root = temp.path();
-                std::fs::write(workspace_root.join("Cargo.toml"), "[workspace]\n").unwrap();
-                std::fs::write(workspace_root.join("package.json"), "{}\n").unwrap();
-                let config = LgtmConfig::default();
-
-                // Act
-                let languages = config.detect_workspace_languages(workspace_root);
-
-                // Assert
-                assert_eq!(
-                    languages,
-                    vec![
-                        "javascript".to_string(),
-                        "rust".to_string(),
-                        "typescript".to_string(),
-                    ]
                 );
             }
         }

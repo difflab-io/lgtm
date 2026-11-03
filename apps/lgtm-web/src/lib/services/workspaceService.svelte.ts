@@ -206,12 +206,7 @@ export class WorkspaceService {
 
   async select(path: string) {
     if (this.blocked) return
-    const entry = this.entries.find((item) => item.path === path) ??
-      this.listed[path] ?? {
-        path,
-        name: path.split('/').at(-1) ?? path,
-        kind: 'file' as const,
-      }
+    const entry = this.resolveFileEntry(path)
     if (entry.kind === 'file') await this.openFile(entry)
   }
 
@@ -231,7 +226,7 @@ export class WorkspaceService {
         }
       }
       const tabId = `file:${entry.path}`
-      const nextTab: WorkspaceTab = {
+      this.upsertTab({
         id: tabId,
         kind: 'file',
         title: entry.name,
@@ -239,13 +234,7 @@ export class WorkspaceService {
         languageId: content.languageId ?? null,
         content: content.content,
         readonly: false,
-      }
-      const existingIdx = this.tabs.findIndex((t) => t.id === tabId)
-      if (existingIdx === -1) {
-        this.tabs = [...this.tabs, nextTab]
-      } else {
-        this.tabs = this.tabs.map((t, idx) => (idx === existingIdx ? nextTab : t))
-      }
+      })
       this.activeTabId = tabId
       this.selectionOffset = targetOffset ?? null
       this.fileVersion++
@@ -323,20 +312,14 @@ export class WorkspaceService {
       const buffer = await this.client.lspGetDiagnosticsBuffer(languageId)
       if (!this.active) return
       const tabId = languageId ? `diagnostics:${languageId}` : 'diagnostics:all'
-      const nextTab: WorkspaceTab = {
+      this.upsertTab({
         id: tabId,
         kind: 'diagnostics',
         title: buffer.title,
         languageId: buffer.languageId ?? null,
         content: buffer.content,
         readonly: true,
-      }
-      const existingIdx = this.tabs.findIndex((item) => item.id === tabId)
-      if (existingIdx === -1) {
-        this.tabs = [...this.tabs, nextTab]
-      } else {
-        this.tabs = this.tabs.map((item, idx) => (idx === existingIdx ? nextTab : item))
-      }
+      })
       this.selected = null
       this.openingError = null
       this.activeTabId = tabId
@@ -353,12 +336,7 @@ export class WorkspaceService {
   }
 
   async jumpToLocation(path: string, offset: number) {
-    const entry = this.entries.find((item) => item.path === path) ??
-      this.listed[path] ?? {
-        path,
-        name: path.split('/').at(-1) ?? path,
-        kind: 'file' as const,
-      }
+    const entry = this.resolveFileEntry(path)
     await this.openFile(entry, offset)
     this.focusRequest++
   }
@@ -603,7 +581,7 @@ export class WorkspaceService {
     if (this.dirtyPath && (this.dirtyPath === path || this.dirtyPath.startsWith(`${path}/`))) {
       if (this.saveTimer) {
         clearTimeout(this.saveTimer)
-        clearSelectedTimers(this)
+        this.saveTimer = null
       }
       this.dirtyPath = null
       this.dirtyContent = null
@@ -674,8 +652,24 @@ export class WorkspaceService {
   private refresh(path: string) {
     this.refreshFolder = { path, version: (this.refreshFolder?.version ?? 0) + 1 }
   }
-}
 
-function clearSelectedTimers(service: WorkspaceService) {
-  void service
+  private resolveFileEntry(path: string): WorkspaceNode {
+    return (
+      this.entries.find((item) => item.path === path) ??
+      this.listed[path] ?? {
+        path,
+        name: path.split('/').at(-1) ?? path,
+        kind: 'file' as const,
+      }
+    )
+  }
+
+  private upsertTab(tab: WorkspaceTab) {
+    const existingIdx = this.tabs.findIndex((item) => item.id === tab.id)
+    if (existingIdx === -1) {
+      this.tabs = [...this.tabs, tab]
+    } else {
+      this.tabs = this.tabs.map((item, idx) => (idx === existingIdx ? tab : item))
+    }
+  }
 }

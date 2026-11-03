@@ -43,7 +43,7 @@
 │       └── components/      # Shell, WorkspaceExplorer, and ContentPane
 ├── libs/
 │   ├── lgtm-config/src/
-│   │   ├── models/          # Global/workspace config structs, language presets, and MiseFile builder
+│   │   ├── models/          # Global/workspace config structs, language presets, and GeneratedMiseFile builder
 │   │   ├── services/        # ConfigService (.lgtm/config.toml) and MiseService (.lgtm/mise.toml + tasks)
 │   │   └── error.rs         # Typed ConfigError
 │   ├── lgtm-db/src/

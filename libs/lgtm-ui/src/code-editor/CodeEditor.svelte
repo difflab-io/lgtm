@@ -145,7 +145,6 @@
   $effect(() => {
     const currentView = view
     const nextDiagnostics = diagnostics
-    const _docValue = value
     if (!currentView) return
     const mapped = toCodeMirrorDiagnostics(currentView.state.doc.length, nextDiagnostics)
     currentView.dispatch(setDiagnostics(currentView.state, mapped))

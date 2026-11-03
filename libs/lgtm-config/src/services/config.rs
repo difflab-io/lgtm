@@ -1,7 +1,8 @@
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use crate::error::{ConfigError, Result};
-use crate::models::config::LgtmConfig;
+use crate::models::config::{LanguageConfig, LgtmConfig};
 use crate::models::mise::GeneratedMiseFile;
 
 #[derive(Debug, Clone, Default)]
@@ -76,7 +77,7 @@ impl ConfigService {
         Self::ensure_git_exclude(workspace_root);
 
         let config = self.get_config(workspace_root)?;
-        let detected_languages = config.detect_workspace_languages(workspace_root);
+        let detected_languages = Self::detect_workspace_languages(&config, workspace_root);
         let generated = GeneratedMiseFile::from_config(&config, &detected_languages);
         let rendered = generated.render_toml()?;
         let mise_path = Self::get_managed_mise_path(workspace_root);
@@ -96,7 +97,82 @@ impl ConfigService {
         Ok(mise_path)
     }
 
+    pub fn detect_project_root(
+        workspace_root: &Path,
+        file_path: &Path,
+        language: &LanguageConfig,
+    ) -> (PathBuf, Option<String>) {
+        let mut cursor = if file_path.is_dir() {
+            file_path.to_path_buf()
+        } else {
+            file_path.parent().unwrap_or(workspace_root).to_path_buf()
+        };
+
+        loop {
+            for marker in &language.root_markers {
+                if cursor.join(marker).exists() {
+                    return (cursor, Some(marker.clone()));
+                }
+            }
+            if cursor == workspace_root {
+                break;
+            }
+            let Some(parent) = cursor.parent() else {
+                break;
+            };
+            if !parent.starts_with(workspace_root) {
+                break;
+            }
+            cursor = parent.to_path_buf();
+        }
+
+        (workspace_root.to_path_buf(), None)
+    }
+
+    pub fn detect_workspace_languages(config: &LgtmConfig, workspace_root: &Path) -> Vec<String> {
+        let mut detected = BTreeSet::new();
+        Self::scan_directory_languages(config, workspace_root, &mut detected, 2);
+        detected.into_iter().collect()
+    }
+
     // Private -----------------------------------------------------------------
+
+    fn scan_directory_languages(
+        config: &LgtmConfig,
+        dir: &Path,
+        detected: &mut BTreeSet<String>,
+        remaining_depth: usize,
+    ) {
+        for (id, cfg) in &config.languages {
+            if cfg.enabled
+                && cfg
+                    .root_markers
+                    .iter()
+                    .any(|marker| dir.join(marker).exists())
+            {
+                detected.insert(id.clone());
+            }
+        }
+
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some((lang_id, _)) = config.detect_file_language(&path) {
+                    detected.insert(lang_id);
+                }
+            } else if remaining_depth > 0 && path.is_dir() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if name_str.starts_with('.') || name_str == "node_modules" || name_str == "target" {
+                    continue;
+                }
+                Self::scan_directory_languages(config, &path, detected, remaining_depth - 1);
+            }
+        }
+    }
 
     fn read_config_file(path: &Path) -> Result<LgtmConfig> {
         let raw = std::fs::read_to_string(path).map_err(|source| ConfigError::Io {
@@ -227,6 +303,46 @@ mod tests {
                 assert_eq!(config.lsp.request_timeout_ms, 9000);
                 assert_eq!(config.mise.tools.get("fd"), Some(&"latest".to_string()));
                 assert!(config.mise.tasks.contains_key("custom"));
+            }
+        }
+
+        mod when_detecting_project_root_and_workspace_languages {
+            use super::*;
+
+            #[test]
+            fn should_walk_up_to_nearest_root_marker_and_list_sorted_languages() {
+                // Arrange
+                let temp = tempfile::tempdir().unwrap();
+                let workspace_root = temp.path();
+                let crate_root = workspace_root.join("crates/core");
+                let file_path = crate_root.join("src/lib.rs");
+                std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+                std::fs::write(
+                    crate_root.join("Cargo.toml"),
+                    "[package]\nname = \"core\"\n",
+                )
+                .unwrap();
+                std::fs::write(&file_path, "pub fn add() {}\n").unwrap();
+                std::fs::write(workspace_root.join("package.json"), "{}\n").unwrap();
+                let config = LgtmConfig::default();
+                let rust_cfg = config.languages.get("rust").unwrap();
+
+                // Act
+                let (project_root, marker) =
+                    ConfigService::detect_project_root(workspace_root, &file_path, rust_cfg);
+                let languages = ConfigService::detect_workspace_languages(&config, workspace_root);
+
+                // Assert
+                assert_eq!(project_root, crate_root);
+                assert_eq!(marker, Some("Cargo.toml".to_string()));
+                assert_eq!(
+                    languages,
+                    vec![
+                        "javascript".to_string(),
+                        "rust".to_string(),
+                        "typescript".to_string(),
+                    ]
+                );
             }
         }
     }

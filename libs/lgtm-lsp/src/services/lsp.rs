@@ -14,7 +14,6 @@ use crate::models::lsp::{
     LspDiagnostic, LspDiagnosticSeverity, LspDiagnosticsBuffer, LspEvent, LspFileDiagnosticsEvent,
     LspHoverResult, LspLocation, LspServerStatus, LspServerStatusEvent, LspWorkspaceSnapshot,
     file_uri_to_path, offset_to_position, path_to_file_uri, position_to_offset,
-    render_diagnostics_buffer,
 };
 
 type SessionKey = (PathBuf, String, PathBuf);
@@ -71,7 +70,7 @@ impl LspService {
     pub fn prepare_workspace(&self, workspace_root: &Path) -> Result<()> {
         let canonical = Self::canonical_or_owned(workspace_root);
         let config = self.config_service.get_config(&canonical)?;
-        let detected = config.detect_workspace_languages(&canonical);
+        let detected = ConfigService::detect_workspace_languages(&config, &canonical);
         if !detected.is_empty() || ConfigService::get_project_config_path(&canonical).is_file() {
             let _ = self.config_service.ensure_workspace_layout(&canonical)?;
         }
@@ -99,9 +98,8 @@ impl LspService {
             return (Some(language_id), None);
         }
 
-        let _ = self.config_service.ensure_workspace_layout(&workspace_root);
         let (project_root, _) =
-            config.detect_project_root(&workspace_root, &file_path, &language_config);
+            ConfigService::detect_project_root(&workspace_root, &file_path, &language_config);
         let project_root = Self::canonical_or_owned(&project_root);
         let key = (
             workspace_root.clone(),
@@ -198,6 +196,9 @@ impl LspService {
         let session_and_version = {
             let mut guard = self.state.lock().unwrap();
             if let Some(doc) = guard.documents.get_mut(&file_path) {
+                if doc.text == content {
+                    return Ok(());
+                }
                 doc.version += 1;
                 doc.text = content.to_string();
                 let key = (
@@ -398,7 +399,7 @@ impl LspService {
             (servers, diags)
         };
 
-        Ok(render_diagnostics_buffer(
+        Ok(LspDiagnosticsBuffer::render(
             &workspace_root,
             language_id,
             &servers,
@@ -493,6 +494,7 @@ impl LspService {
         }
         (self.event_sink)(LspEvent::Status(starting_event));
 
+        let _ = self.config_service.ensure_workspace_layout(workspace_root);
         if auto_install && !language_config.mise_tools.is_empty() {
             let tools: Vec<(&str, &str)> = language_config
                 .mise_tools
@@ -808,49 +810,22 @@ impl LspService {
         let Some(uri) = params.get("uri").and_then(Value::as_str) else {
             return;
         };
-        let Some(file_path) = file_uri_to_path(uri) else {
+        let Some(raw_file_path) = file_uri_to_path(uri) else {
             return;
         };
+        let file_path = Self::canonical_or_owned(&raw_file_path);
         let raw_diags = params
             .get("diagnostics")
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
 
-        let text = {
-            let guard = state.lock().unwrap();
-            guard
-                .documents
-                .get(&file_path)
-                .map(|doc| doc.text.clone())
-                .or_else(|| std::fs::read_to_string(&file_path).ok())
-                .unwrap_or_default()
-        };
+        let text = Self::document_or_disk_text(state, &file_path);
 
         let mut mapped = Vec::with_capacity(raw_diags.len());
         for item in raw_diags {
-            let range = item.get("range");
-            let start = range.and_then(|r| r.get("start"));
-            let end = range.and_then(|r| r.get("end"));
-            let line = start
-                .and_then(|s| s.get("line"))
-                .and_then(Value::as_u64)
-                .unwrap_or(0) as u32;
-            let character = start
-                .and_then(|s| s.get("character"))
-                .and_then(Value::as_u64)
-                .unwrap_or(0) as u32;
-            let end_line = end
-                .and_then(|e| e.get("line"))
-                .and_then(Value::as_u64)
-                .unwrap_or(line as u64) as u32;
-            let end_character = end
-                .and_then(|e| e.get("character"))
-                .and_then(Value::as_u64)
-                .unwrap_or(character as u64) as u32;
-
-            let from = position_to_offset(&text, line, character);
-            let to = position_to_offset(&text, end_line, end_character).max(from);
+            let (line, character, end_line, end_character, from, to) =
+                Self::parse_lsp_range(&text, item.get("range"));
             let severity = match item.get("severity").and_then(Value::as_u64) {
                 Some(1) => LspDiagnosticSeverity::Error,
                 Some(2) => LspDiagnosticSeverity::Warning,
@@ -998,29 +973,48 @@ impl LspService {
         }
     }
 
+    fn document_or_disk_text(state: &Arc<Mutex<LspServiceState>>, file_path: &Path) -> String {
+        let guard = state.lock().unwrap();
+        guard
+            .documents
+            .get(file_path)
+            .map(|doc| doc.text.clone())
+            .or_else(|| std::fs::read_to_string(file_path).ok())
+            .unwrap_or_default()
+    }
+
+    fn parse_lsp_range(text: &str, range: Option<&Value>) -> (u32, u32, u32, u32, u32, u32) {
+        let start = range.and_then(|r| r.get("start"));
+        let end = range.and_then(|r| r.get("end"));
+        let line = start
+            .and_then(|s| s.get("line"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as u32;
+        let character = start
+            .and_then(|s| s.get("character"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as u32;
+        let end_line = end
+            .and_then(|e| e.get("line"))
+            .and_then(Value::as_u64)
+            .unwrap_or(line as u64) as u32;
+        let end_character = end
+            .and_then(|e| e.get("character"))
+            .and_then(Value::as_u64)
+            .unwrap_or(character as u64) as u32;
+        let from = position_to_offset(text, line, character);
+        let to = position_to_offset(text, end_line, end_character).max(from);
+        (line, character, end_line, end_character, from, to)
+    }
+
     fn extract_range_offsets(text: &str, range: Option<&Value>) -> (Option<u32>, Option<u32>) {
         let Some(range) = range else {
             return (None, None);
         };
-        let Some(start) = range.get("start") else {
+        if range.get("start").is_none() || range.get("end").is_none() {
             return (None, None);
-        };
-        let Some(end) = range.get("end") else {
-            return (None, None);
-        };
-        let start_line = start.get("line").and_then(Value::as_u64).unwrap_or(0) as u32;
-        let start_char = start.get("character").and_then(Value::as_u64).unwrap_or(0) as u32;
-        let end_line = end
-            .get("line")
-            .and_then(Value::as_u64)
-            .unwrap_or(start_line as u64) as u32;
-        let end_char = end
-            .get("character")
-            .and_then(Value::as_u64)
-            .unwrap_or(start_char as u64) as u32;
-
-        let from = position_to_offset(text, start_line, start_char);
-        let to = position_to_offset(text, end_line, end_char).max(from);
+        }
+        let (_, _, _, _, from, to) = Self::parse_lsp_range(text, Some(range));
         (Some(from), Some(to))
     }
 
@@ -1046,41 +1040,13 @@ impl LspService {
             let (Some(uri), Some(range)) = (uri, range) else {
                 continue;
             };
-            let Some(target_path) = file_uri_to_path(uri) else {
+            let Some(raw_target_path) = file_uri_to_path(uri) else {
                 continue;
             };
-
-            let target_text = {
-                let guard = self.state.lock().unwrap();
-                guard
-                    .documents
-                    .get(&target_path)
-                    .map(|doc| doc.text.clone())
-                    .or_else(|| std::fs::read_to_string(&target_path).ok())
-                    .unwrap_or_default()
-            };
-
-            let start = range.get("start");
-            let end = range.get("end");
-            let line = start
-                .and_then(|s| s.get("line"))
-                .and_then(Value::as_u64)
-                .unwrap_or(0) as u32;
-            let character = start
-                .and_then(|s| s.get("character"))
-                .and_then(Value::as_u64)
-                .unwrap_or(0) as u32;
-            let end_line = end
-                .and_then(|e| e.get("line"))
-                .and_then(Value::as_u64)
-                .unwrap_or(line as u64) as u32;
-            let end_character = end
-                .and_then(|e| e.get("character"))
-                .and_then(Value::as_u64)
-                .unwrap_or(character as u64) as u32;
-
-            let offset = position_to_offset(&target_text, line, character);
-            let end_offset = position_to_offset(&target_text, end_line, end_character).max(offset);
+            let target_path = Self::canonical_or_owned(&raw_target_path);
+            let target_text = Self::document_or_disk_text(&self.state, &target_path);
+            let (line, character, _, _, offset, end_offset) =
+                Self::parse_lsp_range(&target_text, Some(range));
 
             locations.push(LspLocation {
                 path: Self::to_workspace_relative(workspace_root, &target_path),
@@ -1096,7 +1062,7 @@ impl LspService {
 }
 
 impl LspServerSession {
-    // Public ------------------------------------------------------------------
+    // Private -----------------------------------------------------------------
 
     fn request(&self, method: &str, params: Value) -> Result<Value> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
@@ -1135,19 +1101,6 @@ impl LspServerSession {
         self.send_raw(&payload)
     }
 
-    fn send_raw(&self, payload: &Value) -> Result<()> {
-        let body = serde_json::to_vec(payload)?;
-        let header = format!("Content-Length: {}\r\n\r\n", body.len());
-        let mut guard = self.stdin.lock().unwrap();
-        let Some(stdin) = guard.as_mut() else {
-            return Err(LspError::ServerUnavailable("stdin closed".to_string()));
-        };
-        stdin.write_all(header.as_bytes())?;
-        stdin.write_all(&body)?;
-        stdin.flush()?;
-        Ok(())
-    }
-
     fn shutdown(&self) {
         let _ = self.send_raw(&json!({
             "jsonrpc": "2.0",
@@ -1161,6 +1114,19 @@ impl LspServerSession {
             let _ = child.kill();
             let _ = child.wait();
         }
+    }
+
+    fn send_raw(&self, payload: &Value) -> Result<()> {
+        let body = serde_json::to_vec(payload)?;
+        let header = format!("Content-Length: {}\r\n\r\n", body.len());
+        let mut guard = self.stdin.lock().unwrap();
+        let Some(stdin) = guard.as_mut() else {
+            return Err(LspError::ServerUnavailable("stdin closed".to_string()));
+        };
+        stdin.write_all(header.as_bytes())?;
+        stdin.write_all(&body)?;
+        stdin.flush()?;
+        Ok(())
     }
 }
 

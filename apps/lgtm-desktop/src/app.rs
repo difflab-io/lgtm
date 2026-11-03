@@ -131,14 +131,20 @@ pub async fn workspace_open(
     path: Option<String>,
 ) -> Result<WorkspaceListing> {
     let lsp_service = lsp.0.clone();
-    run_blocking(state, move |w| {
+    let (listing, root) = run_blocking(state, move |w| {
         let listing = w.open(path.as_deref())?;
-        if let Ok(root) = w.get_root() {
-            let _ = lsp_service.prepare_workspace(&root);
-        }
-        Ok(listing)
+        let root = w.get_root().ok();
+        Ok((listing, root))
     })
-    .await
+    .await?;
+    if let Some(root) = root {
+        tauri::async_runtime::spawn_blocking(move || {
+            let _ = lsp_service.prepare_workspace(&root);
+        })
+        .await
+        .map_err(|e| error("io", e.to_string()))?;
+    }
+    Ok(listing)
 }
 
 #[tauri::command]
@@ -164,15 +170,20 @@ pub async fn workspace_read(
     relative_path: String,
 ) -> Result<FileContent> {
     let lsp_service = lsp.0.clone();
-    run_blocking(state, move |w| {
+    let (content, root, file_path) = run_blocking(state, move |w| {
         let content = w.get_file_content(&relative_path)?;
         let root = w.get_root()?;
         let file_path = w.get_entry_path(&relative_path)?;
+        Ok((content, root, file_path))
+    })
+    .await?;
+    tauri::async_runtime::spawn_blocking(move || {
         let (language_id, lsp_status) =
             lsp_service.open_or_sync_file(&root, &file_path, &content.content);
         Ok(content.with_lsp(language_id, lsp_status))
     })
     .await
+    .map_err(|e| error("io", e.to_string()))?
 }
 
 #[tauri::command]
@@ -183,14 +194,21 @@ pub async fn workspace_write(
     content: String,
 ) -> Result<FileContent> {
     let lsp_service = lsp.0.clone();
-    run_blocking(state, move |w| {
+    let content_for_lsp = content.clone();
+    let (written, coords) = run_blocking(state, move |w| {
         let written = w.write_file(&relative_path, &content)?;
-        if let (Ok(root), Ok(file_path)) = (w.get_root(), w.get_entry_path(&relative_path)) {
-            let _ = lsp_service.did_save(&root, &file_path, &content);
-        }
-        Ok(written)
+        let coords = w.get_root().ok().zip(w.get_entry_path(&relative_path).ok());
+        Ok((written, coords))
     })
-    .await
+    .await?;
+    if let Some((root, file_path)) = coords {
+        tauri::async_runtime::spawn_blocking(move || {
+            let _ = lsp_service.did_save(&root, &file_path, &content_for_lsp);
+        })
+        .await
+        .map_err(|e| error("io", e.to_string()))?;
+    }
+    Ok(written)
 }
 
 #[tauri::command]
@@ -225,15 +243,20 @@ pub async fn workspace_rename(
     name: String,
 ) -> Result<WorkspaceNode> {
     let lsp_service = lsp.0.clone();
-    run_blocking(state, move |w| {
+    let (renamed, old_coords) = run_blocking(state, move |w| {
         let old_coords = w.get_root().ok().zip(w.get_entry_path(&relative_path).ok());
         let renamed = w.rename(&relative_path, &name)?;
-        if let Some((root, old_path)) = old_coords {
-            let _ = lsp_service.did_close(&root, &old_path);
-        }
-        Ok(renamed)
+        Ok((renamed, old_coords))
     })
-    .await
+    .await?;
+    if let Some((root, old_path)) = old_coords {
+        tauri::async_runtime::spawn_blocking(move || {
+            let _ = lsp_service.did_close(&root, &old_path);
+        })
+        .await
+        .map_err(|e| error("io", e.to_string()))?;
+    }
+    Ok(renamed)
 }
 
 #[tauri::command]
@@ -243,15 +266,20 @@ pub async fn workspace_delete(
     relative_path: String,
 ) -> Result<()> {
     let lsp_service = lsp.0.clone();
-    run_blocking(state, move |w| {
+    let old_coords = run_blocking(state, move |w| {
         let old_coords = w.get_root().ok().zip(w.get_entry_path(&relative_path).ok());
         w.delete(&relative_path)?;
-        if let Some((root, old_path)) = old_coords {
-            let _ = lsp_service.did_close(&root, &old_path);
-        }
-        Ok(())
+        Ok(old_coords)
     })
-    .await
+    .await?;
+    if let Some((root, old_path)) = old_coords {
+        tauri::async_runtime::spawn_blocking(move || {
+            let _ = lsp_service.did_close(&root, &old_path);
+        })
+        .await
+        .map_err(|e| error("io", e.to_string()))?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -273,14 +301,17 @@ pub async fn lsp_did_change(
     content: String,
 ) -> Result<()> {
     let lsp_service = lsp.0.clone();
-    run_blocking(state, move |w| {
-        let root = w.get_root()?;
-        let file_path = w.get_entry_path(&relative_path)?;
+    let (root, file_path) = run_blocking(state, move |w| {
+        Ok((w.get_root()?, w.get_entry_path(&relative_path)?))
+    })
+    .await?;
+    tauri::async_runtime::spawn_blocking(move || {
         lsp_service
             .did_change(&root, &file_path, &content)
             .map_err(|e| error("lsp", e.to_string()))
     })
     .await
+    .map_err(|e| error("io", e.to_string()))?
 }
 
 #[tauri::command]
@@ -291,14 +322,17 @@ pub async fn lsp_hover(
     offset: u32,
 ) -> Result<Option<LspHoverResult>> {
     let lsp_service = lsp.0.clone();
-    run_blocking(state, move |w| {
-        let root = w.get_root()?;
-        let file_path = w.get_entry_path(&relative_path)?;
+    let (root, file_path) = run_blocking(state, move |w| {
+        Ok((w.get_root()?, w.get_entry_path(&relative_path)?))
+    })
+    .await?;
+    tauri::async_runtime::spawn_blocking(move || {
         lsp_service
             .get_hover(&root, &file_path, offset)
             .map_err(|e| error("lsp", e.to_string()))
     })
     .await
+    .map_err(|e| error("io", e.to_string()))?
 }
 
 #[tauri::command]
@@ -309,14 +343,17 @@ pub async fn lsp_goto_definition(
     offset: u32,
 ) -> Result<Vec<LspLocation>> {
     let lsp_service = lsp.0.clone();
-    run_blocking(state, move |w| {
-        let root = w.get_root()?;
-        let file_path = w.get_entry_path(&relative_path)?;
+    let (root, file_path) = run_blocking(state, move |w| {
+        Ok((w.get_root()?, w.get_entry_path(&relative_path)?))
+    })
+    .await?;
+    tauri::async_runtime::spawn_blocking(move || {
         lsp_service
             .get_definition(&root, &file_path, offset)
             .map_err(|e| error("lsp", e.to_string()))
     })
     .await
+    .map_err(|e| error("io", e.to_string()))?
 }
 
 #[tauri::command]
@@ -325,13 +362,14 @@ pub async fn lsp_get_state(
     lsp: State<'_, LspState>,
 ) -> Result<LspWorkspaceSnapshot> {
     let lsp_service = lsp.0.clone();
-    run_blocking(state, move |w| {
-        let root = w.get_root()?;
+    let root = run_blocking(state, move |w| w.get_root()).await?;
+    tauri::async_runtime::spawn_blocking(move || {
         lsp_service
             .get_workspace_snapshot(&root)
             .map_err(|e| error("lsp", e.to_string()))
     })
     .await
+    .map_err(|e| error("io", e.to_string()))?
 }
 
 #[tauri::command]
@@ -341,11 +379,12 @@ pub async fn lsp_get_diagnostics_buffer(
     language_id: Option<String>,
 ) -> Result<LspDiagnosticsBuffer> {
     let lsp_service = lsp.0.clone();
-    run_blocking(state, move |w| {
-        let root = w.get_root()?;
+    let root = run_blocking(state, move |w| w.get_root()).await?;
+    tauri::async_runtime::spawn_blocking(move || {
         lsp_service
             .get_diagnostics_buffer(&root, language_id.as_deref())
             .map_err(|e| error("lsp", e.to_string()))
     })
     .await
+    .map_err(|e| error("io", e.to_string()))?
 }

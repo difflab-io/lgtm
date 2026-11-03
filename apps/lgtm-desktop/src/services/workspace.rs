@@ -50,15 +50,15 @@ impl WorkspaceService {
             }
         }
         Ok(WorkspaceListing {
-            root: self.ensure_root()?.to_string_lossy().into_owned(),
+            root: self.get_root()?.to_string_lossy().into_owned(),
             entries: self.get_entries("")?,
         })
     }
 
     /// Lists visible entries inside a workspace-relative directory.
     pub fn get_entries(&self, relative: &str) -> Result<Vec<WorkspaceNode>> {
-        let directory = self.resolve(relative)?;
-        let root = self.ensure_root()?;
+        let directory = self.get_entry_path(relative)?;
+        let root = self.get_root()?;
         let mut entries = Vec::new();
         for entry in fs::read_dir(directory)? {
             let entry = entry?;
@@ -96,7 +96,7 @@ impl WorkspaceService {
         if relative.is_empty() {
             return Err(error("unsupported", "Choose a file inside the workspace."));
         }
-        let path = self.resolve(relative)?;
+        let path = self.get_entry_path(relative)?;
         if !fs::metadata(&path)?.is_file() {
             return Err(error("unsupported", "Choose a file inside the workspace."));
         }
@@ -122,12 +122,12 @@ impl WorkspaceService {
         if relative.is_empty() {
             return Err(error("unsupported", "Choose a file inside the workspace."));
         }
-        let root = self.ensure_root()?;
+        let root = self.get_root()?;
         let original = root.join(relative);
         if fs::symlink_metadata(&original)?.file_type().is_symlink() {
             return Err(error("unsupported", "Linked files cannot be modified."));
         }
-        let path = self.resolve(relative)?;
+        let path = self.get_entry_path(relative)?;
         if !fs::metadata(&path)?.is_file() {
             return Err(error("unsupported", "Choose a file inside the workspace."));
         }
@@ -158,7 +158,7 @@ impl WorkspaceService {
             .file_stem()
             .unwrap_or_default()
             .to_string_lossy();
-        let target = self.resolve(parent)?.join(&name);
+        let target = self.get_entry_path(parent)?.join(&name);
         let mut file = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -191,7 +191,7 @@ impl WorkspaceService {
     /// Creates a new directory inside a workspace-relative directory.
     pub fn create_folder(&self, name: &str, parent: &str) -> Result<WorkspaceNode> {
         let name = WorkspaceNode::validate_name(name)?;
-        fs::create_dir(self.resolve(parent)?.join(name)).map_err(|e| {
+        fs::create_dir(self.get_entry_path(parent)?.join(name)).map_err(|e| {
             if e.kind() == std::io::ErrorKind::AlreadyExists {
                 error(
                     "nameUnavailable",
@@ -215,8 +215,8 @@ impl WorkspaceService {
     /// Renames a file or folder exclusively without overwriting an existing entry.
     pub fn rename(&self, relative: &str, name: &str) -> Result<WorkspaceNode> {
         let name = WorkspaceNode::validate_name(name)?;
-        let source = self.resolve(relative)?;
-        let root = self.ensure_root()?;
+        let source = self.get_entry_path(relative)?;
+        let root = self.get_root()?;
         let original = root.join(relative);
         if fs::symlink_metadata(&original)?.file_type().is_symlink() {
             return Err(error("unsupported", "Linked entries cannot be renamed."));
@@ -296,8 +296,8 @@ impl WorkspaceService {
                 "The workspace itself cannot be deleted.",
             ));
         }
-        let path = self.resolve(relative)?;
-        if fs::symlink_metadata(self.ensure_root()?.join(relative))?
+        let path = self.get_entry_path(relative)?;
+        if fs::symlink_metadata(self.get_root()?.join(relative))?
             .file_type()
             .is_symlink()
         {
@@ -308,17 +308,6 @@ impl WorkspaceService {
 
     /// Returns the canonical root directory of the active workspace.
     pub fn get_root(&self) -> Result<PathBuf> {
-        self.ensure_root()
-    }
-
-    /// Resolves a workspace-relative path to a canonical path inside the active workspace.
-    pub fn get_entry_path(&self, relative: &str) -> Result<PathBuf> {
-        self.resolve(relative)
-    }
-
-    // Private -----------------------------------------------------------------
-
-    fn ensure_root(&self) -> Result<PathBuf> {
         if !self.custom_root {
             fs::create_dir_all(&self.workspace.root)?;
         } else if !self.workspace.root.is_dir() {
@@ -327,9 +316,10 @@ impl WorkspaceService {
         Ok(self.workspace.root.canonicalize()?)
     }
 
-    fn resolve(&self, relative: &str) -> Result<PathBuf> {
+    /// Resolves a workspace-relative path to a canonical path inside the active workspace.
+    pub fn get_entry_path(&self, relative: &str) -> Result<PathBuf> {
         let path = WorkspaceNode::validate_relative_path(relative)?;
-        let root = self.ensure_root()?;
+        let root = self.get_root()?;
         let resolved = root.join(path).canonicalize()?;
         if !resolved.starts_with(&root) {
             return Err(error(

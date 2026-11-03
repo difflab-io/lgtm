@@ -35,11 +35,11 @@ let mise_service = MiseService::new(config_service.clone());
 let config = config_service.get_config(workspace_root)?;
 
 // Synchronize <workspace>/.lgtm/mise.toml and <git-dir>/info/exclude
-let mise_path = mise_service.sync_workspace(workspace_root)?;
+let mise_path = config_service.ensure_workspace_layout(workspace_root)?;
 
 // List or execute tasks defined in the managed mise.toml
 let tasks = mise_service.get_tasks(workspace_root)?;
-let exit_code = mise_service.run_task(workspace_root, Some("check"), &[])?;
+let exit_code = mise_service.run_task(workspace_root, "check", &[])?;
 ```
 
 ### Components and Responsibilities
@@ -65,9 +65,9 @@ flowchart TB
     MISE_SVC --> MISE_BIN["mise CLI"]
 ```
 
-- `ConfigService`: Resolves global and workspace configuration paths, merges TOML overlays onto `LgtmConfig::default_presets()`, writes `<workspace>/.lgtm/mise.toml` when changed, and updates `<git-dir>/info/exclude`.
-- `MiseService`: Synchronizes the workspace `.lgtm/mise.toml`, returns structured `MiseTaskSummary` entries for `lgtm run --list`, executes tasks via `mise run`, and installs language server toolchains via `mise install` when `lsp.auto_install` is enabled.
-- `LgtmConfig` and `LanguageConfig`: Pure domain models holding `[lsp]`, `[mise]`, and `[languages.<id>]` settings, extension-to-language lookup, ancestor root-marker resolution, and workspace language scanning.
+- `ConfigService`: Resolves global and workspace configuration paths, merges TOML overlays onto `LgtmConfig::default_presets()`, discovers ancestor project roots and workspace languages, writes `<workspace>/.lgtm/mise.toml` when changed, and updates `<git-dir>/info/exclude`.
+- `MiseService`: Synchronizes the workspace `.lgtm/mise.toml` via `ConfigService`, returns structured `MiseTaskSummary` entries for `lgtm run --list`, executes tasks via `mise run`, and installs language server toolchains via `mise install` when `lsp.auto_install` is enabled.
+- `LgtmConfig` and `LanguageConfig`: Pure domain models holding `[lsp]`, `[mise]`, and `[languages.<id>]` settings and extension-to-language lookup.
 - `GeneratedMiseFile`: Pure model that combines detected language tools and default tasks (`<lang>:<task>` and `<task>`) with explicit `[mise.tools]` and `[mise.tasks]` overrides and renders `.lgtm/mise.toml`.
 
 ### Data and Control Flow
@@ -81,11 +81,11 @@ sequenceDiagram
     participant Disk as Workspace Filesystem
     participant Mise as mise CLI
 
-    Caller->>MiseSvc: run_task(workspace_root, Some("check"), args)
+    Caller->>MiseSvc: run_task(workspace_root, "check", args)
     MiseSvc->>CfgSvc: ensure_workspace_layout(workspace_root)
     CfgSvc->>Disk: ensure .git/info/exclude contains .lgtm/
     CfgSvc->>CfgSvc: get_config(workspace_root)
-    CfgSvc->>Model: detect_workspace_languages(workspace_root)
+    CfgSvc->>CfgSvc: detect_workspace_languages(workspace_root, &config)
     CfgSvc->>Model: GeneratedMiseFile::from_config(&config, &detected)
     Model-->>CfgSvc: rendered TOML
     CfgSvc->>Disk: write <workspace>/.lgtm/mise.toml (if changed)
@@ -101,11 +101,11 @@ sequenceDiagram
 | `ConfigService::with_global_config_path` | `fn with_global_config_path(path: PathBuf) -> Self` | Construct a configuration service with an explicit global config path for isolated tests. |
 | `ConfigService::get_config` | `fn get_config(&self, workspace_root: &Path) -> Result<LgtmConfig>` | Return merged defaults, global config, and `<workspace>/.lgtm/config.toml`. |
 | `ConfigService::ensure_workspace_layout` | `fn ensure_workspace_layout(&self, workspace_root: &Path) -> Result<PathBuf>` | Ensure `.lgtm/`, `<git-dir>/info/exclude`, and `<workspace>/.lgtm/mise.toml` are up to date. |
-| `MiseService::sync_workspace` | `fn sync_workspace(&self, workspace_root: &Path) -> Result<PathBuf>` | Synchronize `<workspace>/.lgtm/mise.toml` and return its path. |
+| `ConfigService::detect_project_root` | `fn detect_project_root(workspace_root: &Path, file_path: &Path, language: &LanguageConfig) -> (PathBuf, Option<String>)` | Walk ancestor directories up to `workspace_root` to find the nearest root marker. |
+| `ConfigService::detect_workspace_languages` | `fn detect_workspace_languages(config: &LgtmConfig, workspace_root: &Path) -> Vec<String>` | Scan workspace root and subdirectories for enabled language root markers and extensions. |
 | `MiseService::get_tasks` | `fn get_tasks(&self, workspace_root: &Path) -> Result<Vec<MiseTaskSummary>>` | Sync `.lgtm/mise.toml` and list all synthesized and user-defined tasks. |
-| `MiseService::run_task` | `fn run_task(&self, workspace_root: &Path, task: Option<&str>, args: &[String]) -> Result<i32>` | Sync `.lgtm/mise.toml` and execute `mise run <task> [args...]` with `MISE_CONFIG_FILE`. |
+| `MiseService::run_task` | `fn run_task(&self, workspace_root: &Path, task: &str, args: &[String]) -> Result<i32>` | Sync `.lgtm/mise.toml` and execute `mise run <task> [args...]` with `MISE_CONFIG_FILE`. |
 | `LgtmConfig::detect_file_language` | `fn detect_file_language(&self, file_path: &Path) -> Option<(String, &LanguageConfig)>` | Resolve the enabled language ID and configuration for a file extension. |
-| `LgtmConfig::detect_project_root` | `fn detect_project_root(&self, workspace_root: &Path, file_path: &Path, language: &LanguageConfig) -> (PathBuf, Option<String>)` | Walk ancestor directories up to `workspace_root` to find the nearest root marker. |
 
 ## Implementation
 

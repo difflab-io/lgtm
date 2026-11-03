@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use crate::error::{ConfigError, Result};
@@ -17,25 +17,20 @@ impl MiseService {
 
     // Public ------------------------------------------------------------------
 
-    pub fn sync_workspace(&self, workspace_root: &Path) -> Result<PathBuf> {
-        self.config_service.ensure_workspace_layout(workspace_root)
-    }
-
     pub fn get_tasks(&self, workspace_root: &Path) -> Result<Vec<MiseTaskSummary>> {
-        let _ = self.sync_workspace(workspace_root)?;
+        let _ = self
+            .config_service
+            .ensure_workspace_layout(workspace_root)?;
         let config = self.config_service.get_config(workspace_root)?;
-        let detected = config.detect_workspace_languages(workspace_root);
+        let detected = ConfigService::detect_workspace_languages(&config, workspace_root);
         let generated = GeneratedMiseFile::from_config(&config, &detected);
         Ok(generated.task_summaries())
     }
 
-    pub fn run_task(
-        &self,
-        workspace_root: &Path,
-        task: Option<&str>,
-        args: &[String],
-    ) -> Result<i32> {
-        let mise_file = self.sync_workspace(workspace_root)?;
+    pub fn run_task(&self, workspace_root: &Path, task: &str, args: &[String]) -> Result<i32> {
+        let mise_file = self
+            .config_service
+            .ensure_workspace_layout(workspace_root)?;
         let config = self.config_service.get_config(workspace_root)?;
 
         let _ = Command::new("mise")
@@ -59,17 +54,13 @@ impl MiseService {
                 .env("MISE_NOT_FOUND_AUTO_INSTALL", "false");
         }
 
-        if let Some(task_name) = task {
-            cmd.arg("run");
-            if !config.lsp.auto_install {
-                cmd.arg("--skip-tools");
-            }
-            cmd.arg(task_name);
-            if !args.is_empty() {
-                cmd.args(args);
-            }
-        } else {
-            cmd.arg("tasks").arg("ls");
+        cmd.arg("run");
+        if !config.lsp.auto_install {
+            cmd.arg("--skip-tools");
+        }
+        cmd.arg(task);
+        if !args.is_empty() {
+            cmd.args(args);
         }
 
         let status = cmd
@@ -82,7 +73,9 @@ impl MiseService {
         if tools.is_empty() {
             return Ok(());
         }
-        let mise_file = self.sync_workspace(workspace_root)?;
+        let mise_file = self
+            .config_service
+            .ensure_workspace_layout(workspace_root)?;
         let mut cmd = Command::new("mise");
         cmd.current_dir(workspace_root)
             .env("MISE_CONFIG_FILE", &mise_file)

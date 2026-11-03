@@ -100,6 +100,22 @@ pub enum LspEvent {
     Diagnostics(LspFileDiagnosticsEvent),
 }
 
+impl LspDiagnosticsBuffer {
+    pub fn render(
+        workspace_root: &Path,
+        language_filter: Option<&str>,
+        servers: &[LspServerStatusEvent],
+        diagnostics_by_path: &BTreeMap<String, (String, Vec<LspDiagnostic>)>,
+    ) -> Self {
+        render_diagnostics_buffer(
+            workspace_root,
+            language_filter,
+            servers,
+            diagnostics_by_path,
+        )
+    }
+}
+
 // Public ----------------------------------------------------------------------
 
 pub fn offset_to_position(text: &str, utf16_offset: u32) -> (u32, u32) {
@@ -153,10 +169,7 @@ pub fn position_to_offset(text: &str, target_line: u32, target_character: u32) -
 }
 
 pub fn path_to_file_uri(path: &Path) -> Option<String> {
-    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    Url::from_file_path(canonical)
-        .ok()
-        .map(|url| url.to_string())
+    Url::from_file_path(path).ok().map(|url| url.to_string())
 }
 
 pub fn file_uri_to_path(uri: &str) -> Option<PathBuf> {
@@ -164,8 +177,7 @@ pub fn file_uri_to_path(uri: &str) -> Option<PathBuf> {
     if parsed.scheme() != "file" {
         return None;
     }
-    let path = parsed.to_file_path().ok()?;
-    Some(std::fs::canonicalize(&path).unwrap_or(path))
+    parsed.to_file_path().ok()
 }
 
 pub fn render_diagnostics_buffer(
