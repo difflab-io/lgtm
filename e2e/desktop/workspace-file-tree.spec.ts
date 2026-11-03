@@ -12,44 +12,163 @@ import { readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 
 // Tests -----------------------------------------------------------------------
-test.describe('When opening an existing workspace', { tag: ['@desktop', '@file-tree'] }, () => {
-  test('should start unselected with collapsed folders and navigate entries via keyboard', async ({
-    page,
-  }) => {
-    // Arrange
-    const drafts = page.getByRole('treeitem', { name: 'Drafts', exact: true })
-    const draftsControl = drafts.getByRole('button', { name: 'Drafts', exact: true })
+test.describe('Given a new workspace', { tag: ['@desktop', '@file-tree'] }, () => {
+  test.use({ initialWorkspace: 'empty' })
 
-    // Act
-    await draftsControl.focus()
-    await page.keyboard.press('ArrowRight')
-    await expect(drafts).toHaveAttribute('aria-expanded', 'true')
-    await page.keyboard.press('ArrowRight')
-    await expect(page.locator('[role="treeitem"][data-value$="one.md"]')).toBeFocused()
-    await page.keyboard.press('Enter')
+  test(
+    'should create the workspace on disk, remember opened workspaces, and reopen them',
+    { tag: '@smoke' },
+    async ({ page, workspace }) => {
+      // Arrange
+      const defaultRoot = workspace.root
+      const externalDir = await workspace.createExternalDir()
+      await writeFile(join(externalDir, 'Cargo.toml'), '[package]\nname = "demo"\n')
+      workspace.pickedFolder = externalDir
+      const chooser = page
+        .locator('.titlebar')
+        .getByRole('combobox', { name: 'Workspace selector', exact: true })
 
-    // Assert
-    await expect(page.locator('.cm-content')).toContainText('# One')
-    await expect(page.locator('.cm-content .cm-line span[class]').first()).toBeVisible()
-    await page.locator('[role="treeitem"][data-value$="same.md"]').click()
-    await expect(page.locator('.cm-content')).toContainText('# Markdown')
-    await page.locator('[role="treeitem"][data-value$="notes.txt"]').click()
-    await expect(page.locator('.cm-content')).toContainText('Plain text note.')
-    expect(await draftsControl.evaluate((el) => el.getBoundingClientRect().height)).toBe(24)
-  })
+      // Assert
+      expect((await stat(defaultRoot)).isDirectory()).toBe(true)
+      expect(await readdir(defaultRoot)).toEqual([])
+      await expect(page.getByText('Your workspace is empty.', { exact: false })).toBeVisible()
+      await expect(page.getByText('No file selected')).toBeVisible()
+      await expect(page.locator('.cm-editor')).toHaveCount(0)
 
-  test('should create and rename folders inline, cancel new items, and retain input after errors', async ({
+      // Act
+      await createFile(page)
+
+      // Assert
+      await expect(entry(page, 'Untitled.md')).toBeVisible()
+      expect(await readFile(join(defaultRoot, 'Untitled.md'), 'utf8')).toBe('# Untitled\n\n')
+
+      // Act
+      await chooser.click()
+      await page.getByRole('option', { name: 'Open folder…', exact: true }).click()
+
+      // Assert
+      await expect(entry(page, 'Cargo.toml')).toBeVisible()
+      await expect(chooser).toContainText(basename(externalDir))
+
+      // Act
+      await chooser.click()
+      await page.getByRole('option', { name: 'Local workspace', exact: true }).click()
+
+      // Assert
+      await expect(entry(page, 'Untitled.md')).toBeVisible()
+
+      // Act
+      await chooser.click()
+      await page.getByRole('option', { name: basename(externalDir), exact: true }).click()
+
+      // Assert
+      await expect(entry(page, 'Cargo.toml')).toBeVisible()
+      await entry(page, 'Cargo.toml').click()
+      await expect(page.locator('.cm-content')).toContainText('name = "demo"')
+    },
+  )
+})
+
+test.describe('Given an existing workspace', { tag: ['@desktop', '@file-tree'] }, () => {
+  test.use({ initialWorkspace: 'existing' })
+
+  test(
+    'should start unselected with collapsed folders, navigate entries via keyboard, and view and edit files',
+    { tag: '@smoke' },
+    async ({ page, workspace }) => {
+      // Arrange
+      const drafts = page.getByRole('treeitem', { name: 'Drafts', exact: true })
+      const draftsControl = drafts.getByRole('button', { name: 'Drafts', exact: true })
+
+      // Assert
+      await expect(page.getByText('No file selected')).toBeVisible()
+      await expect(page.locator('.cm-editor')).toHaveCount(0)
+      await expect(drafts).toHaveAttribute('aria-expanded', 'false')
+      await expect(entry(page, 'Drafts/one.md')).toHaveCount(0)
+
+      // Act
+      await draftsControl.focus()
+      await page.keyboard.press('ArrowRight')
+      await expect(drafts).toHaveAttribute('aria-expanded', 'true')
+      await page.keyboard.press('ArrowRight')
+      await expect(page.locator('[role="treeitem"][data-value$="one.md"]')).toBeFocused()
+      await page.keyboard.press('Enter')
+
+      // Assert
+      await expect(page.locator('.cm-content')).toContainText('# One')
+      await expect(page.locator('.cm-content .cm-line span[class]').first()).toBeVisible()
+      await expect(page.locator('.document-heading .format-label')).toHaveCount(0)
+      expect(await draftsControl.evaluate((el) => el.getBoundingClientRect().height)).toBe(24)
+
+      // Act
+      await page.locator('[role="treeitem"][data-value$="same.md"]').click()
+      await expect(page.locator('.cm-content')).toContainText('# Markdown')
+      await page.locator('.cm-content').click()
+      await page.keyboard.type('Persisted across file switch.')
+      await page.locator('[role="treeitem"][data-value$="notes.txt"]').click()
+      await expect(page.locator('.cm-content')).toContainText('Plain text note.')
+      await page.locator('[role="treeitem"][data-value$="same.md"]').click()
+
+      // Assert
+      await expect(page.locator('.cm-content')).toContainText('Persisted across file switch.')
+      expect(await readFile(join(workspace.root, 'same.md'), 'utf8')).toContain(
+        'Persisted across file switch.',
+      )
+    },
+  )
+
+  test(
+    'should create, rename, reopen, and delete a file on disk',
+    { tag: '@smoke' },
+    async ({ page, workspace }) => {
+      // Arrange
+      const original = join(workspace.root, 'Untitled.md')
+      const renamed = join(workspace.root, 'Renamed.md')
+
+      // Act
+      await createFile(page)
+
+      // Assert
+      await expect(page.locator('.cm-content')).toContainText('# Untitled')
+      expect(await readFile(original, 'utf8')).toBe('# Untitled\n\n')
+      await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toHaveCount(0)
+
+      // Act
+      await page.locator('.cm-content').click()
+      await page.keyboard.type('Saved note line.')
+      await renameEntry(page, 'Untitled.md', 'Renamed.md')
+
+      // Assert
+      await expect(page.locator('.document-path')).toHaveAttribute('title', 'Renamed.md')
+      await expect(page.locator('.cm-content')).toContainText('Saved note line.')
+      expect(await exists(original)).toBe(false)
+      expect(await readFile(renamed, 'utf8')).toContain('Saved note line.')
+
+      // Act
+      await deleteEntry(page, 'Renamed.md')
+
+      // Assert
+      await expect(entry(page, 'Renamed.md')).toHaveCount(0)
+      expect(await exists(renamed)).toBe(false)
+      await expect(page.getByText('No file selected')).toBeVisible()
+    },
+  )
+
+  test('should create, rename, and delete folders inline, cancel new items, and retain input after errors', async ({
     page,
     workspace,
   }) => {
     // Arrange
     const name = page.getByRole('textbox', { name: 'Name', exact: true })
+    const original = join(workspace.root, 'Research')
+    const renamed = join(workspace.root, 'Renamed research')
 
     // Act
     await createFolder(page, 'Research')
     const research = page.getByRole('treeitem', { name: 'Research', exact: true })
 
     // Assert
+    expect((await stat(original)).isDirectory()).toBe(true)
     await expect(research).toHaveAttribute('aria-expanded', 'false')
 
     // Act
@@ -91,6 +210,15 @@ test.describe('When opening an existing workspace', { tag: ['@desktop', '@file-t
     await expect(
       page.getByRole('treeitem', { name: 'Renamed research', exact: true }),
     ).toBeVisible()
+    await expect.poll(() => exists(original)).toBe(false)
+    expect((await stat(renamed)).isDirectory()).toBe(true)
+
+    // Act
+    await deleteEntry(page, 'Renamed research')
+
+    // Assert
+    await expect(entry(page, 'Renamed research')).toHaveCount(0)
+    expect(await exists(renamed)).toBe(false)
   })
 
   test('should create, rename, and delete nested entries through context menus', async ({
@@ -153,138 +281,4 @@ test.describe('When opening an existing workspace', { tag: ['@desktop', '@file-t
       .toBe(before!.x)
     await expect(page.locator('.cm-content')).toContainText('# Markdown')
   })
-
-  test(
-    'should open an external directory and switch between workspaces via the titlebar chooser',
-    { tag: '@smoke' },
-    async ({ page, workspace }) => {
-      // Arrange
-      const externalDir = await workspace.createExternalDir()
-      await writeFile(join(externalDir, 'Cargo.toml'), '[package]\nname = "demo"\n')
-      workspace.pickedFolder = externalDir
-      const chooser = page
-        .locator('.titlebar')
-        .getByRole('combobox', { name: 'Workspace selector', exact: true })
-
-      // Act
-      await chooser.click()
-      await page.getByRole('option', { name: 'Open folder…', exact: true }).click()
-
-      // Assert
-      await expect(entry(page, 'Cargo.toml')).toBeVisible()
-      await expect(chooser).toContainText(basename(externalDir))
-      await entry(page, 'Cargo.toml').click()
-      await expect(page.locator('.cm-content')).toContainText('name = "demo"')
-
-      // Act
-      await chooser.click()
-      await page.getByRole('option', { name: 'Local workspace', exact: true }).click()
-
-      // Assert
-      await expect(entry(page, 'same.md')).toBeVisible()
-      await expect(page.getByText('No file selected')).toBeVisible()
-    },
-  )
 })
-
-for (const initialWorkspace of ['empty', 'existing'] as const) {
-  const context =
-    initialWorkspace === 'empty'
-      ? 'When using the app for the first time with an empty workspace'
-      : 'When working in an existing local workspace'
-
-  test.describe(context, { tag: ['@desktop', '@file-tree'] }, () => {
-    test.use({ initialWorkspace })
-
-    test(
-      'should render the local tree and unselected file placeholder',
-      { tag: '@smoke' },
-      async ({ page, workspace }) => {
-        // Arrange
-        const tree = page.getByRole('tree')
-
-        // Assert
-        await expect(page.getByText('No file selected')).toBeVisible()
-        await expect(page.locator('.cm-editor')).toHaveCount(0)
-        if (initialWorkspace === 'empty') {
-          await expect(tree.getByRole('treeitem')).toHaveCount(0)
-          await expect(page.getByText('Your workspace is empty.', { exact: false })).toBeVisible()
-          expect(await readdir(workspace.root)).toEqual([])
-        } else {
-          await expect(entry(page, 'Drafts')).toHaveAttribute('aria-expanded', 'false')
-          await expect(entry(page, 'same.md')).toBeVisible()
-          await expect(entry(page, 'Drafts/one.md')).toHaveCount(0)
-
-          // Act
-          await entry(page, 'Drafts').getByRole('button', { name: 'Drafts', exact: true }).click()
-
-          // Assert
-          await expect(entry(page, 'Drafts/one.md')).toBeVisible()
-          await expect(entry(page, 'Drafts/two.md')).toBeVisible()
-          expect(await readFile(join(workspace.root, 'Drafts/one.md'), 'utf8')).toContain('# One')
-        }
-      },
-    )
-
-    test(
-      'should create, rename, reopen, and delete a file on disk',
-      { tag: '@smoke' },
-      async ({ page, workspace }) => {
-        // Arrange
-        const original = join(workspace.root, 'Untitled.md')
-        const renamed = join(workspace.root, 'Renamed.md')
-
-        // Act
-        await createFile(page)
-
-        // Assert
-        await expect(page.locator('.cm-content')).toContainText('# Untitled')
-        expect(await readFile(original, 'utf8')).toBe('# Untitled\n\n')
-        await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toHaveCount(0)
-
-        // Act
-        await renameEntry(page, 'Untitled.md', 'Renamed.md')
-
-        // Assert
-        await expect(page.locator('.document-path')).toHaveAttribute('title', 'Renamed.md')
-        expect(await exists(original)).toBe(false)
-        expect(await readFile(renamed, 'utf8')).toContain('# Untitled')
-
-        // Act
-        await deleteEntry(page, 'Renamed.md')
-
-        // Assert
-        await expect(entry(page, 'Renamed.md')).toHaveCount(0)
-        expect(await exists(renamed)).toBe(false)
-        await expect(page.getByText('No file selected')).toBeVisible()
-      },
-    )
-
-    test('should create, rename, and delete folders on disk', async ({ page, workspace }) => {
-      // Arrange
-      const original = join(workspace.root, 'Research')
-      const renamed = join(workspace.root, 'Reference')
-
-      // Act
-      await createFolder(page, 'Research')
-
-      // Assert
-      expect((await stat(original)).isDirectory()).toBe(true)
-      await expect(entry(page, 'Research')).toHaveAttribute('aria-expanded', 'false')
-
-      // Act
-      await renameEntry(page, 'Research', 'Reference')
-
-      // Assert
-      await expect.poll(() => exists(original)).toBe(false)
-      expect((await stat(renamed)).isDirectory()).toBe(true)
-
-      // Act
-      await deleteEntry(page, 'Reference')
-
-      // Assert
-      await expect(entry(page, 'Reference')).toHaveCount(0)
-      expect(await exists(renamed)).toBe(false)
-    })
-  })
-}

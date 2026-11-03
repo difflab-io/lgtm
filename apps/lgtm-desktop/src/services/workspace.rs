@@ -117,6 +117,35 @@ impl WorkspaceService {
         FileContent::from_bytes(bytes)
     }
 
+    /// Writes UTF-8 text to an existing workspace-relative file and returns its new revision.
+    pub fn write_file(&self, relative: &str, content: &str) -> Result<FileContent> {
+        if relative.is_empty() {
+            return Err(error("unsupported", "Choose a file inside the workspace."));
+        }
+        let root = self.ensure_root()?;
+        let original = root.join(relative);
+        if fs::symlink_metadata(&original)?.file_type().is_symlink() {
+            return Err(error("unsupported", "Linked files cannot be modified."));
+        }
+        let path = self.resolve(relative)?;
+        if !fs::metadata(&path)?.is_file() {
+            return Err(error("unsupported", "Choose a file inside the workspace."));
+        }
+        if content.len() as u64 > MAX_BYTES {
+            return Err(error(
+                "tooLarge",
+                "This file is larger than the 16 MB viewing limit.",
+            ));
+        }
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&path)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()?;
+        FileContent::from_bytes(content.as_bytes().to_vec())
+    }
+
     /// Creates a new file inside a workspace-relative directory without overwriting existing files.
     pub fn create_file(&self, name: &str, parent: &str) -> Result<WorkspaceNode> {
         let name = WorkspaceNode::validate_name(name)?;
@@ -518,6 +547,25 @@ mod tests {
                 assert_eq!(read.revision.len(), 64);
                 assert_eq!(delete_root.unwrap_err().code, "outsideWorkspace");
                 assert_eq!(delete_outside.unwrap_err().code, "outsideWorkspace");
+            }
+
+            #[test]
+            fn should_write_and_read_updated_utf8_content() {
+                // Arrange
+                let mut fixture = WorkspaceFixture::new();
+                fixture.service.open(None).unwrap();
+                fixture.service.create_file("Notes.md", "").unwrap();
+
+                // Act
+                let written = fixture
+                    .service
+                    .write_file("Notes.md", "# Notes\n\nUpdated body.\n")
+                    .unwrap();
+                let reread = fixture.service.get_file_content("Notes.md").unwrap();
+
+                // Assert
+                assert_eq!(written.content, "# Notes\n\nUpdated body.\n");
+                assert_eq!(reread, written);
             }
         }
     }

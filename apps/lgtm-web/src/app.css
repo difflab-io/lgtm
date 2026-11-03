@@ -156,10 +156,6 @@ button:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.format-label {
-  margin-left: auto;
-  font-size: 9px;
-}
 .editor-scroll {
   display: flex;
   flex-direction: column;

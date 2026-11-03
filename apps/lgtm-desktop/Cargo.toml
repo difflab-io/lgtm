@@ -7,10 +7,6 @@ description = "LGTM desktop application shell and local workspace service."
 license = "MIT"
 publish = false
 
-[lib]
-name = "premise_tauri_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
-
 [build-dependencies]
 tauri-build = { version = "=2.6.3", features = [] }
 

@@ -25,9 +25,6 @@
   {#if workspace.selected}
     <div class="document-heading">
       <span class="document-path" title={workspace.selected.path}>{workspace.selectedTitle}</span>
-      {#if workspace.selected.name.includes('.')}
-        <span class="format-label">{workspace.selected.name.split('.').at(-1)?.toUpperCase()}</span>
-      {/if}
     </div>
   {/if}
   {#if workspace.fileLoading}
@@ -50,6 +47,7 @@
           value={workspace.fileContent.content}
           filename={workspace.selected.name}
           label={workspace.selected.name}
+          onchange={(content) => workspace.updateContent(content)}
         />
       {/key}
     </div>

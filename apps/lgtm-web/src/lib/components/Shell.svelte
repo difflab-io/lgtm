@@ -38,7 +38,7 @@
     void workspace.open()
     if (client.isDesktop()) {
       void client
-        .registerQuitHandlers()
+        .registerQuitHandlers(() => workspace.flushSave())
         .then(async (stops) => {
           for (const stop of stops) {
             if (active) unlisteners.push(stop)

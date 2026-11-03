@@ -1,5 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod app;
+pub mod error;
+pub mod models;
+pub mod services;
+
 fn main() {
-    premise_tauri_lib::run();
+    app::run();
 }

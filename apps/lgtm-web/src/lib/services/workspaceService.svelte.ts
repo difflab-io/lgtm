@@ -29,11 +29,16 @@ export class WorkspaceService {
   selected = $state<WorkspaceNode | null>(null)
   fileContent = $state<FileContent | null>(null)
   fileLoading = $state(false)
+  saving = $state(false)
   openingError = $state<string | null>(null)
   fileVersion = $state(0)
   focusRequest = $state(0)
   private listed = $state<Record<string, WorkspaceNode>>({})
   private active = true
+  private dirtyPath: string | null = null
+  private dirtyContent: string | null = null
+  private saveTimer: ReturnType<typeof setTimeout> | null = null
+  private inFlightSave: Promise<void> | null = null
 
   constructor(private client: WorkspaceClient) {}
 
@@ -52,6 +57,7 @@ export class WorkspaceService {
   get status() {
     if (this.openingError) return this.openingError
     if (this.fileLoading) return 'Opening file…'
+    if (this.saving) return 'Saving…'
     if (this.selected) return 'Ready'
     return 'Idle'
   }
@@ -86,6 +92,7 @@ export class WorkspaceService {
   }
 
   async open(path?: string) {
+    await this.flushSave()
     this.loading = true
     this.error = null
     this.creationError = null
@@ -145,6 +152,7 @@ export class WorkspaceService {
   }
 
   async openFile(entry: WorkspaceNode) {
+    await this.flushSave()
     this.selected = entry
     this.fileLoading = true
     this.openingError = null
@@ -163,7 +171,62 @@ export class WorkspaceService {
     }
   }
 
+  updateContent(content: string) {
+    if (!this.selected || !this.fileContent || this.fileContent.content === content) return
+    this.fileContent = { ...this.fileContent, content }
+    this.dirtyPath = this.selected.path
+    this.dirtyContent = content
+    if (this.saveTimer) clearTimeout(this.saveTimer)
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null
+      void this.flushSave()
+    }, 150)
+  }
+
+  async flushSave() {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer)
+      this.saveTimer = null
+    }
+    if (this.inFlightSave) {
+      await this.inFlightSave
+    }
+    while (this.dirtyPath && this.dirtyContent !== null) {
+      const path = this.dirtyPath
+      const content = this.dirtyContent
+      this.dirtyPath = null
+      this.dirtyContent = null
+      this.saving = true
+      const task = this.client
+        .write(path, content)
+        .then((saved) => {
+          if (
+            this.active &&
+            this.selected?.path === path &&
+            this.fileContent?.content === content
+          ) {
+            this.fileContent = saved
+          }
+        })
+        .catch((error) => {
+          if (this.active) this.openingError = errorMessage(error)
+        })
+        .finally(() => {
+          if (this.active) this.saving = false
+          this.inFlightSave = null
+        })
+      this.inFlightSave = task
+      await task
+    }
+  }
+
   clearSelected() {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer)
+      this.saveTimer = null
+    }
+    this.dirtyPath = null
+    this.dirtyContent = null
     this.selected = null
     this.fileContent = null
     this.openingError = null
@@ -171,6 +234,7 @@ export class WorkspaceService {
 
   async newFile(parent = '') {
     if (this.cannotCreate) return
+    await this.flushSave()
     this.busy = true
     this.creationError = null
     let created: WorkspaceNode | undefined
@@ -209,6 +273,7 @@ export class WorkspaceService {
 
   async commitEntry(path: string, name: string) {
     if (this.blocked) throw new Error('Wait for the current operation to finish.')
+    await this.flushSave()
     this.busy = true
     let openNext: WorkspaceNode | undefined
     try {
@@ -249,6 +314,16 @@ export class WorkspaceService {
       return
     }
     if (action !== 'delete' || this.blocked) return
+    if (this.dirtyPath && (this.dirtyPath === path || this.dirtyPath.startsWith(`${path}/`))) {
+      if (this.saveTimer) {
+        clearTimeout(this.saveTimer)
+        this.saveTimer = null
+      }
+      this.dirtyPath = null
+      this.dirtyContent = null
+    } else {
+      await this.flushSave()
+    }
     this.busy = true
     this.creationError = null
     try {
@@ -284,6 +359,15 @@ export class WorkspaceService {
   }
 
   dispose() {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer)
+      this.saveTimer = null
+    }
+    if (this.dirtyPath && this.dirtyContent !== null) {
+      void this.client.write(this.dirtyPath, this.dirtyContent)
+      this.dirtyPath = null
+      this.dirtyContent = null
+    }
     this.active = false
   }
 

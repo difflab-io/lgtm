@@ -21,6 +21,7 @@ interface CommandArgs {
   name?: string
   parentPath?: string
   relativePath?: string
+  content?: string
 }
 
 const revision = (content: string) => createHash('sha256').update(content).digest('hex')
@@ -40,7 +41,9 @@ export const test = base.extend<{ workspace: Workspace; initialWorkspace: 'empty
   initialWorkspace: ['existing', { option: true }],
   workspace: [
     async ({ page, initialWorkspace }, use, testInfo) => {
-      const initialRoot = await mkdtemp(join(tmpdir(), 'lgtm-ui-'))
+      const homeRoot = await mkdtemp(join(tmpdir(), 'lgtm-ui-'))
+      const initialRoot =
+        initialWorkspace === 'empty' ? join(homeRoot, '.lgtm', 'workspace') : homeRoot
       const extraDirs: string[] = []
       const workspace: Workspace = {
         root: initialRoot,
@@ -96,6 +99,8 @@ export const test = base.extend<{ workspace: Workspace; initialWorkspace: 'empty
                 const info = await stat(candidate).catch(() => null)
                 if (!info?.isDirectory()) throw new Error('Choose an existing folder.')
                 workspace.root = candidate
+              } else {
+                await mkdir(workspace.root, { recursive: true })
               }
               return { root: workspace.root, entries: await list('') }
             }
@@ -159,6 +164,12 @@ export const test = base.extend<{ workspace: Workspace; initialWorkspace: 'empty
               const content = await readFile(location(args.relativePath!), 'utf8')
               return { content, revision: revision(content) }
             }
+            if (command === 'workspace_write') {
+              if (workspace.failWrites) throw new Error('Disk unavailable')
+              const content = args.content ?? ''
+              await writeFile(location(args.relativePath!), content, 'utf8')
+              return { content, revision: revision(content) }
+            }
             if (command === 'workspace_frontend_ready') return null
             if (command === 'plugin:window|destroy') {
               workspace.destroyed = true
@@ -187,7 +198,7 @@ export const test = base.extend<{ workspace: Workspace; initialWorkspace: 'empty
           try {
             await page.close()
           } finally {
-            await rm(initialRoot, { recursive: true, force: true })
+            await rm(homeRoot, { recursive: true, force: true })
             for (const dir of extraDirs) {
               await rm(dir, { recursive: true, force: true })
             }

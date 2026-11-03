@@ -1,9 +1,9 @@
-//! Tauri commands serialize filesystem operations across native services.
+//! Tauri application state, lifecycle, and IPC command handlers.
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
-use tauri::State;
+use tauri::{Emitter, Manager, State};
 
 use crate::{
     error::{Result, error},
@@ -24,7 +24,63 @@ pub struct FrontendReady(
     pub AtomicBool,
 );
 
-async fn run<T: Send + 'static>(
+/// Construct the app; an explicit home is used by the isolated desktop smoke harness.
+pub fn builder(workspace_home: Option<std::path::PathBuf>) -> tauri::Builder<tauri::Wry> {
+    tauri::Builder::default()
+        .manage(FrontendReady::default())
+        .setup(move |app| {
+            let home = match workspace_home {
+                Some(home) => home,
+                None => app.path().home_dir()?,
+            };
+            app.manage(WorkspaceState(Arc::new(Mutex::new(
+                WorkspaceService::from_home(home),
+            ))));
+            Ok(())
+        })
+        .invoke_handler(commands)
+}
+
+/// Shared command dispatch for the app and the native integration harness.
+pub fn commands(invoke: tauri::ipc::Invoke) -> bool {
+    let handler: fn(tauri::ipc::Invoke) -> bool = tauri::generate_handler![
+        workspace_open,
+        workspace_pick_folder,
+        workspace_list,
+        workspace_read,
+        workspace_write,
+        workspace_create_file,
+        workspace_create_folder,
+        workspace_rename,
+        workspace_delete,
+        workspace_frontend_ready,
+        workspace_finish_quit,
+    ];
+    handler(invoke)
+}
+
+/// User-requested quit coordinates with the frontend before exiting.
+pub fn handle_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
+    if let tauri::RunEvent::ExitRequested {
+        code: None, api, ..
+    } = event
+        && app.state::<FrontendReady>().0.load(Ordering::Relaxed)
+        && !app.webview_windows().is_empty()
+    {
+        api.prevent_exit();
+        let _ = app.emit("workspace-quit-requested", ());
+    }
+}
+
+/// Builds and runs the Tauri desktop application.
+pub fn run() {
+    builder(None)
+        .build(tauri::generate_context!())
+        .expect("error while building Tauri application")
+        .run(handle_event);
+}
+
+async fn run_blocking<T: Send + 'static>(
     state: State<'_, WorkspaceState>,
     operation: impl FnOnce(&mut WorkspaceService) -> Result<T> + Send + 'static,
 ) -> Result<T> {
@@ -44,7 +100,7 @@ pub async fn workspace_open(
     state: State<'_, WorkspaceState>,
     path: Option<String>,
 ) -> Result<WorkspaceListing> {
-    run(state, move |w| w.open(path.as_deref())).await
+    run_blocking(state, move |w| w.open(path.as_deref())).await
 }
 
 #[tauri::command]
@@ -60,7 +116,7 @@ pub async fn workspace_list(
     state: State<'_, WorkspaceState>,
     relative_path: String,
 ) -> Result<Vec<WorkspaceNode>> {
-    run(state, move |w| w.get_entries(&relative_path)).await
+    run_blocking(state, move |w| w.get_entries(&relative_path)).await
 }
 
 #[tauri::command]
@@ -68,7 +124,16 @@ pub async fn workspace_read(
     state: State<'_, WorkspaceState>,
     relative_path: String,
 ) -> Result<FileContent> {
-    run(state, move |w| w.get_file_content(&relative_path)).await
+    run_blocking(state, move |w| w.get_file_content(&relative_path)).await
+}
+
+#[tauri::command]
+pub async fn workspace_write(
+    state: State<'_, WorkspaceState>,
+    relative_path: String,
+    content: String,
+) -> Result<FileContent> {
+    run_blocking(state, move |w| w.write_file(&relative_path, &content)).await
 }
 
 #[tauri::command]
@@ -77,7 +142,7 @@ pub async fn workspace_create_file(
     name: String,
     parent_path: Option<String>,
 ) -> Result<WorkspaceNode> {
-    run(state, move |w| {
+    run_blocking(state, move |w| {
         w.create_file(&name, parent_path.as_deref().unwrap_or(""))
     })
     .await
@@ -89,7 +154,7 @@ pub async fn workspace_create_folder(
     name: String,
     parent_path: Option<String>,
 ) -> Result<WorkspaceNode> {
-    run(state, move |w| {
+    run_blocking(state, move |w| {
         w.create_folder(&name, parent_path.as_deref().unwrap_or(""))
     })
     .await
@@ -101,7 +166,7 @@ pub async fn workspace_rename(
     relative_path: String,
     name: String,
 ) -> Result<WorkspaceNode> {
-    run(state, move |w| w.rename(&relative_path, &name)).await
+    run_blocking(state, move |w| w.rename(&relative_path, &name)).await
 }
 
 #[tauri::command]
@@ -109,7 +174,7 @@ pub async fn workspace_delete(
     state: State<'_, WorkspaceState>,
     relative_path: String,
 ) -> Result<()> {
-    run(state, move |w| w.delete(&relative_path)).await
+    run_blocking(state, move |w| w.delete(&relative_path)).await
 }
 
 #[tauri::command]
