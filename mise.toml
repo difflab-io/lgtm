@@ -52,7 +52,7 @@ run = [
 depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:format", "e2e:format", "//e2e/desktop:format"]
 run = [
   "cargo fmt --all",
-  "cargo fmt --manifest-path apps/lgtm-desktop/Cargo.toml --all",
+  "cargo fmt --manifest-path apps/lgtm-desktop/Cargo.toml -p lgtm-desktop",
   "mise run //libs/lgtm-ui:format",
   "mise run //apps/lgtm-web:format",
 ]
@@ -61,7 +61,7 @@ run = [
 depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:format:check", "e2e:format:check", "//e2e/desktop:format:check"]
 run = [
   "cargo fmt --all --check",
-  "cargo fmt --manifest-path apps/lgtm-desktop/Cargo.toml --all --check",
+  "cargo fmt --manifest-path apps/lgtm-desktop/Cargo.toml -p lgtm-desktop --check",
   "mise run //libs/lgtm-ui:format:check",
   "mise run //apps/lgtm-web:format:check",
 ]

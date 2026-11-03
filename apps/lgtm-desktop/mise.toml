@@ -59,11 +59,11 @@ run = "cargo clippy --manifest-path Cargo.toml --fix --allow-dirty --allow-stage
 
 [tasks.format]
 description = "Format Rust sources"
-run = "cargo fmt --manifest-path Cargo.toml --all"
+run = "cargo fmt --manifest-path Cargo.toml -p lgtm-desktop"
 
 [tasks."format:check"]
 description = "Check formatting without modifying files"
-run = "cargo fmt --manifest-path Cargo.toml --all --check"
+run = "cargo fmt --manifest-path Cargo.toml -p lgtm-desktop --check"
 
 [tasks.env-pull]
 description = "Pull external environment configuration"
