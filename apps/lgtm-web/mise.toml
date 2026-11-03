@@ -8,7 +8,7 @@ run = "bun install"
 
 [tasks.build]
 description = "Build the static web application"
-depends = ["generate"]
+depends = ["generate", "//libs/lgtm-ui:build"]
 run = "bun run build"
 
 [tasks.clean]
@@ -22,7 +22,7 @@ run = "bun run test"
 
 [tasks.lint]
 description = "Type-check the application"
-depends = ["install"]
+depends = ["install", "//libs/lgtm-ui:build"]
 dir = "{{ config_root }}/.."
 run = [
   "bunx --no-install eslint --config ../eslint.config.js \"$MISE_PROJECT_ROOT\" --no-warn-ignored",
@@ -76,7 +76,7 @@ fi
 
 [tasks.dev]
 description = "Run the application in development mode"
-depends = ["generate"]
+depends = ["generate", "//libs/lgtm-ui:build"]
 run = '''
 set -eu
 if [ "${PREMISE_TEMPLATE_TEST:-}" = "1" ]; then

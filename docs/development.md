@@ -51,9 +51,10 @@ Individual development tasks are available:
 ```sh
 premise run //apps/lgtm-forge:dev
 premise run //apps/lgtm-web:dev
+premise run //apps/lgtm-desktop:dev
 ```
 
-The web task needs a running backend for RPC calls. The combined task starts both components.
+The web task needs a running backend for RPC calls. The combined task starts both components. `//apps/lgtm-desktop:dev` launches the native Tauri desktop shell against `//apps/lgtm-web:dev`, opening `~/.lgtm/workspace` by default and allowing any folder on disk to be opened via the titlebar workspace selector.
 
 ## 3. CLI and libraries
 
@@ -109,6 +110,8 @@ premise run lint
 premise run format:check
 premise run e2e:fixtures:test
 premise run e2e:smoke
+premise run //e2e/desktop:smoke
+premise run //e2e/desktop:test
 ```
 
 Use project task addresses such as `premise run //apps/lgtm-forge:test` for focused checks. Run full E2E only for final validation or shared-fixture changes. The reduced suites cover hello-review, CLI safety, daemon/UI and Neovim loading; offline cassette tests preserve recorder/replay behavior. See [E2E](../e2e/README.md) for recording limits and commands.

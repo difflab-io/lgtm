@@ -1,3 +1,4 @@
 [workspace]
 members = ["apps/lgtm-cli", "apps/lgtm-forge", "libs/lgtm-db"]
+exclude = ["apps/lgtm-desktop"]
 resolver = "3"

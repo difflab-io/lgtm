@@ -1,0 +1,69 @@
+[tools]
+bun = "1.4.2"
+
+[tasks.install]
+description = "Install Bun dependencies"
+depends = ["//:install"]
+run = 'echo "Workspace dependencies installed"'
+
+[tasks.build]
+description = "Check the private Svelte UI library"
+depends = ["install"]
+run = "bun run build"
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = "bun run clean"
+
+[tasks.test]
+description = "Run the Bun test suite"
+depends = ["install"]
+run = "bun run test"
+
+[tasks.lint]
+description = "Check UI types and component diagnostics"
+depends = ["install"]
+dir = "{{ config_root }}/.."
+run = [
+  "bunx --no-install eslint --config ../eslint.config.js \"$MISE_PROJECT_ROOT\" --no-warn-ignored",
+  "mise run -C \"$MISE_PROJECT_ROOT\" typecheck",
+]
+
+[tasks."lint:fix"]
+description = "Format and type-check the library"
+depends = ["install", "format"]
+dir = "{{ config_root }}/.."
+run = [
+  "bunx --no-install eslint --config ../eslint.config.js \"$MISE_PROJECT_ROOT\" --fix --no-warn-ignored",
+  "mise run -C \"$MISE_PROJECT_ROOT\" lint",
+]
+
+[tasks.format]
+description = "Format project files"
+depends = ["install"]
+dir = "{{ config_root }}/.."
+run = "bunx --no-install prettier --ignore-path ../.prettierignore --plugin=prettier-plugin-svelte --write \"$MISE_PROJECT_ROOT\""
+
+[tasks."format:check"]
+description = "Check project formatting"
+depends = ["install"]
+dir = "{{ config_root }}/.."
+run = "bunx --no-install prettier --ignore-path ../.prettierignore --plugin=prettier-plugin-svelte --check \"$MISE_PROJECT_ROOT\""
+
+[tasks.env-pull]
+description = "Pull external environment configuration"
+run = 'echo "env-pull: nothing to pull"'
+
+[tasks."publish:rc"]
+description = "Skip internal release candidate publication"
+run = 'echo "publish:rc: package is internal; nothing to publish"'
+
+[tasks.publish]
+description = "Skip internal stable publication"
+run = 'echo "publish: package is internal; nothing to publish"'
+
+[tasks.typecheck]
+description = "Run project-specific type checks"
+hide = true
+dir = "{{ config_root }}"
+run = 'bunx --no-install svelte-check --tsconfig ./tsconfig.json'

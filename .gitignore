@@ -1,7 +1,11 @@
 # Bun dependencies and generated output
 node_modules/
 **/node_modules/
+bun.lock
+**/bun.lock
+dist/
 **/dist/
+**/dist-e2e/
 .output/
 **/.output/
 .svelte-kit/
@@ -10,6 +14,13 @@ build/
 **/build/
 coverage/
 **/coverage/
+
+# Browser test artifacts
+**/test-results/
+**/playwright-report/
+
+# Keep the root dependency graph reproducible
+!/bun.lock
 
 # Mise local state
 .mise/
@@ -31,20 +42,10 @@ coverage/
 
 # Operating system files
 .DS_Store
+
 # Rust build artifacts
 target/
 **/target/
-
-# GoReleaser artifacts
-dist/
-
-# mise local state
-
-# Premise agent harness
-
-# macOS
-
-# Editors
 
 # Generated CLI package contents (included explicitly by Cargo)
 /apps/lgtm-cli/bundle/

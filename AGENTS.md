@@ -25,22 +25,37 @@
 │   │   ├── snapshots.rs     # LGTM-managed local Git snapshot store
 │   │   ├── error.rs         # Application error enum
 │   │   └── utils.rs         # Cross-cutting non-SDK helpers (LGTM_HOME, URLs, agent descriptors)
-│   └── lgtm-cli/src/
-│       ├── commands/        # One file per command group (local types, Args, run callback, helpers)
-│       ├── models/          # CLI view models (From<Proto> + print) and shared args (common.rs)
-│       ├── rpc_client.rs    # Connect RPC client factory over generated ReviewServiceClient
-│       ├── daemon.rs        # Background daemon lifecycle
-│       └── store.rs         # Local runtime state store
+│   ├── lgtm-cli/src/
+│   │   ├── commands/        # One file per command group (local types, Args, run callback, helpers)
+│   │   ├── models/          # CLI view models (From<Proto> + print) and shared args (common.rs)
+│   │   ├── rpc_client.rs    # Connect RPC client factory over generated ReviewServiceClient
+│   │   ├── daemon.rs        # Background daemon lifecycle
+│   │   └── store.rs         # Local runtime state store
+│   ├── lgtm-desktop/src/
+│   │   ├── models/          # Pure workspace domain types and name/UTF-8 validators
+│   │   ├── services/        # Local workspace filesystem orchestration (WorkspaceService)
+│   │   ├── app.rs           # Tauri app state, lifecycle, and IPC command handlers
+│   │   └── error.rs         # Serializable WorkspaceError
+│   └── lgtm-web/src/lib/
+│       ├── clients/         # Tauri IPC and Connect RPC transport adapters
+│       ├── models/          # View models mapping domain nodes to UI component contracts
+│       ├── services/        # Reactive Svelte 5 state orchestration (workspaceService.svelte.ts)
+│       └── components/      # Shell, WorkspaceExplorer, and ContentPane
 ├── libs/
-│   └── lgtm-db/src/
-│       ├── entities/        # Private SeaORM table models and shared column enums (common.rs)
-│       ├── repositories/    # Named repository queries and explicit column mutations
-│       └── client.rs        # Database pool and Transaction handles
+│   ├── lgtm-db/src/
+│   │   ├── entities/        # Private SeaORM table models and shared column enums (common.rs)
+│   │   ├── repositories/    # Named repository queries and explicit column mutations
+│   │   └── client.rs        # Database pool and Transaction handles
+│   └── lgtm-ui/src/
+│       ├── tree-view/       # Portable Ark UI TreeView + Helical CVA styles
+│       ├── context-menu/    # Portable Ark UI Menu + Helical CVA styles
+│       └── code-editor/     # Portable CodeMirror 6 wrapper + Helical CVA styles
 └── e2e/
     ├── common/              # Shared process, cassette, and GitHub PR fixtures
     ├── forge/               # Backend RPC E2E specs
     ├── cli/                 # CLI local-review, pr-review, parity, and daemon specs
-    └── nvim/                # Neovim plugin shell and installer specs
+    ├── nvim/                # Neovim plugin shell and installer specs
+    └── desktop/             # Playwright Chromium/WebKit desktop shell and file tree specs
 ```
 
 ```mermaid
@@ -90,6 +105,11 @@ impl CommentAnchor {
 ### CLI View Models
 
 - Transform backend RPC responses into CLI view models under `apps/lgtm-cli/src/models/` using `From` conversions and render terminal/JSON output via `print` methods. Name entity structs without a `View` suffix (`Identity`, `CommentAnchor`, `Comment`, `DiffHunk`, `Review`, `Session`) and name command-response wrappers `*CommandOutput` (`AddCommandOutput`, `ShowReviewCommandOutput`). Keep shared CLI argument types and formatting helpers in `apps/lgtm-cli/src/models/common.rs`.
+
+### Desktop & Helical UI Components
+
+- Compose published `@cloudvoyant/helical-svelte` primitives (`SidebarProvider`, `Sidebar`, `SidebarTrigger`, `SidebarHeader`, `SidebarContent`, `Select*`, `Button`, `Row`, `Col`, `Center`, `Stack`, `HStack`, `VStack`, `Scroll`, `Portal`, `Notice`) directly in `apps/lgtm-web`.
+- Author reusable components in `libs/lgtm-ui` (`TreeView`, `ContextMenu`, `CodeEditor`) per Helical UI conventions (`@ark-ui/svelte` headless primitives, orthogonal `cva` variants + `VariantProps` in `styles.ts`, `@cloudvoyant/helical-ui` `cn` + semantic Tailwind tokens, `$derived(cn(...))`, and pure `types.ts` contracts with zero app/Tauri coupling) so they can be upstreamed directly to `helical-ui`.
 
 ### Documentation
 
@@ -142,6 +162,7 @@ mod tests {
 
 - Organize Vitest specs under `e2e/` using `describe('Given ... / When ...')` or `describe('When ...')` blocks and space-separated `it('should <behavior>')` titles (do not use `should_snake_case` in TypeScript).
 - Separate `// Arrange`, `// Act`, and `// Assert` blocks with comments. Keep feature setup in adjacent `*.fixtures.ts` files and export only helpers used across modules.
+- Separate desktop workspace E2E suites into `Given a new workspace` (creation, persistence, and reopening) and `Given an existing workspace` (viewing, editing, creating, renaming, conflict handling, and deleting entries) with nested `When ...` action blocks.
 
 ```typescript
 describe('Given a local working tree / When staging and committing in local snapshot mode', { tags: ['e2e', 'cli', 'local-review'] }, () => {

@@ -143,10 +143,14 @@ Only the CLI publishes. GoReleaser defines macOS and Linux archives for arm64 an
 lgtm/
 ├── apps/
 │   ├── lgtm-cli/       CLI and bundled application
+│   ├── lgtm-desktop/   Tauri v2 desktop application and local workspace service
 │   ├── lgtm-forge/     Rust services and shared Protobuf schema
-│   └── lgtm-web/       SvelteKit interface and generated client
-└── libs/
-    └── lgtm-db/        Private Rust library
+│   └── lgtm-web/       SvelteKit desktop/web shell and generated client
+├── libs/
+│   ├── lgtm-db/        Private Rust library
+│   └── lgtm-ui/        Shared Helical UI + Ark UI + CodeMirror 6 Svelte library
+└── e2e/
+    └── desktop/        Playwright Chromium and WebKit desktop E2E suite
 ```
 
 ### Runtime and delivery

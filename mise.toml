@@ -8,39 +8,63 @@ monorepo_root = true
 LC_ALL = "{% if os() == 'macos' %}en_US.UTF-8{% else %}C.UTF-8{% endif %}"
 
 [monorepo]
-config_roots = ["apps/*", "libs/*", "e2e/forge", "e2e/cli", "e2e/nvim"]
+config_roots = ["apps/*", "libs/*", "e2e/forge", "e2e/cli", "e2e/nvim", "e2e/desktop"]
 
 [tools]
 buf = "1.73.0"
 rust = { version = "1.94.0", components = "rustfmt,clippy,rust-analyzer" }
 bun = "1.4.2"
-node = "26.10.0"
+node = "24"
 goreleaser = "2.18.1"
 "cargo:cargo-zigbuild" = "0.23.4"
 zig = "0.16.0"
 
 [tasks.install]
-run = ["cargo fetch", "bun install --frozen-lockfile"]
+run = ["cargo fetch", "bun install"]
 
 [tasks.build]
 depends = ["//apps/lgtm-cli:bundle"]
-run = ["cargo build --workspace", "bun run --filter lgtm-web build"]
+run = [
+  "cargo build --workspace",
+  "bun run --filter lgtm-ui build",
+  "bun run --filter lgtm-web build",
+]
 
 [tasks.test]
 depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:test", "e2e:typecheck"]
-run = ["cargo test --workspace", "bun run --filter lgtm-web test"]
+run = [
+  "cargo test --workspace",
+  "mise run //apps/lgtm-desktop:test",
+  "bun run --filter lgtm-ui test",
+  "bun run --filter lgtm-web test",
+]
 
 [tasks.lint]
-depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:lint", "e2e:lint"]
-run = ["cargo clippy --workspace --all-targets --all-features -- -D warnings", "mise run //apps/lgtm-web:lint"]
+depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:lint", "e2e:lint", "//e2e/desktop:lint"]
+run = [
+  "cargo clippy --workspace --all-targets --all-features -- -D warnings",
+  "mise run //apps/lgtm-desktop:lint",
+  "mise run //libs/lgtm-ui:lint",
+  "mise run //apps/lgtm-web:lint",
+]
 
 [tasks.format]
-depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:format", "e2e:format"]
-run = ["cargo fmt --all", "mise run //apps/lgtm-web:format"]
+depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:format", "e2e:format", "//e2e/desktop:format"]
+run = [
+  "cargo fmt --all",
+  "cargo fmt --manifest-path apps/lgtm-desktop/Cargo.toml --all",
+  "mise run //libs/lgtm-ui:format",
+  "mise run //apps/lgtm-web:format",
+]
 
 [tasks."format:check"]
-depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:format:check", "e2e:format:check"]
-run = ["cargo fmt --all --check", "mise run //apps/lgtm-web:format:check"]
+depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:format:check", "e2e:format:check", "//e2e/desktop:format:check"]
+run = [
+  "cargo fmt --all --check",
+  "cargo fmt --manifest-path apps/lgtm-desktop/Cargo.toml --all --check",
+  "mise run //libs/lgtm-ui:format:check",
+  "mise run //apps/lgtm-web:format:check",
+]
 
 [tasks."run:cli"]
 depends = ["//apps/lgtm-cli:bundle"]
@@ -53,6 +77,10 @@ run = "mise run //apps/lgtm-forge:dev"
 
 [tasks."dev:web"]
 run = "mise run //apps/lgtm-web:dev"
+
+[tasks."dev:desktop"]
+description = "Run the LGTM desktop application in development mode"
+run = "mise run //apps/lgtm-desktop:dev"
 
 [tasks."release:check"]
 depends = ["//apps/lgtm-cli:bundle"]
@@ -95,6 +123,10 @@ fi
 mise run //e2e/nvim:test
 '''
 
+[tasks."e2e:desktop"]
+description = "Run desktop E2E tests"
+run = "mise run //e2e/desktop:test"
+
 [tasks.e2e]
 description = "Run E2E suites in parallel"
 usage = 'flag "--extended" help="Include extended tests"'
@@ -103,7 +135,7 @@ export LGTM_E2E_EXTENDED="${usage_extended:-false}"
 if [ "$LGTM_E2E_EXTENDED" = true ]; then
   export LGTM_E2E_NVIM_PROFILES="${LGTM_E2E_NVIM_PROFILES:-required,kak}"
 fi
-mise run --continue-on-error //:e2e:fixtures:test ::: //e2e/forge:test ::: //e2e/cli:test ::: //e2e/nvim:test
+mise run --continue-on-error //:e2e:fixtures:test ::: //e2e/forge:test ::: //e2e/cli:test ::: //e2e/nvim:test ::: //e2e/desktop:test
 '''
 
 [tasks."nvim:lint"]
@@ -144,7 +176,7 @@ run = "bun x vitest run --config e2e/nvim/vitest.config.ts"
 
 [tasks."e2e:list"]
 description = "List local BDD journeys without running them"
-depends = ["//e2e/forge:list", "//e2e/cli:list", "//e2e/nvim:list"]
+depends = ["//e2e/forge:list", "//e2e/cli:list", "//e2e/nvim:list", "//e2e/desktop:list"]
 
 [tasks."e2e:forge:run"]
 description = "Run forge journeys against existing binaries without rebuilding"
@@ -156,8 +188,8 @@ description = "Run CLI journeys against existing binaries without rebuilding"
 run = "bun x vitest run --config e2e/cli/vitest.config.ts"
 
 [tasks."e2e:smoke"]
-description = "Run representative E2E flows across forge, CLI and Neovim"
-run = "mise run --continue-on-error //e2e/forge:smoke ::: //e2e/cli:smoke ::: //e2e/nvim:smoke"
+description = "Run representative E2E flows across forge, CLI, Neovim and desktop"
+run = "mise run --continue-on-error //e2e/forge:smoke ::: //e2e/cli:smoke ::: //e2e/nvim:smoke ::: //e2e/desktop:smoke"
 
 [tasks."e2e:fixtures:test"]
 description = "Verify strict HTTP replay, UUID binding and mutation barriers without GitHub"
