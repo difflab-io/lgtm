@@ -16,8 +16,9 @@
     SelectItem,
     SelectItemText,
   } from '@cloudvoyant/helical-svelte'
-  import { FilePlus2, FolderPlus, PanelLeft, ChevronDown } from 'lucide-svelte'
+  import { FilePlus2, FolderPlus, PanelLeft, ChevronDown, Moon, Sun } from 'lucide-svelte'
   import { errorMessage, workspaceClient, type WorkspaceClient } from '../clients/workspaceClient'
+  import { ThemeService } from '../services/themeService.svelte'
   import { WorkspaceService } from '../services/workspaceService.svelte'
   import WorkspaceExplorer from './WorkspaceExplorer.svelte'
   import ContentPane from './ContentPane.svelte'
@@ -30,11 +31,12 @@
 
   // State ---------------------------------------------------------------------
   const workspace = untrack(() => new WorkspaceService(client))
+  const theme = untrack(() => new ThemeService())
 
   // Lifecycle -----------------------------------------------------------------
   onMount(() => {
     let active = true
-    const unlisteners: (() => void)[] = []
+    const unlisteners: (() => void)[] = [theme.init()]
     void workspace.open()
     if (client.isDesktop()) {
       void client
@@ -102,6 +104,22 @@
             >{/each}</SelectContent
         >
       </Select>
+    </div>
+    <div class="titlebar-actions">
+      <Button
+        variant="text"
+        size="sm"
+        class="theme-toggle"
+        aria-label={theme.isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+        title={theme.isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+        onclick={() => theme.toggle()}
+      >
+        {#if theme.isDark}
+          <Sun size={14} strokeWidth={1.5} />
+        {:else}
+          <Moon size={14} strokeWidth={1.5} />
+        {/if}
+      </Button>
     </div>
   </header>
   <Row class="workspace-body">

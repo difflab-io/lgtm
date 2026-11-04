@@ -4,7 +4,7 @@ import { cva, type VariantProps } from 'class-variance-authority'
 export const tabsRootBase = 'w-full shrink-0'
 
 export const tabsListVariants = cva(
-  'flex w-full items-stretch overflow-x-auto border-b border-border bg-slate-50 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+  'flex w-full items-stretch overflow-x-auto border-b border-border bg-muted/40 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
   {
     variants: {
       size: {

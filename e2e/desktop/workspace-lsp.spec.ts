@@ -260,4 +260,37 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
       },
     )
   })
+
+  test.describe('When toggling the color theme from the titlebar', () => {
+    test(
+      'should follow system color scheme by default and toggle between light and dark mode',
+      { tag: '@smoke' },
+      async ({ page }) => {
+        // Arrange
+        await page.emulateMedia({ colorScheme: 'dark' })
+
+        // Assert: system dark preference activates dark mode automatically
+        await expect(page.locator('html')).toHaveClass(/dark/)
+        const switchToLight = page.getByRole('button', {
+          name: 'Switch to light mode',
+          exact: true,
+        })
+        await expect(switchToLight).toBeVisible()
+
+        // Act: toggle to light mode
+        await switchToLight.click()
+
+        // Assert
+        await expect(page.locator('html')).not.toHaveClass(/dark/)
+        const switchToDark = page.getByRole('button', { name: 'Switch to dark mode', exact: true })
+        await expect(switchToDark).toBeVisible()
+
+        // Act: toggle back to dark mode
+        await switchToDark.click()
+
+        // Assert
+        await expect(page.locator('html')).toHaveClass(/dark/)
+      },
+    )
+  })
 })
