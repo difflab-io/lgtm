@@ -100,7 +100,8 @@ export class ThemeService {
   private applyToDocument(): void {
     if (typeof document === 'undefined') return
     const root = document.documentElement
-    root.classList.add('theme-vercel')
+    root.classList.remove('theme-vercel')
+    root.classList.add('theme-lgtm')
     root.classList.toggle('dark', this.resolvedMode === 'dark')
     root.style.colorScheme = this.resolvedMode
   }

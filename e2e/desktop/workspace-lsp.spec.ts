@@ -276,7 +276,7 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
         expect(workspace.configuredWindowTheme).toBeNull()
         await expect(systemButton).toBeVisible()
         await expect(systemButton).toHaveAttribute('data-theme', 'system')
-        await expect(page.locator('html')).toHaveClass(/theme-vercel/)
+        await expect(page.locator('html')).toHaveClass(/theme-lgtm/)
         await expect(page.locator('html')).toHaveClass(/dark/)
         await expect(page.locator('.titlebar')).toHaveCSS('background-color', darkSurface)
         await expect(page.locator('.workspace-sidebar')).toHaveCSS('background-color', darkSurface)
