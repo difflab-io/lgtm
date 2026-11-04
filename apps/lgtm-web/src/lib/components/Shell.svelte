@@ -16,7 +16,8 @@
     SelectItem,
     SelectItemText,
   } from '@cloudvoyant/helical-svelte'
-  import { FilePlus2, FolderPlus, PanelLeft, ChevronDown, Moon, Sun } from 'lucide-svelte'
+  import { FilePlus2, FolderPlus, PanelLeft, ChevronDown } from 'lucide-svelte'
+  import { ThemeToggle } from 'lgtm-ui'
   import { errorMessage, workspaceClient, type WorkspaceClient } from '../clients/workspaceClient'
   import { ThemeService } from '../services/themeService.svelte'
   import { WorkspaceService } from '../services/workspaceService.svelte'
@@ -106,20 +107,7 @@
       </Select>
     </div>
     <div class="titlebar-actions">
-      <Button
-        variant="text"
-        size="sm"
-        class="theme-toggle"
-        aria-label={theme.isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-        title={theme.isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-        onclick={() => theme.toggle()}
-      >
-        {#if theme.isDark}
-          <Sun size={14} strokeWidth={1.5} />
-        {:else}
-          <Moon size={14} strokeWidth={1.5} />
-        {/if}
-      </Button>
+      <ThemeToggle value={theme.preference} onchange={(next) => theme.setPreference(next)} />
     </div>
   </header>
   <Row class="workspace-body">

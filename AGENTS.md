@@ -57,7 +57,8 @@
 │   └── lgtm-ui/src/
 │       ├── tree-view/       # Portable Ark UI TreeView + Helical CVA styles
 │       ├── context-menu/    # Portable Ark UI Menu + Helical CVA styles
-│       └── code-editor/     # Portable CodeMirror 6 wrapper + Helical CVA styles
+│       ├── code-editor/     # Portable CodeMirror 6 wrapper + Helical CVA styles
+│       └── theme-toggle/    # Portable 3-state (system/light/dark) icon button + Helical CVA styles
 └── e2e/
     ├── common/              # Shared process, cassette, and GitHub PR fixtures
     ├── forge/               # Backend RPC E2E specs
@@ -118,7 +119,7 @@ impl CommentAnchor {
 ### Desktop & Helical UI Components
 
 - Compose published `@cloudvoyant/helical-svelte` primitives (`SidebarProvider`, `Sidebar`, `SidebarTrigger`, `SidebarHeader`, `SidebarContent`, `Select*`, `Button`, `Row`, `Col`, `Center`, `Stack`, `HStack`, `VStack`, `Scroll`, `Portal`, `Notice`) directly in `apps/lgtm-web`.
-- Author reusable components in `libs/lgtm-ui` (`TreeView`, `ContextMenu`, `CodeEditor`, `Tabs`, `Menu`) per Helical UI conventions (`@ark-ui/svelte` headless primitives, orthogonal `cva` variants + `VariantProps` in `styles.ts`, `@cloudvoyant/helical-ui` `cn` + semantic Tailwind tokens, `$derived(cn(...))`, and pure `types.ts` contracts with zero app/Tauri coupling) so they can be upstreamed directly to `helical-ui`.
+- Author reusable components in `libs/lgtm-ui` (`TreeView`, `ContextMenu`, `CodeEditor`, `Tabs`, `Menu`, `ThemeToggle`) per Helical UI conventions (`@ark-ui/svelte` headless primitives, orthogonal `cva` variants + `VariantProps` in `styles.ts`, `@cloudvoyant/helical-ui` `cn` + semantic Tailwind tokens, `$derived(cn(...))`, and pure `types.ts` contracts with zero app/Tauri coupling) so they can be upstreamed directly to `helical-ui`.
 - Keep component styling in `libs/lgtm-ui` as Tailwind `cva` variants; restrict `apps/lgtm-web/src/app.css` to Helical UI theme extensions and Tauri shell/CodeMirror integration overrides.
 
 ### Documentation

@@ -1,35 +1,37 @@
-export type ThemeMode = 'light' | 'dark'
+import type { ThemePreference } from 'lgtm-ui'
+
+export type ResolvedThemeMode = 'light' | 'dark'
 
 const STORAGE_KEY = 'lgtm.theme'
 
 export class ThemeService {
-  mode = $state<ThemeMode>('light')
-  hasExplicitPreference = $state(false)
+  preference = $state<ThemePreference>('system')
+  systemDark = $state(false)
 
   // Derived -------------------------------------------------------------------
-  readonly isDark = $derived(this.mode === 'dark')
+  readonly resolvedMode = $derived<ResolvedThemeMode>(
+    this.preference === 'system' ? (this.systemDark ? 'dark' : 'light') : this.preference,
+  )
+  readonly isDark = $derived(this.resolvedMode === 'dark')
 
   // Public --------------------------------------------------------------------
   init(): () => void {
     if (typeof window === 'undefined') return () => {}
 
-    const stored = window.localStorage.getItem(STORAGE_KEY)
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    this.systemDark = mediaQuery.matches
 
-    if (stored === 'light' || stored === 'dark') {
-      this.mode = stored
-      this.hasExplicitPreference = true
+    const stored = window.localStorage.getItem(STORAGE_KEY)
+    if (stored === 'system' || stored === 'light' || stored === 'dark') {
+      this.preference = stored
     } else {
-      this.mode = mediaQuery.matches ? 'dark' : 'light'
-      this.hasExplicitPreference = false
+      this.preference = 'system'
     }
     this.applyToDocument()
 
     const handleMediaChange = (event: MediaQueryListEvent) => {
-      if (!this.hasExplicitPreference) {
-        this.mode = event.matches ? 'dark' : 'light'
-        this.applyToDocument()
-      }
+      this.systemDark = event.matches
+      this.applyToDocument()
     }
 
     mediaQuery.addEventListener('change', handleMediaChange)
@@ -38,13 +40,8 @@ export class ThemeService {
     }
   }
 
-  toggle(): void {
-    this.setMode(this.mode === 'dark' ? 'light' : 'dark')
-  }
-
-  setMode(next: ThemeMode): void {
-    this.mode = next
-    this.hasExplicitPreference = true
+  setPreference(next: ThemePreference): void {
+    this.preference = next
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(STORAGE_KEY, next)
     }
@@ -55,7 +52,7 @@ export class ThemeService {
   private applyToDocument(): void {
     if (typeof document === 'undefined') return
     const root = document.documentElement
-    root.classList.toggle('dark', this.mode === 'dark')
-    root.style.colorScheme = this.mode
+    root.classList.toggle('dark', this.resolvedMode === 'dark')
+    root.style.colorScheme = this.resolvedMode
   }
 }

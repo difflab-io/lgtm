@@ -120,15 +120,6 @@ button:focus-visible {
   align-items: center;
   gap: 4px;
 }
-.titlebar .theme-toggle {
-  width: 26px;
-  height: 26px;
-  padding: 4px;
-  color: var(--muted-foreground);
-}
-.titlebar .theme-toggle:hover {
-  color: var(--foreground);
-}
 .workspace-body {
   flex: 1;
   min-height: 0;

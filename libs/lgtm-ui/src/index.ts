@@ -6,6 +6,8 @@ export { default as Menu } from './menu/Menu.svelte'
 export type { MenuItem, MenuItemIndicatorTone, MenuProps } from './menu/types'
 export { default as Tabs } from './tabs/Tabs.svelte'
 export type { TabItem, TabsProps } from './tabs/types'
+export { default as ThemeToggle } from './theme-toggle/ThemeToggle.svelte'
+export type { ThemePreference, ThemeToggleProps } from './theme-toggle/types'
 export { default as CodeEditor } from './code-editor/CodeEditor.svelte'
 export type {
   CodeEditorDiagnostic,
