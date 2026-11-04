@@ -2,14 +2,14 @@
 
 ## Overview
 
-`lgtm-config` is the configuration, language discovery, and Mise task orchestration library for LGTM (`lgtm-cli`, `lgtm-lsp`, and `lgtm-desktop`). It merges global (`~/.lgtm/config.toml`) and project (`<workspace>/.lgtm/config.toml`) settings over built-in language presets (Rust, TypeScript, JavaScript, Python, and Go), detects project roots and workspace languages, synthesizes a deterministic `<workspace>/.lgtm/mise.toml` file, registers `.lgtm/` in `<git-dir>/info/exclude`, and proxies task execution via `mise`.
+`lgtm-config` is the configuration, language discovery, and Mise task orchestration library for LGTM (`lgtm-cli`, `lgtm-lsp`, and `lgtm-desktop`). It merges global (`~/.lgtm/config.toml`) and project (`<workspace>/.lgtm/config.toml`) settings over built-in language presets (Rust, TypeScript, JavaScript, Python, Go, and Markdown), detects project roots and workspace languages, synthesizes a deterministic `<workspace>/.lgtm/mise.toml` file, registers `.lgtm/` in `<git-dir>/info/exclude`, and proxies task execution via `mise`.
 
 ## Requirement
 
 ### Functional
 
 - Layered configuration: Load built-in language and tool presets, merge `~/.lgtm/config.toml` (or `$LGTM_HOME/config.toml`), and overlay `<workspace>/.lgtm/config.toml`.
-- Language and root discovery: Resolve a file's language from its extension and walk ancestor directories up to the workspace boundary to find the nearest language root marker (`Cargo.toml`, `tsconfig.json`, `package.json`, `pyproject.toml`, `requirements.txt`, `go.mod`).
+- Language and root discovery: Resolve a file's language from its extension and walk ancestor directories up to the workspace boundary to find the nearest language root marker (`Cargo.toml`, `tsconfig.json`, `package.json`, `pyproject.toml`, `requirements.txt`, `go.mod`, `.marksman.toml`).
 - Managed Mise file generation: Synthesize `<workspace>/.lgtm/mise.toml` with `[tools]` and `[tasks]` for detected languages plus user-configured tools and tasks, setting `dir = "{{cwd}}"` so tasks execute in the caller's working directory.
 - Git worktree hygiene: Register `.lgtm/` idempotently in `<git-dir>/info/exclude` (supporting both standard `.git` directories and worktree `.git` pointer files) without modifying tracked `.gitignore` files.
 - Task execution proxy: List synthesized tasks and proxy `lgtm run [task] [args...]` to `mise run` with `MISE_CONFIG_FILE=<workspace>/.lgtm/mise.toml`.

@@ -80,7 +80,7 @@ pub struct LanguageConfig {
 }
 
 impl LgtmConfig {
-    /// Builds the default LGTM configuration with presets for Rust, TypeScript, JavaScript, Python, and Go.
+    /// Builds the default LGTM configuration with presets for Rust, TypeScript, JavaScript, Python, Go, and Markdown.
     pub fn default_presets() -> Self {
         let mut languages = BTreeMap::new();
 
@@ -230,6 +230,21 @@ impl LgtmConfig {
             },
         );
 
+        languages.insert(
+            "markdown".to_string(),
+            LanguageConfig {
+                enabled: true,
+                extensions: vec!["md".to_string(), "markdown".to_string(), "mdx".to_string()],
+                root_markers: vec![".marksman.toml".to_string()],
+                mise_tools: BTreeMap::from([("marksman".to_string(), "latest".to_string())]),
+                command: "marksman".to_string(),
+                args: vec!["server".to_string()],
+                env: BTreeMap::new(),
+                initialization_options: None,
+                default_tasks: BTreeMap::new(),
+            },
+        );
+
         Self {
             lsp: LspSettings::default(),
             mise: MiseSettings::default(),
@@ -297,7 +312,7 @@ mod tests {
             use super::*;
 
             #[test]
-            fn should_include_rust_typescript_javascript_python_and_go() {
+            fn should_include_rust_typescript_javascript_python_go_and_markdown() {
                 // Arrange
                 let config = LgtmConfig::default();
 
@@ -310,6 +325,7 @@ mod tests {
                     vec![
                         "go".to_string(),
                         "javascript".to_string(),
+                        "markdown".to_string(),
                         "python".to_string(),
                         "rust".to_string(),
                         "typescript".to_string(),
@@ -331,13 +347,15 @@ mod tests {
                 let ts = config.detect_file_language(Path::new("web/app.ts"));
                 let py = config.detect_file_language(Path::new("scripts/run.py"));
                 let go = config.detect_file_language(Path::new("cmd/main.go"));
-                let unknown = config.detect_file_language(Path::new("README.md"));
+                let md = config.detect_file_language(Path::new("README.md"));
+                let unknown = config.detect_file_language(Path::new("notes.txt"));
 
                 // Assert
                 assert_eq!(rust.map(|(id, _)| id), Some("rust".to_string()));
                 assert_eq!(ts.map(|(id, _)| id), Some("typescript".to_string()));
                 assert_eq!(py.map(|(id, _)| id), Some("python".to_string()));
                 assert_eq!(go.map(|(id, _)| id), Some("go".to_string()));
+                assert_eq!(md.map(|(id, _)| id), Some("markdown".to_string()));
                 assert!(unknown.is_none());
             }
         }

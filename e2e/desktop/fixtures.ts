@@ -121,7 +121,7 @@ function handleMessage(msg) {
       result: {
         contents: {
           kind: 'markdown',
-          value: 'fn helper() -> i32\\nComputes the workspace answer.',
+          value: '\`\`\`rust\\npub fn helper() -> i32\\n\`\`\`\\n\\n---\\n\\nComputes the **workspace** answer using \`helper\`.',
         },
         range: {
           start: { line: msg.params.position.line, character: 0 },
@@ -272,6 +272,14 @@ export const test = base.extend<{
           'enabled = true',
           'extensions = ["go"]',
           'root_markers = ["go.mod"]',
+          'mise_tools = {}',
+          'command = "node"',
+          `args = ["${escapedScript}"]`,
+          '',
+          '[languages.markdown]',
+          'enabled = true',
+          'extensions = ["md", "markdown", "mdx"]',
+          'root_markers = [".marksman.toml"]',
           'mise_tools = {}',
           'command = "node"',
           `args = ["${escapedScript}"]`,

@@ -28,6 +28,11 @@ const SUPPORTED_LSP_CASES = [
     fileName: 'sample.go',
     source: 'package main\nfunc check() {\n\tBROKEN()\n}\n',
   },
+  {
+    languageId: 'markdown',
+    fileName: 'sample.md',
+    source: '# Check\n\nBROKEN\n',
+  },
 ] as const
 
 // Tests -----------------------------------------------------------------------
@@ -135,6 +140,27 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
         const lspButton = page.getByRole('button', { name: 'LSP status', exact: true })
         await expect(lspButton).toContainText('LSP: rust (ready, 1 error)')
         await expect(page.locator('.cm-lintRange-error')).toBeVisible()
+
+        // Act: hover over symbol to verify formatted Markdown tooltip and bounded placement
+        await page
+          .locator('.cm-line')
+          .first()
+          .hover({ position: { x: 40, y: 8 } })
+        const hoverTooltip = page.locator('[data-slot="code-editor-hover"]')
+        await expect(hoverTooltip).toBeVisible()
+        await expect(hoverTooltip.locator('pre code[data-language="rust"]')).toHaveText(
+          'pub fn helper() -> i32',
+        )
+        await expect(hoverTooltip.locator('strong')).toHaveText('workspace')
+        await expect(hoverTooltip.locator('p code')).toHaveText('helper')
+        const scrollerBox = await page.locator('.cm-scroller').boundingBox()
+        const tooltipBox = await page.locator('.cm-tooltip-hover').boundingBox()
+        expect(scrollerBox).not.toBeNull()
+        expect(tooltipBox).not.toBeNull()
+        expect(tooltipBox!.y).toBeGreaterThanOrEqual(scrollerBox!.y)
+        expect(tooltipBox!.y + tooltipBox!.height).toBeLessThanOrEqual(
+          scrollerBox!.y + scrollerBox!.height,
+        )
 
         // Act
         await lspButton.click()
