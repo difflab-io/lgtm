@@ -9,6 +9,7 @@ The active TypeScript/Vitest suites check the `lgtm-forge` `ReviewService` RPCs,
 | Forge | `ReviewService` RPCs (`Add`, `Commit`, `CreateReview`, `ListReviews`, `CreateComment`, `ShowReview`, `CloseReview`) and removed RPC rejection | `premise run e2e:forge` |
 | CLI | Command parsing, local snapshot review lifecycle (`--local`), remote GitHub PR review lifecycle, local/remote diff output parity, UI/daemon serving and shutdown | `premise run e2e:cli` |
 | Neovim | Shell loading, Lua/Ex/key control, diagnostics and package-manager setup | `premise run e2e:nvim` |
+| Desktop | Workspace explorer, tabs, `lgtm-lsp` diagnostics/hover/definition over real Rust Tauri IPC bridge (`lgtm-desktop --ipc-bridge`) | `premise run e2e:desktop` |
 | Replay infrastructure | Strict HTTP snapshots, UUID binding, ordered mutation barriers, recording safety and retained Git reconstruction | `premise run e2e:fixtures:test` |
 
 All default checks run without GitHub credentials or remote forge writes.

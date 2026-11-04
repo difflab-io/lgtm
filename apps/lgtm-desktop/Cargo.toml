@@ -15,7 +15,7 @@ lgtm-config = { path = "../../libs/lgtm-config" }
 lgtm-lsp = { path = "../../libs/lgtm-lsp" }
 rfd = "0.15"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", optional = true }
 sha2 = "0.10"
 tauri = { version = "=2.11.6", features = [] }
 trash = "=5.2.9"
@@ -27,9 +27,10 @@ rustix = { version = "1", features = ["fs"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
 
 [dev-dependencies]
+serde_json = "1"
 tauri = { version = "=2.11.6", features = ["test"] }
 tempfile = "3"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
-e2e-bridge = ["tauri/test"]
+e2e-bridge = ["dep:serde_json", "tauri/test"]

@@ -168,6 +168,7 @@ The installed CLI serves backend RPCs and embedded frontend assets in one proces
 - [CLI architecture](cli/index.md).
 - [Config & Mise SDK architecture](config/index.md).
 - [LSP SDK architecture](lsp/index.md).
+- [End-to-end testing architecture](e2e/index.md).
 - [Editor setup and usage](../../apps/lgtm.nvim/README.md).
 - [Development guide](../development.md).
 - [Architecture decision](../../adr/0001-initial-architecture/ADR.md).

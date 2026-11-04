@@ -11,9 +11,8 @@ use lgtm_config::ConfigService;
 use lgtm_lsp::{
     LspDiagnosticsBuffer, LspEvent, LspHoverResult, LspLocation, LspService, LspWorkspaceSnapshot,
 };
-use serde_json::Value;
 #[cfg(any(test, feature = "e2e-bridge"))]
-use serde_json::json;
+use serde_json::{Value, json};
 use tauri::{Emitter, Manager, State};
 
 use crate::{
@@ -22,6 +21,7 @@ use crate::{
     services::WorkspaceService,
 };
 
+#[cfg(any(test, feature = "e2e-bridge"))]
 type BridgeEventForwarder = Arc<dyn Fn(&str, Value) + Send + Sync>;
 
 /// Shared workspace access for Tauri command handlers.
@@ -45,19 +45,21 @@ pub struct FrontendReady(
 
 /// Construct the app; an explicit home is used by the isolated desktop smoke harness.
 pub fn builder(workspace_home: Option<PathBuf>) -> tauri::Builder<tauri::Wry> {
-    configure_builder(tauri::Builder::default(), workspace_home, None)
+    configure_builder(tauri::Builder::default(), workspace_home)
 }
 
 /// Configure any Tauri runtime builder with real workspace and LSP services and IPC handlers.
 pub fn configure_builder<R: tauri::Runtime>(
     builder: tauri::Builder<R>,
     workspace_home: Option<PathBuf>,
-    event_forwarder: Option<BridgeEventForwarder>,
 ) -> tauri::Builder<R> {
     builder
         .manage(FrontendReady::default())
         .setup(move |app| {
-            init_app_state(app.handle(), workspace_home, event_forwarder)?;
+            #[cfg(any(test, feature = "e2e-bridge"))]
+            init_app_state(app.handle(), workspace_home, None)?;
+            #[cfg(not(any(test, feature = "e2e-bridge")))]
+            init_app_state(app.handle(), workspace_home)?;
             Ok(())
         })
         .invoke_handler(commands)
@@ -66,7 +68,7 @@ pub fn configure_builder<R: tauri::Runtime>(
 fn init_app_state<R: tauri::Runtime>(
     app_handle: &tauri::AppHandle<R>,
     workspace_home: Option<PathBuf>,
-    event_forwarder: Option<BridgeEventForwarder>,
+    #[cfg(any(test, feature = "e2e-bridge"))] event_forwarder: Option<BridgeEventForwarder>,
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
     if app_handle.try_state::<WorkspaceState>().is_some() {
         return Ok(());
@@ -80,6 +82,7 @@ fn init_app_state<R: tauri::Runtime>(
     let emit_handle = app_handle.clone();
     let lsp_service = LspService::new(config_service, move |event| match event {
         LspEvent::Status(payload) => {
+            #[cfg(any(test, feature = "e2e-bridge"))]
             if let Some(cb) = &event_forwarder
                 && let Ok(val) = serde_json::to_value(&payload)
             {
@@ -88,6 +91,7 @@ fn init_app_state<R: tauri::Runtime>(
             let _ = emit_handle.emit("lsp-status", payload);
         }
         LspEvent::Diagnostics(payload) => {
+            #[cfg(any(test, feature = "e2e-bridge"))]
             if let Some(cb) = &event_forwarder
                 && let Ok(val) = serde_json::to_value(&payload)
             {
@@ -146,13 +150,9 @@ pub fn run_ipc_bridge(home: PathBuf) {
         }
     });
 
-    let app = configure_builder(
-        tauri::test::mock_builder(),
-        Some(home.clone()),
-        Some(forwarder.clone()),
-    )
-    .build(app_context())
-    .expect("failed to build mock Tauri app for IPC bridge");
+    let app = configure_builder(tauri::test::mock_builder(), Some(home.clone()))
+        .build(app_context())
+        .expect("failed to build mock Tauri app for IPC bridge");
     init_app_state(app.handle(), Some(home), Some(forwarder))
         .expect("failed to initialize IPC bridge state");
     let webview = app.get_webview_window("main").unwrap_or_else(|| {
@@ -722,13 +722,10 @@ process.stdin.on('data', (chunk) => {
                 )
                 .unwrap();
 
-                let app = configure_builder(
-                    tauri::test::mock_builder(),
-                    Some(home.path().to_path_buf()),
-                    None,
-                )
-                .build(app_context())
-                .unwrap();
+                let app =
+                    configure_builder(tauri::test::mock_builder(), Some(home.path().to_path_buf()))
+                        .build(app_context())
+                        .unwrap();
                 init_app_state(app.handle(), Some(home.path().to_path_buf()), None).unwrap();
                 let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
                     .build()
