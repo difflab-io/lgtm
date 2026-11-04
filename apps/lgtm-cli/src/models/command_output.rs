@@ -1,4 +1,5 @@
 //! Command outputs for `lgtm add`, `lgtm commit`, `lgtm push`, and `lgtm run`.
+// TODO: Split each `*CommandOutput` model into its own module file under `models/`.
 
 use serde_json::json;
 

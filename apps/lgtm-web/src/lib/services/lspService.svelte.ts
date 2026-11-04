@@ -126,10 +126,15 @@ export class LspService {
       for (const srv of snapshot.servers) {
         nextServers[srv.languageId] = srv
       }
-      this.servers = nextServers
-      this.diagnostics = {
+      if (JSON.stringify(nextServers) !== JSON.stringify(this.servers)) {
+        this.servers = nextServers
+      }
+      const nextDiagnostics = {
         ...this.diagnostics,
         ...snapshot.diagnosticsByPath,
+      }
+      if (JSON.stringify(nextDiagnostics) !== JSON.stringify(this.diagnostics)) {
+        this.diagnostics = nextDiagnostics
       }
     } catch {
       // Non-LSP test fixtures or browser-only mode may not implement lsp_get_state.

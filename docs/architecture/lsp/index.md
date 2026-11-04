@@ -26,10 +26,10 @@
 ```rust
 use std::path::Path;
 use lgtm_config::ConfigService;
-use lgtm_lsp::{LspEvent, LspService};
+use lgtm_lsp::{LgtmLspManager, LspEvent};
 
 let config_service = ConfigService::new();
-let lsp_service = LspService::new(config_service, |event| match event {
+let lsp_manager = LgtmLspManager::new(config_service, |event| match event {
     LspEvent::Status(status) => println!("LSP {}: {:?}", status.language_id, status.status),
     LspEvent::Diagnostics(diags) => println!("{} diagnostics for {}", diags.diagnostics.len(), diags.path),
 });
@@ -38,44 +38,45 @@ let workspace = Path::new("/path/to/workspace");
 let file = workspace.join("src/lib.rs");
 let source = "pub fn helper() -> i32 { 42 }\n";
 
-let (language_id, status) = lsp_service.open_or_sync_file(workspace, &file, source);
-let hover = lsp_service.get_hover(workspace, &file, 7)?;
-let definitions = lsp_service.get_definition(workspace, &file, 7)?;
-let buffer = lsp_service.get_diagnostics_buffer(workspace, language_id.as_deref())?;
-lsp_service.shutdown_all();
+let (language_id, status) = lsp_manager.open_or_sync_file(workspace, &file, source);
+let hover = lsp_manager.get_hover(workspace, &file, 7)?;
+let definitions = lsp_manager.get_definition(workspace, &file, 7)?;
+let buffer = lsp_manager.get_diagnostics_buffer(workspace, language_id.as_deref())?;
+lsp_manager.shutdown_all();
 ```
 
 ### Components and Responsibilities
 
 ```mermaid
 flowchart TB
-    DESKTOP["lgtm-desktop (app.rs Tauri commands & events)"]
+    DESKTOP["lgtm-desktop (services/lsp.rs LspService)"]
     subgraph Library["lgtm-lsp"]
-        SVC["LspService"]
-        SESSION["LspServerSession (stdio JSON-RPC 2.0)"]
+        MGR["LgtmLspManager"]
+        CACHE["LspCacheService"]
+        HANDLE["LspClientHandle (stdio JSON-RPC 2.0)"]
         MODELS["LspDiagnostic, LspHoverResult, LspLocation, LspDiagnosticsBuffer"]
-        COORDS["offset_to_position / position_to_offset / render_diagnostics_buffer"]
-        SVC --> SESSION
-        SVC --> MODELS
-        SVC --> COORDS
+        MGR --> CACHE
+        MGR --> HANDLE
+        MGR --> MODELS
     end
     CFG["lgtm-config (ConfigService & MiseService)"]
-    DESKTOP --> SVC
-    SVC --> CFG
-    SESSION --> PROC["mise exec -- <language-server> (or direct binary)"]
+    DESKTOP --> MGR
+    MGR --> CFG
+    HANDLE --> PROC["mise exec -- <language-server> (or direct binary)"]
 ```
 
-- `LspService`: Owns the active session pool, open document snapshots, per-file diagnostics store, and server status table; exposes synchronous methods invoked from `lgtm-desktop`'s blocking task runner.
-- `LspServerSession`: Manages one child language server process, frames outgoing requests and notifications with `Content-Length` headers over `ChildStdin`, demultiplexes incoming responses and `textDocument/publishDiagnostics` notifications on a reader thread, and enforces request timeouts.
-- `models::lsp`: Defines serializable IPC payloads (`LspServerStatusEvent`, `LspDiagnostic`, `LspFileDiagnosticsEvent`, `LspHoverResult`, `LspLocation`, `LspWorkspaceSnapshot`, `LspDiagnosticsBuffer`), UTF-16 offset conversion functions, `file://` URI helpers, and plain-text diagnostics buffer formatting.
+- `LgtmLspManager`: Owns active `LspClientHandle` sessions, coordinates with `LspCacheService` for open document snapshots and diagnostics, and exposes synchronous methods and client handles to callers such as `lgtm-desktop`'s `LspService`.
+- `LspCacheService`: Manages cached project-root/mise discovery, open UTF-8 document snapshots (`didOpen`/`didChange` diffing), per-file diagnostics, and server status snapshots.
+- `LspClientHandle`: Handle to an individual stdio JSON-RPC 2.0 language server session (`LspServerSession`), framing requests and notifications with `Content-Length` headers and demultiplexing responses and `textDocument/publishDiagnostics` notifications on a reader thread.
+- `models::lsp` and `models::cache`: Define serializable IPC payloads (`LspServerStatusEvent`, `LspDiagnostic`, `LspFileDiagnosticsEvent`, `LspHoverResult`, `LspLocation`, `LspWorkspaceSnapshot`, `LspDiagnosticsBuffer`), cache state types (`LspSessionKey`, `LspCachedDocument`, `LspDiscoveryCache`, `LspDocumentSyncAction`), UTF-16 offset conversion functions, `file://` URI helpers, and plain-text diagnostics buffer formatting.
 
 ### Data and Control Flow
 
 ```mermaid
 sequenceDiagram
     participant Web as lgtm-web (CodeEditor / LspStatusMenu)
-    participant App as lgtm-desktop (app.rs)
-    participant Lsp as LspService
+    participant App as lgtm-desktop (LspService)
+    participant Lsp as LgtmLspManager
     participant Proc as Language Server (stdio)
 
     Web->>App: workspace_read("src/lib.rs")
@@ -99,20 +100,20 @@ sequenceDiagram
 
 ### Interfaces and Contracts
 
-| Method / Function | Signature | Description |
-| --- | --- | --- |
-| `LspService::new` | `fn new<F>(config_service: ConfigService, event_sink: F) -> Self` | Create an `LspService` forwarding `LspEvent::Status` and `LspEvent::Diagnostics` to `event_sink`. |
-| `LspService::open_or_sync_file` | `fn open_or_sync_file(&self, workspace_root: &Path, file_path: &Path, content: &str) -> (Option<String>, Option<LspServerStatusEvent>)` | Detect file language, start or reuse the project's language server, and send `didOpen` or `didChange`. |
-| `LspService::did_change` | `fn did_change(&self, workspace_root: &Path, file_path: &Path, content: &str) -> Result<()>` | Update the in-memory document snapshot and send `textDocument/didChange`. |
-| `LspService::did_save` | `fn did_save(&self, workspace_root: &Path, file_path: &Path, content: &str) -> Result<()>` | Synchronize latest content and send `textDocument/didSave`. |
-| `LspService::did_close` | `fn did_close(&self, workspace_root: &Path, file_path: &Path) -> Result<()>` | Remove the open document snapshot and send `textDocument/didClose`. |
-| `LspService::get_hover` | `fn get_hover(&self, workspace_root: &Path, file_path: &Path, offset: u32) -> Result<Option<LspHoverResult>>` | Convert UTF-16 `offset` to `(line, character)` and query `textDocument/hover`. |
-| `LspService::get_definition` | `fn get_definition(&self, workspace_root: &Path, file_path: &Path, offset: u32) -> Result<Vec<LspLocation>>` | Convert UTF-16 `offset` to `(line, character)`, query `textDocument/definition`, and return workspace-relative locations with UTF-16 offsets. |
-| `LspService::get_workspace_snapshot` | `fn get_workspace_snapshot(&self, workspace_root: &Path) -> Result<LspWorkspaceSnapshot>` | Return all active language server statuses and diagnostics for `workspace_root`. |
-| `LspService::get_diagnostics_buffer` | `fn get_diagnostics_buffer(&self, workspace_root: &Path, language_id: Option<&str>) -> Result<LspDiagnosticsBuffer>` | Render a plain-text diagnostics report for all active servers or a single language server. |
-| `LspService::restart_language_server` | `fn restart_language_server(&self, workspace_root: &Path, language_id: &str) -> Result<LspServerStatusEvent>` | Restart all active sessions for `language_id` in `workspace_root` and re-synchronize open documents. |
-| `offset_to_position` | `fn offset_to_position(text: &str, utf16_offset: u32) -> (u32, u32)` | Convert a 0-based UTF-16 code-unit offset to a 0-based LSP `(line, character)` pair. |
-| `position_to_offset` | `fn position_to_offset(text: &str, target_line: u32, target_character: u32) -> u32` | Convert a 0-based LSP `(line, character)` pair to a 0-based UTF-16 code-unit offset. |
+| Method / Function                         | Signature                                                                                                                               | Description                                                                                                                                   |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LgtmLspManager::new`                     | `fn new<F>(config_service: ConfigService, event_sink: F) -> Self`                                                                       | Create an `LgtmLspManager` forwarding `LspEvent::Status` and `LspEvent::Diagnostics` to `event_sink`.                                         |
+| `LgtmLspManager::noop`                    | `fn noop(config_service: ConfigService) -> Self`                                                                                        | Create a disabled `LgtmLspManager` that performs no-ops and spawns no child language server processes.                                        |
+| `LgtmLspManager::get_client_handle`       | `fn get_client_handle(&self, workspace_root: &Path, file_path: &Path) -> Result<Option<LspClientHandle>>`                               | Return an `LspClientHandle` for the language server governing `file_path`.                                                                    |
+| `LgtmLspManager::open_or_sync_file`       | `fn open_or_sync_file(&self, workspace_root: &Path, file_path: &Path, content: &str) -> (Option<String>, Option<LspServerStatusEvent>)` | Detect file language, start or reuse the project's language server, and send `didOpen` or `didChange`.                                        |
+| `LgtmLspManager::did_change`              | `fn did_change(&self, workspace_root: &Path, file_path: &Path, content: &str) -> Result<()>`                                            | Update the in-memory document snapshot and send `textDocument/didChange`.                                                                     |
+| `LgtmLspManager::did_save`                | `fn did_save(&self, workspace_root: &Path, file_path: &Path, content: &str) -> Result<()>`                                              | Synchronize latest content and send `textDocument/didSave`.                                                                                   |
+| `LgtmLspManager::did_close`               | `fn did_close(&self, workspace_root: &Path, file_path: &Path) -> Result<()>`                                                            | Remove the open document snapshot and send `textDocument/didClose`.                                                                           |
+| `LgtmLspManager::get_hover`               | `fn get_hover(&self, workspace_root: &Path, file_path: &Path, offset: u32) -> Result<Option<LspHoverResult>>`                           | Convert UTF-16 `offset` to `(line, character)` and query `textDocument/hover`.                                                                |
+| `LgtmLspManager::get_definition`          | `fn get_definition(&self, workspace_root: &Path, file_path: &Path, offset: u32) -> Result<Vec<LspLocation>>`                            | Convert UTF-16 `offset` to `(line, character)`, query `textDocument/definition`, and return workspace-relative locations with UTF-16 offsets. |
+| `LgtmLspManager::get_workspace_snapshot`  | `fn get_workspace_snapshot(&self, workspace_root: &Path) -> Result<LspWorkspaceSnapshot>`                                               | Return all active language server statuses and diagnostics for `workspace_root`.                                                              |
+| `LgtmLspManager::get_diagnostics_buffer`  | `fn get_diagnostics_buffer(&self, workspace_root: &Path, language_id: Option<&str>) -> Result<LspDiagnosticsBuffer>`                    | Render a plain-text diagnostics report for all active servers or a single language server.                                                    |
+| `LgtmLspManager::restart_language_server` | `fn restart_language_server(&self, workspace_root: &Path, language_id: &str) -> Result<LspServerStatusEvent>`                           | Restart all active sessions for `language_id` in `workspace_root` and re-synchronize open documents.                                          |
 
 ## Implementation
 
@@ -122,20 +123,26 @@ sequenceDiagram
 libs/lgtm-lsp/
 ├── Cargo.toml
 ├── mise.toml
-└── src/
-    ├── lib.rs                 Public LspService, model, and coordinate helper exports
-    ├── error.rs               LspError and Result alias
-    ├── models/
-    │   ├── mod.rs
-    │   └── lsp.rs             LSP domain models, UTF-16 offset math, URI helpers, and buffer renderer
-    └── services/
-        ├── mod.rs
-        └── lsp.rs             LspService and LspServerSession stdio JSON-RPC 2.0 client
+├── src/
+│   ├── lib.rs                 Public LgtmLspManager, LspClientHandle, LspCacheService, and model exports
+│   ├── error.rs               LspError and Result alias
+│   ├── models/
+│   │   ├── mod.rs
+│   │   ├── cache.rs           LspSessionKey, LspCachedDocument, LspDiscoveryCache, LspDocumentSyncAction
+│   │   └── lsp.rs             LSP domain models, UTF-16 offset math, URI helpers, and buffer renderer
+│   └── services/
+│       ├── mod.rs
+│       ├── cache.rs           LspCacheService
+│       └── manager.rs         LgtmLspManager and LspClientHandle stdio JSON-RPC 2.0 client
+└── tests/
+    ├── common/mod.rs          Shared mock stdio JSON-RPC 2.0 language server fixture
+    ├── cache.rs               LspCacheService BDD integration suite
+    └── manager.rs             LgtmLspManager BDD integration suite
 ```
 
 ### Mise execution with direct binary fallback
 
-When spawning a language server whose `LanguageConfig` declares `mise_tools`, `LspService` first attempts `mise exec --cd <project_root> <tool@version>... -- <command> <args...>` with `MISE_CONFIG_FILE=<workspace>/.lgtm/mise.toml`. If `mise` or the managed tool is not installed in the current environment, `LspService` falls back to spawning `<command> <args...>` directly from `PATH` before reporting `LspServerStatus::Unavailable`.
+When spawning a language server whose `LanguageConfig` declares `mise_tools`, `LgtmLspManager` first attempts `mise exec --cd <project_root> <tool@version>... -- <command> <args...>` with `MISE_CONFIG_FILE=<workspace>/.lgtm/mise.toml`. If `mise` or the managed tool is not installed in the current environment, `LgtmLspManager` falls back to spawning `<command> <args...>` directly from `PATH` before reporting `LspServerStatus::Unavailable`.
 
 ## References
 

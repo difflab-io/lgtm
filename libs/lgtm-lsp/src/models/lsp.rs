@@ -173,10 +173,10 @@ impl LspDiagnosticsBuffer {
     }
 }
 
-// Public ----------------------------------------------------------------------
+// Private ---------------------------------------------------------------------
 
 /// Converts a flat UTF-16 code unit offset in `text` into a 0-based `(line, character)` LSP position.
-pub fn offset_to_position(text: &str, utf16_offset: u32) -> (u32, u32) {
+pub(crate) fn offset_to_position(text: &str, utf16_offset: u32) -> (u32, u32) {
     let mut current_utf16: u32 = 0;
     let mut line: u32 = 0;
     let mut character: u32 = 0;
@@ -199,7 +199,7 @@ pub fn offset_to_position(text: &str, utf16_offset: u32) -> (u32, u32) {
 }
 
 /// Converts a 0-based `(target_line, target_character)` LSP position in `text` into a flat UTF-16 offset.
-pub fn position_to_offset(text: &str, target_line: u32, target_character: u32) -> u32 {
+pub(crate) fn position_to_offset(text: &str, target_line: u32, target_character: u32) -> u32 {
     let mut current_utf16: u32 = 0;
     let mut line: u32 = 0;
     let mut character: u32 = 0;
@@ -228,12 +228,12 @@ pub fn position_to_offset(text: &str, target_line: u32, target_character: u32) -
 }
 
 /// Converts an absolute filesystem path into a `file://` URI string.
-pub fn path_to_file_uri(path: &Path) -> Option<String> {
+pub(crate) fn path_to_file_uri(path: &Path) -> Option<String> {
     Url::from_file_path(path).ok().map(|url| url.to_string())
 }
 
 /// Parses a `file://` URI string back into an absolute filesystem path.
-pub fn file_uri_to_path(uri: &str) -> Option<PathBuf> {
+pub(crate) fn file_uri_to_path(uri: &str) -> Option<PathBuf> {
     let parsed = Url::parse(uri).ok()?;
     if parsed.scheme() != "file" {
         return None;
@@ -242,7 +242,7 @@ pub fn file_uri_to_path(uri: &str) -> Option<PathBuf> {
 }
 
 /// Renders a plain-text/Markdown buffer listing active servers and file diagnostics.
-pub fn render_diagnostics_buffer(
+pub(crate) fn render_diagnostics_buffer(
     workspace_root: &Path,
     language_filter: Option<&str>,
     servers: &[LspServerStatusEvent],

@@ -1,10 +1,11 @@
-import { isTauri } from '@tauri-apps/api/core'
-import { getCurrentWindow } from '@tauri-apps/api/window'
-import type { ThemePreference } from 'lgtm-ui'
+import type {
+  ResolvedThemeMode,
+  ThemePreference,
+  ThemeServiceOptions,
+  ThemeWindowBridge,
+} from './types'
 
-export type ResolvedThemeMode = 'light' | 'dark'
-
-const STORAGE_KEY = 'lgtm.theme'
+const DEFAULT_STORAGE_KEY = 'helical.theme'
 
 function readSystemDarkMode(): boolean {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
@@ -19,6 +20,16 @@ export class ThemeService {
   preference = $state<ThemePreference>('system')
   systemDark = $state(readSystemDarkMode())
 
+  private readonly storageKey: string
+  private readonly themeClass: string | undefined
+  private readonly windowBridge: ThemeWindowBridge | undefined
+
+  constructor(options: ThemeServiceOptions = {}) {
+    this.storageKey = options.storageKey ?? DEFAULT_STORAGE_KEY
+    this.themeClass = options.themeClass
+    this.windowBridge = options.windowBridge
+  }
+
   // Derived -------------------------------------------------------------------
   readonly resolvedMode = $derived<ResolvedThemeMode>(
     this.preference === 'system' ? (this.systemDark ? 'dark' : 'light') : this.preference,
@@ -32,7 +43,7 @@ export class ThemeService {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
     this.systemDark = mediaQuery.matches
 
-    const stored = window.localStorage.getItem(STORAGE_KEY)
+    const stored = window.localStorage.getItem(this.storageKey)
     if (stored === 'system' || stored === 'light' || stored === 'dark') {
       this.preference = stored
     } else {
@@ -47,29 +58,29 @@ export class ThemeService {
 
     mediaQuery.addEventListener('change', handleMediaChange)
 
-    let unlistenTauriTheme: (() => void) | undefined
-    if (isTauri()) {
-      void getCurrentWindow()
-        .onThemeChanged(({ payload }) => {
-          this.systemDark = payload === 'dark'
+    let unlistenWindowTheme: (() => void) | undefined
+    if (this.windowBridge) {
+      void this.windowBridge
+        .onThemeChanged((mode) => {
+          this.systemDark = mode === 'dark'
           this.applyToDocument()
         })
         .then((unlisten) => {
-          unlistenTauriTheme = unlisten
+          unlistenWindowTheme = unlisten
         })
         .catch(() => {})
     }
 
     return () => {
       mediaQuery.removeEventListener('change', handleMediaChange)
-      unlistenTauriTheme?.()
+      unlistenWindowTheme?.()
     }
   }
 
   setPreference(next: ThemePreference): void {
     this.preference = next
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem(STORAGE_KEY, next)
+      window.localStorage.setItem(this.storageKey, next)
     }
     this.applyThemePreference(next)
   }
@@ -77,12 +88,12 @@ export class ThemeService {
   // Private -------------------------------------------------------------------
   private applyThemePreference(mode: ThemePreference): void {
     this.applyToDocument()
-    if (!isTauri()) return
-    const win = getCurrentWindow()
-    void win
+    if (!this.windowBridge) return
+    const bridge = this.windowBridge
+    void bridge
       .setTheme(mode === 'system' ? null : mode)
       .catch(() => {})
-      .then(() => win.theme())
+      .then(() => bridge.getTheme())
       .then((osTheme) => {
         if (osTheme === 'dark' || osTheme === 'light') {
           this.systemDark = osTheme === 'dark'
@@ -100,8 +111,9 @@ export class ThemeService {
   private applyToDocument(): void {
     if (typeof document === 'undefined') return
     const root = document.documentElement
-    root.classList.remove('theme-vercel')
-    root.classList.add('theme-lgtm')
+    if (this.themeClass) {
+      root.classList.add(this.themeClass)
+    }
     root.classList.toggle('dark', this.resolvedMode === 'dark')
     root.style.colorScheme = this.resolvedMode
   }

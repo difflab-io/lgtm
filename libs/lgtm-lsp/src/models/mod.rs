@@ -1,1 +1,2 @@
-pub mod lsp;
+pub(crate) mod cache;
+pub(crate) mod lsp;

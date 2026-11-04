@@ -1,6 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import type { ThemeWindowBridge } from 'lgtm-ui'
 
 export interface WorkspaceNode {
   path: string
@@ -76,6 +77,7 @@ export interface FileContent {
 
 export interface WorkspaceClient {
   isDesktop(): boolean
+  themeWindowBridge?(): ThemeWindowBridge | undefined
   open(path?: string): Promise<{ root: string; entries: WorkspaceNode[] }>
   pickFolder(): Promise<string | null>
   list(path: string): Promise<WorkspaceNode[]>
@@ -102,6 +104,23 @@ export interface WorkspaceClient {
 
 export const workspaceClient: WorkspaceClient = {
   isDesktop: () => isTauri(),
+  themeWindowBridge: () => {
+    if (!isTauri()) return undefined
+    const win = getCurrentWindow()
+    return {
+      setTheme: (mode) => win.setTheme(mode),
+      getTheme: async () => {
+        const theme = await win.theme()
+        return theme === 'dark' || theme === 'light' ? theme : null
+      },
+      onThemeChanged: (handler) =>
+        win.onThemeChanged(({ payload }) => {
+          if (payload === 'dark' || payload === 'light') {
+            handler(payload)
+          }
+        }),
+    }
+  },
   open: (path?: string) => {
     if (!isTauri())
       return Promise.reject(new Error('Open LGTM in the desktop app to access a local workspace.'))

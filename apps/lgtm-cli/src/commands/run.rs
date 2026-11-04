@@ -5,6 +5,7 @@ use crate::{
     models::RunCommandOutput,
 };
 
+/// Arguments for the `lgtm run` command.
 #[derive(Args, Debug, Clone)]
 pub struct RunArgs {
     /// List tasks defined in the LGTM-managed `.lgtm/mise.toml`.
@@ -17,6 +18,7 @@ pub struct RunArgs {
     pub args: Vec<String>,
 }
 
+/// Lists or executes tasks configured in the workspace's LGTM-managed `.lgtm/mise.toml`.
 #[tracing::instrument(skip_all, fields(list = args.list, task = ?args.task))]
 pub async fn run(args: RunArgs, json: bool) -> anyhow::Result<()> {
     let workspace_root = std::env::current_dir()?;

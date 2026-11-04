@@ -34,7 +34,10 @@
   })
 </script>
 
-<main class="document-pane" aria-label="File viewer">
+<main
+  class="document-pane flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground"
+  aria-label="File viewer"
+>
   {#if workspace.tabItems.length > 0}
     <Tabs
       items={workspace.tabItems}
@@ -45,10 +48,19 @@
     />
   {/if}
   {#if workspace.fileLoading}
-    <div class="empty-pane" role="status">Opening file…</div>
+    <div
+      class="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground"
+      role="status"
+    >
+      Opening file…
+    </div>
   {:else if workspace.openingError}
-    <div class="empty-pane">
-      <p class="error" role="alert">{workspace.openingError}</p>
+    <div
+      class="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground"
+    >
+      <p class="max-w-115 text-xs leading-relaxed text-warn" role="alert">
+        {workspace.openingError}
+      </p>
       {#if workspace.selected}<Button
           variant="outline"
           size="sm"
@@ -57,7 +69,7 @@
         >{/if}
     </div>
   {:else if workspace.fileContent && (workspace.selected || workspace.activeTab)}
-    <div class="editor-scroll">
+    <div class="flex min-h-0 flex-1 flex-col overflow-auto">
       {#key workspace.fileVersion}
         <CodeEditor
           bind:this={editorRef}
@@ -74,17 +86,27 @@
       {/key}
     </div>
   {:else}
-    <div class="empty-pane">
+    <div
+      class="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground"
+    >
       <FileText size={32} strokeWidth={1.5} />
-      <h1>Your workspace, ready for review.</h1>
-      <p>Select a file from the sidebar, or create a new one.</p>
+      <h1 class="text-[17px] font-medium text-foreground">Your workspace, ready for review.</h1>
+      <p class="max-w-115 text-xs leading-relaxed">
+        Select a file from the sidebar, or create a new one.
+      </p>
     </div>
   {/if}
-  <footer class="document-status" role="status" aria-live="polite">
-    <span class="document-path" title={workspace.selectedPath}>{workspace.selectedTitle}</span>
-    <div class="document-status-right">
+  <footer
+    class="relative flex items-center justify-between gap-4 border-t border-border bg-sidebar px-4 py-2 text-[10px] text-muted-foreground"
+    role="status"
+    aria-live="polite"
+  >
+    <span class="document-path truncate" title={workspace.selectedPath}
+      >{workspace.selectedTitle}</span
+    >
+    <div class="flex items-center gap-3">
       <LspStatusMenu {workspace} />
-      <span class={{ error: Boolean(workspace.openingError) }}>{workspace.status}</span>
+      <span class={workspace.openingError ? 'text-warn' : ''}>{workspace.status}</span>
     </div>
   </footer>
 </main>

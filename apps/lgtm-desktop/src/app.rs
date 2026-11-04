@@ -5,10 +5,8 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use lgtm_config::ConfigService;
 use lgtm_lsp::{
-    LspDiagnosticsBuffer, LspEvent, LspHoverResult, LspLocation, LspServerStatusEvent, LspService,
-    LspWorkspaceSnapshot,
+    LspDiagnosticsBuffer, LspHoverResult, LspLocation, LspServerStatusEvent, LspWorkspaceSnapshot,
 };
 use tauri::{Emitter, Manager, State};
 
@@ -17,7 +15,7 @@ use crate::services::BridgeEventForwarder;
 use crate::{
     error::{Result, error},
     models::{FileContent, WorkspaceListing, WorkspaceNode},
-    services::WorkspaceService,
+    services::{LspService, WorkspaceService},
 };
 
 /// Shared workspace access for Tauri command handlers.
@@ -26,9 +24,9 @@ pub struct WorkspaceState(
     pub Arc<Mutex<WorkspaceService>>,
 );
 
-/// Shared LSP service access for Tauri command handlers.
+/// Shared desktop LSP service access for Tauri command handlers.
 pub struct LspState(
-    /// The shared LSP orchestration service across all Tauri workspace and editor commands.
+    /// The shared desktop LSP orchestration service across all Tauri workspace and editor commands.
     pub Arc<LspService>,
 );
 
@@ -73,28 +71,14 @@ pub(crate) fn init_app_state<R: tauri::Runtime>(
         Some(home) => home,
         None => app_handle.path().home_dir()?,
     };
-    let config_service = ConfigService::from_home(home.clone());
-    let emit_handle = app_handle.clone();
-    let lsp_service = Arc::new(LspService::new(config_service, move |event| match event {
-        LspEvent::Status(payload) => {
-            #[cfg(any(test, feature = "e2e-bridge"))]
-            if let Some(cb) = &event_forwarder
-                && let Ok(val) = serde_json::to_value(&payload)
-            {
-                cb("lsp-status", val);
-            }
-            let _ = emit_handle.emit("lsp-status", payload);
-        }
-        LspEvent::Diagnostics(payload) => {
-            #[cfg(any(test, feature = "e2e-bridge"))]
-            if let Some(cb) = &event_forwarder
-                && let Ok(val) = serde_json::to_value(&payload)
-            {
-                cb("lsp-diagnostics", val);
-            }
-            let _ = emit_handle.emit("lsp-diagnostics", payload);
-        }
-    }));
+    #[cfg(any(test, feature = "e2e-bridge"))]
+    let lsp_service = Arc::new(LspService::from_app_handle(
+        app_handle,
+        home.clone(),
+        event_forwarder,
+    ));
+    #[cfg(not(any(test, feature = "e2e-bridge")))]
+    let lsp_service = Arc::new(LspService::from_app_handle(app_handle, home.clone()));
     app_handle.manage(WorkspaceState(Arc::new(Mutex::new(
         WorkspaceService::with_lsp(home, lsp_service.clone()),
     ))));
@@ -164,6 +148,16 @@ async fn run_blocking<T: Send + 'static>(
     })
     .await
     .map_err(|e| error("io", e.to_string()))?
+}
+
+async fn run_lsp_blocking<T: Send + 'static>(
+    lsp: State<'_, LspState>,
+    operation: impl FnOnce(&LspService) -> Result<T> + Send + 'static,
+) -> Result<T> {
+    let lsp_service = lsp.0.clone();
+    tauri::async_runtime::spawn_blocking(move || operation(&lsp_service))
+        .await
+        .map_err(|e| error("io", e.to_string()))?
 }
 
 /// Opens the active or specified workspace directory and prepares workspace language servers.
@@ -285,18 +279,11 @@ pub async fn lsp_did_change(
     relative_path: String,
     content: String,
 ) -> Result<()> {
-    let lsp_service = lsp.0.clone();
     let (root, file_path) = run_blocking(state, move |w| {
         Ok((w.get_root()?, w.get_entry_path(&relative_path)?))
     })
     .await?;
-    tauri::async_runtime::spawn_blocking(move || {
-        lsp_service
-            .did_change(&root, &file_path, &content)
-            .map_err(|e| error("lsp", e.to_string()))
-    })
-    .await
-    .map_err(|e| error("io", e.to_string()))?
+    run_lsp_blocking(lsp, move |s| s.did_change(&root, &file_path, &content)).await
 }
 
 /// Requests hover documentation (`textDocument/hover`) at a UTF-16 editor offset.
@@ -307,18 +294,11 @@ pub async fn lsp_hover(
     relative_path: String,
     offset: u32,
 ) -> Result<Option<LspHoverResult>> {
-    let lsp_service = lsp.0.clone();
     let (root, file_path) = run_blocking(state, move |w| {
         Ok((w.get_root()?, w.get_entry_path(&relative_path)?))
     })
     .await?;
-    tauri::async_runtime::spawn_blocking(move || {
-        lsp_service
-            .get_hover(&root, &file_path, offset)
-            .map_err(|e| error("lsp", e.to_string()))
-    })
-    .await
-    .map_err(|e| error("io", e.to_string()))?
+    run_lsp_blocking(lsp, move |s| s.get_hover(&root, &file_path, offset)).await
 }
 
 /// Requests symbol definition locations (`textDocument/definition`) at a UTF-16 editor offset.
@@ -329,18 +309,11 @@ pub async fn lsp_goto_definition(
     relative_path: String,
     offset: u32,
 ) -> Result<Vec<LspLocation>> {
-    let lsp_service = lsp.0.clone();
     let (root, file_path) = run_blocking(state, move |w| {
         Ok((w.get_root()?, w.get_entry_path(&relative_path)?))
     })
     .await?;
-    tauri::async_runtime::spawn_blocking(move || {
-        lsp_service
-            .get_definition(&root, &file_path, offset)
-            .map_err(|e| error("lsp", e.to_string()))
-    })
-    .await
-    .map_err(|e| error("io", e.to_string()))?
+    run_lsp_blocking(lsp, move |s| s.get_definition(&root, &file_path, offset)).await
 }
 
 /// Returns the current workspace LSP server statuses and diagnostics snapshot.
@@ -349,15 +322,8 @@ pub async fn lsp_get_state(
     state: State<'_, WorkspaceState>,
     lsp: State<'_, LspState>,
 ) -> Result<LspWorkspaceSnapshot> {
-    let lsp_service = lsp.0.clone();
     let root = run_blocking(state, move |w| w.get_root()).await?;
-    tauri::async_runtime::spawn_blocking(move || {
-        lsp_service
-            .get_workspace_snapshot(&root)
-            .map_err(|e| error("lsp", e.to_string()))
-    })
-    .await
-    .map_err(|e| error("io", e.to_string()))?
+    run_lsp_blocking(lsp, move |s| s.get_workspace_snapshot(&root)).await
 }
 
 /// Renders a read-only diagnostics buffer for the active workspace, optionally filtered by `language_id`.
@@ -367,15 +333,11 @@ pub async fn lsp_get_diagnostics_buffer(
     lsp: State<'_, LspState>,
     language_id: Option<String>,
 ) -> Result<LspDiagnosticsBuffer> {
-    let lsp_service = lsp.0.clone();
     let root = run_blocking(state, move |w| w.get_root()).await?;
-    tauri::async_runtime::spawn_blocking(move || {
-        lsp_service
-            .get_diagnostics_buffer(&root, language_id.as_deref())
-            .map_err(|e| error("lsp", e.to_string()))
+    run_lsp_blocking(lsp, move |s| {
+        s.get_diagnostics_buffer(&root, language_id.as_deref())
     })
     .await
-    .map_err(|e| error("io", e.to_string()))?
 }
 
 /// Restarts the language server for `language_id` in the active workspace.
@@ -385,13 +347,6 @@ pub async fn lsp_restart(
     lsp: State<'_, LspState>,
     language_id: String,
 ) -> Result<LspServerStatusEvent> {
-    let lsp_service = lsp.0.clone();
     let root = run_blocking(state, move |w| w.get_root()).await?;
-    tauri::async_runtime::spawn_blocking(move || {
-        lsp_service
-            .restart_language_server(&root, &language_id)
-            .map_err(|e| error("lsp", e.to_string()))
-    })
-    .await
-    .map_err(|e| error("io", e.to_string()))?
+    run_lsp_blocking(lsp, move |s| s.restart_language_server(&root, &language_id)).await
 }
