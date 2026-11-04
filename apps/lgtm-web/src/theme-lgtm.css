@@ -19,7 +19,7 @@
   --accent-foreground: #171717;
   --destructive: #dc2626;
   --destructive-foreground: #f8f8fa;
-  --success: #3d8b5e;
+  --success: #1f8a4c;
   --success-foreground: #f8f8fa;
   --danger: #dc2626;
   --danger-foreground: #f8f8fa;
@@ -31,7 +31,7 @@
   --input: #dedee3;
   --ring: #0068d6;
   --chart-1: #0068d6;
-  --chart-2: #3d8b5e;
+  --chart-2: #1f8a4c;
   --chart-3: #d97706;
   --chart-4: #7c3aed;
   --chart-5: #c81e68;
@@ -58,7 +58,7 @@
   --cm-match-paren: #b45309;
   --cm-syntax-keyword: #7c3aed;
   --cm-syntax-operator: #171717;
-  --cm-syntax-string: #3d8b5e;
+  --cm-syntax-string: #1f8a4c;
   --cm-syntax-number: #b45309;
   --cm-syntax-function: #0068d6;
   --cm-syntax-type: #171717;
@@ -70,12 +70,12 @@
   --cm-syntax-heading: #0068d6;
   --cm-syntax-strong: #b45309;
   --cm-syntax-italic: #c81e68;
-  --cm-syntax-code: #3d8b5e;
+  --cm-syntax-code: #1f8a4c;
   --cm-syntax-code-bg: #e8e8ec;
   --cm-syntax-quote: #666666;
   --cm-syntax-link: #0068d6;
   --cm-syntax-meta: #666666;
-  --cm-syntax-inserted: #3d8b5e;
+  --cm-syntax-inserted: #1f8a4c;
   --cm-syntax-deleted: #dc2626;
   --cm-syntax-changed: #b45309;
 }
@@ -99,7 +99,7 @@
   --accent-foreground: #ededed;
   --destructive: #f32e40;
   --destructive-foreground: #101010;
-  --success: #74d99f;
+  --success: #2ebd6b;
   --success-foreground: #101010;
   --danger: #f32e40;
   --danger-foreground: #101010;
@@ -111,7 +111,7 @@
   --input: oklch(0.32 0 0);
   --ring: #52a8ff;
   --chart-1: #52a8ff;
-  --chart-2: #74d99f;
+  --chart-2: #2ebd6b;
   --chart-3: #ffae00;
   --chart-4: #8b5cf6;
   --chart-5: #f12b82;
@@ -132,7 +132,7 @@
   --cm-match-paren: #ffae00;
   --cm-syntax-keyword: #8b5cf6;
   --cm-syntax-operator: #ededed;
-  --cm-syntax-string: #74d99f;
+  --cm-syntax-string: #2ebd6b;
   --cm-syntax-number: #f59e0b;
   --cm-syntax-function: #52a8ff;
   --cm-syntax-type: #ededed;
@@ -144,12 +144,12 @@
   --cm-syntax-heading: #52a8ff;
   --cm-syntax-strong: #ffae00;
   --cm-syntax-italic: #f12b82;
-  --cm-syntax-code: #74d99f;
+  --cm-syntax-code: #2ebd6b;
   --cm-syntax-code-bg: #1a1a1a;
   --cm-syntax-quote: #a1a1a1;
   --cm-syntax-link: #52a8ff;
   --cm-syntax-meta: #a1a1a1;
-  --cm-syntax-inserted: #74d99f;
+  --cm-syntax-inserted: #2ebd6b;
   --cm-syntax-deleted: #f32e40;
   --cm-syntax-changed: #ffae00;
 }

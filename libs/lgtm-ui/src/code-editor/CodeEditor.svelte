@@ -30,7 +30,7 @@
     },
     {
       tag: [tags.string, tags.special(tags.string), tags.regexp, tags.character],
-      color: 'var(--cm-syntax-string, #74d99f)',
+      color: 'var(--cm-syntax-string, #2ebd6b)',
     },
     {
       tag: [
@@ -104,7 +104,7 @@
     },
     {
       tag: tags.monospace,
-      color: 'var(--cm-syntax-code, #74d99f)',
+      color: 'var(--cm-syntax-code, #2ebd6b)',
       backgroundColor: 'var(--cm-syntax-code-bg, #1a1a1a)',
       borderRadius: '3px',
     },
@@ -123,7 +123,7 @@
       tag: [tags.processingInstruction, tags.contentSeparator, tags.meta],
       color: 'var(--cm-syntax-meta, #a1a1a1)',
     },
-    { tag: tags.inserted, color: 'var(--cm-syntax-inserted, #74d99f)' },
+    { tag: tags.inserted, color: 'var(--cm-syntax-inserted, #2ebd6b)' },
     { tag: tags.deleted, color: 'var(--cm-syntax-deleted, #f32e40)' },
     { tag: tags.changed, color: 'var(--cm-syntax-changed, #ffae00)' },
   ])
