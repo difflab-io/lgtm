@@ -461,6 +461,8 @@ export async function renameEntry(page: Page, path: string, name: string) {
   await input.fill(name)
   await input.press('Enter')
   await expect(input).toHaveCount(0)
+  const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/') + 1) : ''
+  await expect(entry(page, `${parent}${name}`)).toBeVisible()
 }
 
 export async function createFolder(page: Page, name: string) {

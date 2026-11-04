@@ -303,6 +303,7 @@ impl WorkspaceService {
         {
             return Err(error("unsupported", "Linked entries cannot be deleted."));
         }
+        #[cfg(any(test, feature = "e2e-bridge"))]
         if std::env::var_os("LGTM_E2E_PERMANENT_DELETE").is_some() {
             if path.is_dir() {
                 return fs::remove_dir_all(path).map_err(Into::into);

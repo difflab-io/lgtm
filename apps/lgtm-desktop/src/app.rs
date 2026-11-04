@@ -1,4 +1,5 @@
 //! Tauri application state, lifecycle, and IPC command handlers.
+#[cfg(any(test, feature = "e2e-bridge"))]
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::sync::{
@@ -10,7 +11,9 @@ use lgtm_config::ConfigService;
 use lgtm_lsp::{
     LspDiagnosticsBuffer, LspEvent, LspHoverResult, LspLocation, LspService, LspWorkspaceSnapshot,
 };
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(any(test, feature = "e2e-bridge"))]
+use serde_json::json;
 use tauri::{Emitter, Manager, State};
 
 use crate::{
@@ -128,6 +131,7 @@ fn app_context<R: tauri::Runtime>() -> tauri::Context<R> {
 }
 
 /// Runs a headless stdio IPC bridge backed by the real Tauri command router and services.
+#[cfg(any(test, feature = "e2e-bridge"))]
 pub fn run_ipc_bridge(home: PathBuf) {
     let stdout_lock: Arc<Mutex<std::io::Stdout>> = Arc::new(Mutex::new(std::io::stdout()));
     let event_stdout = stdout_lock.clone();
@@ -424,9 +428,11 @@ pub fn workspace_finish_quit<R: tauri::Runtime>(
     lsp: State<'_, LspState>,
 ) {
     lsp.0.shutdown_all();
-    if std::env::var_os("LGTM_IPC_BRIDGE").is_none() {
-        app.exit(0);
+    #[cfg(any(test, feature = "e2e-bridge"))]
+    if std::env::var_os("LGTM_IPC_BRIDGE").is_some() {
+        return;
     }
+    app.exit(0);
 }
 
 #[tauri::command]
