@@ -17,7 +17,7 @@ fi
 
 [tasks.build-bridge]
 description = "Build the lgtm-desktop binary for IPC bridge execution"
-depends = ["//:install", "//apps/lgtm-web:build"]
+depends = ["//:install", "//apps/lgtm-desktop:install", "//apps/lgtm-web:build"]
 dir = "{{config_root}}/../.."
 run = "cargo build --manifest-path apps/lgtm-desktop/Cargo.toml --bin lgtm-desktop"
 
