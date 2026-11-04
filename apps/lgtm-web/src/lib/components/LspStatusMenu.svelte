@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Menu, type MenuItem, type MenuItemIndicatorTone } from 'lgtm-ui'
-  import { Radio } from 'lucide-svelte'
+  import { CircleX, Radio, TriangleAlert } from 'lucide-svelte'
+  import type { LspServerStatusEvent } from '../clients/workspaceClient'
   import type { WorkspaceService } from '../services/workspaceService.svelte'
 
   // Props ---------------------------------------------------------------------
@@ -10,8 +11,12 @@
   let { workspace }: LspStatusMenuProps = $props()
 
   // Derived -------------------------------------------------------------------
+  const activeServer = $derived(workspace.activeLspServer)
+  const activeErrorCount = $derived(activeServer?.errorCount ?? 0)
+  const activeWarningCount = $derived(activeServer?.warningCount ?? 0)
+
   const triggerSummary = $derived.by(() => {
-    const server = workspace.activeLspServer
+    const server = activeServer
     if (!server) {
       return workspace.activeLanguageId ? `LSP: ${workspace.activeLanguageId}` : 'LSP: idle'
     }
@@ -27,9 +32,17 @@
   })
 
   const triggerTone = $derived.by((): MenuItemIndicatorTone => {
-    const server = workspace.activeLspServer
+    const server = activeServer
     if (!server) return 'inactive'
     return workspace.lsp.getServerIndicator(server, workspace.activeLanguageId).tone
+  })
+
+  const serversByLanguageId = $derived.by((): Record<string, LspServerStatusEvent> => {
+    const map: Record<string, LspServerStatusEvent> = {}
+    for (const server of workspace.allLspServers) {
+      map[server.languageId] = server
+    }
+    return map
   })
 
   const menuItems = $derived.by((): MenuItem[] => {
@@ -58,26 +71,12 @@
         items.push({
           value: `server:${server.languageId}`,
           label: server.languageId,
-          detail: `${server.status} · ${server.errorCount}E ${server.warningCount}W`,
           indicator: indicator.tone,
           indicatorLabel: indicator.label,
+          detailRender: serverCountsDetail,
           items: subItems,
         })
       }
-    }
-
-    for (const [idx, diag] of workspace.lsp.diagnosticEntries.entries()) {
-      items.push({
-        value: `jump:${diag.path}:${diag.from}:${idx}`,
-        label: `${diag.path}:${diag.line + 1}:${diag.character + 1} [${diag.severity.toUpperCase()}] ${diag.message}`,
-        indicator:
-          diag.severity === 'error'
-            ? 'error'
-            : diag.severity === 'warning'
-              ? 'warning'
-              : 'active-project',
-        separatorBefore: idx === 0,
-      })
     }
 
     items.push({
@@ -104,19 +103,33 @@
       void workspace.restartLanguageServer(languageId)
       return
     }
-    if (value.startsWith('jump:')) {
-      const parts = value.split(':')
-      const offset = Number(parts.at(-2) ?? 0)
-      const path = parts.slice(1, -2).join(':')
-      if (path) {
-        void workspace.jumpToLocation(path, offset)
-      }
-    }
   }
 </script>
 
+{#snippet serverCountsDetail(item: MenuItem)}
+  {@const server = serversByLanguageId[item.label]}
+  {#if server}
+    {#if server.status !== 'ready'}
+      <span>{server.status}</span>
+    {/if}
+    {#if server.errorCount > 0}
+      <span class="inline-flex items-center gap-0.5 text-error" data-slot="lsp-server-errors">
+        <CircleX size={11} strokeWidth={1.75} />
+        <span>{server.errorCount}</span>
+      </span>
+    {/if}
+    {#if server.warningCount > 0}
+      <span class="inline-flex items-center gap-0.5 text-warn" data-slot="lsp-server-warnings">
+        <TriangleAlert size={11} strokeWidth={1.75} />
+        <span>{server.warningCount}</span>
+      </span>
+    {/if}
+  {/if}
+{/snippet}
+
 <Menu
   items={menuItems}
+  placement="top-start"
   ariaLabel="LSP servers and diagnostics"
   triggerAriaLabel="LSP status"
   triggerTitle={triggerSummary}
@@ -138,6 +151,26 @@
       ]}
       data-lsp-tone={triggerTone}
     ></span>
+    {#if activeErrorCount > 0}
+      <span
+        class="inline-flex items-center gap-0.5 text-error"
+        data-slot="lsp-error-count"
+        aria-hidden="true"
+      >
+        <CircleX size={11} strokeWidth={1.75} />
+        <span>{activeErrorCount}</span>
+      </span>
+    {/if}
+    {#if activeWarningCount > 0}
+      <span
+        class="inline-flex items-center gap-0.5 text-warn"
+        data-slot="lsp-warning-count"
+        aria-hidden="true"
+      >
+        <TriangleAlert size={11} strokeWidth={1.75} />
+        <span>{activeWarningCount}</span>
+      </span>
+    {/if}
     <span class="sr-only">{triggerSummary}</span>
   {/snippet}
 </Menu>

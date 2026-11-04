@@ -96,6 +96,12 @@ export class WorkspaceService {
     return this.selected?.path
   }
 
+  get breadcrumbs(): string[] {
+    if (this.activeTab?.kind === 'diagnostics') return [this.activeTab.title]
+    if (!this.selected) return []
+    return this.selected.path.split(/[\\/]/).filter(Boolean)
+  }
+
   get activeDiagnostics(): LspDiagnostic[] {
     return this.lsp.getDiagnosticsForPath(this.selected?.path)
   }

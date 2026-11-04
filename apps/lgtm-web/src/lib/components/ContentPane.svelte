@@ -2,7 +2,7 @@
   import { tick } from 'svelte'
   import { Button } from '@cloudvoyant/helical-svelte'
   import { CodeEditor, Tabs } from 'lgtm-ui'
-  import { FileText } from 'lucide-svelte'
+  import { ChevronRight, FileText } from 'lucide-svelte'
   import type { WorkspaceService } from '../services/workspaceService.svelte'
   import LspStatusMenu from './LspStatusMenu.svelte'
 
@@ -101,12 +101,33 @@
     role="status"
     aria-live="polite"
   >
-    <span class="document-path truncate" title={workspace.selectedPath}
-      >{workspace.selectedTitle}</span
-    >
-    <div class="flex items-center gap-3">
+    <div class="flex min-w-0 items-center gap-2.5">
       <LspStatusMenu {workspace} />
-      <span class={workspace.openingError ? 'text-warn' : ''}>{workspace.status}</span>
+      <nav
+        aria-label="Breadcrumb"
+        class="document-path flex min-w-0 items-center gap-1 truncate"
+        title={workspace.selectedPath}
+      >
+        {#if workspace.breadcrumbs.length > 0}
+          {#each workspace.breadcrumbs as segment, idx (idx)}
+            {#if idx > 0}
+              <ChevronRight size={11} strokeWidth={1.5} class="shrink-0 opacity-60" />
+            {/if}
+            <span
+              class={idx === workspace.breadcrumbs.length - 1
+                ? 'truncate text-foreground'
+                : 'truncate'}
+            >
+              {segment}
+            </span>
+          {/each}
+        {:else}
+          <span class="truncate">No file selected</span>
+        {/if}
+      </nav>
     </div>
+    <span class={workspace.openingError ? 'shrink-0 text-warn' : 'shrink-0'}
+      >{workspace.status}</span
+    >
   </footer>
 </main>

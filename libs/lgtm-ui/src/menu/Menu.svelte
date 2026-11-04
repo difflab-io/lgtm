@@ -34,6 +34,9 @@
   // Derived -------------------------------------------------------------------
   const triggerClasses = $derived(cn(menuTriggerBase, triggerClass))
   const contentClasses = $derived(cn(menuContentBase, className))
+  const submenuPlacement = $derived(
+    placement.endsWith('start') ? ('right-start' as const) : ('left-start' as const),
+  )
 </script>
 
 {#snippet renderItemBody(item: MenuItem, hasSubmenu: boolean)}
@@ -50,13 +53,21 @@
       {/if}
       <span class={menuItemLabelBase}>{item.label}</span>
     </span>
-    {#if item.detail}
+    {#if item.detailRender}
+      <span class={cn(menuItemDetailBase, 'inline-flex items-center gap-1.5')}>
+        {@render item.detailRender(item)}
+      </span>
+    {:else if item.detail}
       <span class={menuItemDetailBase}>{item.detail}</span>
     {:else if item.shortcut}
       <span class={menuItemDetailBase}>{item.shortcut}</span>
     {/if}
     {#if hasSubmenu}
-      <ChevronRight size={12} strokeWidth={1.75} class="shrink-0 text-muted-foreground" />
+      <ChevronRight
+        size={12}
+        strokeWidth={1.75}
+        class="pointer-events-none shrink-0 text-muted-foreground"
+      />
     {/if}
   {/if}
 {/snippet}
@@ -87,12 +98,12 @@
               {/if}
               {#if item.items && item.items.length > 0}
                 <Menu.Root
-                  positioning={{ placement: 'left-start' }}
+                  positioning={{ placement: submenuPlacement }}
                   onSelect={({ value }) => onselect(value)}
                 >
                   <Menu.TriggerItem
                     class={menuItemVariants({ size, destructive: item.destructive })}
-                    data-value={item.value}
+                    data-item-value={item.value}
                   >
                     {@render renderItemBody(item, true)}
                   </Menu.TriggerItem>

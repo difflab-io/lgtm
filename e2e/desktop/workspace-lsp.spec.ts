@@ -166,8 +166,10 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
         await lspButton.click()
         const menu = page.getByRole('menu', { name: 'LSP servers and diagnostics' })
         await expect(menu).toBeVisible()
-        await expect(menu).toContainText('cannot find value `BROKEN` in this scope')
-        await menu.locator('[data-value="server:rust"]').hover()
+        const rustTriggerItem = menu.locator('[data-item-value="server:rust"]')
+        await expect(rustTriggerItem.locator('[data-slot="lsp-server-errors"]')).toHaveText('1')
+        await rustTriggerItem.hover()
+        await expect(rustTriggerItem).toHaveAttribute('data-highlighted', '')
         const rustSubmenu = page.getByRole('menu', { name: 'rust actions' })
         await expect(rustSubmenu).toBeVisible()
         await rustSubmenu
@@ -184,19 +186,6 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
           'lib.rs:6:5 [ERROR] [E0425] (rustc) cannot find value `BROKEN` in this scope',
         )
         await expect(page.locator('.cm-content')).toHaveAttribute('contenteditable', 'false')
-
-        // Act
-        await lspButton.click()
-        await page
-          .getByRole('menu', { name: 'LSP servers and diagnostics' })
-          .getByRole('menuitem', { name: /lib\.rs:6:5/ })
-          .click()
-
-        // Assert
-        await expect(tablist.getByRole('tab', { name: 'lib.rs', exact: true })).toHaveAttribute(
-          'aria-selected',
-          'true',
-        )
       },
     )
 

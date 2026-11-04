@@ -14,6 +14,7 @@ export interface MenuItem {
   destructive?: boolean
   separatorBefore?: boolean
   render?: Snippet<[MenuItem]>
+  detailRender?: Snippet<[MenuItem]>
   items?: MenuItem[]
 }
 

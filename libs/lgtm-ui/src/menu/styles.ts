@@ -10,7 +10,7 @@ export const menuContentBase =
   'z-50 min-w-52 max-w-80 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none'
 
 export const menuItemVariants = cva(
-  'flex cursor-default select-none items-center justify-between gap-3 rounded-sm outline-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+  'flex w-full cursor-default select-none items-center justify-between gap-3 rounded-sm outline-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
   {
     variants: {
       size: {
@@ -40,7 +40,8 @@ export const menuIndicatorVariants = cva('inline-block size-2 shrink-0 rounded-f
 })
 export type MenuIndicatorVariants = VariantProps<typeof menuIndicatorVariants>
 
-export const menuItemMainBase = 'flex min-w-0 flex-1 items-center gap-2'
+export const menuItemMainBase = 'pointer-events-none flex min-w-0 flex-1 items-center gap-2'
 export const menuItemLabelBase = 'truncate font-medium'
-export const menuItemDetailBase = 'ml-auto shrink-0 text-[10px] text-muted-foreground'
+export const menuItemDetailBase =
+  'pointer-events-none ml-auto shrink-0 text-[10px] text-muted-foreground'
 export const menuSeparatorBase = 'my-1 h-px bg-border'
