@@ -16,11 +16,9 @@
         "title": "LGTM",
         "width": 1120,
         "height": 720,
-        "theme": "Light",
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "trafficLightPosition": { "x": 12, "y": 11 },
-        "backgroundColor": "#ffffff",
         "minWidth": 480,
         "minHeight": 400
       }

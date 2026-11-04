@@ -1,6 +1,6 @@
 import { test as base, expect, type Page } from '@playwright/test'
 import { spawn } from 'node:child_process'
-import { mkdtemp, mkdir, writeFile, rm, stat } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -14,6 +14,9 @@ export interface Workspace {
   failLists: boolean
   destroyed: boolean
   quit: boolean
+  configuredWindowTheme: 'light' | 'dark' | null
+  windowTheme: 'light' | 'dark' | null
+  setThemeCalls: Array<'light' | 'dark' | null>
   emit: (event: string, payload?: unknown) => Promise<void>
   createExternalDir: () => Promise<string>
 }
@@ -288,6 +291,17 @@ export const test = base.extend<{
         'utf8',
       )
 
+      const tauriConfRaw = await readFile(
+        join(repoRoot, 'apps/lgtm-desktop/tauri.conf.json'),
+        'utf8',
+      )
+      const tauriConf = JSON.parse(tauriConfRaw) as {
+        app?: { windows?: Array<{ theme?: string }> }
+      }
+      const configuredTheme = tauriConf.app?.windows?.[0]?.theme?.toLowerCase()
+      const initialWindowTheme: 'light' | 'dark' | null =
+        configuredTheme === 'light' || configuredTheme === 'dark' ? configuredTheme : null
+
       const workspace: Workspace = {
         root: initialRoot,
         pickedFolder: null,
@@ -295,6 +309,9 @@ export const test = base.extend<{
         failWrites: false,
         destroyed: false,
         quit: false,
+        configuredWindowTheme: initialWindowTheme,
+        windowTheme: initialWindowTheme,
+        setThemeCalls: [],
         emit: (event, payload) => emit(page, event, payload),
         createExternalDir: async () => {
           const dir = await mkdtemp(join(tmpdir(), 'lgtm-external-repo-'))
@@ -401,6 +418,25 @@ export const test = base.extend<{
               workspace.destroyed = true
               return null
             }
+            if (command === 'plugin:window|set_theme') {
+              const rawTheme = args as {
+                theme?: 'light' | 'dark' | null
+                value?: 'light' | 'dark' | null
+              }
+              const nextTheme = rawTheme.theme ?? rawTheme.value ?? null
+              workspace.windowTheme = nextTheme
+              workspace.setThemeCalls.push(nextTheme)
+              return null
+            }
+            if (command === 'plugin:window|theme') {
+              if (workspace.windowTheme) {
+                return workspace.windowTheme
+              }
+              const prefersDark = await page.evaluate(
+                () => window.matchMedia('(prefers-color-scheme: dark)').matches,
+              )
+              return prefersDark ? 'dark' : 'light'
+            }
 
             const result = await invokeBridge(command, args)
             if (
@@ -418,6 +454,9 @@ export const test = base.extend<{
             return result
           },
         )
+        if (initialWindowTheme) {
+          await page.emulateMedia({ colorScheme: initialWindowTheme })
+        }
         await page.goto('/e2e/desktop/fixture.html')
         await expect(page.getByRole('button', { name: 'New file', exact: true })).toBeEnabled()
         await expect(page.getByText('No file selected')).toBeVisible()

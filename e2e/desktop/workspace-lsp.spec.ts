@@ -262,45 +262,50 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
   })
 
   test.describe('When toggling the color theme from the titlebar', () => {
-    test(
-      'should default to system mode and cycle through system, light, and dark states',
-      { tag: '@smoke' },
-      async ({ page }) => {
-        // Arrange
-        await page.emulateMedia({ colorScheme: 'dark' })
-        await entry(page, 'same.md').click()
-        const systemButton = page.getByRole('button', { name: 'Theme: system', exact: true })
+    test.use({ colorScheme: 'dark' })
 
+    test(
+      'should launch in dark mode when the OS is set to dark and cycle through system, light, and dark states',
+      { tag: '@smoke' },
+      async ({ page, workspace }) => {
+        // Arrange
+        const systemButton = page.getByRole('button', { name: 'Theme: system', exact: true })
         const darkSurface = 'rgb(16, 16, 16)'
 
-        // Assert: defaults to system mode with Vercel theme and dark CodeMirror number rail
+        // Assert: launches directly in system dark mode without tauri.conf.json overriding OS theme
+        expect(workspace.configuredWindowTheme).toBeNull()
         await expect(systemButton).toBeVisible()
         await expect(systemButton).toHaveAttribute('data-theme', 'system')
         await expect(page.locator('html')).toHaveClass(/theme-vercel/)
         await expect(page.locator('html')).toHaveClass(/dark/)
         await expect(page.locator('.titlebar')).toHaveCSS('background-color', darkSurface)
         await expect(page.locator('.workspace-sidebar')).toHaveCSS('background-color', darkSurface)
+        await expect.poll(() => workspace.setThemeCalls).toEqual([null])
+
+        await entry(page, 'same.md').click()
         await expect(page.locator('.cm-gutters')).toHaveCSS('background-color', darkSurface)
 
         // Act: cycle system -> light
         await systemButton.click()
 
-        // Assert: light mode active
+        // Assert: light mode active and synced to Tauri window
         const lightButton = page.getByRole('button', { name: 'Theme: light', exact: true })
         await expect(lightButton).toBeVisible()
         await expect(lightButton).toHaveAttribute('data-theme', 'light')
         await expect(page.locator('html')).not.toHaveClass(/dark/)
         await expect(page.locator('.cm-gutters')).not.toHaveCSS('background-color', darkSurface)
+        await expect.poll(() => workspace.setThemeCalls).toEqual([null, 'light'])
 
         // Act: cycle light -> dark
         await lightButton.click()
 
-        // Assert: dark mode active
+        // Assert: dark mode active and synced to Tauri window
         const darkButton = page.getByRole('button', { name: 'Theme: dark', exact: true })
         await expect(darkButton).toBeVisible()
         await expect(darkButton).toHaveAttribute('data-theme', 'dark')
         await expect(page.locator('html')).toHaveClass(/dark/)
         await expect(page.locator('.cm-gutters')).toHaveCSS('background-color', darkSurface)
+        await expect.poll(() => workspace.setThemeCalls).toEqual([null, 'light', 'dark'])
 
         // Act: cycle dark -> system (with OS set to light)
         await page.emulateMedia({ colorScheme: 'light' })
@@ -310,6 +315,7 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
         await expect(systemButton).toBeVisible()
         await expect(systemButton).toHaveAttribute('data-theme', 'system')
         await expect(page.locator('html')).not.toHaveClass(/dark/)
+        await expect.poll(() => workspace.setThemeCalls).toEqual([null, 'light', 'dark', null])
       },
     )
   })
