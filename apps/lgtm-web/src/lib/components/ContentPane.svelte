@@ -44,11 +44,6 @@
       onclose={(tabId) => workspace.closeTab(tabId)}
     />
   {/if}
-  {#if workspace.selected || workspace.activeTab}
-    <div class="document-heading">
-      <span class="document-path" title={workspace.selectedPath}>{workspace.selectedTitle}</span>
-    </div>
-  {/if}
   {#if workspace.fileLoading}
     <div class="empty-pane" role="status">Opening file…</div>
   {:else if workspace.openingError}
@@ -86,7 +81,7 @@
     </div>
   {/if}
   <footer class="document-status" role="status" aria-live="polite">
-    <span title={workspace.selectedPath}>{workspace.selectedTitle}</span>
+    <span class="document-path" title={workspace.selectedPath}>{workspace.selectedTitle}</span>
     <div class="document-status-right">
       <LspStatusMenu {workspace} />
       <span class={{ error: Boolean(workspace.openingError) }}>{workspace.status}</span>

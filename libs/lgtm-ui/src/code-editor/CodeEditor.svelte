@@ -204,6 +204,7 @@
     value,
     filename,
     readonly = false,
+    lineWrapping = true,
     size = 'sm',
     label = 'Code editor',
     class: className = '',
@@ -218,6 +219,7 @@
   let host: HTMLDivElement | undefined = $state()
   let view: EditorView | undefined = $state()
   const readOnlyCompartment = new Compartment()
+  const lineWrappingCompartment = new Compartment()
   const languageCompartment = new Compartment()
 
   // Derived -------------------------------------------------------------------
@@ -259,6 +261,7 @@
     if (!host) return
     const initialDoc = untrack(() => value)
     const initialReadOnly = untrack(() => readonly)
+    const initialLineWrapping = untrack(() => lineWrapping)
     const state = EditorState.create({
       doc: initialDoc,
       extensions: [
@@ -279,6 +282,7 @@
         }),
         lintGutter(),
         languageCompartment.of([]),
+        lineWrappingCompartment.of(initialLineWrapping ? [EditorView.lineWrapping] : []),
         readOnlyCompartment.of([
           EditorState.readOnly.of(initialReadOnly),
           EditorView.editable.of(!initialReadOnly),
@@ -357,6 +361,17 @@
           EditorState.readOnly.of(nextReadOnly),
           EditorView.editable.of(!nextReadOnly),
         ]),
+      })
+    }
+  })
+
+  $effect(() => {
+    const nextLineWrapping = lineWrapping
+    if (view) {
+      view.dispatch({
+        effects: lineWrappingCompartment.reconfigure(
+          nextLineWrapping ? [EditorView.lineWrapping] : [],
+        ),
       })
     }
   })

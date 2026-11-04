@@ -157,8 +157,9 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@file-tree'] }
 
         // Assert
         await expect(page.locator('.cm-content')).toContainText('# Markdown')
+        await expect(page.locator('.cm-content.cm-lineWrapping')).toBeVisible()
         await expect(page.locator('.cm-content .cm-line span[class]').first()).toBeVisible()
-        await expect(page.locator('.document-heading .format-label')).toHaveCount(0)
+        await expect(page.locator('.document-heading')).toHaveCount(0)
       },
     )
   })

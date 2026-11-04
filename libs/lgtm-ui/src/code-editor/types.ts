@@ -21,6 +21,7 @@ export interface CodeEditorProps {
   value: string
   filename?: string
   readonly?: boolean
+  lineWrapping?: boolean
   size?: CodeEditorRootVariants['size']
   label?: string
   class?: string
