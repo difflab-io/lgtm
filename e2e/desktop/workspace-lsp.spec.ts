@@ -268,12 +268,19 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
       async ({ page }) => {
         // Arrange
         await page.emulateMedia({ colorScheme: 'dark' })
+        await entry(page, 'same.md').click()
         const systemButton = page.getByRole('button', { name: 'Theme: system', exact: true })
 
-        // Assert: defaults to system mode and follows OS dark preference
+        const darkSurface = 'rgb(16, 16, 16)'
+
+        // Assert: defaults to system mode with Vercel theme and dark CodeMirror number rail
         await expect(systemButton).toBeVisible()
         await expect(systemButton).toHaveAttribute('data-theme', 'system')
+        await expect(page.locator('html')).toHaveClass(/theme-vercel/)
         await expect(page.locator('html')).toHaveClass(/dark/)
+        await expect(page.locator('.titlebar')).toHaveCSS('background-color', darkSurface)
+        await expect(page.locator('.workspace-sidebar')).toHaveCSS('background-color', darkSurface)
+        await expect(page.locator('.cm-gutters')).toHaveCSS('background-color', darkSurface)
 
         // Act: cycle system -> light
         await systemButton.click()
@@ -283,6 +290,7 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
         await expect(lightButton).toBeVisible()
         await expect(lightButton).toHaveAttribute('data-theme', 'light')
         await expect(page.locator('html')).not.toHaveClass(/dark/)
+        await expect(page.locator('.cm-gutters')).not.toHaveCSS('background-color', darkSurface)
 
         // Act: cycle light -> dark
         await lightButton.click()
@@ -292,6 +300,7 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
         await expect(darkButton).toBeVisible()
         await expect(darkButton).toHaveAttribute('data-theme', 'dark')
         await expect(page.locator('html')).toHaveClass(/dark/)
+        await expect(page.locator('.cm-gutters')).toHaveCSS('background-color', darkSurface)
 
         // Act: cycle dark -> system (with OS set to light)
         await page.emulateMedia({ colorScheme: 'light' })

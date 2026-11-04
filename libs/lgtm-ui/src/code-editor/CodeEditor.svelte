@@ -82,18 +82,36 @@
       backgroundColor: 'var(--color-background, #ffffff)',
       color: 'var(--color-foreground, #0f172a)',
     },
-    '.cm-content': {
+    '&.cm-focused': {
+      outline: 'none',
+    },
+    '.cm-content, &.cm-editor .cm-content': {
       caretColor: 'var(--color-foreground, #0f172a)',
     },
-    '.cm-cursor, .cm-dropCursor': {
+    '.cm-cursor, .cm-dropCursor, &.cm-editor .cm-cursor, &.cm-editor .cm-dropCursor': {
       borderLeftColor: 'var(--color-foreground, #0f172a)',
     },
-    '.cm-activeLine': {
+    '.cm-gutters, &.cm-editor .cm-gutters': {
+      backgroundColor: 'var(--color-background, #ffffff)',
+      color: 'var(--color-muted-foreground, #64748b)',
+      borderColor: 'var(--color-border, #e2e8f0)',
+    },
+    '.cm-activeLine, &.cm-editor .cm-activeLine': {
       backgroundColor: 'color-mix(in oklab, var(--color-muted, #f1f5f9) 55%, transparent)',
     },
-    '.cm-activeLineGutter': {
+    '.cm-activeLineGutter, &.cm-editor .cm-activeLineGutter': {
       backgroundColor: 'color-mix(in oklab, var(--color-muted, #f1f5f9) 75%, transparent)',
       color: 'var(--color-foreground, #0f172a)',
+    },
+    '.cm-foldPlaceholder, &.cm-editor .cm-foldPlaceholder': {
+      backgroundColor: 'var(--color-muted, #f1f5f9)',
+      borderColor: 'var(--color-border, #e2e8f0)',
+      color: 'var(--color-muted-foreground, #64748b)',
+    },
+    '.cm-panels, &.cm-editor .cm-panels': {
+      backgroundColor: 'var(--color-sidebar, #f8fafc)',
+      color: 'var(--color-foreground, #0f172a)',
+      borderColor: 'var(--color-border, #e2e8f0)',
     },
     '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection':
       {

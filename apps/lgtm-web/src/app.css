@@ -1,5 +1,6 @@
 @import 'tailwindcss';
 @import '@cloudvoyant/helical-ui/theme.css';
+@import '@cloudvoyant/helical-ui/themes.css';
 @import '@cloudvoyant/helical-ui/components.css';
 @source '../../../libs/lgtm-ui/src';
 @source '../../../node_modules/@cloudvoyant/helical-svelte/dist';
@@ -7,6 +8,7 @@
 
 :root {
   font-family:
+    var(--font-sans),
     Inter,
     ui-sans-serif,
     -apple-system,
@@ -16,8 +18,6 @@
   font-synthesis: none;
   color: var(--foreground);
   background: var(--background);
-  --primary: #475569;
-  --primary-foreground: #fff;
   --base-font-size: 16px;
   --cm-syntax-keyword: #7c3aed;
   --cm-syntax-string: #047857;
@@ -25,33 +25,64 @@
   --cm-syntax-type: #0369a1;
   --cm-syntax-function: #1d4ed8;
   --cm-syntax-property: #0f766e;
-  --cm-syntax-variable: #0f172a;
-  --cm-syntax-comment: #64748b;
+  --cm-syntax-variable: var(--foreground);
+  --cm-syntax-comment: var(--muted-foreground);
   --cm-syntax-heading: #1d4ed8;
   --cm-syntax-code: #be185d;
-  --cm-syntax-code-bg: rgba(15, 23, 42, 0.06);
-  --cm-syntax-quote: #475569;
+  --cm-syntax-code-bg: color-mix(in oklab, var(--muted) 80%, transparent);
+  --cm-syntax-quote: var(--muted-foreground);
   --cm-syntax-link: #0284c7;
-  --cm-syntax-meta: #64748b;
+  --cm-syntax-meta: var(--muted-foreground);
 }
 
-.dark {
-  --primary: #e2e8f0;
-  --primary-foreground: #0f172a;
+.dark,
+.theme-vercel.dark {
+  --background: #101010;
+  --foreground: #ededed;
+  --card: oklch(0.14 0 0);
+  --card-foreground: #ededed;
+  --popover: oklch(0.18 0 0);
+  --popover-foreground: #ededed;
+  --primary: #8b5cf6;
+  --primary-foreground: #ffffff;
+  --secondary: oklch(0.25 0 0);
+  --secondary-foreground: #ededed;
+  --muted: oklch(0.23 0 0);
+  --muted-foreground: oklch(0.72 0 0);
+  --accent: #2e1065;
+  --accent-foreground: #ede9fe;
+  --destructive: oklch(0.69 0.2 23.91);
+  --destructive-foreground: oklch(0 0 0);
+  --border: oklch(0.26 0 0);
+  --input: oklch(0.32 0 0);
+  --ring: #8b5cf6;
+  --chart-1: oklch(0.81 0.17 75.35);
+  --chart-2: oklch(0.58 0.21 260.84);
+  --chart-3: oklch(0.56 0 0);
+  --chart-4: oklch(0.44 0 0);
+  --chart-5: oklch(0.92 0 0);
+  --sidebar: #101010;
+  --sidebar-foreground: #ededed;
+  --sidebar-primary: #8b5cf6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #2e1065;
+  --sidebar-accent-foreground: #ede9fe;
+  --sidebar-border: oklch(0.26 0 0);
+  --sidebar-ring: #8b5cf6;
   --cm-syntax-keyword: #c084fc;
   --cm-syntax-string: #34d399;
   --cm-syntax-number: #fbbf24;
   --cm-syntax-type: #38bdf8;
   --cm-syntax-function: #60a5fa;
   --cm-syntax-property: #2dd4bf;
-  --cm-syntax-variable: #e2e8f0;
-  --cm-syntax-comment: #94a3b8;
+  --cm-syntax-variable: var(--foreground);
+  --cm-syntax-comment: var(--muted-foreground);
   --cm-syntax-heading: #60a5fa;
   --cm-syntax-code: #f472b6;
-  --cm-syntax-code-bg: rgba(248, 250, 252, 0.08);
-  --cm-syntax-quote: #94a3b8;
+  --cm-syntax-code-bg: color-mix(in oklab, var(--muted) 80%, transparent);
+  --cm-syntax-quote: var(--muted-foreground);
   --cm-syntax-link: #38bdf8;
-  --cm-syntax-meta: #94a3b8;
+  --cm-syntax-meta: var(--muted-foreground);
 }
 
 * {

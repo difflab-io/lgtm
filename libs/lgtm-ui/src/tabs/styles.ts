@@ -4,7 +4,7 @@ import { cva, type VariantProps } from 'class-variance-authority'
 export const tabsRootBase = 'w-full shrink-0'
 
 export const tabsListVariants = cva(
-  'flex w-full items-stretch overflow-x-auto border-b border-border bg-muted/40 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+  'flex w-full items-stretch overflow-x-auto border-b border-border bg-background [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
   {
     variants: {
       size: {
@@ -18,7 +18,7 @@ export const tabsListVariants = cva(
 export type TabsListVariants = VariantProps<typeof tabsListVariants>
 
 export const tabsItemContainerVariants = cva(
-  'inline-flex h-full shrink-0 items-stretch border-r border-border text-muted-foreground transition-colors data-[selected]:bg-background data-[selected]:font-medium data-[selected]:text-foreground',
+  'inline-flex h-full shrink-0 items-stretch border-r border-border text-muted-foreground transition-colors data-[selected]:bg-muted/50 data-[selected]:font-medium data-[selected]:text-foreground',
   {
     variants: {
       size: {
