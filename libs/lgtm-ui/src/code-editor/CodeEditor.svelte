@@ -15,130 +15,187 @@
 
   const codeEditorHighlightStyle = HighlightStyle.define([
     {
-      tag: [tags.keyword, tags.controlKeyword, tags.operatorKeyword, tags.modifier],
-      color: 'var(--cm-syntax-keyword, #7c3aed)',
+      tag: [
+        tags.keyword,
+        tags.controlKeyword,
+        tags.moduleKeyword,
+        tags.definitionKeyword,
+        tags.modifier,
+      ],
+      color: 'var(--cm-syntax-keyword, #8b5cf6)',
     },
     {
-      tag: [tags.string, tags.special(tags.string), tags.regexp],
-      color: 'var(--cm-syntax-string, #047857)',
+      tag: [tags.operator, tags.operatorKeyword, tags.punctuation],
+      color: 'var(--cm-syntax-operator, inherit)',
     },
     {
-      tag: [tags.number, tags.bool, tags.null, tags.atom],
-      color: 'var(--cm-syntax-number, #b45309)',
+      tag: [tags.string, tags.special(tags.string), tags.regexp, tags.character],
+      color: 'var(--cm-syntax-string, #00ac3a)',
     },
     {
-      tag: [tags.typeName, tags.className, tags.namespace, tags.macroName],
-      color: 'var(--cm-syntax-type, #0369a1)',
+      tag: [
+        tags.number,
+        tags.integer,
+        tags.float,
+        tags.bool,
+        tags.null,
+        tags.atom,
+        tags.constant(tags.variableName),
+      ],
+      color: 'var(--cm-syntax-number, #f59e0b)',
     },
     {
-      tag: [tags.function(tags.variableName), tags.function(tags.propertyName)],
-      color: 'var(--cm-syntax-function, #1d4ed8)',
+      tag: [
+        tags.function(tags.variableName),
+        tags.function(tags.propertyName),
+        tags.definition(tags.function(tags.variableName)),
+        tags.definition(tags.typeName),
+      ],
+      color: 'var(--cm-syntax-function, #52a8ff)',
     },
     {
-      tag: [tags.propertyName, tags.attributeName],
-      color: 'var(--cm-syntax-property, #0f766e)',
+      tag: [tags.typeName, tags.className, tags.namespace],
+      color: 'var(--cm-syntax-type, inherit)',
+    },
+    {
+      tag: [tags.propertyName, tags.definition(tags.propertyName)],
+      color: 'var(--cm-syntax-property, inherit)',
     },
     {
       tag: [tags.definition(tags.variableName), tags.variableName],
       color: 'var(--cm-syntax-variable, inherit)',
     },
     {
-      tag: [tags.comment, tags.lineComment, tags.blockComment],
-      color: 'var(--cm-syntax-comment, #64748b)',
+      tag: [tags.self, tags.tagName, tags.labelName, tags.standard(tags.variableName)],
+      color: 'var(--cm-syntax-builtin, #f12b82)',
+    },
+    {
+      tag: [tags.macroName, tags.attributeName, tags.annotation, tags.escape],
+      color: 'var(--cm-syntax-macro, #00aa95)',
+    },
+    {
+      tag: [tags.comment, tags.lineComment, tags.blockComment, tags.docComment],
+      color: 'var(--cm-syntax-comment, #a1a1a1)',
       fontStyle: 'italic',
     },
     {
-      tag: [tags.heading1, tags.heading2, tags.heading3, tags.heading],
-      color: 'var(--cm-syntax-heading, #1d4ed8)',
+      tag: [
+        tags.heading1,
+        tags.heading2,
+        tags.heading3,
+        tags.heading4,
+        tags.heading5,
+        tags.heading6,
+        tags.heading,
+        tags.list,
+      ],
+      color: 'var(--cm-syntax-heading, #52a8ff)',
       fontWeight: '600',
     },
     {
+      tag: tags.strong,
+      color: 'var(--cm-syntax-strong, #ffae00)',
+      fontWeight: '600',
+    },
+    {
+      tag: tags.emphasis,
+      color: 'var(--cm-syntax-italic, #f12b82)',
+      fontStyle: 'italic',
+    },
+    {
       tag: tags.monospace,
-      color: 'var(--cm-syntax-code, #be185d)',
-      backgroundColor: 'var(--cm-syntax-code-bg, rgba(15, 23, 42, 0.06))',
+      color: 'var(--cm-syntax-code, #00ac3a)',
+      backgroundColor: 'var(--cm-syntax-code-bg, #1a1a1a)',
       borderRadius: '3px',
     },
-    { tag: tags.quote, color: 'var(--cm-syntax-quote, #475569)', fontStyle: 'italic' },
+    { tag: tags.quote, color: 'var(--cm-syntax-quote, #a1a1a1)', fontStyle: 'italic' },
     {
       tag: [tags.link, tags.url],
-      color: 'var(--cm-syntax-link, #0284c7)',
+      color: 'var(--cm-syntax-link, #52a8ff)',
       textDecoration: 'underline',
     },
-    { tag: tags.strong, fontWeight: '600', color: 'var(--color-foreground, inherit)' },
-    { tag: tags.emphasis, fontStyle: 'italic' },
     {
       tag: tags.strikethrough,
       textDecoration: 'line-through',
-      color: 'var(--cm-syntax-meta, #64748b)',
+      color: 'var(--cm-syntax-meta, #a1a1a1)',
     },
     {
       tag: [tags.processingInstruction, tags.contentSeparator, tags.meta],
-      color: 'var(--cm-syntax-meta, #64748b)',
+      color: 'var(--cm-syntax-meta, #a1a1a1)',
     },
+    { tag: tags.inserted, color: 'var(--cm-syntax-inserted, #00ac3a)' },
+    { tag: tags.deleted, color: 'var(--cm-syntax-deleted, #f32e40)' },
+    { tag: tags.changed, color: 'var(--cm-syntax-changed, #ffae00)' },
   ])
 
   const codeEditorTooltipTheme = EditorView.theme({
     '&': {
-      backgroundColor: 'var(--color-background, #ffffff)',
-      color: 'var(--color-foreground, #0f172a)',
+      backgroundColor: 'var(--color-background, #101010)',
+      color: 'var(--color-foreground, #ededed)',
     },
     '&.cm-focused': {
       outline: 'none',
     },
     '.cm-content, &.cm-editor .cm-content': {
-      caretColor: 'var(--color-foreground, #0f172a)',
+      caretColor: 'var(--color-ring, #52a8ff)',
     },
     '.cm-cursor, .cm-dropCursor, &.cm-editor .cm-cursor, &.cm-editor .cm-dropCursor': {
-      borderLeftColor: 'var(--color-foreground, #0f172a)',
+      borderLeftColor: 'var(--color-ring, #52a8ff)',
     },
     '.cm-gutters, &.cm-editor .cm-gutters': {
-      backgroundColor: 'var(--color-background, #ffffff)',
-      color: 'var(--color-muted-foreground, #64748b)',
-      borderColor: 'var(--color-border, #e2e8f0)',
+      backgroundColor: 'var(--color-background, #101010)',
+      color: 'var(--cm-gutter-fg, var(--color-muted-foreground, #676767))',
+      borderColor: 'var(--color-border, #2e2e2e)',
     },
     '.cm-activeLine, &.cm-editor .cm-activeLine': {
-      backgroundColor: 'color-mix(in oklab, var(--color-muted, #f1f5f9) 55%, transparent)',
+      backgroundColor: 'var(--cm-active-line-bg, var(--color-muted, #1a1a1a))',
     },
     '.cm-activeLineGutter, &.cm-editor .cm-activeLineGutter': {
-      backgroundColor: 'color-mix(in oklab, var(--color-muted, #f1f5f9) 75%, transparent)',
-      color: 'var(--color-foreground, #0f172a)',
+      backgroundColor: 'var(--color-background, #101010)',
+      color: 'var(--cm-gutter-active-fg, var(--color-foreground, #ededed))',
+      fontWeight: '600',
+    },
+    '&.cm-focused .cm-matchingBracket': {
+      backgroundColor: 'transparent',
+      color: 'var(--cm-match-paren, #ffae00)',
+      textDecoration: 'underline',
+      fontWeight: '600',
     },
     '.cm-foldPlaceholder, &.cm-editor .cm-foldPlaceholder': {
-      backgroundColor: 'var(--color-muted, #f1f5f9)',
-      borderColor: 'var(--color-border, #e2e8f0)',
-      color: 'var(--color-muted-foreground, #64748b)',
+      backgroundColor: 'var(--color-muted, #1a1a1a)',
+      borderColor: 'var(--color-border, #2e2e2e)',
+      color: 'var(--color-muted-foreground, #a1a1a1)',
     },
     '.cm-panels, &.cm-editor .cm-panels': {
-      backgroundColor: 'var(--color-sidebar, #f8fafc)',
-      color: 'var(--color-foreground, #0f172a)',
-      borderColor: 'var(--color-border, #e2e8f0)',
+      backgroundColor: 'var(--color-card, #1a1a1a)',
+      color: 'var(--color-foreground, #ededed)',
+      borderColor: 'var(--color-border, #2e2e2e)',
     },
     '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection':
       {
-        backgroundColor:
-          'color-mix(in oklab, var(--color-ring, #94a3b8) 32%, transparent) !important',
+        backgroundColor: 'var(--cm-selection-bg, #264564) !important',
       },
     '.cm-tooltip': {
-      border: '1px solid var(--color-border, #e2e8f0)',
+      border: '1px solid var(--color-border, #2e2e2e)',
       borderRadius: '0.375rem',
-      backgroundColor: 'var(--color-popover, #ffffff)',
-      color: 'var(--color-popover-foreground, #0f172a)',
+      backgroundColor: 'var(--color-popover, #1a1a1a)',
+      color: 'var(--color-popover-foreground, #ededed)',
       boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
       overflowY: 'auto',
       overscrollBehavior: 'contain',
       maxWidth: 'min(32rem, calc(100vw - 2rem))',
     },
     '.cm-tooltip.cm-tooltip-hover': {
-      border: '1px solid var(--color-border, #e2e8f0)',
+      border: '1px solid var(--color-border, #2e2e2e)',
       borderRadius: '0.375rem',
-      backgroundColor: 'var(--color-popover, #ffffff)',
+      backgroundColor: 'var(--color-popover, #1a1a1a)',
     },
     '.cm-tooltip .cm-tooltip-section': {
       border: 'none',
       backgroundColor: 'transparent',
     },
     '.cm-tooltip .cm-tooltip-section:not(:first-child)': {
-      borderTop: '1px solid var(--color-border, #e2e8f0)',
+      borderTop: '1px solid var(--color-border, #2e2e2e)',
     },
   })
 

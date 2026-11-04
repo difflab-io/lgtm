@@ -18,37 +18,6 @@
   color: var(--foreground);
   background: var(--background);
   --base-font-size: 16px;
-  --cm-syntax-keyword: #7c3aed;
-  --cm-syntax-string: #047857;
-  --cm-syntax-number: #b45309;
-  --cm-syntax-type: #0369a1;
-  --cm-syntax-function: #1d4ed8;
-  --cm-syntax-property: #0f766e;
-  --cm-syntax-variable: var(--foreground);
-  --cm-syntax-comment: var(--muted-foreground);
-  --cm-syntax-heading: #1d4ed8;
-  --cm-syntax-code: #be185d;
-  --cm-syntax-code-bg: color-mix(in oklab, var(--muted) 80%, transparent);
-  --cm-syntax-quote: var(--muted-foreground);
-  --cm-syntax-link: #0284c7;
-  --cm-syntax-meta: var(--muted-foreground);
-}
-
-.dark {
-  --cm-syntax-keyword: #c084fc;
-  --cm-syntax-string: #34d399;
-  --cm-syntax-number: #fbbf24;
-  --cm-syntax-type: #38bdf8;
-  --cm-syntax-function: #60a5fa;
-  --cm-syntax-property: #2dd4bf;
-  --cm-syntax-variable: var(--foreground);
-  --cm-syntax-comment: var(--muted-foreground);
-  --cm-syntax-heading: #60a5fa;
-  --cm-syntax-code: #f472b6;
-  --cm-syntax-code-bg: color-mix(in oklab, var(--muted) 80%, transparent);
-  --cm-syntax-quote: var(--muted-foreground);
-  --cm-syntax-link: #38bdf8;
-  --cm-syntax-meta: var(--muted-foreground);
 }
 
 * {
