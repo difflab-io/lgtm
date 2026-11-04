@@ -1,4 +1,4 @@
-import type { TreeNode, ContextMenuItem, CodeEditorHoverResult } from 'lgtm-ui'
+import type { TreeNode, ContextMenuItem, CodeEditorHoverResult, TabItem } from 'lgtm-ui'
 import { WorkspaceNodeViewModel } from '../models/workspaceNodeViewModel'
 import {
   errorMessage,
@@ -9,6 +9,7 @@ import {
   type LspFileDiagnosticsEvent,
   type LspServerStatusEvent,
 } from '../clients/workspaceClient'
+import { LspService } from './lspService.svelte'
 
 export interface FolderRefresh {
   path: string
@@ -23,10 +24,12 @@ export interface WorkspaceTab {
   languageId?: string | null
   content: string
   readonly: boolean
+  dirty?: boolean
 }
 
 /** Workspace view model. Rust retains filesystem ownership, path validation, and LSP orchestration. */
 export class WorkspaceService {
+  readonly lsp: LspService
   defaultRoot = $state('')
   root = $state('~/.lgtm/workspace')
   recentWorkspaces = $state<string[]>([])
@@ -49,8 +52,6 @@ export class WorkspaceService {
   tabs = $state<WorkspaceTab[]>([])
   activeTabId = $state<string | null>(null)
   selectionOffset = $state<number | null>(null)
-  lspServers = $state<Record<string, LspServerStatusEvent>>({})
-  lspDiagnostics = $state<Record<string, LspDiagnostic[]>>({})
   private listed = $state<Record<string, WorkspaceNode>>({})
   private active = true
   private dirtyPath: string | null = null
@@ -59,7 +60,9 @@ export class WorkspaceService {
   private inFlightSave: Promise<void> | null = null
   private openRequestSeq = 0
 
-  constructor(private client: WorkspaceClient) {}
+  constructor(private client: WorkspaceClient) {
+    this.lsp = new LspService(client)
+  }
 
   get blocked() {
     return this.busy || this.fileLoading
@@ -74,6 +77,15 @@ export class WorkspaceService {
     return this.tabs.find((tab) => tab.id === this.activeTabId) ?? null
   }
 
+  get tabItems(): TabItem[] {
+    return this.tabs.map((tab) => ({
+      value: tab.id,
+      label: tab.title,
+      dirty: Boolean(tab.dirty),
+      closable: true,
+    }))
+  }
+
   get selectedTitle() {
     if (this.activeTab?.kind === 'diagnostics') return this.activeTab.title
     return this.selected ? this.selected.name : 'No file selected'
@@ -85,8 +97,7 @@ export class WorkspaceService {
   }
 
   get activeDiagnostics(): LspDiagnostic[] {
-    if (!this.selected) return []
-    return this.lspDiagnostics[this.selected.path] ?? []
+    return this.lsp.getDiagnosticsForPath(this.selected?.path)
   }
 
   get activeLanguageId(): string | null {
@@ -97,16 +108,15 @@ export class WorkspaceService {
   }
 
   get activeLspServer(): LspServerStatusEvent | null {
-    const lang = this.activeLanguageId
-    if (lang && this.lspServers[lang]) {
-      return this.lspServers[lang]
-    }
-    const all = Object.values(this.lspServers)
-    return all[0] ?? null
+    return this.lsp.getActiveServer(this.activeLanguageId)
   }
 
   get allLspServers(): LspServerStatusEvent[] {
-    return Object.values(this.lspServers)
+    return this.lsp.allServers
+  }
+
+  get lspDiagnostics(): Record<string, LspDiagnostic[]> {
+    return this.lsp.diagnostics
   }
 
   get status() {
@@ -167,8 +177,7 @@ export class WorkspaceService {
       this.listed = {}
       this.tabs = []
       this.activeTabId = null
-      this.lspServers = {}
-      this.lspDiagnostics = {}
+      this.lsp.reset()
       this.clearSelected()
       this.treeVersion++
       void this.syncLspState()
@@ -222,12 +231,7 @@ export class WorkspaceService {
       const content = await this.client.read(entry.path)
       if (!this.active || requestId !== this.openRequestSeq) return
       this.fileContent = content
-      if (content.lspStatus && !this.lspServers[content.lspStatus.languageId]) {
-        this.lspServers = {
-          ...this.lspServers,
-          [content.lspStatus.languageId]: content.lspStatus,
-        }
-      }
+      this.lsp.recordFileStatus(content.lspStatus)
       const tabId = `file:${entry.path}`
       this.upsertTab({
         id: tabId,
@@ -237,6 +241,7 @@ export class WorkspaceService {
         languageId: content.languageId ?? null,
         content: content.content,
         readonly: false,
+        dirty: false,
       })
       this.activeTabId = tabId
       this.selectionOffset = targetOffset ?? null
@@ -253,7 +258,7 @@ export class WorkspaceService {
   }
 
   async activateTab(tabId: string) {
-    if (this.blocked) return
+    if (this.blocked || this.activeTabId === tabId) return
     const tab = this.tabs.find((item) => item.id === tabId)
     if (!tab) return
     if (tab.kind === 'file' && tab.path) {
@@ -276,7 +281,7 @@ export class WorkspaceService {
     }
     this.fileVersion++
     try {
-      const refreshed = await this.client.lspGetDiagnosticsBuffer(tab.languageId ?? undefined)
+      const refreshed = await this.lsp.getDiagnosticsBuffer(tab.languageId ?? undefined)
       if (!this.active) return
       this.tabs = this.tabs.map((item) =>
         item.id === tab.id ? { ...item, title: refreshed.title, content: refreshed.content } : item,
@@ -306,13 +311,14 @@ export class WorkspaceService {
       this.clearSelected()
       return
     }
+    this.activeTabId = null
     await this.activateTab(fallback.id)
   }
 
   async openDiagnosticsBuffer(languageId?: string) {
     await this.flushSave()
     try {
-      const buffer = await this.client.lspGetDiagnosticsBuffer(languageId)
+      const buffer = await this.lsp.getDiagnosticsBuffer(languageId)
       if (!this.active) return
       const tabId = languageId ? `diagnostics:${languageId}` : 'diagnostics:all'
       this.upsertTab({
@@ -322,6 +328,7 @@ export class WorkspaceService {
         languageId: buffer.languageId ?? null,
         content: buffer.content,
         readonly: true,
+        dirty: false,
       })
       this.selected = null
       this.openingError = null
@@ -338,6 +345,10 @@ export class WorkspaceService {
     }
   }
 
+  async restartLanguageServer(languageId: string) {
+    await this.lsp.restartServer(languageId)
+  }
+
   async jumpToLocation(path: string, offset: number) {
     const entry = this.resolveFileEntry(path)
     await this.openFile(entry, offset)
@@ -346,76 +357,43 @@ export class WorkspaceService {
 
   async requestHover(offset: number): Promise<CodeEditorHoverResult | null> {
     if (!this.selected) return null
-    try {
-      const result = await this.client.lspHover(this.selected.path, offset)
-      if (!result || !result.contents.trim()) return null
-      return {
-        contents: result.contents,
-        ...(result.from !== undefined && result.from !== null ? { from: result.from } : {}),
-        ...(result.to !== undefined && result.to !== null ? { to: result.to } : {}),
-      }
-    } catch {
-      return null
-    }
+    return this.lsp.requestHover(this.selected.path, offset)
   }
 
   async gotoDefinition(offset: number): Promise<void> {
     if (!this.selected) return
-    try {
-      const locations = await this.client.lspGotoDefinition(this.selected.path, offset)
-      const first = locations[0]
-      if (!first) return
-      await this.jumpToLocation(first.path, first.offset)
-    } catch {
-      // Ignore definition errors when language server does not support the symbol.
-    }
+    const locations = await this.lsp.getDefinitions(this.selected.path, offset)
+    const first = locations[0]
+    if (!first) return
+    await this.jumpToLocation(first.path, first.offset)
   }
 
   handleLspStatus(event: LspServerStatusEvent) {
     if (!this.active) return
-    this.lspServers = {
-      ...this.lspServers,
-      [event.languageId]: event,
-    }
+    this.lsp.handleStatus(event)
   }
 
   handleLspDiagnostics(event: LspFileDiagnosticsEvent) {
     if (!this.active) return
-    this.lspDiagnostics = {
-      ...this.lspDiagnostics,
-      [event.path]: event.diagnostics,
-    }
+    this.lsp.handleDiagnostics(event)
     if (this.activeTab?.kind === 'diagnostics') {
       void this.openDiagnosticsBuffer(this.activeTab.languageId ?? undefined)
     }
   }
 
   async syncLspState() {
-    try {
-      const snapshot = await this.client.lspGetState()
-      if (!this.active) return
-      const nextServers: Record<string, LspServerStatusEvent> = { ...this.lspServers }
-      for (const srv of snapshot.servers) {
-        nextServers[srv.languageId] = srv
-      }
-      this.lspServers = nextServers
-      this.lspDiagnostics = {
-        ...this.lspDiagnostics,
-        ...snapshot.diagnosticsByPath,
-      }
-    } catch {
-      // Non-LSP test fixtures or web mode may not implement lsp_get_state.
-    }
+    if (!this.active) return
+    await this.lsp.syncState()
   }
 
   updateContent(content: string) {
     if (!this.selected || !this.fileContent || this.fileContent.content === content) return
     this.fileContent = { ...this.fileContent, content }
     const tabId = `file:${this.selected.path}`
-    this.tabs = this.tabs.map((tab) => (tab.id === tabId ? { ...tab, content } : tab))
+    this.tabs = this.tabs.map((tab) => (tab.id === tabId ? { ...tab, content, dirty: true } : tab))
     this.dirtyPath = this.selected.path
     this.dirtyContent = content
-    void this.client.lspDidChange(this.selected.path, content).catch(() => {})
+    this.lsp.notifyDidChange(this.selected.path, content)
     if (this.saveTimer) clearTimeout(this.saveTimer)
     this.saveTimer = setTimeout(() => {
       this.saveTimer = null
@@ -440,11 +418,12 @@ export class WorkspaceService {
       const task = this.client
         .write(path, content)
         .then((saved) => {
-          if (
-            this.active &&
-            this.selected?.path === path &&
-            this.fileContent?.content === content
-          ) {
+          if (!this.active) return
+          const tabId = `file:${path}`
+          this.tabs = this.tabs.map((tab) =>
+            tab.id === tabId && tab.content === content ? { ...tab, dirty: false } : tab,
+          )
+          if (this.selected?.path === path && this.fileContent?.content === content) {
             this.fileContent = {
               ...this.fileContent,
               ...saved,

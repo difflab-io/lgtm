@@ -6,7 +6,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
-use lgtm_config::{ConfigService, LanguageConfig, MiseService};
+use lgtm_config::{ConfigService, LanguageConfig, LgtmConfig, MiseService};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::error::{LspError, Result};
@@ -19,6 +20,7 @@ use crate::models::lsp::{
 type SessionKey = (PathBuf, String, PathBuf);
 type EventSink = Arc<dyn Fn(LspEvent) + Send + Sync>;
 
+#[derive(Clone)]
 struct OpenDocument {
     workspace_root: PathBuf,
     project_root: PathBuf,
@@ -27,12 +29,20 @@ struct OpenDocument {
     text: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WorkspaceDiscoveryCache {
+    workspace_root: String,
+    detected_languages: Vec<String>,
+    config: LgtmConfig,
+}
+
 #[derive(Default)]
 struct LspServiceState {
     sessions: BTreeMap<SessionKey, Arc<LspServerSession>>,
     documents: BTreeMap<PathBuf, OpenDocument>,
     diagnostics: BTreeMap<PathBuf, (PathBuf, String, Vec<LspDiagnostic>)>,
     statuses: BTreeMap<SessionKey, LspServerStatusEvent>,
+    workspace_configs: BTreeMap<PathBuf, LgtmConfig>,
 }
 
 struct LspServerSession {
@@ -43,6 +53,7 @@ struct LspServerSession {
     timeout: Duration,
 }
 
+/// Manages language server processes, document synchronization, and workspace diagnostics over stdio JSON-RPC 2.0.
 #[derive(Clone)]
 pub struct LspService {
     config_service: ConfigService,
@@ -53,6 +64,7 @@ pub struct LspService {
 }
 
 impl LspService {
+    /// Creates a new `LspService` with the given `ConfigService` and asynchronous `LspEvent` callback.
     pub fn new<F>(config_service: ConfigService, event_sink: F) -> Self
     where
         F: Fn(LspEvent) + Send + Sync + 'static,
@@ -69,12 +81,20 @@ impl LspService {
 
     // Public ------------------------------------------------------------------
 
+    /// Discovers workspace languages, caches merged settings, synchronizes `.lgtm/mise.toml`, and warms up language servers.
     pub fn prepare_workspace(&self, workspace_root: &Path) -> Result<()> {
         let canonical = Self::canonical_or_owned(workspace_root);
         let config = self.config_service.get_config(&canonical)?;
         let detected = ConfigService::detect_workspace_languages(&config, &canonical);
+        {
+            let mut guard = self.state.lock().unwrap();
+            guard
+                .workspace_configs
+                .insert(canonical.clone(), config.clone());
+        }
         if !detected.is_empty() || ConfigService::get_project_config_path(&canonical).is_file() {
             let _ = self.config_service.ensure_workspace_layout(&canonical)?;
+            self.persist_discovery_cache(&canonical, &detected, &config);
         }
         if config.lsp.enabled && !detected.is_empty() {
             let timeout = Duration::from_millis(config.lsp.request_timeout_ms);
@@ -134,6 +154,7 @@ impl LspService {
         Ok(())
     }
 
+    /// Opens or updates `file_path` in the appropriate language server and returns its language ID and server status.
     pub fn open_or_sync_file(
         &self,
         workspace_root: &Path,
@@ -143,7 +164,7 @@ impl LspService {
         let workspace_root = Self::canonical_or_owned(workspace_root);
         let file_path = Self::canonical_or_owned(file_path);
 
-        let Ok(config) = self.config_service.get_config(&workspace_root) else {
+        let Ok(config) = self.get_cached_or_load_config(&workspace_root) else {
             return (None, None);
         };
         let Some((language_id, lang_cfg)) = config.detect_file_language(&file_path) else {
@@ -246,6 +267,7 @@ impl LspService {
         (Some(language_id), status)
     }
 
+    /// Sends a `textDocument/didChange` notification with updated buffer text for `file_path`.
     pub fn did_change(&self, workspace_root: &Path, file_path: &Path, content: &str) -> Result<()> {
         let workspace_root = Self::canonical_or_owned(workspace_root);
         let file_path = Self::canonical_or_owned(file_path);
@@ -291,6 +313,7 @@ impl LspService {
         Ok(())
     }
 
+    /// Synchronizes buffer changes and sends a `textDocument/didSave` notification for `file_path`.
     pub fn did_save(&self, workspace_root: &Path, file_path: &Path, content: &str) -> Result<()> {
         self.did_change(workspace_root, file_path, content)?;
         let file_path = Self::canonical_or_owned(file_path);
@@ -317,6 +340,7 @@ impl LspService {
         Ok(())
     }
 
+    /// Removes `file_path` from tracked open documents and sends `textDocument/didClose` to its language server.
     pub fn did_close(&self, _workspace_root: &Path, file_path: &Path) -> Result<()> {
         let file_path = Self::canonical_or_owned(file_path);
         let session = {
@@ -338,6 +362,7 @@ impl LspService {
         Ok(())
     }
 
+    /// Requests hover documentation (`textDocument/hover`) at the given UTF-16 `offset` in `file_path`.
     pub fn get_hover(
         &self,
         workspace_root: &Path,
@@ -374,6 +399,7 @@ impl LspService {
         Ok(Some(LspHoverResult { contents, from, to }))
     }
 
+    /// Requests symbol definition locations (`textDocument/definition`) at the given UTF-16 `offset` in `file_path`.
     pub fn get_definition(
         &self,
         workspace_root: &Path,
@@ -400,6 +426,7 @@ impl LspService {
         Ok(self.parse_locations(&workspace_root, &response))
     }
 
+    /// Returns a snapshot of all tracked language servers and diagnostics for `workspace_root`.
     pub fn get_workspace_snapshot(&self, workspace_root: &Path) -> Result<LspWorkspaceSnapshot> {
         let workspace_root = Self::canonical_or_owned(workspace_root);
         let guard = self.state.lock().unwrap();
@@ -428,6 +455,7 @@ impl LspService {
         })
     }
 
+    /// Renders a read-only diagnostics buffer for `workspace_root`, optionally filtered to `language_id`.
     pub fn get_diagnostics_buffer(
         &self,
         workspace_root: &Path,
@@ -464,10 +492,115 @@ impl LspService {
         ))
     }
 
+    /// Restarts all sessions for `language_id` in `workspace_root` and re-synchronizes open documents.
+    pub fn restart_language_server(
+        &self,
+        workspace_root: &Path,
+        language_id: &str,
+    ) -> Result<LspServerStatusEvent> {
+        let workspace_root = Self::canonical_or_owned(workspace_root);
+        let config = self.config_service.get_config(&workspace_root)?;
+        {
+            let mut guard = self.state.lock().unwrap();
+            guard
+                .workspace_configs
+                .insert(workspace_root.clone(), config.clone());
+        }
+        let Some(language_config) = config.languages.get(language_id).cloned() else {
+            return Err(LspError::ServerUnavailable(format!(
+                "unknown language `{language_id}`"
+            )));
+        };
+
+        let (old_sessions, open_docs, project_roots) = {
+            let mut guard = self.state.lock().unwrap();
+            let matching_keys: Vec<SessionKey> = guard
+                .sessions
+                .keys()
+                .chain(guard.statuses.keys())
+                .filter(|(ws, lang, _)| ws == &workspace_root && lang == language_id)
+                .cloned()
+                .collect();
+            let mut project_roots = Vec::new();
+            let mut old_sessions = Vec::new();
+            for key in matching_keys {
+                if !project_roots.contains(&key.2) {
+                    project_roots.push(key.2.clone());
+                }
+                if let Some(session) = guard.sessions.remove(&key) {
+                    old_sessions.push(session);
+                }
+                guard.statuses.remove(&key);
+            }
+            if project_roots.is_empty() {
+                project_roots.push(workspace_root.clone());
+            }
+            let open_docs: Vec<(PathBuf, OpenDocument)> = guard
+                .documents
+                .iter()
+                .filter(|(_, doc)| {
+                    doc.workspace_root == workspace_root && doc.language_id == language_id
+                })
+                .map(|(p, d)| (p.clone(), d.clone()))
+                .collect();
+            (old_sessions, open_docs, project_roots)
+        };
+
+        for session in old_sessions {
+            session.shutdown();
+        }
+
+        let timeout = Duration::from_millis(config.lsp.request_timeout_ms);
+        let mut latest_status = None;
+        for project_root in project_roots {
+            let session = self.ensure_session(
+                &workspace_root,
+                &project_root,
+                language_id,
+                &language_config,
+                config.lsp.auto_install,
+                timeout,
+            );
+            if let Some(session) = session {
+                for (path, doc) in &open_docs {
+                    if doc.project_root == project_root
+                        && let Some(uri) = path_to_file_uri(path)
+                    {
+                        let _ = session.notify(
+                            "textDocument/didOpen",
+                            json!({
+                                "textDocument": {
+                                    "uri": uri,
+                                    "languageId": doc.language_id,
+                                    "version": doc.version,
+                                    "text": doc.text,
+                                }
+                            }),
+                        );
+                    }
+                }
+            }
+            let key = (
+                workspace_root.clone(),
+                language_id.to_string(),
+                project_root,
+            );
+            latest_status = self.state.lock().unwrap().statuses.get(&key).cloned();
+        }
+
+        latest_status.ok_or_else(|| {
+            LspError::ServerUnavailable(format!(
+                "failed to restart `{language_id}` language server"
+            ))
+        })
+    }
+
+    /// Shuts down all language server processes associated with `workspace_root`.
     pub fn shutdown_workspace(&self, workspace_root: &Path) {
         let workspace_root = Self::canonical_or_owned(workspace_root);
         let sessions: Vec<Arc<LspServerSession>> = {
             let mut guard = self.state.lock().unwrap();
+            guard.workspace_configs.remove(&workspace_root);
             let keys: Vec<SessionKey> = guard
                 .sessions
                 .keys()
@@ -483,9 +616,11 @@ impl LspService {
         }
     }
 
+    /// Shuts down all active language server processes across all workspaces.
     pub fn shutdown_all(&self) {
         let sessions: Vec<Arc<LspServerSession>> = {
             let mut guard = self.state.lock().unwrap();
+            guard.workspace_configs.clear();
             let keys: Vec<SessionKey> = guard.sessions.keys().cloned().collect();
             keys.into_iter()
                 .filter_map(|key| guard.sessions.remove(&key))
@@ -497,6 +632,42 @@ impl LspService {
     }
 
     // Private -----------------------------------------------------------------
+
+    fn get_cached_or_load_config(&self, workspace_root: &Path) -> Result<LgtmConfig> {
+        {
+            let guard = self.state.lock().unwrap();
+            if let Some(cached) = guard.workspace_configs.get(workspace_root) {
+                return Ok(cached.clone());
+            }
+        }
+        let loaded = self.config_service.get_config(workspace_root)?;
+        let mut guard = self.state.lock().unwrap();
+        guard
+            .workspace_configs
+            .insert(workspace_root.to_path_buf(), loaded.clone());
+        Ok(loaded)
+    }
+
+    fn persist_discovery_cache(
+        &self,
+        workspace_root: &Path,
+        detected_languages: &[String],
+        config: &LgtmConfig,
+    ) {
+        let cache_path =
+            ConfigService::get_workspace_cache_path(workspace_root, "lsp-discovery.json");
+        if let Some(parent) = cache_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let payload = WorkspaceDiscoveryCache {
+            workspace_root: workspace_root.to_string_lossy().to_string(),
+            detected_languages: detected_languages.to_vec(),
+            config: config.clone(),
+        };
+        if let Ok(serialized) = serde_json::to_vec_pretty(&payload) {
+            let _ = std::fs::write(cache_path, serialized);
+        }
+    }
 
     fn canonical_or_owned(path: &Path) -> PathBuf {
         std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
@@ -1486,9 +1657,9 @@ process.stdin.on('data', (chunk) => {
                 // Arrange
                 let temp = tempfile::tempdir().unwrap();
                 let workspace_root = std::fs::canonicalize(temp.path()).unwrap();
-                let script_path = write_mock_lsp_server(&workspace_root);
-                let global_cfg = workspace_root.join("global.toml");
                 std::fs::create_dir_all(workspace_root.join(".lgtm")).unwrap();
+                let script_path = write_mock_lsp_server(&workspace_root.join(".lgtm"));
+                let global_cfg = workspace_root.join(".lgtm/global.toml");
                 std::fs::write(
                     workspace_root.join("Cargo.toml"),
                     "[package]\nname = \"demo\"\n",
@@ -1517,6 +1688,7 @@ process.stdin.on('data', (chunk) => {
                 );
 
                 // Act
+                service.prepare_workspace(&workspace_root).unwrap();
                 let (lang, status) =
                     service.open_or_sync_file(&workspace_root, &src_file, initial_source);
 
@@ -1540,11 +1712,19 @@ process.stdin.on('data', (chunk) => {
                 let buffer = service
                     .get_diagnostics_buffer(&workspace_root, Some("rust"))
                     .unwrap();
+                let restarted = service
+                    .restart_language_server(&workspace_root, "rust")
+                    .unwrap();
                 service.shutdown_all();
 
                 // Assert
+                assert!(
+                    ConfigService::get_workspace_cache_path(&workspace_root, "lsp-discovery.json")
+                        .is_file()
+                );
                 assert_eq!(lang, Some("rust".to_string()));
                 assert_eq!(status.unwrap().status, LspServerStatus::Ready);
+                assert_eq!(restarted.status, LspServerStatus::Ready);
                 assert!(hover.contents.contains("fn helper() -> usize"));
                 assert_eq!(definitions.len(), 1);
                 assert_eq!(definitions[0].offset, 3);

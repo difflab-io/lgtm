@@ -93,6 +93,7 @@ export interface WorkspaceClient {
   lspGotoDefinition(path: string, offset: number): Promise<LspLocation[]>
   lspGetState(): Promise<LspWorkspaceSnapshot>
   lspGetDiagnosticsBuffer(languageId?: string): Promise<LspDiagnosticsBuffer>
+  lspRestart(languageId: string): Promise<LspServerStatusEvent>
   registerLspHandlers(handlers: {
     onStatus: (event: LspServerStatusEvent) => void
     onDiagnostics: (event: LspFileDiagnosticsEvent) => void
@@ -137,6 +138,7 @@ export const workspaceClient: WorkspaceClient = {
   lspGetState: () => invoke('lsp_get_state'),
   lspGetDiagnosticsBuffer: (languageId?: string) =>
     invoke('lsp_get_diagnostics_buffer', languageId ? { languageId } : {}),
+  lspRestart: (languageId: string) => invoke('lsp_restart', { languageId }),
   registerLspHandlers: (handlers) =>
     Promise.all([
       listen<LspServerStatusEvent>('lsp-status', (event) => {

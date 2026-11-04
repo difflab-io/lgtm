@@ -2,6 +2,34 @@ import { test, expect, entry, createFile, renameEntry, exists } from './fixtures
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
+const SUPPORTED_LSP_CASES = [
+  {
+    languageId: 'rust',
+    fileName: 'sample.rs',
+    source: 'pub fn check() {\n    BROKEN();\n}\n',
+  },
+  {
+    languageId: 'typescript',
+    fileName: 'sample.ts',
+    source: 'export function check(): void {\n  BROKEN();\n}\n',
+  },
+  {
+    languageId: 'javascript',
+    fileName: 'sample.js',
+    source: 'export function check() {\n  BROKEN();\n}\n',
+  },
+  {
+    languageId: 'python',
+    fileName: 'sample.py',
+    source: 'def check():\n    BROKEN()\n',
+  },
+  {
+    languageId: 'go',
+    fileName: 'sample.go',
+    source: 'package main\nfunc check() {\n\tBROKEN()\n}\n',
+  },
+] as const
+
 // Tests -----------------------------------------------------------------------
 test.describe('Given a new workspace', { tag: ['@desktop', '@lsp'] }, () => {
   test.use({ initialWorkspace: 'default-seeded' })
@@ -20,11 +48,11 @@ test.describe('Given a new workspace', { tag: ['@desktop', '@lsp'] }, () => {
 
         // Act
         await lspButton.click()
-        const popover = page.getByRole('dialog', { name: 'LSP servers and diagnostics' })
-        await expect(popover).toBeVisible()
-        await expect(popover).toContainText('python')
-        await expect(popover).toContainText('typescript')
-        await popover.getByRole('button', { name: 'Open diagnostics buffer', exact: true }).click()
+        const menu = page.getByRole('menu', { name: 'LSP servers and diagnostics' })
+        await expect(menu).toBeVisible()
+        await expect(menu).toContainText('python')
+        await expect(menu).toContainText('typescript')
+        await menu.getByRole('menuitem', { name: 'Open diagnostics buffer', exact: true }).click()
 
         // Assert
         const tablist = page.getByRole('tablist', { name: 'Open editors' })
@@ -110,10 +138,15 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
 
         // Act
         await lspButton.click()
-        const popover = page.getByRole('dialog', { name: 'LSP servers and diagnostics' })
-        await expect(popover).toBeVisible()
-        await expect(popover).toContainText('cannot find value `BROKEN` in this scope')
-        await popover.getByRole('button', { name: 'View rust diagnostics', exact: true }).click()
+        const menu = page.getByRole('menu', { name: 'LSP servers and diagnostics' })
+        await expect(menu).toBeVisible()
+        await expect(menu).toContainText('cannot find value `BROKEN` in this scope')
+        await menu.locator('[data-value="server:rust"]').hover()
+        const rustSubmenu = page.getByRole('menu', { name: 'rust actions' })
+        await expect(rustSubmenu).toBeVisible()
+        await rustSubmenu
+          .getByRole('menuitem', { name: 'View rust diagnostics', exact: true })
+          .click()
 
         // Assert
         const tablist = page.getByRole('tablist', { name: 'Open editors' })
@@ -129,8 +162,8 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
         // Act
         await lspButton.click()
         await page
-          .getByRole('dialog', { name: 'LSP servers and diagnostics' })
-          .getByRole('button', { name: /lib\.rs:6:5/ })
+          .getByRole('menu', { name: 'LSP servers and diagnostics' })
+          .getByRole('menuitem', { name: /lib\.rs:6:5/ })
           .click()
 
         // Assert
@@ -140,6 +173,27 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
         )
       },
     )
+
+    for (const { languageId, fileName, source } of SUPPORTED_LSP_CASES) {
+      test(`should activate ${languageId} language server and report diagnostics for ${fileName}`, async ({
+        page,
+        workspace,
+      }) => {
+        // Arrange
+        await createFile(page)
+        await renameEntry(page, 'Untitled.md', fileName)
+        await entry(page, 'same.md').click()
+        await writeFile(join(workspace.root, fileName), source, 'utf8')
+
+        // Act
+        await entry(page, fileName).click()
+
+        // Assert
+        const lspButton = page.getByRole('button', { name: 'LSP status', exact: true })
+        await expect(lspButton).toContainText(`LSP: ${languageId} (ready, 1 error)`)
+        await expect(page.locator('.cm-lintRange-error')).toBeVisible()
+      })
+    }
   })
 
   test.describe('When navigating to definitions across files via LSP', () => {

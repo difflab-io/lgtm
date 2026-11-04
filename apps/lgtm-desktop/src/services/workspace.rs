@@ -2,7 +2,10 @@ use std::{
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
+    sync::Arc,
 };
+
+use lgtm_lsp::LspService;
 
 use crate::{
     error::{Result, error},
@@ -11,7 +14,7 @@ use crate::{
 
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
 
-/// Browses and mutates entries within the active local workspace.
+/// Browses and mutates entries within the active local workspace and coordinates LSP document lifecycle.
 pub struct WorkspaceService {
     /// The default workspace directory under the user's home directory.
     default_workspace: Workspace,
@@ -19,23 +22,38 @@ pub struct WorkspaceService {
     workspace: Workspace,
     /// Whether the active workspace was explicitly chosen on disk.
     custom_root: bool,
+    /// Optional injected LSP service bounded to the active workspace lifecycle.
+    lsp_service: Option<Arc<LspService>>,
 }
 
 impl WorkspaceService {
-    /// Selects the default workspace under the supplied home directory.
+    /// Selects the default workspace under the supplied home directory without an attached LSP service.
     pub fn from_home(home: PathBuf) -> Self {
         let default_workspace = Workspace::from_home(home);
         Self {
             workspace: default_workspace.clone(),
             default_workspace,
             custom_root: false,
+            lsp_service: None,
+        }
+    }
+
+    /// Selects the default workspace under `home` and binds `lsp_service` to workspace lifecycle operations.
+    pub fn with_lsp(home: PathBuf, lsp_service: Arc<LspService>) -> Self {
+        let default_workspace = Workspace::from_home(home);
+        Self {
+            workspace: default_workspace.clone(),
+            default_workspace,
+            custom_root: false,
+            lsp_service: Some(lsp_service),
         }
     }
 
     // Public ------------------------------------------------------------------
 
-    /// Opens the active workspace or switches to a chosen directory on disk.
+    /// Opens the active workspace or switches to a chosen directory on disk, warming up workspace LSP servers.
     pub fn open(&mut self, path: Option<&str>) -> Result<WorkspaceListing> {
+        let previous_root = self.get_root().ok();
         if let Some(target) = path.map(str::trim).filter(|s| !s.is_empty()) {
             let candidate = PathBuf::from(target);
             if candidate == self.default_workspace.root {
@@ -49,8 +67,17 @@ impl WorkspaceService {
                 self.custom_root = true;
             }
         }
+        let root = self.get_root()?;
+        if let Some(lsp_service) = &self.lsp_service {
+            if let Some(prev) = previous_root
+                && prev != root
+            {
+                lsp_service.shutdown_workspace(&prev);
+            }
+            let _ = lsp_service.prepare_workspace(&root);
+        }
         Ok(WorkspaceListing {
-            root: self.get_root()?.to_string_lossy().into_owned(),
+            root: root.to_string_lossy().into_owned(),
             entries: self.get_entries("")?,
         })
     }
@@ -91,16 +118,17 @@ impl WorkspaceService {
         Ok(entries)
     }
 
-    /// Reads UTF-8 text and revision hash for a workspace-relative file.
+    /// Reads UTF-8 text and revision hash for a workspace-relative file and synchronizes it with its LSP server.
     pub fn get_file_content(&self, relative: &str) -> Result<FileContent> {
         if relative.is_empty() {
             return Err(error("unsupported", "Choose a file inside the workspace."));
         }
+        let root = self.get_root()?;
         let path = self.get_entry_path(relative)?;
         if !fs::metadata(&path)?.is_file() {
             return Err(error("unsupported", "Choose a file inside the workspace."));
         }
-        let mut file = fs::File::open(path)?;
+        let mut file = fs::File::open(&path)?;
         if !file.metadata()?.is_file() {
             return Err(error("unsupported", "Choose a file inside the workspace."));
         }
@@ -114,10 +142,16 @@ impl WorkspaceService {
                 "This file is larger than the 16 MB viewing limit.",
             ));
         }
-        FileContent::from_bytes(bytes)
+        let content = FileContent::from_bytes(bytes)?;
+        if let Some(lsp_service) = &self.lsp_service {
+            let (language_id, lsp_status) =
+                lsp_service.open_or_sync_file(&root, &path, &content.content);
+            return Ok(content.with_lsp(language_id, lsp_status));
+        }
+        Ok(content)
     }
 
-    /// Writes UTF-8 text to an existing workspace-relative file and returns its new revision.
+    /// Writes UTF-8 text to an existing workspace-relative file, notifies LSP `didSave`, and returns its new revision.
     pub fn write_file(&self, relative: &str, content: &str) -> Result<FileContent> {
         if relative.is_empty() {
             return Err(error("unsupported", "Choose a file inside the workspace."));
@@ -143,7 +177,11 @@ impl WorkspaceService {
             .open(&path)?;
         file.write_all(content.as_bytes())?;
         file.sync_all()?;
-        FileContent::from_bytes(content.as_bytes().to_vec())
+        let written = FileContent::from_bytes(content.as_bytes().to_vec())?;
+        if let Some(lsp_service) = &self.lsp_service {
+            let _ = lsp_service.did_save(&root, &path, content);
+        }
+        Ok(written)
     }
 
     /// Creates a new file inside a workspace-relative directory without overwriting existing files.
@@ -212,7 +250,7 @@ impl WorkspaceService {
         })
     }
 
-    /// Renames a file or folder exclusively without overwriting an existing entry.
+    /// Renames a file or folder exclusively without overwriting an existing entry and closes its old LSP document.
     pub fn rename(&self, relative: &str, name: &str) -> Result<WorkspaceNode> {
         let name = WorkspaceNode::validate_name(name)?;
         let source = self.get_entry_path(relative)?;
@@ -276,6 +314,9 @@ impl WorkspaceService {
                 ));
             }
         }
+        if let Some(lsp_service) = &self.lsp_service {
+            let _ = lsp_service.did_close(&root, &source);
+        }
         let path = target
             .strip_prefix(root)
             .unwrap()
@@ -288,7 +329,7 @@ impl WorkspaceService {
         })
     }
 
-    /// Moves a workspace entry to the system Trash.
+    /// Moves a workspace entry to the system Trash (or permanently removes it in E2E harness runs) and closes its LSP document.
     pub fn delete(&self, relative: &str) -> Result<()> {
         if relative.is_empty() {
             return Err(error(
@@ -296,8 +337,9 @@ impl WorkspaceService {
                 "The workspace itself cannot be deleted.",
             ));
         }
+        let root = self.get_root()?;
         let path = self.get_entry_path(relative)?;
-        if fs::symlink_metadata(self.get_root()?.join(relative))?
+        if fs::symlink_metadata(root.join(relative))?
             .file_type()
             .is_symlink()
         {
@@ -306,11 +348,20 @@ impl WorkspaceService {
         #[cfg(any(test, feature = "e2e-bridge"))]
         if std::env::var_os("LGTM_E2E_PERMANENT_DELETE").is_some() {
             if path.is_dir() {
-                return fs::remove_dir_all(path).map_err(Into::into);
+                fs::remove_dir_all(&path)?;
+            } else {
+                fs::remove_file(&path)?;
             }
-            return fs::remove_file(path).map_err(Into::into);
+            if let Some(lsp_service) = &self.lsp_service {
+                let _ = lsp_service.did_close(&root, &path);
+            }
+            return Ok(());
         }
-        trash::delete(path).map_err(|e| error("io", e.to_string()))
+        trash::delete(&path).map_err(|e| error("io", e.to_string()))?;
+        if let Some(lsp_service) = &self.lsp_service {
+            let _ = lsp_service.did_close(&root, &path);
+        }
+        Ok(())
     }
 
     /// Returns the canonical root directory of the active workspace.

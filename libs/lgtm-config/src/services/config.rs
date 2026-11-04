@@ -1,22 +1,30 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use crate::error::{ConfigError, Result};
+use crate::error::{LgtmConfigError, Result};
 use crate::models::config::{LanguageConfig, LgtmConfig};
 use crate::models::mise::GeneratedMiseFile;
 
+/// Resolves global and workspace-level LGTM configuration and synchronizes `.lgtm/mise.toml`.
 #[derive(Debug, Clone, Default)]
 pub struct ConfigService {
     global_config_override: Option<PathBuf>,
 }
 
 impl ConfigService {
+    /// Creates a `ConfigService` that resolves the global config from `LGTM_HOME` or `~/.lgtm/config.toml`.
     pub fn new() -> Self {
         Self {
             global_config_override: None,
         }
     }
 
+    /// Creates a `ConfigService` rooted at `<home>/.lgtm/config.toml`.
+    pub fn from_home(home: PathBuf) -> Self {
+        Self::with_global_config_path(home.join(".lgtm").join("config.toml"))
+    }
+
+    /// Creates a `ConfigService` with an explicit global configuration file path.
     pub fn with_global_config_path(path: PathBuf) -> Self {
         Self {
             global_config_override: Some(path),
@@ -25,6 +33,7 @@ impl ConfigService {
 
     // Public ------------------------------------------------------------------
 
+    /// Returns the resolved path to the global `.lgtm/config.toml` file.
     pub fn get_global_config_path(&self) -> PathBuf {
         if let Some(override_path) = &self.global_config_override {
             return override_path.clone();
@@ -41,35 +50,44 @@ impl ConfigService {
             .join("config.toml")
     }
 
+    /// Returns the project configuration path (`<workspace>/.lgtm/config.toml`).
     pub fn get_project_config_path(workspace_root: &Path) -> PathBuf {
         workspace_root.join(".lgtm").join("config.toml")
     }
 
+    /// Returns the LGTM-managed Mise file path (`<workspace>/.lgtm/mise.toml`).
     pub fn get_managed_mise_path(workspace_root: &Path) -> PathBuf {
         workspace_root.join(".lgtm").join("mise.toml")
     }
 
+    /// Returns a designated cache file path inside `<workspace>/.lgtm/cache/<file_name>`.
+    pub fn get_workspace_cache_path(workspace_root: &Path, file_name: &str) -> PathBuf {
+        workspace_root.join(".lgtm").join("cache").join(file_name)
+    }
+
+    /// Loads and merges built-in presets, the global config, and the workspace project config.
     pub fn get_config(&self, workspace_root: &Path) -> Result<LgtmConfig> {
         let mut config = LgtmConfig::default();
 
         let global_path = self.get_global_config_path();
         if global_path.is_file() {
-            let overlay = Self::read_config_file(&global_path)?;
+            let overlay = Self::read_global_config_file(&global_path)?;
             config.merge(overlay);
         }
 
         let project_path = Self::get_project_config_path(workspace_root);
         if project_path.is_file() {
-            let overlay = Self::read_config_file(&project_path)?;
+            let overlay = Self::read_project_config_file(&project_path)?;
             config.merge(overlay);
         }
 
         Ok(config)
     }
 
+    /// Ensures `<workspace>/.lgtm/` exists, registers `.lgtm/` in `.git/info/exclude`, and writes `.lgtm/mise.toml`.
     pub fn ensure_workspace_layout(&self, workspace_root: &Path) -> Result<PathBuf> {
         let lgtm_dir = workspace_root.join(".lgtm");
-        std::fs::create_dir_all(&lgtm_dir).map_err(|source| ConfigError::Io {
+        std::fs::create_dir_all(&lgtm_dir).map_err(|source| LgtmConfigError::ProjectConfigIo {
             path: lgtm_dir.clone(),
             source,
         })?;
@@ -88,15 +106,18 @@ impl ConfigService {
         };
 
         if needs_write {
-            std::fs::write(&mise_path, rendered).map_err(|source| ConfigError::Io {
-                path: mise_path.clone(),
-                source,
+            std::fs::write(&mise_path, rendered).map_err(|source| {
+                LgtmConfigError::ManagedMiseIo {
+                    path: mise_path.clone(),
+                    source,
+                }
             })?;
         }
 
         Ok(mise_path)
     }
 
+    /// Walks up from `file_path` toward `workspace_root` to find the nearest marker for `language`.
     pub fn detect_project_root(
         workspace_root: &Path,
         file_path: &Path,
@@ -129,6 +150,7 @@ impl ConfigService {
         (workspace_root.to_path_buf(), None)
     }
 
+    /// Scans up to two directory levels under `workspace_root` to identify enabled languages.
     pub fn detect_workspace_languages(config: &LgtmConfig, workspace_root: &Path) -> Vec<String> {
         let mut detected = BTreeSet::new();
         Self::scan_directory_languages(config, workspace_root, &mut detected, 2);
@@ -174,14 +196,27 @@ impl ConfigService {
         }
     }
 
-    fn read_config_file(path: &Path) -> Result<LgtmConfig> {
-        let raw = std::fs::read_to_string(path).map_err(|source| ConfigError::Io {
+    fn read_global_config_file(path: &Path) -> Result<LgtmConfig> {
+        let raw =
+            std::fs::read_to_string(path).map_err(|source| LgtmConfigError::GlobalConfigIo {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        toml::from_str(&raw).map_err(|source| LgtmConfigError::GlobalConfigParse {
             path: path.to_path_buf(),
-            source,
-        })?;
-        toml::from_str(&raw).map_err(|source| ConfigError::ParseToml {
+            source: Box::new(source),
+        })
+    }
+
+    fn read_project_config_file(path: &Path) -> Result<LgtmConfig> {
+        let raw =
+            std::fs::read_to_string(path).map_err(|source| LgtmConfigError::ProjectConfigIo {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        toml::from_str(&raw).map_err(|source| LgtmConfigError::ProjectConfigParse {
             path: path.to_path_buf(),
-            source,
+            source: Box::new(source),
         })
     }
 
@@ -246,14 +281,13 @@ mod tests {
                 // Arrange
                 let temp = tempfile::tempdir().unwrap();
                 let workspace_root = temp.path();
-                let global_cfg = workspace_root.join("global-config.toml");
                 std::fs::create_dir_all(workspace_root.join(".git/info")).unwrap();
                 std::fs::write(
                     workspace_root.join("Cargo.toml"),
                     "[package]\nname = \"demo\"\n",
                 )
                 .unwrap();
-                let service = ConfigService::with_global_config_path(global_cfg);
+                let service = ConfigService::from_home(workspace_root.to_path_buf());
 
                 // Act
                 let mise_path = service.ensure_workspace_layout(workspace_root).unwrap();

@@ -16,7 +16,7 @@ fn main() {
                 .next()
                 .map(std::path::PathBuf::from)
                 .expect("missing home directory for --ipc-bridge");
-            app::run_ipc_bridge(home);
+            services::IpcBridgeService::new(home).run();
             return;
         }
     }

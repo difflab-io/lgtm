@@ -98,6 +98,7 @@ sequenceDiagram
 | Type / Method | Signature | Description |
 | --- | --- | --- |
 | `ConfigService::new` | `fn new() -> Self` | Construct a configuration service reading `~/.lgtm/config.toml` (or `$LGTM_HOME/config.toml`). |
+| `ConfigService::from_home` | `fn from_home(home: PathBuf) -> Self` | Construct a configuration service rooted at `<home>/.lgtm/config.toml`. |
 | `ConfigService::with_global_config_path` | `fn with_global_config_path(path: PathBuf) -> Self` | Construct a configuration service with an explicit global config path for isolated tests. |
 | `ConfigService::get_config` | `fn get_config(&self, workspace_root: &Path) -> Result<LgtmConfig>` | Return merged defaults, global config, and `<workspace>/.lgtm/config.toml`. |
 | `ConfigService::ensure_workspace_layout` | `fn ensure_workspace_layout(&self, workspace_root: &Path) -> Result<PathBuf>` | Ensure `.lgtm/`, `<git-dir>/info/exclude`, and `<workspace>/.lgtm/mise.toml` are up to date. |
@@ -117,7 +118,7 @@ libs/lgtm-config/
 ├── mise.toml
 └── src/
     ├── lib.rs                 Public ConfigService, MiseService, and model exports
-    ├── error.rs               ConfigError and Result alias
+    ├── error.rs               LgtmConfigError and Result alias
     ├── models/
     │   ├── mod.rs
     │   ├── config.rs          LgtmConfig, LanguageConfig, presets, and detection logic

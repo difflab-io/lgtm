@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Button } from '@cloudvoyant/helical-svelte'
+  import { Menu, type MenuItem, type MenuItemIndicatorTone } from 'lgtm-ui'
+  import { Radio } from 'lucide-svelte'
   import type { WorkspaceService } from '../services/workspaceService.svelte'
 
   // Props ---------------------------------------------------------------------
@@ -8,11 +9,8 @@
   }
   let { workspace }: LspStatusMenuProps = $props()
 
-  // State ---------------------------------------------------------------------
-  let open = $state(false)
-
   // Derived -------------------------------------------------------------------
-  const triggerLabel = $derived.by(() => {
+  const triggerSummary = $derived.by(() => {
     const server = workspace.activeLspServer
     if (!server) {
       return workspace.activeLanguageId ? `LSP: ${workspace.activeLanguageId}` : 'LSP: idle'
@@ -28,108 +26,118 @@
     return `LSP: ${server.languageId} (${detail})`
   })
 
-  const diagnosticEntries = $derived.by(() => {
-    const items: {
-      path: string
-      from: number
-      line: number
-      character: number
-      severity: string
-      message: string
-    }[] = []
-    for (const [path, list] of Object.entries(workspace.lspDiagnostics)) {
-      for (const diag of list) {
+  const triggerTone = $derived.by((): MenuItemIndicatorTone => {
+    const server = workspace.activeLspServer
+    if (!server) return 'inactive'
+    return workspace.lsp.getServerIndicator(server, workspace.activeLanguageId).tone
+  })
+
+  const menuItems = $derived.by((): MenuItem[] => {
+    const items: MenuItem[] = []
+    const servers = workspace.allLspServers
+    if (servers.length === 0) {
+      items.push({
+        value: 'empty',
+        label: 'No active language servers',
+        indicator: 'inactive',
+        disabled: true,
+      })
+    } else {
+      for (const server of servers) {
+        const indicator = workspace.lsp.getServerIndicator(server, workspace.activeLanguageId)
+        const subItems: MenuItem[] = [
+          {
+            value: `diagnostics:${server.languageId}`,
+            label: `View ${server.languageId} diagnostics`,
+          },
+          {
+            value: `restart:${server.languageId}`,
+            label: `Restart ${server.languageId} server`,
+          },
+        ]
         items.push({
-          path,
-          from: diag.from,
-          line: diag.line,
-          character: diag.character,
-          severity: diag.severity,
-          message: diag.message,
+          value: `server:${server.languageId}`,
+          label: server.languageId,
+          detail: `${server.status} · ${server.errorCount}E ${server.warningCount}W`,
+          indicator: indicator.tone,
+          indicatorLabel: indicator.label,
+          items: subItems,
         })
       }
     }
+
+    for (const [idx, diag] of workspace.lsp.diagnosticEntries.entries()) {
+      items.push({
+        value: `jump:${diag.path}:${diag.from}:${idx}`,
+        label: `${diag.path}:${diag.line + 1}:${diag.character + 1} [${diag.severity.toUpperCase()}] ${diag.message}`,
+        indicator:
+          diag.severity === 'error'
+            ? 'error'
+            : diag.severity === 'warning'
+              ? 'warning'
+              : 'active-project',
+        separatorBefore: idx === 0,
+      })
+    }
+
+    items.push({
+      value: 'diagnostics:all',
+      label: 'Open diagnostics buffer',
+      separatorBefore: true,
+    })
+
     return items
   })
 
-  async function openBuffer(languageId?: string) {
-    open = false
-    await workspace.openDiagnosticsBuffer(languageId)
-  }
-
-  async function jumpToDiagnostic(path: string, offset: number) {
-    open = false
-    await workspace.jumpToLocation(path, offset)
+  function handleSelect(value: string) {
+    if (value === 'diagnostics:all') {
+      void workspace.openDiagnosticsBuffer()
+      return
+    }
+    if (value.startsWith('diagnostics:')) {
+      const languageId = value.slice('diagnostics:'.length)
+      void workspace.openDiagnosticsBuffer(languageId)
+      return
+    }
+    if (value.startsWith('restart:')) {
+      const languageId = value.slice('restart:'.length)
+      void workspace.restartLanguageServer(languageId)
+      return
+    }
+    if (value.startsWith('jump:')) {
+      const parts = value.split(':')
+      const offset = Number(parts.at(-2) ?? 0)
+      const path = parts.slice(1, -2).join(':')
+      if (path) {
+        void workspace.jumpToLocation(path, offset)
+      }
+    }
   }
 </script>
 
-<div class="lsp-status-container">
-  <button
-    type="button"
-    class="lsp-status-trigger"
-    aria-label="LSP status"
-    aria-expanded={open}
-    onclick={() => {
-      open = !open
-      if (open) void workspace.syncLspState()
-    }}
-  >
-    {triggerLabel}
-  </button>
-
-  {#if open}
-    <div class="lsp-status-popover" role="dialog" aria-label="LSP servers and diagnostics">
-      <div class="lsp-popover-header">
-        <span>Language Servers</span>
-        <Button variant="outline" size="sm" onclick={() => openBuffer()}>
-          Open diagnostics buffer
-        </Button>
-      </div>
-
-      {#if workspace.allLspServers.length === 0}
-        <p class="lsp-popover-empty">No active language servers.</p>
-      {:else}
-        <ul class="lsp-server-list" aria-label="Active language servers">
-          {#each workspace.allLspServers as server (server.languageId)}
-            <li class="lsp-server-item">
-              <div class="lsp-server-meta">
-                <strong>{server.languageId}</strong>
-                <span class="lsp-server-badge" data-status={server.status}>{server.status}</span>
-                <span class="lsp-server-counts">
-                  {server.errorCount}E / {server.warningCount}W
-                </span>
-              </div>
-              <Button variant="text" size="sm" onclick={() => openBuffer(server.languageId)}>
-                View {server.languageId} diagnostics
-              </Button>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-
-      {#if diagnosticEntries.length > 0}
-        <div class="lsp-diagnostics-section">
-          <div class="lsp-popover-subheader">Diagnostics</div>
-          <ul class="lsp-diagnostic-list" aria-label="Workspace diagnostics">
-            {#each diagnosticEntries as item, idx (`${item.path}:${item.from}:${idx}`)}
-              <li>
-                <button
-                  type="button"
-                  class="lsp-diagnostic-item"
-                  onclick={() => jumpToDiagnostic(item.path, item.from)}
-                >
-                  <span class="lsp-diagnostic-loc"
-                    >{item.path}:{item.line + 1}:{item.character + 1}</span
-                  >
-                  <span class="lsp-diagnostic-msg"
-                    >[{item.severity.toUpperCase()}] {item.message}</span
-                  >
-                </button>
-              </li>
-            {/each}
-          </ul>
-        </div>
-      {/if}
-    </div>
-  {/if}
-</div>
+<Menu
+  items={menuItems}
+  ariaLabel="LSP servers and diagnostics"
+  triggerAriaLabel="LSP status"
+  triggerTitle={triggerSummary}
+  onopenchange={(open) => {
+    if (open) void workspace.syncLspState()
+  }}
+  onselect={handleSelect}
+>
+  {#snippet trigger()}
+    <Radio size={12} strokeWidth={1.75} data-lsp-summary={triggerSummary} />
+    <span
+      class={[
+        'inline-block size-1.5 rounded-full',
+        triggerTone === 'error' && 'bg-rose-500',
+        triggerTone === 'warning' && 'bg-amber-500',
+        triggerTone === 'active-page' && 'bg-emerald-500',
+        triggerTone === 'active-project' && 'bg-sky-500',
+        triggerTone === 'inactive' && 'bg-slate-300',
+      ]}
+      data-lsp-tone={triggerTone}
+    ></span>
+    <span class="sr-only">{triggerSummary}</span>
+  {/snippet}
+</Menu>

@@ -1,22 +1,25 @@
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use crate::error::{ConfigError, Result};
+use crate::error::{LgtmConfigError, Result};
 use crate::models::mise::{GeneratedMiseFile, MiseTaskSummary};
 use crate::services::config::ConfigService;
 
+/// Executes and inspects LGTM-managed Mise tasks and tool installations for a workspace.
 #[derive(Debug, Clone, Default)]
 pub struct MiseService {
     config_service: ConfigService,
 }
 
 impl MiseService {
+    /// Creates a `MiseService` backed by the given `ConfigService`.
     pub fn new(config_service: ConfigService) -> Self {
         Self { config_service }
     }
 
     // Public ------------------------------------------------------------------
 
+    /// Synchronizes `.lgtm/mise.toml` and returns all synthesized task summaries for the workspace.
     pub fn get_tasks(&self, workspace_root: &Path) -> Result<Vec<MiseTaskSummary>> {
         let _ = self
             .config_service
@@ -24,9 +27,10 @@ impl MiseService {
         let config = self.config_service.get_config(workspace_root)?;
         let detected = ConfigService::detect_workspace_languages(&config, workspace_root);
         let generated = GeneratedMiseFile::from_config(&config, &detected);
-        Ok(generated.task_summaries())
+        Ok(generated.get_task_summaries())
     }
 
+    /// Synchronizes `.lgtm/mise.toml` and runs the named task via `mise run`.
     pub fn run_task(&self, workspace_root: &Path, task: &str, args: &[String]) -> Result<i32> {
         let mise_file = self
             .config_service
@@ -66,10 +70,11 @@ impl MiseService {
 
         let status = cmd
             .status()
-            .map_err(|err| ConfigError::MiseFailed(err.to_string()))?;
+            .map_err(|err| LgtmConfigError::MiseFailed(err.to_string()))?;
         Ok(status.code().unwrap_or(1))
     }
 
+    /// Installs the requested `(tool, version)` pairs via `mise install` scoped to `.lgtm/mise.toml`.
     pub fn install_tools(&self, workspace_root: &Path, tools: &[(&str, &str)]) -> Result<()> {
         if tools.is_empty() {
             return Ok(());
@@ -95,9 +100,9 @@ impl MiseService {
         }
         let output = cmd
             .output()
-            .map_err(|err| ConfigError::MiseFailed(err.to_string()))?;
+            .map_err(|err| LgtmConfigError::MiseFailed(err.to_string()))?;
         if !output.status.success() {
-            return Err(ConfigError::MiseFailed(
+            return Err(LgtmConfigError::MiseFailed(
                 String::from_utf8_lossy(&output.stderr).trim().to_string(),
             ));
         }

@@ -3,57 +3,84 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+/// Merged LGTM configuration combining built-in presets, global user settings, and project overrides.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LgtmConfig {
+    /// Global LSP lifecycle and timeout settings.
     pub lsp: LspSettings,
+    /// User-defined Mise tools and tasks merged into `.lgtm/mise.toml`.
     pub mise: MiseSettings,
+    /// Per-language LSP server and Mise toolchain definitions keyed by language ID.
     pub languages: BTreeMap<String, LanguageConfig>,
 }
 
+/// Settings controlling LSP server startup, automatic tool installation, and request timeouts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LspSettings {
+    /// Whether LSP integration is enabled for workspaces.
     pub enabled: bool,
+    /// Whether missing language server binaries should be installed via `mise install`.
     pub auto_install: bool,
+    /// Maximum duration in milliseconds to wait for an LSP JSON-RPC response.
     pub request_timeout_ms: u64,
 }
 
+/// Custom Mise tools and tasks configured in `.lgtm/config.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct MiseSettings {
+    /// Tool versions keyed by Mise tool name (for example `ripgrep = "latest"`).
     pub tools: BTreeMap<String, String>,
+    /// Named Mise tasks synthesized into `.lgtm/mise.toml`.
     pub tasks: BTreeMap<String, MiseTaskConfig>,
 }
 
+/// A task definition in `.lgtm/config.toml`, represented as either a shell string or a detailed record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum MiseTaskConfig {
+    /// Shorthand shell command string.
     Command(String),
+    /// Detailed task with an optional description and shell command.
     Detailed {
+        /// Optional human-readable task summary.
         description: Option<String>,
+        /// Shell command executed by `mise run`.
         run: String,
     },
 }
 
+/// Language server and Mise tool preset for a single programming language.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LanguageConfig {
+    /// Whether this language preset is active.
     pub enabled: bool,
+    /// File extensions (without leading dots) mapped to this language.
     pub extensions: Vec<String>,
+    /// Marker files or directories that identify the language's project root.
     pub root_markers: Vec<String>,
+    /// Mise tool specifications required to run this language server.
     pub mise_tools: BTreeMap<String, String>,
+    /// Executable name or path for the language server.
     pub command: String,
+    /// Command-line arguments passed to the language server executable.
     #[serde(default)]
     pub args: Vec<String>,
+    /// Extra environment variables passed to the language server process.
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    /// Optional JSON payload forwarded as `initializationOptions` during the LSP `initialize` handshake.
     #[serde(default)]
     pub initialization_options: Option<serde_json::Value>,
+    /// Default Mise tasks synthesized when this language is detected in a workspace.
     #[serde(default)]
     pub default_tasks: BTreeMap<String, MiseTaskConfig>,
 }
 
 impl LgtmConfig {
+    /// Builds the default LGTM configuration with presets for Rust, TypeScript, JavaScript, Python, and Go.
     pub fn default_presets() -> Self {
         let mut languages = BTreeMap::new();
 
@@ -212,6 +239,7 @@ impl LgtmConfig {
 
     // Public ------------------------------------------------------------------
 
+    /// Merges an overlay configuration on top of this configuration in place.
     pub fn merge(&mut self, overlay: Self) {
         self.lsp = overlay.lsp;
         for (tool, version) in overlay.mise.tools {
@@ -225,6 +253,7 @@ impl LgtmConfig {
         }
     }
 
+    /// Resolves the enabled language ID and configuration matching a file's extension.
     pub fn detect_file_language(&self, file_path: &Path) -> Option<(String, &LanguageConfig)> {
         let ext = file_path.extension()?.to_str()?.to_ascii_lowercase();
         self.languages.iter().find_map(|(id, cfg)| {

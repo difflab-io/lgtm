@@ -84,6 +84,7 @@ flowchart LR
 
 ### Rust Layout & Naming
 
+- Document all public types, functions, and methods (`pub fn`) with `///` docstrings.
 - Use one inherent `impl` block per type per file: constructors first, `// Public` operations next, `// Private` helpers last, and trait `impl` blocks after the inherent block. Pad section headers with hyphens to column 80.
 - Name public repository and service reads `get_*`. Name mutating operations and factories with imperative verbs (`promote`, `publish_session`).
 - Call library and generated client methods directly; do not add pass-through wrapper aliases.
@@ -117,10 +118,12 @@ impl CommentAnchor {
 ### Desktop & Helical UI Components
 
 - Compose published `@cloudvoyant/helical-svelte` primitives (`SidebarProvider`, `Sidebar`, `SidebarTrigger`, `SidebarHeader`, `SidebarContent`, `Select*`, `Button`, `Row`, `Col`, `Center`, `Stack`, `HStack`, `VStack`, `Scroll`, `Portal`, `Notice`) directly in `apps/lgtm-web`.
-- Author reusable components in `libs/lgtm-ui` (`TreeView`, `ContextMenu`, `CodeEditor`) per Helical UI conventions (`@ark-ui/svelte` headless primitives, orthogonal `cva` variants + `VariantProps` in `styles.ts`, `@cloudvoyant/helical-ui` `cn` + semantic Tailwind tokens, `$derived(cn(...))`, and pure `types.ts` contracts with zero app/Tauri coupling) so they can be upstreamed directly to `helical-ui`.
+- Author reusable components in `libs/lgtm-ui` (`TreeView`, `ContextMenu`, `CodeEditor`, `Tabs`, `Menu`) per Helical UI conventions (`@ark-ui/svelte` headless primitives, orthogonal `cva` variants + `VariantProps` in `styles.ts`, `@cloudvoyant/helical-ui` `cn` + semantic Tailwind tokens, `$derived(cn(...))`, and pure `types.ts` contracts with zero app/Tauri coupling) so they can be upstreamed directly to `helical-ui`.
+- Keep component styling in `libs/lgtm-ui` as Tailwind `cva` variants; restrict `apps/lgtm-web/src/app.css` to Helical UI theme extensions and Tauri shell/CodeMirror integration overrides.
 
 ### Documentation
 
+- Document all environment variables that affect LGTM behavior in [`docs/environment.md`](docs/environment.md).
 - Use soft wraps for Markdown prose (one source line per paragraph). Keep diagrams as inline Mermaid fences and prefer file trees, tables, and short code snippets over long prose.
 
 ## Testing

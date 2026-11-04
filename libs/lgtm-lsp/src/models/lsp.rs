@@ -4,103 +4,160 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+/// Lifecycle state of a managed language server session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LspServerStatus {
+    /// The language server process is launching or completing its `initialize` handshake.
     Starting,
+    /// The language server is initialized and ready to serve requests.
     Ready,
+    /// The language server binary is unavailable or failed to initialize.
     Unavailable,
+    /// The language server encountered a runtime protocol error.
     Error,
 }
 
+/// Snapshot of a language server's status and aggregate diagnostic counts within a workspace.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LspServerStatusEvent {
+    /// Canonical root directory of the workspace.
     pub workspace_root: String,
+    /// Language identifier (`rust`, `typescript`, `javascript`, `python`, `go`, etc.).
     pub language_id: String,
+    /// Canonical project root directory resolved from language root markers.
     pub project_root: String,
+    /// Current lifecycle state of the language server.
     pub status: LspServerStatus,
+    /// Executable command used to launch the language server.
     pub command: String,
+    /// Optional status or failure detail message.
     pub message: Option<String>,
+    /// Total number of error-severity diagnostics reported for this language in the workspace.
     pub error_count: usize,
+    /// Total number of warning-severity diagnostics reported for this language in the workspace.
     pub warning_count: usize,
 }
 
+/// Severity level of an LSP diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LspDiagnosticSeverity {
+    /// Compile or type error (`severity = 1`).
     Error,
+    /// Compiler or linter warning (`severity = 2`).
     Warning,
+    /// Informational diagnostic (`severity = 3`).
     Info,
+    /// Style or refactoring hint (`severity = 4`).
     Hint,
 }
 
+/// A single diagnostic normalized to both UTF-16 flat editor offsets and 0-based line/character coordinates.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LspDiagnostic {
+    /// Start offset in UTF-16 code units from the beginning of the document.
     pub from: u32,
+    /// End offset in UTF-16 code units from the beginning of the document.
     pub to: u32,
+    /// Zero-based start line number.
     pub line: u32,
+    /// Zero-based start UTF-16 character column.
     pub character: u32,
+    /// Zero-based end line number.
     pub end_line: u32,
+    /// Zero-based end UTF-16 character column.
     pub end_character: u32,
+    /// Diagnostic severity level.
     pub severity: LspDiagnosticSeverity,
+    /// Diagnostic message text.
     pub message: String,
+    /// Optional diagnostic source tool name (for example `rustc`, `tsserver`, `Pyright`).
     pub source: Option<String>,
+    /// Optional diagnostic error or rule code.
     pub code: Option<String>,
 }
 
+/// Diagnostics published by a language server for a single workspace file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LspFileDiagnosticsEvent {
+    /// Canonical root directory of the workspace.
     pub workspace_root: String,
+    /// Workspace-relative path of the file.
     pub path: String,
+    /// Language identifier that produced the diagnostics.
     pub language_id: String,
+    /// Current list of diagnostics for the file.
     pub diagnostics: Vec<LspDiagnostic>,
 }
 
+/// Hover documentation and optional highlight range returned for a document offset.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LspHoverResult {
+    /// Formatted Markdown or plain-text hover contents.
     pub contents: String,
+    /// Optional UTF-16 start offset of the hovered symbol.
     pub from: Option<u32>,
+    /// Optional UTF-16 end offset of the hovered symbol.
     pub to: Option<u32>,
 }
 
+/// A target source location returned by `textDocument/definition`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LspLocation {
+    /// Workspace-relative path of the target file.
     pub path: String,
+    /// UTF-16 start offset of the target symbol.
     pub offset: u32,
+    /// UTF-16 end offset of the target symbol.
     pub end_offset: u32,
+    /// Zero-based start line number.
     pub line: u32,
+    /// Zero-based start UTF-16 character column.
     pub character: u32,
 }
 
+/// Complete snapshot of all active language servers and file diagnostics for a workspace.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LspWorkspaceSnapshot {
+    /// Canonical root directory of the workspace.
     pub workspace_root: String,
+    /// Status snapshots for all tracked language servers in the workspace.
     pub servers: Vec<LspServerStatusEvent>,
+    /// Non-empty diagnostic lists keyed by workspace-relative file path.
     pub diagnostics_by_path: BTreeMap<String, Vec<LspDiagnostic>>,
 }
 
+/// Read-only formatted text buffer summarizing workspace LSP servers and diagnostics.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LspDiagnosticsBuffer {
+    /// Display title for the read-only buffer tab.
     pub title: String,
+    /// Optional language filter applied when rendering the buffer.
     pub language_id: Option<String>,
+    /// Formatted Markdown/plain-text diagnostics report.
     pub content: String,
 }
 
+/// Asynchronous event emitted by `LspService` when server status or file diagnostics change.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum LspEvent {
+    /// A language server changed status or updated its aggregate diagnostic counts.
     Status(LspServerStatusEvent),
+    /// A language server published updated diagnostics for a file.
     Diagnostics(LspFileDiagnosticsEvent),
 }
 
 impl LspDiagnosticsBuffer {
+    /// Renders a formatted diagnostics buffer for `workspace_root`, optionally filtered by `language_filter`.
     pub fn render(
         workspace_root: &Path,
         language_filter: Option<&str>,
@@ -118,6 +175,7 @@ impl LspDiagnosticsBuffer {
 
 // Public ----------------------------------------------------------------------
 
+/// Converts a flat UTF-16 code unit offset in `text` into a 0-based `(line, character)` LSP position.
 pub fn offset_to_position(text: &str, utf16_offset: u32) -> (u32, u32) {
     let mut current_utf16: u32 = 0;
     let mut line: u32 = 0;
@@ -140,6 +198,7 @@ pub fn offset_to_position(text: &str, utf16_offset: u32) -> (u32, u32) {
     (line, character)
 }
 
+/// Converts a 0-based `(target_line, target_character)` LSP position in `text` into a flat UTF-16 offset.
 pub fn position_to_offset(text: &str, target_line: u32, target_character: u32) -> u32 {
     let mut current_utf16: u32 = 0;
     let mut line: u32 = 0;
@@ -168,10 +227,12 @@ pub fn position_to_offset(text: &str, target_line: u32, target_character: u32) -
     current_utf16
 }
 
+/// Converts an absolute filesystem path into a `file://` URI string.
 pub fn path_to_file_uri(path: &Path) -> Option<String> {
     Url::from_file_path(path).ok().map(|url| url.to_string())
 }
 
+/// Parses a `file://` URI string back into an absolute filesystem path.
 pub fn file_uri_to_path(uri: &str) -> Option<PathBuf> {
     let parsed = Url::parse(uri).ok()?;
     if parsed.scheme() != "file" {
@@ -180,6 +241,7 @@ pub fn file_uri_to_path(uri: &str) -> Option<PathBuf> {
     parsed.to_file_path().ok()
 }
 
+/// Renders a plain-text/Markdown buffer listing active servers and file diagnostics.
 pub fn render_diagnostics_buffer(
     workspace_root: &Path,
     language_filter: Option<&str>,

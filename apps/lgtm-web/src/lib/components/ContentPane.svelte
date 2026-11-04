@@ -1,8 +1,8 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import { Button } from '@cloudvoyant/helical-svelte'
-  import { CodeEditor } from 'lgtm-ui'
-  import { FileText, X } from 'lucide-svelte'
+  import { CodeEditor, Tabs } from 'lgtm-ui'
+  import { FileText } from 'lucide-svelte'
   import type { WorkspaceService } from '../services/workspaceService.svelte'
   import LspStatusMenu from './LspStatusMenu.svelte'
 
@@ -35,34 +35,14 @@
 </script>
 
 <main class="document-pane" aria-label="File viewer">
-  {#if workspace.tabs.length > 0}
-    <div class="document-tabs" role="tablist" aria-label="Open editors">
-      {#each workspace.tabs as tab (tab.id)}
-        <div
-          class="document-tab"
-          class:active={workspace.activeTabId === tab.id}
-          data-tab-id={tab.id}
-        >
-          <button
-            type="button"
-            role="tab"
-            class="document-tab-trigger"
-            aria-selected={workspace.activeTabId === tab.id}
-            onclick={() => workspace.activateTab(tab.id)}
-          >
-            {tab.title}
-          </button>
-          <button
-            type="button"
-            class="document-tab-close"
-            aria-label={`Close ${tab.title}`}
-            onclick={() => workspace.closeTab(tab.id)}
-          >
-            <X size={11} strokeWidth={1.75} />
-          </button>
-        </div>
-      {/each}
-    </div>
+  {#if workspace.tabItems.length > 0}
+    <Tabs
+      items={workspace.tabItems}
+      value={workspace.activeTabId}
+      ariaLabel="Open editors"
+      onchange={(tabId) => workspace.activateTab(tabId)}
+      onclose={(tabId) => workspace.closeTab(tabId)}
+    />
   {/if}
   {#if workspace.selected || workspace.activeTab}
     <div class="document-heading">

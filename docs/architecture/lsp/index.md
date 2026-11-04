@@ -110,6 +110,7 @@ sequenceDiagram
 | `LspService::get_definition` | `fn get_definition(&self, workspace_root: &Path, file_path: &Path, offset: u32) -> Result<Vec<LspLocation>>` | Convert UTF-16 `offset` to `(line, character)`, query `textDocument/definition`, and return workspace-relative locations with UTF-16 offsets. |
 | `LspService::get_workspace_snapshot` | `fn get_workspace_snapshot(&self, workspace_root: &Path) -> Result<LspWorkspaceSnapshot>` | Return all active language server statuses and diagnostics for `workspace_root`. |
 | `LspService::get_diagnostics_buffer` | `fn get_diagnostics_buffer(&self, workspace_root: &Path, language_id: Option<&str>) -> Result<LspDiagnosticsBuffer>` | Render a plain-text diagnostics report for all active servers or a single language server. |
+| `LspService::restart_language_server` | `fn restart_language_server(&self, workspace_root: &Path, language_id: &str) -> Result<LspServerStatusEvent>` | Restart all active sessions for `language_id` in `workspace_root` and re-synchronize open documents. |
 | `offset_to_position` | `fn offset_to_position(text: &str, utf16_offset: u32) -> (u32, u32)` | Convert a 0-based UTF-16 code-unit offset to a 0-based LSP `(line, character)` pair. |
 | `position_to_offset` | `fn position_to_offset(text: &str, target_line: u32, target_character: u32) -> u32` | Convert a 0-based LSP `(line, character)` pair to a 0-based UTF-16 code-unit offset. |
 

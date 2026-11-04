@@ -68,7 +68,7 @@ flowchart TB
 - `e2e/common/test-harness.ts`: Spawns isolated `lgtm-forge` and `lgtm` processes per test with dedicated `LGTM_HOME`, SQLite database, Git snapshot store, and cassette proxy ports.
 - `e2e/common/github-cassette.ts` and `github-recording.ts`: Provide strict offline HTTP replay and recording for GitHub PR journeys without touching live repositories during default runs.
 - `e2e/desktop/fixtures.ts`: Injects a thin `window.__TAURI_INTERNALS__` transport shim into Playwright Chromium/WebKit pages, forwards `invoke(cmd, args)` calls over Node `exposeBinding` to `lgtm-desktop --ipc-bridge <home>`, and dispatches streamed backend events (`lsp-status`, `lsp-diagnostics`) to registered browser listeners.
-- `apps/lgtm-desktop/src/app.rs` (`run_ipc_bridge`): Feature-gated (`e2e-bridge`) headless entrypoint that constructs the application with `tauri::test::mock_builder()` and `tauri::generate_context!()`, dispatches incoming JSON commands through `tauri::test::get_ipc_response`, and forwards `LspEvent` notifications to `stdout` via `BridgeEventForwarder`.
+- `apps/lgtm-desktop/src/services/ipc_bridge.rs` (`IpcBridgeService`): Feature-gated (`e2e-bridge`) headless service that constructs the application with `tauri::test::mock_builder()` and `tauri::generate_context!()`, dispatches incoming JSON commands through `tauri::test::get_ipc_response`, and forwards `LspEvent` notifications to `stdout` via `BridgeEventForwarder`.
 
 ### Data and Control Flow
 
@@ -100,7 +100,7 @@ sequenceDiagram
 | Component / Task | Contract / Signature | Description |
 | --- | --- | --- |
 | `//e2e/desktop:build-bridge` | `cargo build --manifest-path apps/lgtm-desktop/Cargo.toml --bin lgtm-desktop --features e2e-bridge` | Compile `lgtm-desktop` with `tauri/test` and `--ipc-bridge` enabled after `//apps/lgtm-desktop:install` and `//apps/lgtm-web:build`. |
-| `app::run_ipc_bridge` | `#[cfg(any(test, feature = "e2e-bridge"))] pub fn run_ipc_bridge(home: PathBuf)` | Run the stdio JSON-line Tauri IPC bridge rooted at `home` using `tauri::test::MockRuntime` and `tauri::generate_context!()`. |
+| `IpcBridgeService::run` | `#[cfg(any(test, feature = "e2e-bridge"))] pub fn run(&self)` | Run the stdio JSON-line Tauri IPC bridge rooted at `home` using `tauri::test::MockRuntime` and `tauri::generate_context!()`. |
 | `BridgeEventForwarder` | `#[cfg(any(test, feature = "e2e-bridge"))] type BridgeEventForwarder = Arc<dyn Fn(&str, Value) + Send + Sync>` | Forward `LspEvent::Status` (`lsp-status`) and `LspEvent::Diagnostics` (`lsp-diagnostics`) payloads as JSON lines on `stdout`. |
 | `stdin` request frame | `{"id": u64, "command": String, "args": Object}` | Single-line JSON IPC request sent from `e2e/desktop/fixtures.ts` to `lgtm-desktop --ipc-bridge`. |
 | `stdout` response frame | `{"id": u64, "ok": Value} \| {"id": u64, "error": Value}` | Single-line JSON IPC response returned from `tauri::test::get_ipc_response`. |

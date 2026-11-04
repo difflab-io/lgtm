@@ -1,3 +1,5 @@
+//! Language Server Protocol (LSP) stdio client and workspace diagnostics orchestration.
+
 pub mod error;
 pub mod models;
 pub mod services;

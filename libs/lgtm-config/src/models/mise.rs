@@ -5,30 +5,42 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 use crate::models::config::{LgtmConfig, MiseTaskConfig};
 
+/// Representation of the LGTM-managed `.lgtm/mise.toml` file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct GeneratedMiseFile {
+    /// Tool versions synthesized from detected languages and explicit `[mise.tools]` overrides.
     #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
     pub tools: BTreeMap<String, String>,
+    /// Task definitions synthesized from detected languages and explicit `[mise.tasks]` overrides.
     #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
     pub tasks: BTreeMap<String, MiseTaskEntry>,
 }
 
+/// A serialized task entry inside `.lgtm/mise.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MiseTaskEntry {
+    /// Optional human-readable description of the task.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Working directory template for task execution (`{{cwd}}`).
     pub dir: String,
+    /// Shell command executed when the task runs.
     pub run: String,
 }
 
+/// Summary of an available Mise task exposed to CLI and UI consumers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MiseTaskSummary {
+    /// Task identifier (`check`, `rust:check`, etc.).
     pub name: String,
+    /// Optional human-readable task description.
     pub description: Option<String>,
+    /// Shell command executed by the task.
     pub run: String,
 }
 
 impl GeneratedMiseFile {
+    /// Synthesizes a `.lgtm/mise.toml` model from the merged config and detected workspace languages.
     pub fn from_config(config: &LgtmConfig, detected_languages: &[String]) -> Self {
         let mut tools = BTreeMap::new();
         let mut tasks = BTreeMap::new();
@@ -63,6 +75,7 @@ impl GeneratedMiseFile {
 
     // Public ------------------------------------------------------------------
 
+    /// Serializes the generated Mise configuration to formatted TOML with an LGTM header comment.
     pub fn render_toml(&self) -> Result<String> {
         let body = toml::to_string_pretty(self)?;
         Ok(format!(
@@ -70,7 +83,8 @@ impl GeneratedMiseFile {
         ))
     }
 
-    pub fn task_summaries(&self) -> Vec<MiseTaskSummary> {
+    /// Returns a sorted list of task summaries for display or CLI output.
+    pub fn get_task_summaries(&self) -> Vec<MiseTaskSummary> {
         self.tasks
             .iter()
             .map(|(name, entry)| MiseTaskSummary {
