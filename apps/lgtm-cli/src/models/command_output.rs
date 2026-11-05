@@ -1,5 +1,7 @@
-//! Command outputs for `lgtm add`, `lgtm commit`, and `lgtm push`.
+//! Command outputs for `lgtm add`, `lgtm commit`, `lgtm push`, and `lgtm run`.
+// TODO: Split each `*CommandOutput` model into its own module file under `models/`.
 
+use lgtm_env::MiseTaskSummary;
 use serde_json::json;
 
 use crate::{
@@ -147,6 +149,66 @@ impl From<PushResponse> for PushCommandOutput {
             head_sha: response.head_sha,
             repository_url: response.repository_url,
             local: response.local,
+        }
+    }
+}
+
+/// Command output for `lgtm run`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RunCommandOutput {
+    Tasks {
+        mise_file: String,
+        tasks: Vec<MiseTaskSummary>,
+    },
+    Executed {
+        mise_file: String,
+        task: Option<String>,
+        exit_code: i32,
+    },
+}
+
+impl RunCommandOutput {
+    // Public ------------------------------------------------------------------
+
+    /// Print the managed task list or execution summary in terminal or `--json` format.
+    pub fn print(&self, json: bool) {
+        match self {
+            Self::Tasks { mise_file, tasks } => {
+                if json {
+                    println!(
+                        "{}",
+                        json!({
+                            "mise_file": mise_file,
+                            "tasks": tasks,
+                        })
+                    );
+                } else if tasks.is_empty() {
+                    println!("No tasks configured in {mise_file}");
+                } else {
+                    for task in tasks {
+                        match &task.description {
+                            Some(desc) => println!("{:<20} {} ({})", task.name, desc, task.run),
+                            None => println!("{:<20} {}", task.name, task.run),
+                        }
+                    }
+                }
+            }
+            Self::Executed {
+                mise_file,
+                task,
+                exit_code,
+            } => {
+                if json {
+                    println!(
+                        "{}",
+                        json!({
+                            "mise_file": mise_file,
+                            "task": task,
+                            "exit_code": exit_code,
+                        })
+                    );
+                }
+            }
         }
     }
 }

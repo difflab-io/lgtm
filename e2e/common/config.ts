@@ -19,6 +19,7 @@ export function suiteConfig(
           'github',
           'review-service',
           'commands',
+          'run',
           'daemon',
           'local-review',
           'pr-review',

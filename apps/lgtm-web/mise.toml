@@ -4,7 +4,8 @@ buf = "1.73.0"
 
 [tasks.install]
 description = "Install Bun dependencies"
-run = "bun install"
+depends = ["//:install"]
+run = 'echo "Workspace dependencies installed"'
 
 [tasks.build]
 description = "Build the static web application"

@@ -61,19 +61,21 @@ lgtm down
 - [Daemon](daemon.md): Start, discover, and stop the background server.
 - [Server](server.md): Serve embedded web assets and `lgtm-forge` Connect RPC endpoints.
 - [Store](store.md): Own runtime paths (`~/.lgtm`), snapshot directories (`~/.lgtm/snapshots/$repoSlug`), and PID/port files.
-- `commands/`: One command group per file (`add.rs`, `commit.rs`, `push.rs`, `review.rs`, `comment.rs`, `ui.rs`).
+- `commands/`: One command group per file (`add.rs`, `commit.rs`, `push.rs`, `review.rs`, `comment.rs`, `run.rs`, `ui.rs`).
 - `models.rs`: Shared command arguments (`ReviewOutcomeArg`, `ReviewGroupByArg`) and output formatting helpers.
 - `rpc_client.rs`: Generated Connect RPC client for `lgtm-forge` and daemon endpoint discovery.
 - `ui.rs`: Browser launching shared by `up` and `ui`.
 - Bundled forge (`bundle/backend/`): Embedded `lgtm-forge` and `lgtm-db` services compiled into the single `lgtm` binary.
+- `lgtm-config`: Linked workspace crate owning `.lgtm/config.toml` resolution, `.lgtm/mise.toml` synthesis, and `lgtm run` task execution.
 
 ```mermaid
 flowchart TD
     MAIN["main: parse command"] --> STORE["Store: runtime directory (~/.lgtm)"]
     MAIN --> DAEMON["daemon: up / down / status"]
     MAIN --> SERVER["server: serve"]
-    MAIN --> COMMANDS["commands: add / commit / push / review / comment / ui"]
+    MAIN --> COMMANDS["commands: add / commit / push / review / comment / run / ui"]
     COMMANDS --> CLIENT["rpc_client: ReviewServiceClient"]
+    COMMANDS --> MISE["lgtm_config: MiseService"]
     COMMANDS --> UI["ui: browser launch"]
     CLIENT --> FORGE["lgtm-forge Connect RPC (/rpc)"]
     MAIN --> LOG["log: server logging"]
@@ -109,6 +111,7 @@ sequenceDiagram
 | `down` | Stop the running background server |
 | `status [--json]` | Report daemon PID, port, and endpoint URLs |
 | `ui [--port PORT] [--no-open] [--json]` | Ensure server readiness and print/open the web UI URL |
+| `run [--list] [<task>] [<args>...] [--json]` | Synchronize `<workspace>/.lgtm/mise.toml` and list or proxy tasks via `mise` |
 | `add <paths>... [--local] [--json]` | Stage paths in the working checkout or in `~/.lgtm/snapshots/$repoSlug` (`--local`) |
 | `commit [--as <agent-name>] [--local] [-m <message>] [--json]` | Create a checkout commit or a shadow snapshot commit (`--local`) |
 | `push [--local] [--json]` | Push committed history to the remote repository or update local snapshot refs (`--local`) |
@@ -141,6 +144,7 @@ apps/lgtm-cli/src/
     ├── push.rs      Push command parser and RPC callback
     ├── review.rs    Review list, new, refresh, show, and close callbacks
     ├── comment.rs   Comment new, update, and delete callbacks
+    ├── run.rs       Managed Mise task listing and execution proxy
     └── ui.rs        Browser command
 ```
 

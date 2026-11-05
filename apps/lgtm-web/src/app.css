@@ -1,6 +1,7 @@
 @import 'tailwindcss';
 @import '@cloudvoyant/helical-ui/theme.css';
 @import '@cloudvoyant/helical-ui/components.css';
+@import './theme-lgtm.css';
 @source '../../../libs/lgtm-ui/src';
 @source '../../../node_modules/@cloudvoyant/helical-svelte/dist';
 @source '../../../node_modules/@cloudvoyant/helical-ui';
@@ -14,192 +15,31 @@
     'Segoe UI',
     sans-serif;
   font-synthesis: none;
-  color: #334155;
-  background: #fff;
-  --primary: #475569;
-  --primary-foreground: #fff;
+  color: var(--foreground);
+  background: var(--background);
   --base-font-size: 16px;
 }
+
 * {
   box-sizing: border-box;
 }
+
 body {
   margin: 0;
   min-width: 480px;
+  background: var(--background);
+  color: var(--foreground);
 }
+
 button {
   cursor: pointer;
 }
+
 button:disabled {
   cursor: default;
 }
+
 button:focus-visible {
-  outline: 2px solid #64748b;
+  outline: 2px solid var(--ring);
   outline-offset: -2px;
-}
-.workspace-shell {
-  flex-direction: column;
-  min-block-size: 0;
-  height: 100vh;
-  height: 100dvh;
-  gap: 0;
-  overflow: hidden;
-}
-.titlebar {
-  height: 36px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 0 16px 0 80px;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
-  user-select: none;
-}
-.brand {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-}
-.workspace-chooser {
-  width: 180px;
-  min-width: 0;
-}
-.workspace-chooser [data-part='trigger'] {
-  width: 100%;
-  min-width: 0;
-  font-size: 12px;
-}
-.titlebar .workspace-chooser [data-part='trigger'] {
-  height: 26px;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  font-size: 11px;
-}
-.workspace-body {
-  flex: 1;
-  min-height: 0;
-  min-block-size: 0;
-  gap: 0;
-  align-items: stretch;
-}
-.workspace-sidebar {
-  top: 36px;
-  height: calc(100dvh - 36px);
-  display: flex;
-  flex-direction: column;
-  width: 236px;
-  flex-shrink: 0;
-  background: #f8fafc;
-  border-right: 1px solid #e2e8f0;
-  overflow-y: auto;
-}
-.sidebar-heading {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  flex-shrink: 0;
-  padding: 15px 14px 10px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #64748b;
-  background: #f8fafc;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 4px;
-}
-.workspace-heading-row {
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.workspace-actions {
-  gap: 4px;
-  align-items: center;
-}
-.sidebar-heading .new-file {
-  width: 24px;
-  height: 24px;
-  padding: 4px;
-  font-size: 10px;
-  font-weight: 500;
-}
-.sidebar-message {
-  font-size: 12px;
-  line-height: 1.7;
-  margin: 8px 14px;
-  overflow-wrap: anywhere;
-}
-.document-pane {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  background: white;
-}
-.document-heading {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 40px;
-  padding: 0 24px;
-  flex-shrink: 0;
-  border-bottom: 1px solid #f1f5f9;
-  font-size: 11px;
-  color: #94a3b8;
-}
-.document-path {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.editor-scroll {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  overflow: auto;
-  min-height: 0;
-}
-.empty-pane {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 32px;
-  text-align: center;
-  color: #94a3b8;
-}
-.empty-pane h1 {
-  color: #64748b;
-  font-size: 17px;
-  font-weight: 500;
-}
-.empty-pane p {
-  font-size: 12px;
-  max-width: 460px;
-  line-height: 1.7;
-}
-.document-status {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 8px 16px;
-  border-top: 1px solid #e2e8f0;
-  background: #f8fafc;
-  font-size: 10px;
-  color: #94a3b8;
-}
-.document-status > span:first-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.error,
-.document-status .error {
-  color: #b45309;
 }

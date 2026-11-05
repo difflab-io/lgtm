@@ -61,12 +61,13 @@ The web task needs a running backend for RPC calls. The combined task starts bot
 ```sh
 premise run run:cli -- up --no-open
 premise run run:cli -- review list --json
+premise run run:cli -- run --list
 premise run run:cli -- ui --no-open
 premise run run:cli -- status
 premise run run:cli -- down
 ```
 
-The `lgtm-cli` package builds the backend/DB source and web assets into the `lgtm` executable. `up` starts or reuses one background application on macOS/Linux, `status` reports its URLs, `ui` prints/opens its URL and `down` stops the identified process. `LGTM_HOME` isolates runtime files; `LGTM_RPC_URL` selects an existing RPC endpoint. Review list calls the hello demonstration; other domain operations are explicit unimplemented stubs.
+The `lgtm-cli` package builds the backend/DB source and web assets into the `lgtm` executable. `up` starts or reuses one background application on macOS/Linux, `status` reports its URLs, `ui` prints/opens its URL, `run` synchronizes `<workspace>/.lgtm/mise.toml` via `lgtm-config` and proxies tasks through `mise`, and `down` stops the identified process. `LGTM_HOME` isolates runtime files; `LGTM_RPC_URL` selects an existing RPC endpoint. Review list calls the hello demonstration; other domain operations are explicit unimplemented stubs.
 
 ### Neovim shell
 

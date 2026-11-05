@@ -1,0 +1,155 @@
+/* Custom LGTM theme: Vercel Dark / Light extended from
+   ~/.config/nvim/colors/vercel-dark.lua and ~/.config/helix/themes/vercel-dark.toml */
+:root,
+.theme-lgtm {
+  --radius: 0.5rem;
+  --background: #f3f3f5;
+  --foreground: #171717;
+  --card: #f8f8fa;
+  --card-foreground: #171717;
+  --popover: #f8f8fa;
+  --popover-foreground: #171717;
+  --primary: #171717;
+  --primary-foreground: #f8f8fa;
+  --secondary: #eaeaed;
+  --secondary-foreground: #171717;
+  --muted: #ececef;
+  --muted-foreground: #666666;
+  --accent: #e4e4e8;
+  --accent-foreground: #171717;
+  --destructive: #dc2626;
+  --destructive-foreground: #f8f8fa;
+  --success: #1f8a4c;
+  --success-foreground: #f8f8fa;
+  --danger: #dc2626;
+  --danger-foreground: #f8f8fa;
+  --warn: #d97706;
+  --warn-foreground: #f8f8fa;
+  --info: #0068d6;
+  --info-foreground: #f8f8fa;
+  --border: #dedee3;
+  --input: #dedee3;
+  --ring: #171717;
+  --chart-1: #0068d6;
+  --chart-2: #1f8a4c;
+  --chart-3: #d97706;
+  --chart-4: #7c3aed;
+  --chart-5: #c81e68;
+  --sidebar: #f3f3f5;
+  --sidebar-foreground: #171717;
+  --sidebar-primary: #171717;
+  --sidebar-primary-foreground: #f8f8fa;
+  --sidebar-accent: #e4e4e8;
+  --sidebar-accent-foreground: #171717;
+  --sidebar-border: #dedee3;
+  --sidebar-ring: #171717;
+  --shadow-blur: 2px;
+  --shadow-color: hsl(0 0% 0%);
+  --shadow-spread: 0px;
+  --shadow-opacity: 0.18;
+  --shadow-offset-x: 0px;
+  --shadow-offset-y: 1px;
+
+  /* CodeMirror editor & syntax tokens (daylight counterparts of vercel-dark.lua) */
+  --cm-active-line-bg: #eaeaed;
+  --cm-selection-bg: #cce6ff;
+  --cm-gutter-fg: #8a8a90;
+  --cm-gutter-active-fg: #171717;
+  --cm-match-paren: #b45309;
+  --cm-syntax-keyword: #7c3aed;
+  --cm-syntax-operator: #171717;
+  --cm-syntax-string: #1f8a4c;
+  --cm-syntax-number: #b45309;
+  --cm-syntax-function: #0068d6;
+  --cm-syntax-type: #171717;
+  --cm-syntax-property: #171717;
+  --cm-syntax-variable: #171717;
+  --cm-syntax-builtin: #c81e68;
+  --cm-syntax-macro: #007a6c;
+  --cm-syntax-comment: #666666;
+  --cm-syntax-heading: #0068d6;
+  --cm-syntax-strong: #b45309;
+  --cm-syntax-italic: #c81e68;
+  --cm-syntax-code: #1f8a4c;
+  --cm-syntax-code-bg: #e8e8ec;
+  --cm-syntax-quote: #666666;
+  --cm-syntax-link: #0068d6;
+  --cm-syntax-meta: #666666;
+  --cm-syntax-inserted: #1f8a4c;
+  --cm-syntax-deleted: #dc2626;
+  --cm-syntax-changed: #b45309;
+}
+
+.dark,
+.theme-lgtm.dark {
+  /* Palette from ~/.config/nvim/colors/vercel-dark.lua */
+  --background: #101010;
+  --foreground: #ededed;
+  --card: #1a1a1a;
+  --card-foreground: #ededed;
+  --popover: #1a1a1a;
+  --popover-foreground: #ededed;
+  --primary: #ededed;
+  --primary-foreground: #101010;
+  --secondary: #1a1a1a;
+  --secondary-foreground: #ededed;
+  --muted: #1a1a1a;
+  --muted-foreground: #a1a1a1;
+  --accent: #262626;
+  --accent-foreground: #ededed;
+  --destructive: #f32e40;
+  --destructive-foreground: #101010;
+  --success: #2ebd6b;
+  --success-foreground: #101010;
+  --danger: #f32e40;
+  --danger-foreground: #101010;
+  --warn: #ffae00;
+  --warn-foreground: #101010;
+  --info: #52a8ff;
+  --info-foreground: #101010;
+  --border: oklch(0.26 0 0);
+  --input: oklch(0.32 0 0);
+  --ring: oklch(0.72 0 0);
+  --chart-1: #52a8ff;
+  --chart-2: #2ebd6b;
+  --chart-3: #ffae00;
+  --chart-4: #8b5cf6;
+  --chart-5: #f12b82;
+  --sidebar: #101010;
+  --sidebar-foreground: #ededed;
+  --sidebar-primary: #ededed;
+  --sidebar-primary-foreground: #101010;
+  --sidebar-accent: #222222;
+  --sidebar-accent-foreground: #ededed;
+  --sidebar-border: oklch(0.26 0 0);
+  --sidebar-ring: oklch(0.72 0 0);
+
+  /* CodeMirror editor & syntax tokens directly from ~/.config/nvim/colors/vercel-dark.lua */
+  --cm-active-line-bg: #1a1a1a;
+  --cm-selection-bg: #264564;
+  --cm-gutter-fg: #676767;
+  --cm-gutter-active-fg: #ededed;
+  --cm-match-paren: #ffae00;
+  --cm-syntax-keyword: #8b5cf6;
+  --cm-syntax-operator: #ededed;
+  --cm-syntax-string: #2ebd6b;
+  --cm-syntax-number: #f59e0b;
+  --cm-syntax-function: #52a8ff;
+  --cm-syntax-type: #ededed;
+  --cm-syntax-property: #ededed;
+  --cm-syntax-variable: #ededed;
+  --cm-syntax-builtin: #f12b82;
+  --cm-syntax-macro: #00aa95;
+  --cm-syntax-comment: #a1a1a1;
+  --cm-syntax-heading: #52a8ff;
+  --cm-syntax-strong: #ffae00;
+  --cm-syntax-italic: #f12b82;
+  --cm-syntax-code: #2ebd6b;
+  --cm-syntax-code-bg: #1a1a1a;
+  --cm-syntax-quote: #a1a1a1;
+  --cm-syntax-link: #52a8ff;
+  --cm-syntax-meta: #a1a1a1;
+  --cm-syntax-inserted: #2ebd6b;
+  --cm-syntax-deleted: #f32e40;
+  --cm-syntax-changed: #ffae00;
+}

@@ -4,6 +4,8 @@ Local review tooling for people and agents; includes the CLI, Tauri desktop work
 
 - [Development](docs/development.md)
 - [CLI usage](apps/lgtm-cli/README.md)
+- [Config & Mise SDK](docs/architecture/config/index.md)
+- [LSP SDK](docs/architecture/lsp/index.md)
 - [UI library](libs/lgtm-ui/README.md)
 - [Architecture](docs/architecture/index.md)
 - [E2E and recording/replay](e2e/README.md)

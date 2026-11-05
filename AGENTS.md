@@ -6,6 +6,7 @@
 - During alpha, update branch-introduced contracts directly without compatibility shims or duplicate fields.
 - Expose database queries and mutations only through named repository methods in [`libs/lgtm-db`](libs/lgtm-db/src/lib.rs). Keep SeaORM `Entity` and `ActiveModel` types `pub(crate)`; never expose raw connections, query builders, or raw SQL to callers.
 - Models validate, map data, and implement pure domain behavior; services own persistence orchestration, transactions, and external I/O.
+- Give each file and service a single responsibility; extract distinct capabilities (such as caching or desktop lifecycle orchestration) into dedicated model and service modules with their own integration suites.
 - Keep CLI review and comment commands as thin RPC clients over `lgtm-forge`. Preserve daemon and health behavior; do not embed review persistence in `lgtm-cli`.
 - Establish tracing spans at CLI/RPC boundaries (`#[tracing::instrument]`). Services emit tracing events and never store request spans.
 - Preserve pinned Neovim dependencies in the plugin setup, source-switch installer, and E2E harness (including NuiComponents/NUI and optional Kak).
@@ -14,49 +15,12 @@
 
 ## Organization
 
-```text
-├── apps/
-│   ├── lgtm-forge/src/
-│   │   ├── models/          # Pure domain entities, factories, validators, and proto From mappers
-│   │   ├── services/        # Stateful orchestration (ReviewService) with constructor injection
-│   │   ├── extensions/      # Stateless SDK/CLI adapters (git.rs, gitoxide.rs, octocrab.rs)
-│   │   ├── forge/           # RemoteForge trait and provider wire contracts (forge/models.rs)
-│   │   ├── rpc/             # Connect/gRPC transport handlers
-│   │   ├── snapshots.rs     # LGTM-managed local Git snapshot store
-│   │   ├── error.rs         # Application error enum
-│   │   └── utils.rs         # Cross-cutting non-SDK helpers (LGTM_HOME, URLs, agent descriptors)
-│   ├── lgtm-cli/src/
-│   │   ├── commands/        # One file per command group (local types, Args, run callback, helpers)
-│   │   ├── models/          # CLI view models (From<Proto> + print) and shared args (common.rs)
-│   │   ├── rpc_client.rs    # Connect RPC client factory over generated ReviewServiceClient
-│   │   ├── daemon.rs        # Background daemon lifecycle
-│   │   └── store.rs         # Local runtime state store
-│   ├── lgtm-desktop/src/
-│   │   ├── models/          # Pure workspace domain types and name/UTF-8 validators
-│   │   ├── services/        # Local workspace filesystem orchestration (WorkspaceService)
-│   │   ├── app.rs           # Tauri app state, lifecycle, and IPC command handlers
-│   │   └── error.rs         # Serializable WorkspaceError
-│   └── lgtm-web/src/lib/
-│       ├── clients/         # Tauri IPC and Connect RPC transport adapters
-│       ├── models/          # View models mapping domain nodes to UI component contracts
-│       ├── services/        # Reactive Svelte 5 state orchestration (workspaceService.svelte.ts)
-│       └── components/      # Shell, WorkspaceExplorer, and ContentPane
-├── libs/
-│   ├── lgtm-db/src/
-│   │   ├── entities/        # Private SeaORM table models and shared column enums (common.rs)
-│   │   ├── repositories/    # Named repository queries and explicit column mutations
-│   │   └── client.rs        # Database pool and Transaction handles
-│   └── lgtm-ui/src/
-│       ├── tree-view/       # Portable Ark UI TreeView + Helical CVA styles
-│       ├── context-menu/    # Portable Ark UI Menu + Helical CVA styles
-│       └── code-editor/     # Portable CodeMirror 6 wrapper + Helical CVA styles
-└── e2e/
-    ├── common/              # Shared process, cassette, and GitHub PR fixtures
-    ├── forge/               # Backend RPC E2E specs
-    ├── cli/                 # CLI local-review, pr-review, parity, and daemon specs
-    ├── nvim/                # Neovim plugin shell and installer specs
-    └── desktop/             # Playwright Chromium/WebKit desktop shell and file tree specs
-```
+- `apps/lgtm-forge/src/`: `rpc/` (Connect handlers) -> `services/` (`ReviewService`) -> `models/`, `forge/` (`RemoteForge`), `extensions/` (`git`, `gitoxide`, `octocrab`), `snapshots.rs`, `utils.rs`.
+- `apps/lgtm-cli/src/`: `commands/` (one file per command group), `models/` (`From<Proto>` + `print`), `rpc_client.rs`, `daemon.rs`, `store.rs`.
+- `apps/lgtm-desktop/src/`: `app.rs` (Tauri IPC handlers), `services/` (`WorkspaceService`, `DesktopLspService`), `models/`, `error.rs`.
+- `apps/lgtm-web/src/lib/`: `clients/` (Tauri/RPC adapters), `services/` (reactive Svelte 5 state), `models/`, `components/`.
+- `libs/`: `lgtm-config` (`.lgtm/config.toml` + language discovery), `lgtm-db` (private SeaORM entities + named repositories), `lgtm-env` (managed `mise` binary lifecycle + `.lgtm/mise.toml` synthesis), `lgtm-lsp` (`LgtmLspManager`, `LspCacheService`, stdio JSON-RPC), `lgtm-ui` (portable Helical UI components and services).
+- `e2e/`: `common/`, `forge/`, `cli/`, `nvim/`, `desktop/`.
 
 ```mermaid
 flowchart LR
@@ -76,6 +40,9 @@ flowchart LR
 
 ### Rust Layout & Naming
 
+- Document all public types, functions, and methods (`pub fn`) with `///` docstrings (`#![warn(missing_docs, unreachable_pub)]`) that state the type's architectural role and boundary purpose.
+- Export only public API types from crate roots (`lib.rs`), formatted one `pub use` item per line.
+- Link workspace library crates through `Cargo.toml` dependencies rather than `#[path = ...]` module shims or `#[allow(dead_code)]`, and prefer standard library or crate formatting traits (such as `LowerHex` on digest outputs) over manual formatting loops.
 - Use one inherent `impl` block per type per file: constructors first, `// Public` operations next, `// Private` helpers last, and trait `impl` blocks after the inherent block. Pad section headers with hyphens to column 80.
 - Name public repository and service reads `get_*`. Name mutating operations and factories with imperative verbs (`promote`, `publish_session`).
 - Call library and generated client methods directly; do not add pass-through wrapper aliases.
@@ -108,11 +75,13 @@ impl CommentAnchor {
 
 ### Desktop & Helical UI Components
 
-- Compose published `@cloudvoyant/helical-svelte` primitives (`SidebarProvider`, `Sidebar`, `SidebarTrigger`, `SidebarHeader`, `SidebarContent`, `Select*`, `Button`, `Row`, `Col`, `Center`, `Stack`, `HStack`, `VStack`, `Scroll`, `Portal`, `Notice`) directly in `apps/lgtm-web`.
-- Author reusable components in `libs/lgtm-ui` (`TreeView`, `ContextMenu`, `CodeEditor`) per Helical UI conventions (`@ark-ui/svelte` headless primitives, orthogonal `cva` variants + `VariantProps` in `styles.ts`, `@cloudvoyant/helical-ui` `cn` + semantic Tailwind tokens, `$derived(cn(...))`, and pure `types.ts` contracts with zero app/Tauri coupling) so they can be upstreamed directly to `helical-ui`.
+- Compose `@cloudvoyant/helical-svelte` primitives directly in `apps/lgtm-web`; build missing reusable primitives and services in `libs/lgtm-ui` per Helical UI conventions (`@ark-ui/svelte`, orthogonal `cva` + `VariantProps` in `styles.ts`, `cn` + semantic Tailwind tokens, and app-agnostic `types.ts`) for upstreaming.
+- Style components and shell layouts with Tailwind utilities and `cva` variants; restrict `apps/lgtm-web/src/app.css` to theme imports and global element resets, and extract repeated Svelte markup/class patterns into local `{#snippet}` blocks or subcomponents.
+- Style IDE menus, context menus, and tab bars compactly with square item highlights (`rounded-none`), full-row submenu trigger hover targets, neutral surface hover/focus tokens (`--accent`, `--ring`), workspace-relative breadcrumbs, and icon-based diagnostic badges only when counts are non-zero.
 
 ### Documentation
 
+- Document all environment variables that affect LGTM behavior in [`docs/environment.md`](docs/environment.md).
 - Use soft wraps for Markdown prose (one source line per paragraph). Keep diagrams as inline Mermaid fences and prefer file trees, tables, and short code snippets over long prose.
 
 ## Testing
@@ -120,7 +89,7 @@ impl CommentAnchor {
 ### Rust BDD Unit & Integration Tests
 
 - Colocate unit tests in `#[cfg(test)] mod tests` after a `// tests ---` separator padded to column 80; place shared unit fixtures in `src/tests/`.
-- Put integration suites directly under `tests/<area>.rs` with shared fixtures in `tests/common/mod.rs` (never `tests/integration/` or `tests/support/`).
+- Put integration suites directly under `tests/<area>.rs` with shared fixtures in `tests/common/mod.rs` (never `tests/integration/` or `tests/support/`). Cover core module behaviors, edge cases, and failure modes at library integration boundaries to keep E2E suites focused on cross-tier wiring.
 - Structure all Rust unit and integration tests with nested `mod given_*` and `mod when_*` modules and `fn should_<behavior>()` leaf cases:
 
 ```rust
@@ -165,21 +134,29 @@ mod tests {
 - Separate desktop workspace E2E suites into `Given a new workspace` (creation, persistence, and reopening) and `Given an existing workspace` (viewing, editing, creating, renaming, conflict handling, and deleting entries) with nested `When ...` action blocks.
 
 ```typescript
-describe('Given a local working tree / When staging and committing in local snapshot mode', { tags: ['e2e', 'cli', 'local-review'] }, () => {
-  const fixture = useTestHarness('cli')
+describe(
+  'Given a local working tree / When staging and committing in local snapshot mode',
+  { tags: ['e2e', 'cli', 'local-review'] },
+  () => {
+    const fixture = useTestHarness('cli')
 
-  it('should stage and shadow commit worktree changes without modifying checkout', { tags: ['smoke'] }, async () => {
-    // Arrange
-    const { runtime } = fixture()
-    await initLocalRepo(runtime)
+    it(
+      'should stage and shadow commit worktree changes without modifying checkout',
+      { tags: ['smoke'] },
+      async () => {
+        // Arrange
+        const { runtime } = fixture()
+        await initLocalRepo(runtime)
 
-    // Act
-    const added = await runtime.json(['add', 'src/lib.rs', '--local'])
+        // Act
+        const added = await runtime.json(['add', 'src/lib.rs', '--local'])
 
-    // Assert
-    expect(added).toEqual({ staged_paths: ['src/lib.rs'], local: true })
-  })
-})
+        // Assert
+        expect(added).toEqual({ staged_paths: ['src/lib.rs'], local: true })
+      },
+    )
+  },
+)
 ```
 
 - During development, run focused tests (`premise run e2e:smoke` or a single spec/test filter); reserve full E2E runs for final validation or shared fixture changes. See [`e2e/README.md`](e2e/README.md) for GitHub cassette replay and recording commands.

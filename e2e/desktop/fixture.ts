@@ -7,7 +7,7 @@ import '../../apps/lgtm-web/src/app.css'
 // This page is included only in the isolated test build, never included in the application build.
 const testWindow = window as unknown as {
   workspaceTestInvoke: (command: string, args: unknown) => Promise<unknown>
-  workspaceTestEmit: (event: string) => Promise<void>
+  workspaceTestEmit: (event: string, payload?: unknown) => Promise<void>
   isTauri: boolean
 }
 mockWindows('main')
@@ -15,5 +15,5 @@ mockIPC((command, args) => testWindow.workspaceTestInvoke(command, args), {
   shouldMockEvents: true,
 })
 testWindow.isTauri = true
-testWindow.workspaceTestEmit = (event) => emit(event)
+testWindow.workspaceTestEmit = (event, payload) => emit(event, payload)
 mount(Shell, { target: document.querySelector('#app')! })
