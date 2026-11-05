@@ -1,10 +1,10 @@
 # lgtm.nvim
 
-The Neovim plugin is a shell for a future rewrite. Its previous UI, review workflows and backend transport have been removed. It currently provides a loadable package, a setup hook that loads dependencies and editor help. There are no LGTM commands or keymaps. Pinned editor dependencies remain in plugin installation and E2E setup for the rewrite.
+`lgtm.nvim` provides reactive Neovim UI scaffolding for **Local Review** (always on during normal buffer editing) and **PR Review** (activated after selecting an open branch pull request into a `CodeDiff` session). It is built on `nui-components.nvim`, `nui.nvim`, `codediff.nvim`, `which-key.nvim`, and `nvim-notify`.
 
 ## Setup
 
-Development checks use Neovim 0.12.5. The shell does not require the CLI or a running backend. The plugin lives in `apps/lgtm.nvim` inside the LGTM monorepo. Add that subdirectory to Neovim's runtime path. The root `doc` symlink exposes editor help.
+Development checks use Neovim 0.12.5. The UI scaffolding runs against reactive in-memory services (`LocalReviewService` and `PrService`) and does not require a running backend daemon. The plugin lives in `apps/lgtm.nvim` inside the LGTM monorepo. Add that subdirectory to Neovim's runtime path. The root `doc` symlink exposes editor help.
 
 Retained dependency pins:
 
@@ -17,7 +17,7 @@ Retained dependency pins:
 | `folke/which-key.nvim` | `3aab2147e74890957785941f0c1ad87d0a44c15a` |
 | `rcarriga/nvim-notify` | `8701bece920b38ea289b457f902e2ad184131a5d` |
 
-The shell's setup hook requires CodeDiff, WhichKey, nvim-notify and NuiComponents/NUI. It also loads Kak when available, without configuring its keybindings. CodeDiff also needs its native library; allow its download or follow its source-build instructions.
+The setup hook requires CodeDiff, WhichKey, nvim-notify and NuiComponents/NUI. It also loads Kak when available, without configuring its keybindings. CodeDiff also needs its native library; allow its download or follow its source-build instructions.
 
 ### lazy.nvim
 
@@ -77,9 +77,34 @@ vim.cmd("runtime plugin/lgtm.lua")
 
 Change `root` for a custom package directory. Run `:helptags ALL` after manual installation, then use `:help lgtm.txt`.
 
+## Review Modes and UI Components
+
+`lgtm.nvim` supports two review modes:
+
+- **Local Review (Always On):** Active during normal buffer editing (`LocalReviewService`). Create or reply to local review threads at the cursor line (`<leader>rc`), view inline `anchored-thread-summary` virtual-line overlays, press `<CR>` or `<leader>ro` on an anchored line to open `threads-pane` directly in `thread-detail-view`, or toggle the right-hand `threads-pane` (`<leader>rt`) to browse, fold (`za` / `zA`), reply (`c` / `r`), edit (`e`), delete (`dd`), and resolve (`x`) local threads.
+- **PR Review (`CodeDiff`):** Open `pr-select-modal` (`<leader>rp` or `:Lgtm pr`) to browse open pull requests for the current branch on the left and preview the Markdown PR description on the right. Selecting a PR launches a `CodeDiff` session with the file tree on the left and diff view on the right, scopes inline overlays and `threads-pane` to PR threads (`PrService`), and enables overall PR review submission (`Comment`, `Approve`, `Request Changes`) via `pr-submit-editor` (`<leader>rs`, `<leader>ra`, `<leader>rr`).
+
+## Keymaps and Commands
+
+Global mappings use the `<leader>r` prefix in `which-key` so they never collide with LazyVim's `<leader>l` menu:
+
+| Keymap / Command | Mode | Description |
+| --- | --- | --- |
+| `<leader>rc` / `:Lgtm comment` | Normal, Visual | Open `comment-editor` to draft a new thread or reply at the cursor line (`c` in PR diff buffers and `threads-pane`) |
+| `<leader>rp` / `:Lgtm pr` | Normal | Open `pr-select-modal` to pick an open branch PR and launch `CodeDiff` |
+| `<leader>rt` / `:Lgtm threads` | Normal | Toggle the right-hand `threads-pane` split |
+| `<leader>ro` / `<CR>` / `:Lgtm thread` | Normal | Open `threads-pane` directly in `thread-detail-view` for the thread at the cursor |
+| `<leader>rx` / `x` / `:Lgtm resolve` | Normal | Toggle resolved state for the thread at the cursor |
+| `<leader>rs` / `:Lgtm submit` | Normal | Open `pr-submit-editor` for the active PR (`Comment` default) |
+| `<leader>ra` / `:Lgtm approve` | Normal | Open `pr-submit-editor` pre-selected to `Approve` |
+| `<leader>rr` / `:Lgtm request_changes` | Normal | Open `pr-submit-editor` pre-selected to `Request Changes` |
+| `]c` / `[c` | Normal | Jump to next / previous anchored thread in the current buffer |
+| `za` / `zA` | Normal | Toggle fold on the current thread / fold or unfold all threads |
+| `<BS>` / `h` | `threads-pane` (detail) | Return from `thread-detail-view` to `threads-summary-view` |
+
 ## Setup contract
 
-`require("lgtm").setup()` and `setup({})` load the retained dependencies without opening LGTM UI, registering commands or calling the backend. Previous feature options no longer have an effect. The `:Lgtm` command and `:checkhealth lgtm` integration are unavailable while the plugin is rewritten.
+`require("lgtm").setup()` and `setup({})` load the retained dependencies, initialize `LocalReviewService`, `PrService`, and `ThreadsOverlay`, and register `:Lgtm` and `<leader>r` WhichKey bindings without opening any windows on startup.
 
 ## Development
 
@@ -102,7 +127,7 @@ premise run nvim:lint
 premise run nvim:format:check
 ```
 
-The [Neovim E2E shell](../../e2e/nvim) retains isolated editor processes, MessagePack control, fixture composition, diagnostics and package installation checks. It uses the shared CLI/backend runtime fixture, so E2E tasks still build the CLI. The required editor profile installs the pinned dependencies and loads CodeDiff, WhichKey, nvim-notify and NuiComponents/NUI; the optional `kak` profile also loads pinned Kak keybindings.
+The [Neovim E2E shell](../../e2e/nvim) runs isolated editor processes, MessagePack control, fixture composition, diagnostics, package installation checks, and end-to-end specs for Local Review (`local-review.spec.ts`) and PR Review (`pr-review.spec.ts`). The required editor profile installs the pinned dependencies and loads CodeDiff, WhichKey, nvim-notify and NuiComponents/NUI; the optional `kak` profile also loads pinned Kak keybindings.
 
 ```sh
 premise run e2e:nvim
