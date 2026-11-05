@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-/// Errors returned while loading or synchronizing LGTM global, project, or Mise configuration.
+/// Errors returned while loading or validating LGTM global or project configuration.
 #[derive(Debug, Error)]
 pub enum LgtmConfigError {
     /// Failed to read or write the global configuration file (`~/.lgtm/config.toml`).
@@ -41,21 +41,6 @@ pub enum LgtmConfigError {
         #[source]
         source: Box<toml::de::Error>,
     },
-    /// Failed to read or write the LGTM-managed Mise file (`<workspace>/.lgtm/mise.toml`).
-    #[error("failed to write managed Mise configuration at {path}: {source}")]
-    ManagedMiseIo {
-        /// Path to the managed `.lgtm/mise.toml` file.
-        path: PathBuf,
-        /// Underlying filesystem I/O error.
-        #[source]
-        source: std::io::Error,
-    },
-    /// Failed to serialize configuration models to TOML.
-    #[error("failed to serialize configuration: {0}")]
-    SerializeToml(#[from] toml::ser::Error),
-    /// A `mise` CLI invocation failed.
-    #[error("mise command failed: {0}")]
-    MiseFailed(String),
 }
 
 /// Result alias for `lgtm-config` operations.

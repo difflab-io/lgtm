@@ -1,0 +1,20 @@
+[package]
+name = "lgtm-env"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "LGTM managed Mise binary installation, .lgtm/mise.toml synthesis, and task/tool execution."
+repository = "https://github.com/difflab-io/lgtm"
+publish = false
+license = "Apache-2.0"
+
+[dependencies]
+dirs = "6"
+lgtm-config = { path = "../lgtm-config" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+toml = "0.8"
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"

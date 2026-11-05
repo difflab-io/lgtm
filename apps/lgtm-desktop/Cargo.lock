@@ -1999,10 +1999,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "lgtm-env"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "lgtm-config",
+ "serde",
+ "thiserror 2.0.21",
+ "toml 0.8.2",
+ "tracing",
+]
+
+[[package]]
 name = "lgtm-lsp"
 version = "0.1.0"
 dependencies = [
  "lgtm-config",
+ "lgtm-env",
  "lsp-types",
  "serde",
  "serde_json",

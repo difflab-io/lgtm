@@ -1,5 +1,6 @@
 use clap::Args;
-use lgtm_config::{ConfigService, MiseService};
+use lgtm_config::ConfigService;
+use lgtm_env::MiseService;
 
 use crate::models::RunCommandOutput;
 

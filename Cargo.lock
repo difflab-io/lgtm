@@ -2801,6 +2801,7 @@ dependencies = [
  "fs2",
  "gix",
  "lgtm-config",
+ "lgtm-env",
  "mime_guess",
  "nix 0.30.1",
  "octocrab",
@@ -2853,6 +2854,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "lgtm-env"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "lgtm-config",
+ "serde",
+ "tempfile",
+ "thiserror",
+ "toml",
+ "tracing",
+]
+
+[[package]]
 name = "lgtm-forge"
 version = "0.1.0"
 dependencies = [
@@ -2884,6 +2898,7 @@ name = "lgtm-lsp"
 version = "0.1.0"
 dependencies = [
  "lgtm-config",
+ "lgtm-env",
  "lsp-types",
  "serde",
  "serde_json",

@@ -1,6 +1,6 @@
 # lgtm-config
 
-Pure-Rust configuration and `mise` synthesis SDK (`ConfigService`, `MiseService`, `LgtmConfig`, `GeneratedMiseFile`) for LGTM. See [Config & Mise SDK architecture](../../docs/architecture/config/index.md).
+Pure-Rust configuration and language discovery SDK (`ConfigService`, `LgtmConfig`, `LanguageConfig`) for LGTM. See [Configuration & Environment SDK architecture](../../docs/architecture/config/index.md).
 
 ## Tasks
 

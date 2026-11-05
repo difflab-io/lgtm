@@ -1,4 +1,4 @@
-//! Configuration and Mise task orchestration for LGTM workspaces.
+//! Configuration and language discovery for LGTM workspaces.
 #![deny(missing_docs, unreachable_pub)]
 
 mod error;
@@ -12,8 +12,4 @@ pub use models::config::LgtmConfig;
 pub use models::config::LspSettings;
 pub use models::config::MiseSettings;
 pub use models::config::MiseTaskConfig;
-pub use models::mise::GeneratedMiseFile;
-pub use models::mise::MiseTaskEntry;
-pub use models::mise::MiseTaskSummary;
 pub use services::config::ConfigService;
-pub use services::mise::MiseService;

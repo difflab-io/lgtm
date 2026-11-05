@@ -3,9 +3,8 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{LgtmConfigError, Result};
 use crate::models::config::{LanguageConfig, LgtmConfig};
-use crate::models::mise::GeneratedMiseFile;
 
-/// Resolves global and workspace-level LGTM configuration and synchronizes `.lgtm/mise.toml`.
+/// Resolves global and workspace-level LGTM configuration and workspace `.lgtm/` directory layout.
 #[derive(Debug, Clone, Default)]
 pub struct ConfigService {
     global_config_override: Option<PathBuf>,
@@ -33,21 +32,31 @@ impl ConfigService {
 
     // Public ------------------------------------------------------------------
 
-    /// Returns the resolved path to the global `.lgtm/config.toml` file.
-    pub fn get_global_config_path(&self) -> PathBuf {
+    /// Returns the resolved LGTM home directory (`LGTM_HOME` or `~/.lgtm`).
+    pub fn get_lgtm_home_dir(&self) -> PathBuf {
         if let Some(override_path) = &self.global_config_override {
-            return override_path.clone();
+            return override_path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from(".lgtm"));
         }
         if let Ok(lgtm_home) = std::env::var("LGTM_HOME") {
             let trimmed = lgtm_home.trim();
             if !trimmed.is_empty() {
-                return PathBuf::from(trimmed).join("config.toml");
+                return PathBuf::from(trimmed);
             }
         }
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".lgtm")
-            .join("config.toml")
+    }
+
+    /// Returns the resolved path to the global `.lgtm/config.toml` file.
+    pub fn get_global_config_path(&self) -> PathBuf {
+        if let Some(override_path) = &self.global_config_override {
+            return override_path.clone();
+        }
+        self.get_lgtm_home_dir().join("config.toml")
     }
 
     /// Returns the project configuration path (`<workspace>/.lgtm/config.toml`).
@@ -84,8 +93,8 @@ impl ConfigService {
         Ok(config)
     }
 
-    /// Ensures `<workspace>/.lgtm/` exists, registers `.lgtm/` in `.git/info/exclude`, and writes `.lgtm/mise.toml`.
-    pub fn ensure_workspace_layout(&self, workspace_root: &Path) -> Result<PathBuf> {
+    /// Ensures `<workspace>/.lgtm/` exists and registers `.lgtm/` in `<git-dir>/info/exclude`.
+    pub fn ensure_workspace_dir(&self, workspace_root: &Path) -> Result<PathBuf> {
         let lgtm_dir = workspace_root.join(".lgtm");
         std::fs::create_dir_all(&lgtm_dir).map_err(|source| LgtmConfigError::ProjectConfigIo {
             path: lgtm_dir.clone(),
@@ -94,27 +103,7 @@ impl ConfigService {
 
         Self::ensure_git_exclude(workspace_root);
 
-        let config = self.get_config(workspace_root)?;
-        let detected_languages = Self::detect_workspace_languages(&config, workspace_root);
-        let generated = GeneratedMiseFile::from_config(&config, &detected_languages);
-        let rendered = generated.render_toml()?;
-        let mise_path = Self::get_managed_mise_path(workspace_root);
-
-        let needs_write = match std::fs::read_to_string(&mise_path) {
-            Ok(existing) => existing != rendered,
-            Err(_) => true,
-        };
-
-        if needs_write {
-            std::fs::write(&mise_path, rendered).map_err(|source| {
-                LgtmConfigError::ManagedMiseIo {
-                    path: mise_path.clone(),
-                    source,
-                }
-            })?;
-        }
-
-        Ok(mise_path)
+        Ok(lgtm_dir)
     }
 
     /// Walks up from `file_path` toward `workspace_root` to find the nearest marker for `language`.
@@ -273,32 +262,26 @@ mod tests {
     mod given_a_git_backed_rust_workspace {
         use super::*;
 
-        mod when_ensuring_workspace_layout {
+        mod when_ensuring_workspace_dir {
             use super::*;
 
             #[test]
-            fn should_generate_managed_mise_file_and_register_git_exclude_idempotently() {
+            fn should_create_dot_lgtm_dir_and_register_git_exclude_idempotently() {
                 // Arrange
                 let temp = tempfile::tempdir().unwrap();
                 let workspace_root = temp.path();
                 std::fs::create_dir_all(workspace_root.join(".git/info")).unwrap();
-                std::fs::write(
-                    workspace_root.join("Cargo.toml"),
-                    "[package]\nname = \"demo\"\n",
-                )
-                .unwrap();
                 let service = ConfigService::from_home(workspace_root.to_path_buf());
 
                 // Act
-                let mise_path = service.ensure_workspace_layout(workspace_root).unwrap();
-                let _ = service.ensure_workspace_layout(workspace_root).unwrap();
-                let mise_contents = std::fs::read_to_string(&mise_path).unwrap();
+                let lgtm_dir = service.ensure_workspace_dir(workspace_root).unwrap();
+                let _ = service.ensure_workspace_dir(workspace_root).unwrap();
                 let exclude_contents =
                     std::fs::read_to_string(workspace_root.join(".git/info/exclude")).unwrap();
 
                 // Assert
-                assert!(mise_contents.contains("rust-analyzer = \"latest\""));
-                assert!(mise_contents.contains("cargo check"));
+                assert_eq!(lgtm_dir, workspace_root.join(".lgtm"));
+                assert!(lgtm_dir.is_dir());
                 let lgtm_lines: Vec<&str> = exclude_contents
                     .lines()
                     .filter(|line| line.trim() == ".lgtm/")

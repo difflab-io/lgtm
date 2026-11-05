@@ -68,6 +68,14 @@ workspace:
                 - linux
           answers:
             name: lgtm-db
+        - name: lgtm-env
+          template: cloudvoyant/premise-cargo:premise-rust-lib
+          path: libs/lgtm-env
+          ci:
+            check_platforms:
+                - linux
+          answers:
+            name: lgtm-env
         - name: lgtm-lsp
           template: cloudvoyant/premise-cargo:premise-rust-lib
           path: libs/lgtm-lsp

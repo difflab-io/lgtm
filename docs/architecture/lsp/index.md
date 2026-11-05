@@ -2,7 +2,7 @@
 
 ## Overview
 
-`lgtm-lsp` is the Rust Language Server Protocol client and process orchestration SDK for `lgtm-desktop`. Consuming `lgtm-config`, it spawns and pools per-`(workspace_root, language_id, project_root)` stdio JSON-RPC 2.0 language server sessions (via `mise exec` with direct binary fallback), maintains open UTF-8 document snapshots, converts between CodeMirror UTF-16 character offsets (`u32`) and LSP `(line, character)` coordinates in Rust, and provides diagnostics, hover documentation, go-to-definition locations, and plain-text diagnostics buffers.
+`lgtm-lsp` is the Rust Language Server Protocol client and process orchestration SDK for `lgtm-desktop`. Consuming `lgtm-config` and `lgtm-env`, it spawns and pools per-`(workspace_root, language_id, project_root)` stdio JSON-RPC 2.0 language server sessions (via `MiseService::build_exec_command` with direct binary fallback), maintains open UTF-8 document snapshots, converts between CodeMirror UTF-16 character offsets (`u32`) and LSP `(line, character)` coordinates in Rust, and provides diagnostics, hover documentation, go-to-definition locations, and plain-text diagnostics buffers.
 
 ## Requirement
 
@@ -59,7 +59,7 @@ flowchart TB
         MGR --> HANDLE
         MGR --> MODELS
     end
-    CFG["lgtm-config (ConfigService & MiseService)"]
+    CFG["lgtm-config (ConfigService) & lgtm-env (MiseService)"]
     DESKTOP --> MGR
     MGR --> CFG
     HANDLE --> PROC["mise exec -- <language-server> (or direct binary)"]
@@ -146,5 +146,7 @@ When spawning a language server whose `LanguageConfig` declares `mise_tools`, `L
 
 ## References
 
-- [Configuration library architecture](../config/index.md).
+- [Configuration library (`lgtm-config`) architecture](../config/index.md).
+- [Environment library (`lgtm-env`) architecture](../env/index.md).
+- [Desktop application (`lgtm-desktop`) architecture](../desktop/index.md).
 - [Application architecture](../index.md).

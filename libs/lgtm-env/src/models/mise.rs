@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
+use lgtm_config::{LgtmConfig, MiseTaskConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::models::config::{LgtmConfig, MiseTaskConfig};
 
 /// Representation of the LGTM-managed `.lgtm/mise.toml` file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]

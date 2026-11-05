@@ -8,7 +8,8 @@ LGTM components (`lgtm-cli`, `lgtm-forge`, `lgtm-desktop`, `lgtm-config`, `lgtm-
 
 | Variable | Component | Default | Description |
 | --- | --- | --- | --- |
-| `LGTM_HOME` | `lgtm-cli`, `lgtm-forge`, `lgtm-config` | `~/.lgtm` | Overrides the LGTM state, snapshot, database, and global configuration directory (`$LGTM_HOME/config.toml`, `$LGTM_HOME/lgtm.db`, `$LGTM_HOME/snapshots`). |
+| `LGTM_HOME` | `lgtm-cli`, `lgtm-forge`, `lgtm-config`, `lgtm-env` | `~/.lgtm` | Overrides the LGTM state, snapshot, database, managed `mise` binary (`$LGTM_HOME/bin/mise`), and global configuration directory (`$LGTM_HOME/config.toml`, `$LGTM_HOME/lgtm.db`, `$LGTM_HOME/snapshots`). |
+| `LGTM_MISE_INSTALLER_URL` | `lgtm-env` | `https://mise.run` | Overrides the installer script URL used when `MiseService` bootstraps a missing `mise` binary into `$LGTM_HOME/bin/mise`. |
 | `LGTM_DATABASE_URL` | `lgtm-forge`, `lgtm-cli` | `sqlite://$LGTM_HOME/lgtm.db?mode=rwc` | Explicit SeaORM database connection string (`sqlite://...` or `postgres://...`). Takes precedence over `DATABASE_URL`. |
 | `DATABASE_URL` | `lgtm-forge`, `lgtm-cli` | `sqlite://$LGTM_HOME/lgtm.db?mode=rwc` | Fallback database connection URL when `LGTM_DATABASE_URL` is unset. |
 | `LGTM_BACKEND_ADDR` | `lgtm-forge` | `127.0.0.1:8080` | Socket address (`<ip>:<port>`) bound by the standalone `lgtm-forge` server binary. |
@@ -25,15 +26,16 @@ LGTM components (`lgtm-cli`, `lgtm-forge`, `lgtm-desktop`, `lgtm-config`, `lgtm-
 
 ## Mise & LSP subprocess environment
 
-When `lgtm-config` (`MiseService`) and `lgtm-lsp` (`LspService`) invoke `mise` for a workspace, they scope the child process environment to the workspace's generated `<workspace>/.lgtm/mise.toml`:
+When `lgtm-env` (`MiseService`) and `lgtm-lsp` (`LgtmLspManager`) invoke or bootstrap `mise` for a workspace, they scope the child process environment to the workspace's generated `<workspace>/.lgtm/mise.toml`:
 
 | Variable | Set by | Value | Purpose |
 | --- | --- | --- | --- |
-| `MISE_CONFIG_FILE` | `MiseService`, `LspService` | `<workspace>/.lgtm/mise.toml` | Directs `mise` to load the LGTM-synthesized workspace configuration without modifying any user-owned root `mise.toml`. |
-| `MISE_GLOBAL_CONFIG_FILE` | `MiseService`, `LspService` | `<workspace>/.lgtm/mise.toml` | Prevents personal global Mise tool definitions from conflicting with workspace-managed LSP toolchains. |
-| `MISE_TRUSTED_CONFIG_PATHS` | `MiseService`, `LspService` | `<workspace>/.lgtm/mise.toml` | Marks the workspace's `.lgtm/mise.toml` as trusted for non-interactive task and LSP execution. |
-| `MISE_NOT_FOUND_AUTO_INSTALL` | `MiseService`, `LspService` | `false` | Disables implicit background installs when `lsp.auto_install = false` or during initial `mise exec` probes. |
-| `MISE_EXEC_AUTO_INSTALL` | `LspService` | `false` | Ensures `mise exec` probes fail fast before `LspService` decides whether to run explicit `mise install`. |
+| `MISE_INSTALL_PATH` | `MiseService` | `<lgtm_home>/bin/mise` | Target binary path passed to the `mise` installer script when `mise` is not yet installed on the machine. |
+| `MISE_CONFIG_FILE` | `MiseService`, `LgtmLspManager` | `<workspace>/.lgtm/mise.toml` | Directs `mise` to load the LGTM-synthesized workspace configuration without modifying any user-owned root `mise.toml`. |
+| `MISE_GLOBAL_CONFIG_FILE` | `MiseService`, `LgtmLspManager` | `<workspace>/.lgtm/mise.toml` | Prevents personal global Mise tool definitions from conflicting with workspace-managed LSP toolchains. |
+| `MISE_TRUSTED_CONFIG_PATHS` | `MiseService`, `LgtmLspManager` | `<workspace>/.lgtm/mise.toml` | Marks the workspace's `.lgtm/mise.toml` as trusted for non-interactive task and LSP execution. |
+| `MISE_NOT_FOUND_AUTO_INSTALL` | `MiseService`, `LgtmLspManager` | `false` | Disables implicit background installs when `lsp.auto_install = false` or during initial `mise exec` probes. |
+| `MISE_EXEC_AUTO_INSTALL` | `MiseService` | `false` | Ensures `mise exec` probes fail fast before `LgtmLspManager` decides whether to run explicit `mise install`. |
 | `MISE_TASK_RUN_AUTO_INSTALL` | `MiseService` | `false` (when `lsp.auto_install = false`) | Prevents `mise run` from installing missing tools when automatic installation is disabled. |
 
 ## End-to-end test harness (`e2e/`)
@@ -55,7 +57,9 @@ When `lgtm-config` (`MiseService`) and `lgtm-lsp` (`LspService`) invoke `mise` f
 ## References
 
 - [Software architecture](architecture/index.md).
-- [Config & Mise SDK architecture](architecture/config/index.md).
+- [Desktop application architecture](architecture/desktop/index.md).
+- [Configuration library architecture](architecture/config/index.md).
+- [Environment & Mise library architecture](architecture/env/index.md).
 - [LSP SDK architecture](architecture/lsp/index.md).
 - [End-to-end testing architecture](architecture/e2e/index.md).
 - [E2E suite guide](../e2e/README.md).

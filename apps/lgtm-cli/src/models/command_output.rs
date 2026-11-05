@@ -1,7 +1,7 @@
 //! Command outputs for `lgtm add`, `lgtm commit`, `lgtm push`, and `lgtm run`.
 // TODO: Split each `*CommandOutput` model into its own module file under `models/`.
 
-use lgtm_config::MiseTaskSummary;
+use lgtm_env::MiseTaskSummary;
 use serde_json::json;
 
 use crate::{

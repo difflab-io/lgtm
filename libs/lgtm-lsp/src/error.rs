@@ -3,9 +3,12 @@ use thiserror::Error;
 /// Errors returned by `lgtm-lsp` server lifecycle and JSON-RPC operations.
 #[derive(Debug, Error)]
 pub enum LspError {
-    /// Failed to load or synchronize workspace LGTM/Mise configuration.
+    /// Failed to load or synchronize workspace LGTM configuration.
     #[error(transparent)]
     Config(#[from] lgtm_config::LgtmConfigError),
+    /// Failed to manage the Mise environment or `.lgtm/mise.toml` file.
+    #[error(transparent)]
+    Env(#[from] lgtm_env::LgtmEnvError),
     /// Standard I/O failure while communicating with a language server process.
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),

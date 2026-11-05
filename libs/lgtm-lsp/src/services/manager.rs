@@ -6,7 +6,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
-use lgtm_config::{ConfigService, LanguageConfig, MiseService};
+use lgtm_config::{ConfigService, LanguageConfig};
+use lgtm_env::MiseService;
 use lsp_types::{
     DiagnosticSeverity, GotoDefinitionResponse, Hover, HoverContents, MarkedString, NumberOrString,
     PublishDiagnosticsParams, Range,
@@ -173,7 +174,7 @@ impl LgtmLspManager {
         self.cache_service
             .set_workspace_config(&canonical, config.clone());
         if !detected.is_empty() || ConfigService::get_project_config_path(&canonical).is_file() {
-            let _ = self.config_service.ensure_workspace_layout(&canonical)?;
+            let _ = self.mise_service.sync_workspace_mise(&canonical)?;
             let _ = self
                 .cache_service
                 .write_discovery_cache(&canonical, &detected, &config);
@@ -756,7 +757,7 @@ impl LgtmLspManager {
         );
         (self.event_sink)(LspEvent::Status(starting_event));
 
-        let _ = self.config_service.ensure_workspace_layout(workspace_root);
+        let _ = self.mise_service.sync_workspace_mise(workspace_root);
 
         match self.spawn_and_initialize_session(
             workspace_root,
@@ -828,6 +829,7 @@ impl LgtmLspManager {
                 language_config,
                 timeout,
                 false,
+                false,
             );
         }
 
@@ -838,22 +840,12 @@ impl LgtmLspManager {
             language_config,
             timeout,
             true,
+            auto_install,
         ) {
             return Ok(session);
         }
 
-        if let Ok(session) = self.try_spawn_session(
-            workspace_root,
-            project_root,
-            language_id,
-            language_config,
-            timeout,
-            false,
-        ) {
-            return Ok(session);
-        }
-
-        if auto_install && !language_config.mise_tools.is_empty() {
+        if auto_install {
             let tools: Vec<(&str, &str)> = language_config
                 .mise_tools
                 .iter()
@@ -867,6 +859,7 @@ impl LgtmLspManager {
                 language_config,
                 timeout,
                 true,
+                true,
             ) {
                 return Ok(session);
             }
@@ -879,9 +872,11 @@ impl LgtmLspManager {
             language_config,
             timeout,
             false,
+            false,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn try_spawn_session(
         &self,
         workspace_root: &Path,
@@ -890,23 +885,19 @@ impl LgtmLspManager {
         language_config: &LanguageConfig,
         timeout: Duration,
         use_mise_exec: bool,
+        auto_install_mise: bool,
     ) -> Result<Arc<LspServerSession>> {
-        let mise_file = ConfigService::get_managed_mise_path(workspace_root);
         let mut command = if use_mise_exec {
-            let mut cmd = Command::new("mise");
-            cmd.arg("exec").arg("--cd").arg(project_root);
-            for (tool, version) in &language_config.mise_tools {
-                cmd.arg(format!("{tool}@{version}"));
-            }
-            cmd.arg("--")
-                .arg(&language_config.command)
-                .args(&language_config.args);
-            cmd.env("MISE_CONFIG_FILE", &mise_file)
-                .env("MISE_GLOBAL_CONFIG_FILE", &mise_file)
-                .env("MISE_TRUSTED_CONFIG_PATHS", &mise_file)
-                .env("MISE_NOT_FOUND_AUTO_INSTALL", "false")
-                .env("MISE_EXEC_AUTO_INSTALL", "false");
-            cmd
+            self.mise_service
+                .build_exec_command(
+                    workspace_root,
+                    project_root,
+                    &language_config.mise_tools,
+                    &language_config.command,
+                    &language_config.args,
+                    auto_install_mise,
+                )
+                .map_err(|err| LspError::ServerUnavailable(err.to_string()))?
         } else {
             let mut cmd = Command::new(&language_config.command);
             cmd.args(&language_config.args);
