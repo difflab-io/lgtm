@@ -50,8 +50,10 @@ impl GeneratedMiseFile {
                 if !lang_cfg.enabled {
                     continue;
                 }
-                for (tool, version) in &lang_cfg.mise_tools {
-                    tools.entry(tool.clone()).or_insert_with(|| version.clone());
+                if config.lsp.enabled && config.lsp.auto_install {
+                    for (tool, version) in &lang_cfg.mise_tools {
+                        tools.entry(tool.clone()).or_insert_with(|| version.clone());
+                    }
                 }
                 for (task_name, task_cfg) in &lang_cfg.default_tasks {
                     let entry = Self::to_entry(task_cfg);

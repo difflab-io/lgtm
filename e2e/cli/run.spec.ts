@@ -77,6 +77,9 @@ describe(
       await runtime.write(
         '.lgtm/config.toml',
         [
+          '[lsp]',
+          'auto_install = false',
+          '',
           '[mise.tasks.write-marker]',
           'description = "Write marker file"',
           'run = "printf \'managed-run-ok\' > .lgtm/marker.txt"',

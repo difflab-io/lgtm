@@ -4,7 +4,7 @@ node = "24"
 
 [tasks.install]
 description = "Install the pinned Playwright browser engines"
-depends = ["//:install"]
+depends = ["//:install", "//apps/lgtm-desktop:install"]
 dir = "{{config_root}}/../.."
 run = '''
 set -eu

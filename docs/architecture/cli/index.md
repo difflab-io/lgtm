@@ -65,7 +65,8 @@ lgtm down
 - `models.rs`: Shared command arguments (`ReviewOutcomeArg`, `ReviewGroupByArg`) and output formatting helpers.
 - `rpc_client.rs`: Generated Connect RPC client for `lgtm-forge` and daemon endpoint discovery.
 - `ui.rs`: Browser launching shared by `up` and `ui`.
-- Bundled forge and config (`bundle/backend/`, `bundle/config/`): Embedded `lgtm-forge`, `lgtm-db`, and `lgtm-config` services compiled into the single `lgtm` binary.
+- Bundled forge (`bundle/backend/`): Embedded `lgtm-forge` and `lgtm-db` services compiled into the single `lgtm` binary.
+- `lgtm-config`: Linked workspace crate owning `.lgtm/config.toml` resolution, `.lgtm/mise.toml` synthesis, and `lgtm run` task execution.
 
 ```mermaid
 flowchart TD

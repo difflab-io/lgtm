@@ -85,6 +85,15 @@
   <meta name="description" content="LGTM Hello Review" />
 </svelte:head>
 
+{#snippet sidebarNotice(text: string, role?: 'alert' | 'status')}
+  <p
+    class={['mx-3.5 my-2 text-xs leading-relaxed wrap-anywhere', role === 'alert' && 'text-warn']}
+    {role}
+  >
+    {text}
+  </p>
+{/snippet}
+
 <SidebarProvider
   class="workspace-shell h-dvh min-h-0 flex-col gap-0 overflow-hidden"
   style="--sidebar-width: 236px"
@@ -161,27 +170,18 @@
         </Row>
       </SidebarHeader>
       <SidebarContent>
-        {#if workspace.creationError}<p
-            class="mx-3.5 my-2 text-xs leading-relaxed wrap-anywhere text-warn"
-            role="alert"
-          >
-            {workspace.creationError}
-          </p>{/if}
+        {#if workspace.creationError}
+          {@render sidebarNotice(workspace.creationError, 'alert')}
+        {/if}
         {#if workspace.loading}
-          <p class="mx-3.5 my-2 text-xs leading-relaxed wrap-anywhere" role="status">
-            Opening workspace…
-          </p>
+          {@render sidebarNotice('Opening workspace…', 'status')}
         {:else if workspace.error}
-          <p class="mx-3.5 my-2 text-xs leading-relaxed wrap-anywhere text-warn" role="alert">
-            {workspace.error}
-          </p>
+          {@render sidebarNotice(workspace.error, 'alert')}
           {#if client.isDesktop()}<Button variant="text" size="sm" onclick={() => workspace.open()}
               >Retry</Button
             >{/if}
         {:else if !workspace.entries.length && !workspace.pendingEntry}
-          <p class="mx-3.5 my-2 text-xs leading-relaxed wrap-anywhere">
-            Your workspace is empty. Create your first file with New file.
-          </p>
+          {@render sidebarNotice('Your workspace is empty. Create your first file with New file.')}
         {:else}
           {#key workspace.treeVersion}<WorkspaceExplorer {workspace} />{/key}
         {/if}

@@ -78,7 +78,7 @@
               onclose(item.value)
             }}
           >
-            <X size={11} strokeWidth={1.75} />
+            <X size={10} strokeWidth={1.75} />
           </button>
         {/if}
       </div>

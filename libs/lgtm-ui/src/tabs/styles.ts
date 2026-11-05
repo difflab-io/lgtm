@@ -8,8 +8,8 @@ export const tabsListVariants = cva(
   {
     variants: {
       size: {
-        sm: 'h-8.5',
-        md: 'h-10',
+        sm: 'h-7',
+        md: 'h-8',
       },
     },
     defaultVariants: { size: 'sm' },
@@ -31,12 +31,12 @@ export const tabsItemContainerVariants = cva(
 )
 
 export const tabsTriggerVariants = cva(
-  'inline-flex h-full cursor-pointer items-center gap-1.5 border-0 bg-transparent text-inherit whitespace-nowrap outline-none',
+  'inline-flex h-full cursor-pointer items-center gap-1 border-0 bg-transparent text-inherit whitespace-nowrap outline-none',
   {
     variants: {
       size: {
-        sm: 'pl-3 pr-1.5 text-[11px]',
-        md: 'pl-3.5 pr-2 text-xs',
+        sm: 'pl-2.5 pr-1 text-[11px]',
+        md: 'pl-3 pr-1.5 text-xs',
       },
     },
     defaultVariants: { size: 'sm' },
@@ -47,4 +47,4 @@ export type TabsTriggerVariants = VariantProps<typeof tabsTriggerVariants>
 export const tabsDirtyIndicatorBase = 'inline-block size-1.5 shrink-0 rounded-full bg-amber-500'
 
 export const tabsCloseButtonBase =
-  'mr-1.5 inline-flex cursor-pointer items-center justify-center self-center rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground'
+  'mr-1 inline-flex size-4 cursor-pointer items-center justify-center self-center rounded-none p-0 text-muted-foreground hover:bg-accent hover:text-foreground'

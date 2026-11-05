@@ -40,8 +40,9 @@ flowchart LR
 
 ### Rust Layout & Naming
 
-- Document all public types, functions, and methods (`pub fn`) with `///` docstrings (`#![warn(missing_docs, unreachable_pub)]`).
+- Document all public types, functions, and methods (`pub fn`) with `///` docstrings (`#![warn(missing_docs, unreachable_pub)]`) that state the type's architectural role and boundary purpose.
 - Export only public API types from crate roots (`lib.rs`), formatted one `pub use` item per line.
+- Link workspace library crates through `Cargo.toml` dependencies rather than `#[path = ...]` module shims or `#[allow(dead_code)]`, and prefer standard library or crate formatting traits (such as `LowerHex` on digest outputs) over manual formatting loops.
 - Use one inherent `impl` block per type per file: constructors first, `// Public` operations next, `// Private` helpers last, and trait `impl` blocks after the inherent block. Pad section headers with hyphens to column 80.
 - Name public repository and service reads `get_*`. Name mutating operations and factories with imperative verbs (`promote`, `publish_session`).
 - Call library and generated client methods directly; do not add pass-through wrapper aliases.
@@ -75,7 +76,8 @@ impl CommentAnchor {
 ### Desktop & Helical UI Components
 
 - Compose `@cloudvoyant/helical-svelte` primitives directly in `apps/lgtm-web`; build missing reusable primitives and services in `libs/lgtm-ui` per Helical UI conventions (`@ark-ui/svelte`, orthogonal `cva` + `VariantProps` in `styles.ts`, `cn` + semantic Tailwind tokens, and app-agnostic `types.ts`) for upstreaming.
-- Style components and shell layouts with Tailwind utilities and `cva` variants; restrict `apps/lgtm-web/src/app.css` to theme imports and global element resets.
+- Style components and shell layouts with Tailwind utilities and `cva` variants; restrict `apps/lgtm-web/src/app.css` to theme imports and global element resets, and extract repeated Svelte markup/class patterns into local `{#snippet}` blocks or subcomponents.
+- Style IDE menus, context menus, and tab bars compactly with square item highlights (`rounded-none`), full-row submenu trigger hover targets, neutral surface hover/focus tokens (`--accent`, `--ring`), workspace-relative breadcrumbs, and icon-based diagnostic badges only when counts are non-zero.
 
 ### Documentation
 

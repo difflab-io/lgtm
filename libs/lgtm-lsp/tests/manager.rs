@@ -301,7 +301,7 @@ mod given_a_workspace_with_unavailable_or_failing_language_servers {
             fs::create_dir_all(workspace_root.join(".lgtm")).unwrap();
             let script_path = write_mock_lsp_server(&workspace_root.join(".lgtm"));
             let timeout_cfg = format!(
-                "[lsp]\nenabled = true\nauto_install = false\nrequest_timeout_ms = 60\n\n[languages.rust]\nenabled = true\nextensions = [\"rs\"]\nroot_markers = [\"Cargo.toml\"]\nmise_tools = {{}}\ncommand = \"node\"\nargs = [\"{}\"]\nenv = {{ MOCK_LSP_DELAY_MS = \"400\" }}\n",
+                "[lsp]\nenabled = true\nauto_install = false\nrequest_timeout_ms = 250\n\n[languages.rust]\nenabled = true\nextensions = [\"rs\"]\nroot_markers = [\"Cargo.toml\"]\nmise_tools = {{}}\ncommand = \"node\"\nargs = [\"{}\"]\nenv = {{ MOCK_LSP_DELAY_MS = \"2000\" }}\n",
                 script_path.display()
             );
             let fixture = ManagerFixture::new(Some(&timeout_cfg));

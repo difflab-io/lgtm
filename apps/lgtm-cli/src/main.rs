@@ -4,9 +4,6 @@ use tracing::Instrument;
 #[path = "../bundle/backend/mod.rs"]
 pub mod backend;
 mod daemon;
-#[allow(dead_code)]
-#[path = "../bundle/config/mod.rs"]
-pub mod lgtm_config;
 mod log;
 mod models;
 

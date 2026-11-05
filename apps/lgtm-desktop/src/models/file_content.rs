@@ -3,13 +3,13 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{Result, error};
 
-/// UTF-8 file contents, revision hash, and optional LSP metadata read from the workspace.
+/// Tauri IPC response payload returned by `workspace_read` and `workspace_write`, bundling the decoded UTF-8 document text, its SHA-256 content revision fingerprint for change tracking, and the initial LSP language and server status synchronized when the file is opened.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileContent {
     /// The UTF-8 source text of the file.
     pub content: String,
-    /// The SHA-256 hex digest of the file bytes.
+    /// The lowercase SHA-256 hex digest of the on-disk file bytes used to detect content changes across reads and writes.
     pub revision: String,
     /// Optional detected language identifier for the file.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -46,15 +46,9 @@ impl FileContent {
         self
     }
 
-    /// Computes a stable SHA-256 hex digest for a byte slice.
+    /// Computes the lowercase SHA-256 hex digest used as a deterministic content revision fingerprint across file reads and writes.
     pub fn revision_for(bytes: &[u8]) -> String {
-        let digest = Sha256::digest(bytes);
-        let mut hex = String::with_capacity(digest.len() * 2);
-        for byte in digest {
-            use std::fmt::Write as _;
-            let _ = write!(&mut hex, "{byte:02x}");
-        }
-        hex
+        format!("{:x}", Sha256::digest(bytes))
     }
 }
 
@@ -84,8 +78,59 @@ mod tests {
 
                 // Assert
                 assert_eq!(decoded.content, "# Review\n");
-                assert_eq!(decoded.revision.len(), 64);
+                assert_eq!(
+                    decoded.revision,
+                    "60390e262951c11c87fb37a0bba58ec02f73889fe444964faf0037e3adce528a"
+                );
                 assert_eq!(rejected.unwrap_err().code, "unsupported");
+            }
+        }
+
+        mod when_computing_content_revision {
+            use super::*;
+
+            #[test]
+            fn should_return_deterministic_sha256_hex_and_change_when_bytes_differ() {
+                // Arrange
+                let first = b"fn main() {}\n";
+                let second = b"fn main() { println!(\"hi\"); }\n";
+
+                // Act
+                let rev_a1 = FileContent::revision_for(first);
+                let rev_a2 = FileContent::revision_for(first);
+                let rev_b = FileContent::revision_for(second);
+
+                // Assert
+                assert_eq!(rev_a1.len(), 64);
+                assert_eq!(rev_a1, rev_a2);
+                assert_ne!(rev_a1, rev_b);
+            }
+        }
+
+        mod when_attaching_lsp_metadata {
+            use super::*;
+
+            #[test]
+            fn should_populate_language_id_and_server_status() {
+                // Arrange
+                let base = FileContent::from_bytes(b"pub fn add() {}\n".to_vec()).unwrap();
+                let status = lgtm_lsp::LspServerStatusEvent {
+                    workspace_root: "/tmp/demo".to_string(),
+                    language_id: "rust".to_string(),
+                    project_root: "/tmp/demo".to_string(),
+                    command: "rust-analyzer".to_string(),
+                    status: lgtm_lsp::LspServerStatus::Ready,
+                    message: None,
+                    error_count: 0,
+                    warning_count: 0,
+                };
+
+                // Act
+                let enriched = base.with_lsp(Some("rust".to_string()), Some(status.clone()));
+
+                // Assert
+                assert_eq!(enriched.language_id.as_deref(), Some("rust"));
+                assert_eq!(enriched.lsp_status, Some(status));
             }
         }
     }

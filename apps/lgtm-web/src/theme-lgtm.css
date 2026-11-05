@@ -29,7 +29,7 @@
   --info-foreground: #f8f8fa;
   --border: #dedee3;
   --input: #dedee3;
-  --ring: #0068d6;
+  --ring: #171717;
   --chart-1: #0068d6;
   --chart-2: #1f8a4c;
   --chart-3: #d97706;
@@ -42,7 +42,7 @@
   --sidebar-accent: #e4e4e8;
   --sidebar-accent-foreground: #171717;
   --sidebar-border: #dedee3;
-  --sidebar-ring: #0068d6;
+  --sidebar-ring: #171717;
   --shadow-blur: 2px;
   --shadow-color: hsl(0 0% 0%);
   --shadow-spread: 0px;
@@ -95,7 +95,7 @@
   --secondary-foreground: #ededed;
   --muted: #1a1a1a;
   --muted-foreground: #a1a1a1;
-  --accent: #264564;
+  --accent: #262626;
   --accent-foreground: #ededed;
   --destructive: #f32e40;
   --destructive-foreground: #101010;
@@ -109,7 +109,7 @@
   --info-foreground: #101010;
   --border: oklch(0.26 0 0);
   --input: oklch(0.32 0 0);
-  --ring: #52a8ff;
+  --ring: oklch(0.72 0 0);
   --chart-1: #52a8ff;
   --chart-2: #2ebd6b;
   --chart-3: #ffae00;
@@ -117,12 +117,12 @@
   --chart-5: #f12b82;
   --sidebar: #101010;
   --sidebar-foreground: #ededed;
-  --sidebar-primary: #52a8ff;
+  --sidebar-primary: #ededed;
   --sidebar-primary-foreground: #101010;
-  --sidebar-accent: #1a1a1a;
+  --sidebar-accent: #222222;
   --sidebar-accent-foreground: #ededed;
   --sidebar-border: oklch(0.26 0 0);
-  --sidebar-ring: #52a8ff;
+  --sidebar-ring: oklch(0.72 0 0);
 
   /* CodeMirror editor & syntax tokens directly from ~/.config/nvim/colors/vercel-dark.lua */
   --cm-active-line-bg: #1a1a1a;

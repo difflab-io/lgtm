@@ -50,9 +50,8 @@ async function bundleRust(sourceDir, targetDir, crateRoot) {
 }
 await bundleRust(join(root, 'apps/lgtm-forge/src'), join(stage, 'backend'), 'crate::backend')
 await bundleRust(join(root, 'libs/lgtm-db/src'), join(stage, 'backend/database'), 'crate::backend::database')
-await bundleRust(join(root, 'libs/lgtm-config/src'), join(stage, 'config'), 'crate::lgtm_config')
 const formatted = Bun.spawnSync(
-  ['rustfmt', '--edition', '2024', join(stage, 'backend/mod.rs'), join(stage, 'config/mod.rs')],
+  ['rustfmt', '--edition', '2024', join(stage, 'backend/mod.rs')],
   { cwd: root, stdout: 'inherit', stderr: 'inherit' },
 )
 if (formatted.exitCode !== 0) throw new Error('Bundled backend formatting failed')
