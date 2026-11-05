@@ -1,3 +1,4 @@
+local AnchoredThreadSummary = require("lgtm.ui.anchored_thread_summary")
 local Component = require("nui-components.component")
 local Line = require("nui.line")
 local Thread = require("lgtm.models.thread")
@@ -226,12 +227,18 @@ function ThreadDetailView:_build_detail_lines(thread)
 end
 
 function ThreadDetailView:_detail_header(thread)
+  AnchoredThreadSummary.ensure_highlights()
   local status = thread.resolved and "[RESOLVED]" or "[OPEN]"
-  local status_hl = thread.resolved and "DiagnosticOk" or "DiagnosticWarn"
+  local status_hl = thread.resolved and "LgtmBadgeResolved" or "LgtmBadgeOpen"
 
   local title = Line()
   title:append(" ◀ Thread Detail · ", "Title")
-  title:append(status .. " ", status_hl)
+  title:append(status, status_hl)
+  title:append(" ", "Normal")
+  if thread.outdated then
+    title:append(" 󰦖 STALE ", "LgtmBadgeOutdated")
+    title:append(" ", "Normal")
+  end
   title:append(Thread.format_anchor(thread), "Directory")
 
   local hints = Line()
@@ -247,10 +254,12 @@ function ThreadDetailView:_detail_header(thread)
 end
 
 function ThreadDetailView:_comment_block(comment, index)
+  AnchoredThreadSummary.ensure_highlights()
   local header = Line()
   local label = index == 1 and "Root" or string.format("Reply #%d", index - 1)
+  local state_label, state_hl = AnchoredThreadSummary.state_badge_spec(comment.state)
   header:append(string.format(" %s · @%s ", label, comment.author), "Title")
-  header:append("[" .. comment.state .. "]", "Comment")
+  header:append(state_label, state_hl)
 
   local rows = { header }
   local body = comment.body or ""

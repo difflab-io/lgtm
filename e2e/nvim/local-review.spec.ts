@@ -223,7 +223,9 @@ for (const profile of profiles) {
           }
         `)
         expect(collapsedAfterFold.collapsed).toBe(true)
-        expect(collapsedAfterFold.text).toContain('▸ [OPEN] src/workflow.lua:4')
+        expect(collapsedAfterFold.text).toContain('▸ [OPEN]')
+        expect(collapsedAfterFold.text).toContain('DRAFT')
+        expect(collapsedAfterFold.text).toContain('src/workflow.lua:4')
         expect(collapsedAfterFold.text).not.toContain('Initial local review note')
 
         // Act: uncollapse with za, then press <CR> to enter thread-detail-view

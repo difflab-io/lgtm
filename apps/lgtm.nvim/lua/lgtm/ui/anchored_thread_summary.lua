@@ -16,31 +16,100 @@ local AUTHOR_PALETTE = {
   "#8aadf4",
 }
 
+local CARD_BG = "#181d2b"
+local CARD_HEADER_BG = "#202635"
+
 function AnchoredThreadSummary.ensure_highlights()
   if highlights_initialized then
     return
   end
   highlights_initialized = true
 
-  vim.api.nvim_set_hl(0, "LgtmThreadBorder", { fg = "#89b4fa", default = true })
+  vim.api.nvim_set_hl(0, "LgtmThreadBorder", { fg = "#89b4fa", bg = CARD_BG, default = true })
   vim.api.nvim_set_hl(
     0,
     "LgtmThreadBorderSelected",
-    { fg = "#c6a0f6", bold = true, default = true }
+    { fg = "#c6a0f6", bg = CARD_BG, bold = true, default = true }
   )
-  vim.api.nvim_set_hl(0, "LgtmThreadBorderResolved", { fg = "#a6da95", default = true })
+  vim.api.nvim_set_hl(
+    0,
+    "LgtmThreadBorderResolved",
+    { fg = "#86efac", bg = CARD_BG, default = true }
+  )
+  vim.api.nvim_set_hl(
+    0,
+    "LgtmThreadBorderOutdated",
+    { fg = "#f5a97f", bg = CARD_BG, default = true }
+  )
+
   vim.api.nvim_set_hl(0, "LgtmThreadSignOpen", { fg = "#89b4fa", bold = true, default = true })
   vim.api.nvim_set_hl(0, "LgtmThreadSignSelected", { fg = "#c6a0f6", bold = true, default = true })
-  vim.api.nvim_set_hl(0, "LgtmThreadSignResolved", { fg = "#a6da95", bold = true, default = true })
-  vim.api.nvim_set_hl(0, "LgtmThreadMuted", { fg = "#7f849c", default = true })
-  vim.api.nvim_set_hl(0, "LgtmThreadPositive", { fg = "#a6da95", bold = true, default = true })
-  vim.api.nvim_set_hl(0, "LgtmThreadWarning", { fg = "#f9e2af", bold = true, default = true })
-  vim.api.nvim_set_hl(0, "LgtmThreadInfo", { fg = "#89b4fa", bold = true, default = true })
-  vim.api.nvim_set_hl(0, "LgtmThreadBody", { link = "Normal", default = true })
+  vim.api.nvim_set_hl(0, "LgtmThreadSignResolved", { fg = "#86efac", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "LgtmThreadSignOutdated", { fg = "#f5a97f", bold = true, default = true })
+
+  vim.api.nvim_set_hl(0, "LgtmThreadBody", { fg = "#cdd6f4", bg = CARD_BG, default = true })
+  vim.api.nvim_set_hl(
+    0,
+    "LgtmThreadHeaderBg",
+    { fg = "#cdd6f4", bg = CARD_HEADER_BG, default = true }
+  )
+  vim.api.nvim_set_hl(0, "LgtmThreadMuted", { fg = "#7f849c", bg = CARD_BG, default = true })
+  vim.api.nvim_set_hl(
+    0,
+    "LgtmThreadHeaderMuted",
+    { fg = "#7f849c", bg = CARD_HEADER_BG, default = true }
+  )
+  vim.api.nvim_set_hl(
+    0,
+    "LgtmThreadPositive",
+    { fg = "#86efac", bg = CARD_HEADER_BG, bold = true, default = true }
+  )
+  vim.api.nvim_set_hl(
+    0,
+    "LgtmThreadWarning",
+    { fg = "#fcd34d", bg = CARD_HEADER_BG, bold = true, default = true }
+  )
+  vim.api.nvim_set_hl(
+    0,
+    "LgtmThreadInfo",
+    { fg = "#89b4fa", bg = CARD_HEADER_BG, bold = true, default = true }
+  )
+
+  vim.api.nvim_set_hl(
+    0,
+    "LgtmBadgeDraft",
+    { fg = "#111827", bg = "#fcd34d", bold = true, default = true }
+  )
+  vim.api.nvim_set_hl(
+    0,
+    "LgtmBadgePending",
+    { fg = "#0b1320", bg = "#89b4fa", bold = true, default = true }
+  )
+  vim.api.nvim_set_hl(
+    0,
+    "LgtmBadgePublished",
+    { fg = "#cdd6f4", bg = "#313244", bold = true, default = true }
+  )
+  vim.api.nvim_set_hl(
+    0,
+    "LgtmBadgeOpen",
+    { fg = "#0b1320", bg = "#7dc4e4", bold = true, default = true }
+  )
+  vim.api.nvim_set_hl(
+    0,
+    "LgtmBadgeResolved",
+    { fg = "#0b1320", bg = "#86efac", bold = true, default = true }
+  )
+  vim.api.nvim_set_hl(
+    0,
+    "LgtmBadgeOutdated",
+    { fg = "#111827", bg = "#f5a97f", bold = true, default = true }
+  )
 
   for idx, hex in ipairs(AUTHOR_PALETTE) do
     vim.api.nvim_set_hl(0, string.format("LgtmAuthorColor%02d", idx), {
       fg = hex,
+      bg = CARD_HEADER_BG,
       bold = true,
       default = true,
     })
@@ -52,39 +121,69 @@ function AnchoredThreadSummary.border_highlights(thread, is_selected)
   if is_selected then
     return "LgtmThreadBorderSelected", "LgtmThreadSignSelected"
   end
+  if thread.outdated then
+    return "LgtmThreadBorderOutdated", "LgtmThreadSignOutdated"
+  end
   if thread.resolved then
     return "LgtmThreadBorderResolved", "LgtmThreadSignResolved"
   end
   return "LgtmThreadBorder", "LgtmThreadSignOpen"
 end
 
+function AnchoredThreadSummary.state_badge_spec(state)
+  AnchoredThreadSummary.ensure_highlights()
+  local normalized = tostring(state or "DRAFT"):upper()
+  if normalized == "PENDING" then
+    return " 󰦖 PENDING ", "LgtmBadgePending"
+  end
+  if normalized == "PUBLISHED" then
+    return "  PUBLISHED ", "LgtmBadgePublished"
+  end
+  return "  DRAFT ", "LgtmBadgeDraft"
+end
+
+function AnchoredThreadSummary.thread_status_badges(thread)
+  AnchoredThreadSummary.ensure_highlights()
+  local badges = {}
+  if thread.outdated then
+    table.insert(badges, { " 󰦖 STALE ", "LgtmBadgeOutdated" })
+  end
+  if thread.resolved then
+    table.insert(badges, { "  RESOLVED ", "LgtmBadgeResolved" })
+  else
+    table.insert(badges, { " ● OPEN ", "LgtmBadgeOpen" })
+  end
+  return badges
+end
+
 function AnchoredThreadSummary:init(thread, opts)
   opts = opts or {}
   local is_selected = opts.is_selected == true
   local border_hl, sign_hl = AnchoredThreadSummary.border_highlights(thread, is_selected)
-  local total_width = tonumber(opts.width) or vim.o.columns or 80
-  local inner_width = math.max(36, total_width - 4)
+  local total_width = math.max(20, tonumber(opts.width) or vim.o.columns or 80)
+  local inner_width = math.max(18, total_width - 2)
 
   self.thread = thread
   self.is_selected = is_selected
   self.border_hl = border_hl
   self.sign_hl = sign_hl
+  self.total_width = total_width
   self.inner_width = inner_width
-  self.content_width = math.max(16, inner_width - 2)
+  self.content_width = math.max(14, inner_width - 2)
 end
 
 function AnchoredThreadSummary:render()
   local virt_lines = {
     self:_top_border_row(),
-    self:_box_row(self:_header_chunks()),
+    self:_box_row(self:_header_chunks(), "LgtmThreadHeaderBg"),
   }
 
   if not self.thread.collapsed then
-    for _, row_chunks in ipairs(self:_body_rows()) do
-      table.insert(virt_lines, self:_box_row(row_chunks))
+    for _, row_spec in ipairs(self:_body_rows()) do
+      table.insert(virt_lines, self:_box_row(row_spec.chunks, row_spec.fill_hl))
     end
     table.insert(virt_lines, self:_separator_row())
-    table.insert(virt_lines, self:_box_row(self:_footer_chunks()))
+    table.insert(virt_lines, self:_box_row(self:_footer_chunks(), "LgtmThreadHeaderBg"))
   end
 
   table.insert(virt_lines, self:_bottom_border_row())
@@ -97,60 +196,65 @@ end
 
 function AnchoredThreadSummary:_top_border_row()
   return {
-    { " ╭" .. string.rep("─", self.inner_width) .. "╮", self.border_hl },
+    { "╭" .. string.rep("─", self.inner_width) .. "╮", self.border_hl },
   }
 end
 
 function AnchoredThreadSummary:_bottom_border_row()
   return {
-    { " ╰" .. string.rep("─", self.inner_width) .. "╯", self.border_hl },
+    { "╰" .. string.rep("─", self.inner_width) .. "╯", self.border_hl },
   }
 end
 
 function AnchoredThreadSummary:_separator_row()
   local rule = string.rep("─", self.content_width)
   return {
-    { " │ ", self.border_hl },
-    { rule, "LgtmThreadMuted" },
-    { " │", self.border_hl },
+    { "│", self.border_hl },
+    { " " .. rule .. " ", "LgtmThreadMuted" },
+    { "│", self.border_hl },
   }
 end
 
-function AnchoredThreadSummary:_box_row(chunks)
-  local fitted = self:_fit_chunks(chunks, self.content_width)
+function AnchoredThreadSummary:_box_row(chunks, fill_hl)
+  local bg_hl = fill_hl or "LgtmThreadBody"
+  local fitted = self:_fit_chunks(chunks, self.content_width, bg_hl)
   local row = {
-    { " │ ", self.border_hl },
+    { "│", self.border_hl },
+    { " ", bg_hl },
   }
   for _, chunk in ipairs(fitted) do
     table.insert(row, chunk)
   end
-  table.insert(row, { " │", self.border_hl })
+  table.insert(row, { " ", bg_hl })
+  table.insert(row, { "│", self.border_hl })
   return row
 end
 
 function AnchoredThreadSummary:_header_chunks()
   local root, reply_count = Thread.summary_stats(self.thread)
-  local fold_icon = self.thread.collapsed and "▸" or "▾"
-  local status_badge = self.thread.resolved and "✓ [RESOLVED]" or "[OPEN]"
-  local status_hl = self.thread.resolved and "LgtmThreadPositive" or "LgtmThreadWarning"
-  local state_badge = self:_comment_state_badge(root.state)
+  local fold_icon = self.thread.collapsed and "" or ""
+  local state_label, state_hl = AnchoredThreadSummary.state_badge_spec(root.state)
   local reply_label = self:_reply_label(reply_count)
   local preview = self.thread.collapsed and (" · " .. self:_first_line(root.body)) or ""
 
   local left = {
     { fold_icon .. " ", "LgtmThreadInfo" },
-    { "󰀄 @" .. root.author, self:_author_hl(root.author) },
-    { " (" .. Thread.format_anchor(self.thread) .. reply_label .. ")", "LgtmThreadMuted" },
+    { " @" .. root.author, self:_author_hl(root.author) },
+    { " (" .. Thread.format_anchor(self.thread) .. reply_label .. ")", "LgtmThreadHeaderMuted" },
   }
   if preview ~= "" then
-    table.insert(left, { preview, "LgtmThreadBody" })
+    table.insert(left, { preview, "LgtmThreadHeaderBg" })
   end
 
   local right = {
-    { state_badge, "LgtmThreadMuted" },
-    { status_badge, status_hl },
+    { state_label, state_hl },
   }
-  return self:_align_left_right(left, right, self.content_width)
+  for _, badge in ipairs(AnchoredThreadSummary.thread_status_badges(self.thread)) do
+    table.insert(right, { " ", "LgtmThreadHeaderBg" })
+    table.insert(right, badge)
+  end
+
+  return self:_align_left_right(left, right, self.content_width, "LgtmThreadHeaderBg")
 end
 
 function AnchoredThreadSummary:_body_rows()
@@ -158,13 +262,22 @@ function AnchoredThreadSummary:_body_rows()
   for index, comment in ipairs(self.thread.comments) do
     if index > 1 then
       table.insert(rows, {
-        { string.rep("─", self.content_width), "LgtmThreadMuted" },
+        fill_hl = "LgtmThreadBody",
+        chunks = {
+          { string.rep("─", self.content_width), "LgtmThreadMuted" },
+        },
       })
-      table.insert(rows, self:_reply_header_chunks(comment))
+      table.insert(rows, {
+        fill_hl = "LgtmThreadHeaderBg",
+        chunks = self:_reply_header_chunks(comment),
+      })
     end
     for _, wrapped_line in ipairs(self:_wrap_body(comment.body, self.content_width)) do
       table.insert(rows, {
-        { wrapped_line, "LgtmThreadBody" },
+        fill_hl = "LgtmThreadBody",
+        chunks = {
+          { wrapped_line, "LgtmThreadBody" },
+        },
       })
     end
   end
@@ -172,21 +285,22 @@ function AnchoredThreadSummary:_body_rows()
 end
 
 function AnchoredThreadSummary:_reply_header_chunks(comment)
+  local state_label, state_hl = AnchoredThreadSummary.state_badge_spec(comment.state)
   local left = {
-    { "↳ ", "LgtmThreadMuted" },
-    { "󰀄 @" .. comment.author, self:_author_hl(comment.author) },
+    { " ", "LgtmThreadHeaderMuted" },
+    { " @" .. comment.author, self:_author_hl(comment.author) },
   }
   local right = {
-    { "[" .. tostring(comment.state or "DRAFT") .. "]", "LgtmThreadMuted" },
+    { state_label, state_hl },
   }
-  return self:_align_left_right(left, right, self.content_width)
+  return self:_align_left_right(left, right, self.content_width, "LgtmThreadHeaderBg")
 end
 
 function AnchoredThreadSummary:_footer_chunks()
   return {
     {
-      "[<CR>/<leader>ro: detail · <leader>rc: reply · za: fold · x: resolve]",
-      "LgtmThreadMuted",
+      "<CR>/<leader>ro detail   <leader>rc reply   za fold   x resolve",
+      "LgtmThreadHeaderMuted",
     },
   }
 end
@@ -200,14 +314,7 @@ function AnchoredThreadSummary:_author_hl(author)
   return string.format("LgtmAuthorColor%02d", hash + 1)
 end
 
-function AnchoredThreadSummary:_comment_state_badge(state)
-  if type(state) ~= "string" or state == "" then
-    return ""
-  end
-  return "[" .. state .. "] "
-end
-
-function AnchoredThreadSummary:_align_left_right(left_chunks, right_chunks, content_width)
+function AnchoredThreadSummary:_align_left_right(left_chunks, right_chunks, content_width, gap_hl)
   local right_width = self:_chunks_width(right_chunks)
   local max_left = math.max(4, content_width - right_width - 1)
   local left_fitted = self:_truncate_chunks(left_chunks, max_left)
@@ -218,18 +325,18 @@ function AnchoredThreadSummary:_align_left_right(left_chunks, right_chunks, cont
   for _, chunk in ipairs(left_fitted) do
     table.insert(combined, chunk)
   end
-  table.insert(combined, { string.rep(" ", gap), "LgtmThreadMuted" })
+  table.insert(combined, { string.rep(" ", gap), gap_hl or "LgtmThreadHeaderMuted" })
   for _, chunk in ipairs(right_chunks) do
     table.insert(combined, chunk)
   end
   return combined
 end
 
-function AnchoredThreadSummary:_fit_chunks(chunks, content_width)
+function AnchoredThreadSummary:_fit_chunks(chunks, content_width, fill_hl)
   local truncated = self:_truncate_chunks(chunks, content_width)
   local used = self:_chunks_width(truncated)
   if used < content_width then
-    table.insert(truncated, { string.rep(" ", content_width - used), "LgtmThreadBody" })
+    table.insert(truncated, { string.rep(" ", content_width - used), fill_hl or "LgtmThreadBody" })
   end
   return truncated
 end

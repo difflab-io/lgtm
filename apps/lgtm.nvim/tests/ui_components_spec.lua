@@ -62,8 +62,13 @@ function M.run()
         local bottom_text = virt_lines[#virt_lines][1][1]
         assert(top_text:find("╭", 1, true) ~= nil and top_text:find("╮", 1, true) ~= nil)
         assert(bottom_text:find("╰", 1, true) ~= nil and bottom_text:find("╯", 1, true) ~= nil)
-        assert(vim.fn.strdisplaywidth(top_text) == 79)
-        assert(vim.fn.strdisplaywidth(bottom_text) == 79)
+        assert(vim.fn.strdisplaywidth(top_text) == 80)
+        assert(vim.fn.strdisplaywidth(bottom_text) == 80)
+
+        local stale_thread = make_thread({ outdated = true, resolved = true })
+        local stale_card = AnchoredThreadSummary(stale_thread, { width = 80 })
+        assert(stale_card.border_hl == "LgtmThreadBorderOutdated")
+        assert(stale_card.sign_hl == "LgtmThreadSignOutdated")
 
         local collapsed_thread = Thread.with_collapsed(with_reply, true)
         local collapsed_lines = AnchoredThreadSummary.render_virt_lines(collapsed_thread, {

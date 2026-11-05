@@ -1,3 +1,4 @@
+local AnchoredThreadSummary = require("lgtm.ui.anchored_thread_summary")
 local Component = require("nui-components.component")
 local Line = require("nui.line")
 local Thread = require("lgtm.models.thread")
@@ -295,15 +296,24 @@ function ThreadSummaryView:_thread_card(thread, is_selected)
 end
 
 function ThreadSummaryView:_thread_header_line(thread, is_selected)
+  AnchoredThreadSummary.ensure_highlights()
   local root, reply_count = Thread.summary_stats(thread)
   local fold_icon = thread.collapsed and "▸" or "▾"
   local pointer = is_selected and "❯ " or "  "
   local status = thread.resolved and "[RESOLVED]" or "[OPEN]"
-  local status_hl = thread.resolved and "DiagnosticOk" or "DiagnosticWarn"
+  local status_hl = thread.resolved and "LgtmBadgeResolved" or "LgtmBadgeOpen"
+  local state_label, state_hl = AnchoredThreadSummary.state_badge_spec(root.state)
 
   local line = Line()
   line:append(pointer .. fold_icon .. " ", is_selected and "DiagnosticInfo" or "Comment")
-  line:append(status .. " ", status_hl)
+  line:append(status, status_hl)
+  line:append(" ", "Normal")
+  if thread.outdated then
+    line:append(" 󰦖 STALE ", "LgtmBadgeOutdated")
+    line:append(" ", "Normal")
+  end
+  line:append(state_label, state_hl)
+  line:append(" ", "Normal")
   line:append(Thread.format_anchor(thread), "Directory")
   line:append(" · @" .. root.author, "Title")
   if reply_count > 0 then
