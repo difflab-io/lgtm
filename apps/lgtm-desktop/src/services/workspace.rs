@@ -29,11 +29,6 @@ impl WorkspaceService {
     /// Selects the default workspace under the supplied home directory with a no-op LSP service.
     pub fn from_home(home: PathBuf) -> Self {
         let lsp_service = Arc::new(LspService::noop(home.clone()));
-        Self::with_lsp(home, lsp_service)
-    }
-
-    /// Selects the default workspace under `home` and binds `lsp_service` to workspace lifecycle operations.
-    pub fn with_lsp(home: PathBuf, lsp_service: Arc<LspService>) -> Self {
         Self::with_initial_workspace(home, None, lsp_service)
     }
 
