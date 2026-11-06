@@ -27,8 +27,8 @@ if (!generated) throw new Error('Backend did not report generated Protobuf outpu
 const stage = join(cli, '.bundle-stage')
 await rm(stage, { recursive: true, force: true })
 await mkdir(stage)
-// Include the real backend and DB sources so the standalone published CLI serves
-// the same review API without depending on unpublished workspace crates.
+// Include the real backend, DB, config, and env sources so the standalone published CLI
+// serves the same review and task API without depending on unpublished workspace crates.
 async function bundleRust(sourceDir, targetDir, crateRoot) {
   await mkdir(targetDir, { recursive: true })
   for (const entry of await readdir(sourceDir, { withFileTypes: true })) {
@@ -39,10 +39,15 @@ async function bundleRust(sourceDir, targetDir, crateRoot) {
       await bundleRust(source, target, crateRoot)
     } else if (entry.name.endsWith('.rs')) {
       let content = (await readFile(source, 'utf8'))
+        .replace(/#!\[deny\([^\]]*\)\]\n?/g, '')
         .replace(/\n\/\/ tests -+[\s\S]*$/, '\n')
         .replace(/\bcrate::/g, `${crateRoot}::`)
+        .replace(/\blgtm_config::/g, 'crate::backend::config::')
       if (entry.name === 'lib.rs' && crateRoot === 'crate::backend') {
-        content = content.replace('pub use lgtm_db as database;', 'pub mod database;')
+        content = content.replace(
+          'pub use lgtm_db as database;',
+          '#[allow(dead_code)]\npub mod config;\npub mod database;\n#[allow(dead_code)]\npub mod env;',
+        )
       }
       await writeFile(target, content)
     }
@@ -50,6 +55,8 @@ async function bundleRust(sourceDir, targetDir, crateRoot) {
 }
 await bundleRust(join(root, 'apps/lgtm-forge/src'), join(stage, 'backend'), 'crate::backend')
 await bundleRust(join(root, 'libs/lgtm-db/src'), join(stage, 'backend/database'), 'crate::backend::database')
+await bundleRust(join(root, 'libs/lgtm-config/src'), join(stage, 'backend/config'), 'crate::backend::config')
+await bundleRust(join(root, 'libs/lgtm-env/src'), join(stage, 'backend/env'), 'crate::backend::env')
 const formatted = Bun.spawnSync(
   ['rustfmt', '--edition', '2024', join(stage, 'backend/mod.rs')],
   { cwd: root, stdout: 'inherit', stderr: 'inherit' },

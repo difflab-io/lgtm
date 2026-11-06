@@ -1,11 +1,13 @@
 //! Command outputs for `lgtm add`, `lgtm commit`, `lgtm push`, and `lgtm run`.
 // TODO: Split each `*CommandOutput` model into its own module file under `models/`.
 
-use lgtm_env::MiseTaskSummary;
 use serde_json::json;
 
 use crate::{
-    backend::proto::lgtm::v1::{AddResponse, CommitResponse, PushResponse},
+    backend::{
+        env::MiseTaskSummary,
+        proto::lgtm::v1::{AddResponse, CommitResponse, PushResponse},
+    },
     models::common::{Identity, short_sha},
 };
 
