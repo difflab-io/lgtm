@@ -1,12 +1,11 @@
 //! Shared CLI argument structs, parsers, and view formatting primitives.
 
 use clap::{Args, ValueEnum};
-use serde_json::{Value, json};
-
-use crate::backend::proto::lgtm::v1::{
+use lgtm_forge::proto::lgtm::v1::{
     CommentAnchorDetail, DiffLineKind, IdentitySummary, ReviewGroupBy as ProtoGroupBy,
     ReviewOutcome as ProtoOutcome, ReviewStatus, SessionState,
 };
+use serde_json::{Value, json};
 
 #[derive(Args, Clone, Copy, Debug, Default)]
 pub struct LocalArgs {

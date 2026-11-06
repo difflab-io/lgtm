@@ -25,6 +25,7 @@ describe(
         const commentHelp = await runtime.cli(['comment', '--help'])
         const removedSession = await runtime.cli(['session', 'list'])
         const removedComments = await runtime.cli(['comments', 'list'])
+        const removedUi = await runtime.cli(['ui'])
         const badOutcome = await runtime.cli(['review', 'close', 'demo', '--with', 'merge'])
 
         // Assert
@@ -35,7 +36,8 @@ describe(
           'push',
           'review',
           'comment',
-          'ui',
+          'open',
+          'run',
           'up',
           'down',
           'status',
@@ -46,6 +48,7 @@ describe(
         for (const sub of ['new', 'update', 'delete']) expect(commentHelp.stdout).toContain(sub)
         expect(removedSession.code).not.toBe(0)
         expect(removedComments.code).not.toBe(0)
+        expect(removedUi.code).not.toBe(0)
         expect(badOutcome.code).not.toBe(0)
         expect(badOutcome.stderr).toContain('merge')
       },

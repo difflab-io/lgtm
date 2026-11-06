@@ -64,12 +64,12 @@ function formatTextInspectionOutput(args: string[], stdout: string): string | nu
     if (args[0] === 'comment' && args[1] === 'delete' && data.deleted_number !== undefined) {
       return `Deleted comment [${data.deleted_number}]`
     }
-    if (args[0] === 'ui' && typeof data.ui_url === 'string') {
-      return data.ui_url
+    if (args[0] === 'open' && typeof data.workspace_path === 'string') {
+      return `Opened LGTM Desktop at ${data.workspace_path}`
     }
     if (args[0] === 'status' && typeof data.running === 'boolean') {
       return data.running
-        ? `LGTM backend is running (ui: ${data.ui_url ?? 'n/a'})`
+        ? `LGTM backend is running (server: ${data.server_url ?? 'n/a'})`
         : 'LGTM backend is not running'
     }
     return trimmed
@@ -151,7 +151,7 @@ export class TestHarness {
             : 'invalid'
     await rm(join(this.home, 'server.port'), { force: true })
     this.log = ''
-    const args = this.kind === 'cli' ? ['up', '--foreground', '--no-open', '--port', '0'] : []
+    const args = this.kind === 'cli' ? ['up', '--foreground', '--port', '0'] : []
     this.child = spawn(binary(this.kind === 'cli' ? 'lgtm' : 'lgtm-forge'), args, {
       cwd: this.workspace,
       env: { ...this.env, LGTM_BACKEND_ADDR: '127.0.0.1:0' },

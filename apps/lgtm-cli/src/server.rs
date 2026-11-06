@@ -1,4 +1,5 @@
-use crate::{backend, store::Store};
+use std::{future::IntoFuture, time::Duration};
+
 use axum::{
     Json, Router,
     body::Body,
@@ -7,12 +8,9 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use std::{future::IntoFuture, time::Duration};
 use tower::ServiceExt;
 
-mod assets {
-    include!(concat!(env!("OUT_DIR"), "/assets.rs"));
-}
+use crate::store::Store;
 
 // api -------------------------------------------------------------------------
 
@@ -26,7 +24,7 @@ pub async fn serve(port: u16, store: &Store, detached: bool) -> anyhow::Result<(
     };
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await?;
     let port = listener.local_addr()?.port();
-    let (router, health) = backend::connect_default_router().await?;
+    let (router, health) = lgtm_forge::connect_default_router().await?;
     let rpc = router.into_axum_service();
     let app = Router::new()
         .route(
@@ -39,7 +37,7 @@ pub async fn serve(port: u16, store: &Store, detached: bool) -> anyhow::Result<(
     store.write_port(port)?;
     tracing::info!(port, pid = std::process::id(), "Server started");
     if !detached {
-        println!("LGTM UI and RPC server listening on http://127.0.0.1:{port}");
+        println!("LGTM RPC server listening on http://127.0.0.1:{port}");
     }
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let serving = axum::serve(listener, app)
@@ -67,20 +65,7 @@ async fn dispatch(
     request: Request<Body>,
 ) -> Response {
     if request.method() == Method::GET || request.method() == Method::HEAD {
-        let path = request.uri().path().trim_start_matches('/');
-        let path = if path.is_empty() { "index.html" } else { path };
-        return match assets::get(path) {
-            Some((bytes, mime)) => (
-                [("content-type", mime), ("cache-control", "no-cache")],
-                if request.method() == Method::HEAD {
-                    &[][..]
-                } else {
-                    bytes
-                },
-            )
-                .into_response(),
-            None => StatusCode::NOT_FOUND.into_response(),
-        };
+        return StatusCode::NOT_FOUND.into_response();
     }
     match rpc.oneshot(request).await {
         Ok(response) => response.into_response(),

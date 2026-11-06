@@ -10,7 +10,6 @@ description = "Resolve and fetch Cargo dependencies"
 run = "cargo fetch"
 
 [tasks.build]
-depends = ["bundle"]
 description = "Compile the CLI"
 run = "cargo build"
 
@@ -19,27 +18,22 @@ description = "Remove build artifacts"
 run = "cargo clean"
 
 [tasks.test]
-depends = ["bundle"]
 description = "Run the test suite"
 run = "cargo test"
 
 [tasks.lint]
-depends = ["bundle"]
 description = "Lint with clippy (deny warnings)"
 run = "cargo clippy --all-targets --all-features -- -D warnings"
 
 [tasks."lint:fix"]
-depends = ["bundle"]
 description = "Auto-fix clippy findings"
 run = "cargo clippy --fix --allow-dirty --allow-staged --allow-no-vcs"
 
 [tasks.format]
-depends = ["bundle"]
 description = "Format Rust sources"
 run = "cargo fmt -p lgtm-cli"
 
 [tasks."format:check"]
-depends = ["bundle"]
 description = "Check formatting without modifying files"
 run = "cargo fmt -p lgtm-cli --check"
 
@@ -48,47 +42,18 @@ description = "Pull external environment configuration"
 run = 'echo "env-pull: nothing to pull"'
 
 [tasks."publish:rc"]
-depends = ["bundle"]
-description = "Publish a prerelease (rc) version of the crate"
-run = '''
-set -eu
-if [ "${PREMISE_TEMPLATE_TEST:-}" = "1" ]; then
-  echo "publish:rc (test mode): cargo publish --dry-run --allow-dirty"
-  cargo publish --dry-run --allow-dirty
-  exit 0
-fi
-version="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)"
-case "$version" in
-  *-*) ;;
-  *) echo "error: publish:rc requires a SemVer prerelease version (got $version)" >&2; exit 1 ;;
-esac
-cargo publish --allow-dirty --no-verify
-'''
+description = "Private package; publication disabled"
+run = 'echo "Private package; publication disabled"'
 
 [tasks.publish]
-depends = ["bundle"]
-description = "Publish a stable version of the crate"
-run = '''
-set -eu
-if [ "${PREMISE_TEMPLATE_TEST:-}" = "1" ]; then
-  echo "publish (test mode): cargo publish --dry-run --allow-dirty"
-  cargo publish --dry-run --allow-dirty
-  exit 0
-fi
-version="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)"
-case "$version" in
-  *-*) echo "error: publish requires a stable version (got $version)" >&2; exit 1 ;;
-esac
-cargo publish --allow-dirty --no-verify
-'''
+description = "Private package; publication disabled"
+run = 'echo "Private package; publication disabled"'
 
 [tasks.run]
-depends = ["bundle"]
 description = "Run the CLI"
 run = "cargo run --"
 
 [tasks.dev]
-depends = ["bundle"]
 description = "Run the CLI in development mode"
 run = '''
 set -eu
@@ -102,4 +67,3 @@ fi
 [tasks.deploy]
 description = "Validate the deploy contract (no deployable surface)"
 run = 'echo "deploy: no deployable surface"'
-

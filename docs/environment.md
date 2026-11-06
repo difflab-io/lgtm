@@ -14,6 +14,8 @@ LGTM components (`lgtm-cli`, `lgtm-forge`, `lgtm-desktop`, `lgtm-config`, `lgtm-
 | `DATABASE_URL` | `lgtm-forge`, `lgtm-cli` | `sqlite://$LGTM_HOME/lgtm.db?mode=rwc` | Fallback database connection URL when `LGTM_DATABASE_URL` is unset. |
 | `LGTM_BACKEND_ADDR` | `lgtm-forge` | `127.0.0.1:8080` | Socket address (`<ip>:<port>`) bound by the standalone `lgtm-forge` server binary. |
 | `LGTM_RPC_URL` | `lgtm-cli` | `http://127.0.0.1:<daemon-port>/rpc` | Explicit Connect RPC endpoint URL used by `lgtm-cli` instead of discovering or auto-starting the background daemon. |
+| `LGTM_DESKTOP_BIN` | `lgtm-cli` | Auto-discovered (`PATH`, sibling binary, `/Applications/lgtm-desktop.app`) | Overrides the `lgtm-desktop` executable path launched by `lgtm open [<path>]` (or `lgtm [<path>]`). |
+| `LGTM_WORKSPACE` | `lgtm-desktop`, `lgtm-cli` | `~/.lgtm/workspace` | Initial workspace directory opened on launch by `lgtm-desktop` when no explicit path is passed to `workspace_open`. Set automatically by `lgtm open [<path>]`. |
 | `RUST_LOG` | `lgtm-forge`, `lgtm-cli` | `info` | `tracing_subscriber::EnvFilter` directive controlling structured log verbosity. |
 
 ## GitHub & remote forge integration

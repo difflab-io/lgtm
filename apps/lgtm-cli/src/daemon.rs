@@ -22,11 +22,12 @@ pub fn detach(_store: &Store) -> Result<()> {
     bail!("Background mode requires macOS or Linux; use lgtm up --foreground")
 }
 
-pub async fn up(port: u16, open_browser: bool, store: &Store) -> Result<()> {
+pub async fn up(port: u16, store: &Store, json: bool) -> Result<()> {
     let instance = ensure_running(port, store).await?;
-    announce(&instance, store);
-    if open_browser {
-        crate::ui::open(&instance.url());
+    if json {
+        println!("{}", discovery_json(&instance));
+    } else {
+        announce(&instance, store);
     }
     Ok(())
 }
@@ -60,13 +61,7 @@ pub async fn status(store: &Store, json: bool) -> Result<()> {
     let instance = active(&client()?, store).await;
     if json {
         let discovery = match instance {
-            Some(instance) => serde_json::json!({
-                "running": true,
-                "pid": instance.pid,
-                "ui_url": instance.url(),
-                "server_url": instance.url(),
-                "rpc_url": format!("{}/rpc", instance.url()),
-            }),
+            Some(instance) => discovery_json(&instance),
             None => serde_json::json!({"running": false}),
         };
         println!("{discovery}");
@@ -132,10 +127,18 @@ pub(crate) async fn ensure_running(port: u16, store: &Store) -> Result<Instance>
     )
 }
 
+fn discovery_json(instance: &Instance) -> serde_json::Value {
+    serde_json::json!({
+        "running": true,
+        "pid": instance.pid,
+        "server_url": instance.url(),
+        "rpc_url": format!("{}/rpc", instance.url()),
+    })
+}
+
 fn announce(instance: &Instance, store: &Store) {
     println!("LGTM is running (pid {})", instance.pid);
-    println!("UI: {}", instance.url());
     println!("Server: {}", instance.url());
-    println!("Browser RPC: {}/rpc", instance.url());
+    println!("RPC: {}/rpc", instance.url());
     println!("Logs: {}", store.path("server.log").display());
 }

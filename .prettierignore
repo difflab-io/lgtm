@@ -26,8 +26,5 @@ RELEASE_NOTES.md
 # Generated Protobuf clients
 **/src/lib/gen/
 
-apps/lgtm-cli/bundle/
-apps/lgtm-cli/.bundle-stage/
-
 # Downloaded Neovim test dependencies
 e2e/nvim/.cache/

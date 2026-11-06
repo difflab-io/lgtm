@@ -1,13 +1,13 @@
 use clap::{Args, Subcommand};
+use lgtm_forge::{
+    extensions::git::get_cwd_git_dir,
+    proto::lgtm::v1::{
+        CloseReviewRequest, CreateReviewRequest, ListReviewsRequest, RefreshReviewRequest,
+        ReviewGroupBy as ProtoGroupBy, ReviewOutcome as ProtoOutcome, ShowReviewRequest,
+    },
+};
 
 use crate::{
-    backend::{
-        extensions::git::get_cwd_git_dir,
-        proto::lgtm::v1::{
-            CloseReviewRequest, CreateReviewRequest, ListReviewsRequest, RefreshReviewRequest,
-            ReviewGroupBy as ProtoGroupBy, ReviewOutcome as ProtoOutcome, ShowReviewRequest,
-        },
-    },
     models::{
         ActorArgs, ListReviewsCommandOutput, LocalArgs, RefreshReviewCommandOutput, ReviewGroupBy,
         ReviewOutcome, ReviewSessionCommandOutput, ShowReviewCommandOutput, parse_nonempty,

@@ -1,14 +1,12 @@
 //! Comment models and output types for `lgtm comment` commands and review threads.
 
 use anyhow::Context;
+use lgtm_forge::proto::lgtm::v1::{
+    CommentDetail, CreateCommentResponse, DeleteCommentResponse, UpdateCommentResponse,
+};
 use serde_json::{Value, json};
 
-use crate::{
-    backend::proto::lgtm::v1::{
-        CommentDetail, CreateCommentResponse, DeleteCommentResponse, UpdateCommentResponse,
-    },
-    models::common::{CommentAnchor, Identity},
-};
+use crate::models::common::{CommentAnchor, Identity};
 
 /// Single review comment.
 #[derive(Clone, Debug, PartialEq, Eq)]

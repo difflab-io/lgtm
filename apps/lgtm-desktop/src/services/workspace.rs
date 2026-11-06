@@ -34,7 +34,26 @@ impl WorkspaceService {
 
     /// Selects the default workspace under `home` and binds `lsp_service` to workspace lifecycle operations.
     pub fn with_lsp(home: PathBuf, lsp_service: Arc<LspService>) -> Self {
+        Self::with_initial_workspace(home, None, lsp_service)
+    }
+
+    /// Selects `initial_workspace` when provided and valid on disk (otherwise the default workspace under `home`) and binds `lsp_service`.
+    pub fn with_initial_workspace(
+        home: PathBuf,
+        initial_workspace: Option<PathBuf>,
+        lsp_service: Arc<LspService>,
+    ) -> Self {
         let default_workspace = Workspace::from_home(home);
+        if let Some(initial) = initial_workspace.filter(|path| path.is_dir())
+            && initial != default_workspace.root
+        {
+            return Self {
+                workspace: Workspace::from_path(initial),
+                default_workspace,
+                custom_root: true,
+                lsp_service,
+            };
+        }
         Self {
             workspace: default_workspace.clone(),
             default_workspace,
@@ -416,6 +435,31 @@ mod tests {
                     fixture.default_root().canonicalize().unwrap()
                 );
                 assert!(opened.entries.is_empty());
+            }
+
+            #[test]
+            fn should_open_initial_workspace_when_configured_from_cli_or_env() {
+                // Arrange
+                let home = TempDir::new().unwrap();
+                let initial_dir = TempDir::new().unwrap();
+                fs::write(initial_dir.path().join("main.rs"), "fn main() {}\n").unwrap();
+                let lsp_service = Arc::new(LspService::noop(home.path().to_path_buf()));
+                let mut service = WorkspaceService::with_initial_workspace(
+                    home.path().to_path_buf(),
+                    Some(initial_dir.path().to_path_buf()),
+                    lsp_service,
+                );
+
+                // Act
+                let opened = service.open(None).unwrap();
+
+                // Assert
+                assert_eq!(
+                    PathBuf::from(&opened.root),
+                    initial_dir.path().canonicalize().unwrap()
+                );
+                assert_eq!(opened.entries.len(), 1);
+                assert_eq!(opened.entries[0].name, "main.rs");
             }
 
             #[test]

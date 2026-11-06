@@ -23,7 +23,6 @@ zig = "0.16.0"
 run = ["cargo fetch", "bun install"]
 
 [tasks.build]
-depends = ["//apps/lgtm-cli:bundle"]
 run = [
   "cargo build --workspace",
   "bun run --filter lgtm-ui build",
@@ -31,7 +30,7 @@ run = [
 ]
 
 [tasks.test]
-depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:test", "e2e:typecheck"]
+depends = ["//apps/lgtm.nvim:test", "e2e:typecheck"]
 run = [
   "cargo test --workspace",
   "mise run //apps/lgtm-desktop:test",
@@ -40,7 +39,7 @@ run = [
 ]
 
 [tasks.lint]
-depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:lint", "e2e:lint", "//e2e/desktop:lint"]
+depends = ["//apps/lgtm.nvim:lint", "e2e:lint", "//e2e/desktop:lint"]
 run = [
   "cargo clippy --workspace --all-targets --all-features -- -D warnings",
   "mise run //apps/lgtm-desktop:lint",
@@ -49,7 +48,7 @@ run = [
 ]
 
 [tasks.format]
-depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:format", "e2e:format", "//e2e/desktop:format"]
+depends = ["//apps/lgtm.nvim:format", "e2e:format", "//e2e/desktop:format"]
 run = [
   "cargo fmt --all",
   "cargo fmt --manifest-path apps/lgtm-desktop/Cargo.toml -p lgtm-desktop",
@@ -58,7 +57,7 @@ run = [
 ]
 
 [tasks."format:check"]
-depends = ["//apps/lgtm-cli:bundle", "//apps/lgtm.nvim:format:check", "e2e:format:check", "//e2e/desktop:format:check"]
+depends = ["//apps/lgtm.nvim:format:check", "e2e:format:check", "//e2e/desktop:format:check"]
 run = [
   "cargo fmt --all --check",
   "cargo fmt --manifest-path apps/lgtm-desktop/Cargo.toml -p lgtm-desktop --check",
@@ -67,7 +66,6 @@ run = [
 ]
 
 [tasks."run:cli"]
-depends = ["//apps/lgtm-cli:bundle"]
 description = "Run the LGTM CLI"
 alias = "dev:cli"
 run = "cargo run -p lgtm-cli --bin lgtm --"
@@ -83,19 +81,16 @@ description = "Run the LGTM desktop application in development mode"
 run = "mise run //apps/lgtm-desktop:dev"
 
 [tasks."release:check"]
-depends = ["//apps/lgtm-cli:bundle"]
-description = "Validate CLI-only release configuration and Cargo packaging"
-run = ["goreleaser check --config .goreleaser.yaml", "cargo publish -p lgtm-cli --dry-run --allow-dirty --locked"]
+description = "Validate CLI-only release configuration and Cargo compilation"
+run = ["goreleaser check --config .goreleaser.yaml", "cargo check -p lgtm-cli --locked"]
 
 [tasks."release:cli"]
-depends = ["//apps/lgtm-cli:bundle"]
 description = "Publish only lgtm-cli archives from a release tag"
 run = "goreleaser release --config .goreleaser.yaml --clean"
 
 [tasks."publish:cli"]
-depends = ["//apps/lgtm-cli:bundle"]
-description = "Publish only lgtm-cli to crates.io"
-run = "cargo publish -p lgtm-cli --locked"
+description = "Private package; publication disabled (binary-only release via release:cli)"
+run = 'echo "Private package; publication disabled"'
 
 [tasks.dev]
 description = "Run the backend watcher and desktop development application together"

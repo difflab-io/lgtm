@@ -1,7 +1,7 @@
 use clap::Args;
+use lgtm_forge::{extensions::git::get_cwd_git_dir, proto::lgtm::v1::AddRequest};
 
 use crate::{
-    backend::{extensions::git::get_cwd_git_dir, proto::lgtm::v1::AddRequest},
     models::{AddCommandOutput, LocalArgs, parse_nonempty},
     rpc_client,
     store::Store,

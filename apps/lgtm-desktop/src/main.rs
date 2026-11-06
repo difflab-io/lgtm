@@ -6,12 +6,10 @@ pub mod models;
 pub mod services;
 
 fn main() {
-    #[cfg(any(test, feature = "e2e-bridge"))]
-    {
-        let mut args = std::env::args().skip(1);
-        if let Some(flag) = args.next()
-            && flag == "--ipc-bridge"
-        {
+    let mut args = std::env::args().skip(1);
+    if let Some(first) = args.next() {
+        #[cfg(any(test, feature = "e2e-bridge"))]
+        if first == "--ipc-bridge" {
             let home = args
                 .next()
                 .map(std::path::PathBuf::from)
@@ -19,6 +17,7 @@ fn main() {
             services::IpcBridgeService::new(home).run();
             return;
         }
+        let _ = first;
     }
     app::run();
 }

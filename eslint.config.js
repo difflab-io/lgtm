@@ -17,8 +17,6 @@ export default tseslint.config(
       '**/playwright-report/**',
       '**/routeTree.gen.ts',
       '**/src/lib/gen/**',
-      'apps/lgtm-cli/bundle/**',
-      'apps/lgtm-cli/.bundle-stage/**',
     ],
   },
   eslint.configs.recommended,

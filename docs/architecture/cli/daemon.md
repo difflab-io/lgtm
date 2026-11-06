@@ -2,15 +2,15 @@
 
 ## Overview
 
-The daemon module starts, discovers, and stops the single process that serves the UI and API.
+The daemon module starts, discovers, and stops the background process that serves the `lgtm-forge` Connect/gRPC API.
 
 ## Requirement
 
 ### Functional
 
-- FR1: Start the server when no healthy instance exists.
+- FR1: Start the background RPC server when no healthy instance exists.
 - FR2: Reuse a healthy server for repeated startup requests and prevent duplicate servers through PID-file locking.
-- FR3: Report the PID and UI/API URLs.
+- FR3: Report the PID, `server_url`, and `rpc_url`.
 - FR4: Stop the identified server with SIGTERM.
 
 ### Non-Functional
@@ -27,23 +27,22 @@ Pass the same store to startup, discovery, and shutdown:
 
 ```rust
 let store = Store::new()?;
-up(0, false, &store).await?;
+up(0, &store, false).await?;
 status(&store, true).await?;
 down(&store).await?;
 ```
 
 `up` starts or reuses a healthy instance. `status` reports discovery data without starting one. `down` stops only the process that matches the recorded health response.
 
-
 ### Components and Responsibilities
 
 ```mermaid
 flowchart TD
-    CALL["up / ui / down / status"] --> PROBE["Probe recorded PID and /health"]
+    CALL["up / down / status"] --> PROBE["Probe recorded PID and /health"]
     PROBE --> STORE["Store: PID, port, log paths"]
-    CALL --> START["daemonize: background server"]
+    CALL --> START["daemonize: background RPC server"]
     CALL --> STOP["SIGTERM: stop identified server"]
-    CALL --> URLS["Print UI and API URLs"]
+    CALL --> URLS["Print server_url and rpc_url"]
 ```
 
 - `daemonize` detaches the server, locks its PID file, and redirects output.
@@ -51,7 +50,6 @@ flowchart TD
 - `log::output` opens the file for daemon output.
 - The HTTP client probes `/health` to identify a ready server.
 - `nix` sends SIGTERM to the identified process on Unix.
-- `ui::open` opens the base UI URL after `up` or `ui` succeeds.
 
 ### Data and Control Flow
 
@@ -59,13 +57,13 @@ flowchart TD
 
 The library's PID-file lock prevents duplicate servers. Concurrent launches compete for that lock; an unsuccessful launch returns its captured error before readiness polling. There is no separate startup lock.
 
-`down` probes the instance, sends SIGTERM, and waits for the server to remove `server.port`. `status` only reads files and probes the server. The `ui` command also uses `ensure_running`; it prints the URL and opens the browser unless `--no-open` is supplied, with structured URL output for `--json`.
+`down` probes the instance, sends SIGTERM, and waits for the server to remove `server.port`. `status` only reads files and probes the server.
 
 ### Interfaces and Contracts
 
 ```rust
 pub fn detach(store: &Store) -> Result<()>;
-pub async fn up(port: u16, open_browser: bool, store: &Store) -> Result<()>;
+pub async fn up(port: u16, store: &Store, json: bool) -> Result<()>;
 pub(crate) async fn ensure_running(port: u16, store: &Store) -> Result<Instance>;
 pub async fn down(store: &Store) -> Result<()>;
 pub async fn status(store: &Store, json: bool) -> Result<()>;
@@ -75,12 +73,12 @@ pub async fn status(store: &Store, json: bool) -> Result<()>;
 | API              | Contract                                    |
 | ---------------- | ------------------------------------------- |
 | `detach`         | Detach before runtime threads start         |
-| `up`             | Ensure readiness and optionally open the UI |
+| `up`             | Ensure readiness and print server/RPC URLs  |
 | `ensure_running` | Return a healthy instance                   |
 | `down`           | Stop the identified Unix process            |
 | `status`         | Print URLs or JSON discovery data           |
 
-Running JSON contains `running`, `pid`, `ui_url`, `server_url`, and `rpc_url`. The UI and server URLs share the same origin. The browser RPC URL adds `/rpc`.
+Running JSON contains `running`, `pid`, `server_url`, and `rpc_url` (`{server_url}/rpc`).
 
 Stopped JSON is `{"running":false}`. A stored PID alone does not count as a running server.
 
