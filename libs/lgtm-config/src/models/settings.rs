@@ -219,82 +219,18 @@ impl ConfigFormat {
     }
 }
 
-impl AppearanceSettingsPatch {
-    // Public ------------------------------------------------------------------
-
-    /// Returns `true` if no fields in the `appearance` section are set.
-    pub fn is_empty(&self) -> bool {
-        self.theme.is_none()
-    }
-
-    /// Merges `overlay` leaf fields on top of `self`.
-    pub fn merge(&mut self, overlay: Self) {
-        if let Some(theme) = overlay.theme {
-            self.theme = Some(theme);
-        }
-    }
-}
-
-impl WorkspaceSettingsPatch {
-    // Public ------------------------------------------------------------------
-
-    /// Returns `true` if no fields in the `workspace` section are set.
-    pub fn is_empty(&self) -> bool {
-        self.active_root.is_none() && self.recent_roots.is_none()
-    }
-
-    /// Merges `overlay` leaf fields on top of `self`.
-    pub fn merge(&mut self, overlay: Self) {
-        if let Some(active_root) = overlay.active_root {
-            self.active_root = Some(active_root);
-        }
-        if let Some(recent_roots) = overlay.recent_roots {
-            self.recent_roots = Some(recent_roots);
-        }
-    }
-}
-
-impl EditorSettingsPatch {
-    // Public ------------------------------------------------------------------
-
-    /// Returns `true` if no fields in the `editor` section are set.
-    pub fn is_empty(&self) -> bool {
-        self.line_wrapping.is_none()
-    }
-
-    /// Merges `overlay` leaf fields on top of `self`.
-    pub fn merge(&mut self, overlay: Self) {
-        if let Some(line_wrapping) = overlay.line_wrapping {
-            self.line_wrapping = Some(line_wrapping);
-        }
-    }
-}
-
 impl UserSettings {
     // Public ------------------------------------------------------------------
 
     /// Applies a sparse `UserSettingsPatch` recursively at the leaf level onto this resolved settings tree.
     pub fn apply_patch(&mut self, patch: &UserSettingsPatch) {
-        if let Some(schema) = &patch.schema {
-            self.schema = Some(schema.clone());
-        }
-        if let Some(appearance) = &patch.appearance
-            && let Some(theme) = appearance.theme
+        if let (Ok(mut base), Ok(overlay)) =
+            (serde_json::to_value(&*self), serde_json::to_value(patch))
         {
-            self.appearance.theme = theme;
-        }
-        if let Some(workspace) = &patch.workspace {
-            if let Some(active_root) = &workspace.active_root {
-                self.workspace.active_root = Some(active_root.clone());
+            UserSettingsPatch::merge_json_leaves(&mut base, overlay);
+            if let Ok(merged) = serde_json::from_value(base) {
+                *self = merged;
             }
-            if let Some(recent_roots) = &workspace.recent_roots {
-                self.workspace.recent_roots = recent_roots.clone();
-            }
-        }
-        if let Some(editor) = &patch.editor
-            && let Some(line_wrapping) = editor.line_wrapping
-        {
-            self.editor.line_wrapping = line_wrapping;
         }
     }
 }
@@ -353,43 +289,20 @@ impl UserSettingsPatch {
 
     /// Returns `true` if no nested settings leaf is set in this patch.
     pub fn is_empty(&self) -> bool {
-        self.appearance
-            .as_ref()
-            .is_none_or(AppearanceSettingsPatch::is_empty)
-            && self
-                .workspace
-                .as_ref()
-                .is_none_or(WorkspaceSettingsPatch::is_empty)
-            && self
-                .editor
-                .as_ref()
-                .is_none_or(EditorSettingsPatch::is_empty)
+        serde_json::to_value(self)
+            .ok()
+            .is_none_or(|val| !Self::has_non_schema_leaf(&val))
     }
 
     /// Recursively merges `overlay` leaf fields into `self` and prunes empty nested sections.
     pub fn merge_patch(&mut self, overlay: Self) {
-        if let Some(schema) = overlay.schema {
-            self.schema = Some(schema);
-        }
-        if let Some(overlay_appearance) = overlay.appearance {
-            let entry = self.appearance.get_or_insert_with(Default::default);
-            entry.merge(overlay_appearance);
-            if entry.is_empty() {
-                self.appearance = None;
-            }
-        }
-        if let Some(overlay_workspace) = overlay.workspace {
-            let entry = self.workspace.get_or_insert_with(Default::default);
-            entry.merge(overlay_workspace);
-            if entry.is_empty() {
-                self.workspace = None;
-            }
-        }
-        if let Some(overlay_editor) = overlay.editor {
-            let entry = self.editor.get_or_insert_with(Default::default);
-            entry.merge(overlay_editor);
-            if entry.is_empty() {
-                self.editor = None;
+        if let (Ok(mut base), Ok(over)) =
+            (serde_json::to_value(&*self), serde_json::to_value(overlay))
+        {
+            Self::merge_json_leaves(&mut base, over);
+            Self::prune_empty_objects(&mut base);
+            if let Ok(merged) = serde_json::from_value(base) {
+                *self = merged;
             }
         }
     }
@@ -399,77 +312,19 @@ impl UserSettingsPatch {
         &self,
         project_existing: Option<&Self>,
     ) -> (Option<Self>, Option<Self>) {
-        let mut global = Self::default();
-        let mut project = Self::default();
+        let Ok(serde_json::Value::Object(incoming_map)) = serde_json::to_value(self) else {
+            return (None, None);
+        };
+        let existing_val = project_existing.and_then(|p| serde_json::to_value(p).ok());
+        let existing_map = existing_val.as_ref().and_then(serde_json::Value::as_object);
 
-        if let Some(appearance) = &self.appearance
-            && let Some(theme) = appearance.theme
-        {
-            let overridden_in_project = project_existing
-                .and_then(|p| p.appearance.as_ref())
-                .and_then(|a| a.theme)
-                .is_some();
-            let target = if overridden_in_project {
-                &mut project
-            } else {
-                &mut global
-            };
-            target.appearance.get_or_insert_with(Default::default).theme = Some(theme);
-        }
-
-        if let Some(workspace) = &self.workspace {
-            if let Some(active_root) = &workspace.active_root {
-                let overridden_in_project = project_existing
-                    .and_then(|p| p.workspace.as_ref())
-                    .and_then(|w| w.active_root.as_ref())
-                    .is_some();
-                let target = if overridden_in_project {
-                    &mut project
-                } else {
-                    &mut global
-                };
-                target
-                    .workspace
-                    .get_or_insert_with(Default::default)
-                    .active_root = Some(active_root.clone());
-            }
-            if let Some(recent_roots) = &workspace.recent_roots {
-                let overridden_in_project = project_existing
-                    .and_then(|p| p.workspace.as_ref())
-                    .and_then(|w| w.recent_roots.as_ref())
-                    .is_some();
-                let target = if overridden_in_project {
-                    &mut project
-                } else {
-                    &mut global
-                };
-                target
-                    .workspace
-                    .get_or_insert_with(Default::default)
-                    .recent_roots = Some(recent_roots.clone());
-            }
-        }
-
-        if let Some(editor) = &self.editor
-            && let Some(line_wrapping) = editor.line_wrapping
-        {
-            let overridden_in_project = project_existing
-                .and_then(|p| p.editor.as_ref())
-                .and_then(|e| e.line_wrapping)
-                .is_some();
-            let target = if overridden_in_project {
-                &mut project
-            } else {
-                &mut global
-            };
-            target
-                .editor
-                .get_or_insert_with(Default::default)
-                .line_wrapping = Some(line_wrapping);
-        }
-
-        let global_out = (!global.is_empty()).then_some(global);
-        let project_out = (!project.is_empty()).then_some(project);
+        let (global_map, project_map) = Self::split_json_maps(&incoming_map, existing_map);
+        let global_out = serde_json::from_value::<Self>(serde_json::Value::Object(global_map))
+            .ok()
+            .filter(|patch| !patch.is_empty());
+        let project_out = serde_json::from_value::<Self>(serde_json::Value::Object(project_map))
+            .ok()
+            .filter(|patch| !patch.is_empty());
         (global_out, project_out)
     }
 
@@ -553,6 +408,80 @@ impl UserSettingsPatch {
     }
 
     // Private -----------------------------------------------------------------
+
+    fn has_non_schema_leaf(value: &serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::Null => false,
+            serde_json::Value::Object(map) => map
+                .iter()
+                .filter(|(k, _)| k.as_str() != "$schema")
+                .any(|(_, v)| Self::has_non_schema_leaf(v)),
+            _ => true,
+        }
+    }
+
+    fn merge_json_leaves(target: &mut serde_json::Value, overlay: serde_json::Value) {
+        if let (serde_json::Value::Object(target_map), serde_json::Value::Object(overlay_map)) =
+            (target, overlay)
+        {
+            for (k, v) in overlay_map {
+                if v.is_null() {
+                    continue;
+                }
+                match target_map.get_mut(&k) {
+                    Some(existing) if existing.is_object() && v.is_object() => {
+                        Self::merge_json_leaves(existing, v);
+                    }
+                    _ => {
+                        target_map.insert(k, v);
+                    }
+                }
+            }
+        }
+    }
+
+    fn prune_empty_objects(value: &mut serde_json::Value) {
+        if let serde_json::Value::Object(map) = value {
+            for child in map.values_mut() {
+                Self::prune_empty_objects(child);
+            }
+            map.retain(|_, v| !matches!(v, serde_json::Value::Object(m) if m.is_empty()));
+        }
+    }
+
+    fn split_json_maps(
+        incoming: &serde_json::Map<String, serde_json::Value>,
+        existing: Option<&serde_json::Map<String, serde_json::Value>>,
+    ) -> (
+        serde_json::Map<String, serde_json::Value>,
+        serde_json::Map<String, serde_json::Value>,
+    ) {
+        let mut global = serde_json::Map::new();
+        let mut project = serde_json::Map::new();
+        for (k, v) in incoming {
+            if k == "$schema" || v.is_null() {
+                continue;
+            }
+            let existing_child = existing.and_then(|m| m.get(k));
+            if let serde_json::Value::Object(child_map) = v {
+                let (g_sub, p_sub) = Self::split_json_maps(
+                    child_map,
+                    existing_child.and_then(serde_json::Value::as_object),
+                );
+                if !g_sub.is_empty() {
+                    global.insert(k.clone(), serde_json::Value::Object(g_sub));
+                }
+                if !p_sub.is_empty() {
+                    project.insert(k.clone(), serde_json::Value::Object(p_sub));
+                }
+            } else if existing_child.is_some_and(|ev| !ev.is_null()) {
+                project.insert(k.clone(), v.clone());
+            } else {
+                global.insert(k.clone(), v.clone());
+            }
+        }
+        (global, project)
+    }
 
     fn locate_issue_span(
         text: &str,
@@ -698,31 +627,6 @@ mod tests {
                 );
                 assert!(project.workspace.is_none());
                 assert!(project.editor.is_none());
-            }
-        }
-
-        mod when_validating_json_and_yaml_documents {
-            use super::*;
-
-            #[test]
-            fn should_report_invalid_enum_values_and_unknown_nested_fields() {
-                // Arrange
-                let invalid_json = "{\n  \"appearance\": {\n    \"theme\": \"neon\"\n  }\n}\n";
-                let invalid_yaml = "appearance:\n  unknownNested: true\n";
-
-                // Act
-                let json_issues =
-                    UserSettingsPatch::validate_document_text(ConfigFormat::Json, invalid_json);
-                let yaml_issues =
-                    UserSettingsPatch::validate_document_text(ConfigFormat::Yaml, invalid_yaml);
-
-                // Assert
-                assert_eq!(json_issues.len(), 1);
-                assert_eq!(json_issues[0].line, 2);
-                assert!(json_issues[0].message.contains("neon"));
-                assert_eq!(yaml_issues.len(), 1);
-                assert_eq!(yaml_issues[0].line, 1);
-                assert!(yaml_issues[0].message.contains("unknownNested"));
             }
         }
     }

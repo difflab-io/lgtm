@@ -15,22 +15,19 @@
 
 ## Organization
 
-- `apps/lgtm-forge/src/`: `rpc/` (Connect handlers) -> `services/` (`ReviewService`) -> `models/`, `forge/` (`RemoteForge`), `extensions/` (`git`, `gitoxide`, `octocrab`), `snapshots.rs`, `utils.rs`.
-- `apps/lgtm-cli/src/`: `commands/` (one file per command group), `models/` (`From<Proto>` + `print`), `rpc_client.rs`, `daemon.rs`, `store.rs`.
-- `apps/lgtm-desktop/src/`: `app.rs` (Tauri Specta IPC handlers), `services/` (`WorkspaceService`, `DesktopLspService`), `models/`, `error.rs`.
-- `apps/lgtm-web/src/lib/`: `gen/bindings.ts` (Specta TypeScript bindings), `clients/` (Tauri/RPC adapters), `services/` (reactive Svelte 5 state), `models/`, `components/`.
-- `libs/`: `lgtm-config` (`.lgtm/config.{json,yaml}` nested settings, JSON Schema, + language discovery), `lgtm-db` (private SeaORM entities + named repositories), `lgtm-env` (managed `mise` binary lifecycle + `.lgtm/mise.toml` synthesis), `lgtm-lsp` (`LgtmLspManager`, `LspCacheService`, stdio JSON-RPC), `lgtm-ui` (portable Helical UI components and services).
-- `e2e/`: `common/`, `forge/`, `cli/`, `nvim/`, `desktop/`.
-
-```mermaid
-flowchart LR
-    CLI["lgtm-cli: commands + view models"] --> RPC["lgtm-forge/rpc: transport handlers"]
-    RPC --> Service["services: stateful orchestration"]
-    Service --> Model["models: pure domain logic + mappers"]
-    Service --> Repo["lgtm-db/repositories: named queries"]
-    Repo --> Entity["lgtm-db/entities: private SeaORM rows"]
-    Service --> Ext["extensions: git, gitoxide, octocrab"]
-    Service --> Utils["utils: paths, URLs, descriptors"]
+```text
+apps/
+├── lgtm-cli/       # Thin RPC CLI client, daemon launcher, and terminal/JSON view models
+├── lgtm-desktop/   # Tauri desktop host and Specta IPC command handlers
+├── lgtm-forge/     # Connect RPC backend, review orchestration, and Git/GitHub adapters
+└── lgtm-web/       # Svelte 5 desktop frontend
+libs/
+├── lgtm-config/    # Nested .lgtm/config.{json,yaml} settings, JSON Schema, and language discovery
+├── lgtm-db/        # Private SeaORM entities and named repositories
+├── lgtm-env/       # Managed mise binary lifecycle and .lgtm/mise.toml synthesis
+├── lgtm-lsp/       # Language server process manager, cache service, and stdio JSON-RPC client
+└── lgtm-ui/        # Portable Helical UI components and services
+e2e/                # Vitest E2E suites (common, forge, cli, nvim, desktop)
 ```
 
 - [Proposed] Name architecture documentation and E2E suite directories for `lgtm-forge` as `forge` (`docs/architecture/forge/` and `e2e/forge/`) rather than `backend`.
@@ -90,6 +87,7 @@ impl CommentAnchor {
 
 - Colocate unit tests in `#[cfg(test)] mod tests` after a `// tests ---` separator padded to column 80; place shared unit fixtures in `src/tests/`.
 - Put integration suites directly under `tests/<area>.rs` with shared fixtures in `tests/common/mod.rs` (never `tests/integration/` or `tests/support/`). Cover core module behaviors, edge cases, and failure modes at library integration boundaries to keep E2E suites focused on cross-tier wiring.
+- Do not write custom JSON schema validation/parsing logic or unit tests for schema validation and serialization; rely on library crates and test domain behavior through public service boundaries.
 - Structure all Rust unit and integration tests with nested `mod given_*` and `mod when_*` modules and `fn should_<behavior>()` leaf cases:
 
 ```rust
