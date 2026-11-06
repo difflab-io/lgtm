@@ -13,3 +13,5 @@ pub use models::config::LspSettings;
 pub use models::config::MiseSettings;
 pub use models::config::MiseTaskConfig;
 pub use services::config::ConfigService;
+pub use services::config::LGTM_DESKTOP_BIN_ENV;
+pub use services::config::LGTM_WORKSPACE_ENV;

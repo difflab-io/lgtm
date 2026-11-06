@@ -5,6 +5,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+use lgtm_config::ConfigService;
 use lgtm_lsp::{
     LspDiagnosticsBuffer, LspHoverResult, LspLocation, LspServerStatusEvent, LspWorkspaceSnapshot,
 };
@@ -79,26 +80,12 @@ pub(crate) fn init_app_state<R: tauri::Runtime>(
     ));
     #[cfg(not(any(test, feature = "e2e-bridge")))]
     let lsp_service = Arc::new(LspService::from_app_handle(app_handle, home.clone()));
-    let initial_workspace = resolve_initial_workspace();
+    let initial_workspace = ConfigService::resolve_initial_workspace();
     app_handle.manage(WorkspaceState(Arc::new(Mutex::new(
         WorkspaceService::with_initial_workspace(home, initial_workspace, lsp_service.clone()),
     ))));
     app_handle.manage(LspState(lsp_service));
     Ok(())
-}
-
-fn resolve_initial_workspace() -> Option<PathBuf> {
-    if let Some(env_path) = std::env::var_os("LGTM_WORKSPACE")
-        .map(PathBuf::from)
-        .filter(|path| !path.as_os_str().is_empty())
-    {
-        return Some(env_path);
-    }
-    let first = std::env::args_os().nth(1)?;
-    if first.to_string_lossy().starts_with('-') {
-        return None;
-    }
-    Some(PathBuf::from(first))
 }
 
 /// Shared command dispatch for the app and the native integration harness.

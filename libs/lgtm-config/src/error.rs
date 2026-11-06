@@ -41,6 +41,33 @@ pub enum LgtmConfigError {
         #[source]
         source: Box<toml::de::Error>,
     },
+    /// Requested workspace directory does not exist on disk.
+    #[error("Workspace directory '{}' does not exist", path.display())]
+    WorkspaceDirectoryNotFound {
+        /// Requested workspace path.
+        path: PathBuf,
+    },
+    /// Requested workspace path exists but is not a directory.
+    #[error("Workspace path '{}' is not a directory", path.display())]
+    WorkspacePathNotDirectory {
+        /// Requested workspace path.
+        path: PathBuf,
+    },
+    /// Failed to canonicalize a workspace directory path.
+    #[error("Canonicalize workspace directory '{}': {source}", path.display())]
+    WorkspaceCanonicalize {
+        /// Requested workspace path.
+        path: PathBuf,
+        /// Underlying filesystem I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+    /// Failed to locate the `lgtm-desktop` executable on disk or in `PATH`.
+    #[error("{detail}")]
+    DesktopExecutableNotFound {
+        /// Human-readable diagnostic describing the missing desktop binary.
+        detail: String,
+    },
 }
 
 /// Result alias for `lgtm-config` operations.

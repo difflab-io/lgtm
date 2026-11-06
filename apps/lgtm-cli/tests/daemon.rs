@@ -42,105 +42,34 @@ fn discovery(dir: &Path) -> serde_json::Value {
 mod given_a_stopped_daemon {
     use super::*;
 
-    mod when_running_up_status_and_down {
+    mod when_running_up {
         use super::*;
 
-        #[tokio::test]
-        async fn should_serve_rpc_and_health_from_background_instance_and_stop() {
+        #[test]
+        fn should_start_background_daemon_and_write_discovery_state() {
             // Arrange
             let instance = Instance(tempfile::tempdir().unwrap());
             let dir = instance.0.path();
 
             // Act
-            let up = command(dir, &["up", "--port", "0"]);
+            let up = command(dir, &["up", "--port", "0", "--json"]);
+
+            // Assert
             assert!(
                 up.status.success(),
                 "{}",
                 String::from_utf8_lossy(&up.stderr)
             );
-            let state = discovery(dir);
-            let url = state["server_url"].as_str().unwrap().to_owned();
-            let client = reqwest::Client::builder().no_proxy().build().unwrap();
-            let grpc = proto::lgtm::v1::GreeterServiceClient::new(
-                connectrpc::client::HttpClient::plaintext_http2_only(),
-                connectrpc::client::ClientConfig::new(url.parse().unwrap())
-                    .with_protocol(connectrpc::Protocol::Grpc),
-            );
-            let reply = grpc
-                .say_hello(proto::lgtm::v1::SayHelloRequest {
-                    name: "gRPC".into(),
-                    ..Default::default()
-                })
-                .await
-                .unwrap();
-
-            // Assert
-            assert_eq!(reply.into_owned().message, "Hello, gRPC!");
-            assert!(state.get("ui_url").is_none());
-
-            let root_get = client.get(&url).send().await.unwrap();
-            assert_eq!(root_get.status(), 404);
-
-            for prefix in ["", "/rpc"] {
-                let response = client
-                    .post(format!("{url}{prefix}/lgtm.v1.GreeterService/SayHello"))
-                    .json(&serde_json::json!({"name": "Package"}))
-                    .send()
-                    .await
-                    .unwrap();
-                assert_eq!(response.status(), 200);
-                assert_eq!(
-                    response.json::<serde_json::Value>().await.unwrap()["message"],
-                    "Hello, Package!"
-                );
-            }
-            assert_eq!(
-                client
-                    .get(format!("{url}/missing.js"))
-                    .send()
-                    .await
-                    .unwrap()
-                    .status(),
-                404
-            );
-            let health = client.get(format!("{url}/health")).send().await.unwrap();
-            assert_eq!(health.status(), 200);
-            assert_eq!(
-                health.json::<serde_json::Value>().await.unwrap()["pid"],
-                state["pid"]
-            );
-
-            let again = command(dir, &["up", "--port", "0", "--json"]);
-            assert!(again.status.success());
-            let again_json: serde_json::Value = serde_json::from_slice(&again.stdout).unwrap();
-            assert_eq!(again_json["pid"], state["pid"]);
-            assert_eq!(again_json["server_url"], url);
-            assert_eq!(again_json["rpc_url"], format!("{url}/rpc"));
-            assert!(again_json.get("ui_url").is_none());
-
-            let foreground = command(dir, &["up", "--foreground", "--port", "0"]);
-            assert!(!foreground.status.success());
-            assert!(String::from_utf8_lossy(&foreground.stderr).contains("Another LGTM instance"));
-
-            let status = command(dir, &["status"]);
-            assert!(status.status.success());
-            let text = String::from_utf8_lossy(&status.stdout);
-            assert!(!text.contains("UI:"));
-            assert!(text.contains(&format!("Server: {url}")));
-            assert!(text.contains(&format!("RPC: {url}/rpc")));
-
-            assert!(command(dir, &["down"]).status.success());
-            assert!(!dir.join("server.port").exists());
-            let status = command(dir, &["status"]);
-            assert!(String::from_utf8_lossy(&status.stdout).contains("not running"));
-            let status = command(dir, &["status", "--json"]);
-            assert_eq!(
-                serde_json::from_slice::<serde_json::Value>(&status.stdout).unwrap(),
-                serde_json::json!({"running": false})
-            );
+            let up_json: serde_json::Value = serde_json::from_slice(&up.stdout).unwrap();
+            let url = up_json["server_url"].as_str().unwrap();
+            assert_eq!(up_json["running"], true);
+            assert!(url.starts_with("http://127.0.0.1:"));
+            assert_eq!(up_json["rpc_url"], format!("{url}/rpc"));
+            assert!(up_json.get("ui_url").is_none());
+            assert!(dir.join("server.pid").exists());
+            assert!(dir.join("server.port").exists());
             let log = std::fs::read_to_string(dir.join("server.log")).unwrap();
             assert!(log.contains("INFO") && log.contains("Server started"));
-            assert!(log.contains("Server stopped"));
             assert!(!log.contains('\u{1b}'));
         }
 
@@ -189,6 +118,77 @@ mod given_a_stopped_daemon {
         }
 
         #[test]
+        fn should_fail_without_leaving_stale_port_file_when_port_is_occupied() {
+            // Arrange
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port().to_string();
+            let dir = tempfile::tempdir().unwrap();
+
+            // Act
+            let result = command(dir.path(), &["up", "--port", &port]);
+
+            // Assert
+            assert!(!result.status.success());
+            assert!(String::from_utf8_lossy(&result.stderr).contains("did not become ready"));
+            assert!(!dir.path().join("server.port").exists());
+            assert!(
+                std::fs::read_to_string(dir.path().join("server.log"))
+                    .unwrap()
+                    .contains("Address already in use")
+            );
+        }
+    }
+
+    mod when_running_status {
+        use super::*;
+
+        #[test]
+        fn should_report_not_running_and_leave_unused_home_untouched() {
+            // Arrange
+            let root = tempfile::tempdir().unwrap();
+            let home = root.path().join("unused home");
+
+            // Act
+            let text_status = Command::new(env!("CARGO_BIN_EXE_lgtm"))
+                .env("LGTM_HOME", &home)
+                .args(["status"])
+                .output()
+                .unwrap();
+            let json_status = Command::new(env!("CARGO_BIN_EXE_lgtm"))
+                .env("LGTM_HOME", &home)
+                .args(["status", "--json"])
+                .output()
+                .unwrap();
+
+            // Assert
+            assert!(text_status.status.success());
+            assert!(String::from_utf8_lossy(&text_status.stdout).contains("not running"));
+            assert!(json_status.status.success());
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&json_status.stdout).unwrap(),
+                serde_json::json!({"running": false})
+            );
+            assert!(!home.exists());
+        }
+    }
+
+    mod when_running_down {
+        use super::*;
+
+        #[test]
+        fn should_report_not_running_when_no_daemon_is_active() {
+            // Arrange
+            let dir = tempfile::tempdir().unwrap();
+
+            // Act
+            let down = command(dir.path(), &["down"]);
+
+            // Assert
+            assert!(down.status.success());
+            assert!(String::from_utf8_lossy(&down.stdout).contains("not running"));
+        }
+
+        #[test]
         fn should_preserve_other_server_when_pid_is_stale() {
             // Arrange
             let first = Instance(tempfile::tempdir().unwrap());
@@ -225,56 +225,155 @@ mod given_a_stopped_daemon {
                 assert_eq!(discovery(instance.0.path())["running"], true);
             }
         }
-
-        #[test]
-        fn should_leave_unused_home_untouched_when_reading_status() {
-            // Arrange
-            let root = tempfile::tempdir().unwrap();
-            let home = root.path().join("unused home");
-
-            // Act
-            let status = Command::new(env!("CARGO_BIN_EXE_lgtm"))
-                .env("LGTM_HOME", &home)
-                .args(["status", "--json"])
-                .output()
-                .unwrap();
-
-            // Assert
-            assert!(status.status.success());
-            assert_eq!(
-                serde_json::from_slice::<serde_json::Value>(&status.stdout).unwrap(),
-                serde_json::json!({"running": false})
-            );
-            assert!(!home.exists());
-        }
     }
 }
 
-mod given_an_occupied_port {
+mod given_a_running_daemon {
     use super::*;
 
     mod when_running_up {
         use super::*;
 
         #[test]
-        fn should_fail_without_leaving_stale_port_file() {
+        fn should_reuse_running_daemon_on_subsequent_up_and_reject_foreground_conflict() {
             // Arrange
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            let port = listener.local_addr().unwrap().port().to_string();
-            let dir = tempfile::tempdir().unwrap();
+            let instance = Instance(tempfile::tempdir().unwrap());
+            let dir = instance.0.path();
+            assert!(command(dir, &["up", "--port", "0"]).status.success());
+            let initial = discovery(dir);
+            let url = initial["server_url"].as_str().unwrap();
 
             // Act
-            let result = command(dir.path(), &["up", "--port", &port]);
+            let again = command(dir, &["up", "--port", "0", "--json"]);
+            let foreground = command(dir, &["up", "--foreground", "--port", "0"]);
 
             // Assert
-            assert!(!result.status.success());
-            assert!(String::from_utf8_lossy(&result.stderr).contains("did not become ready"));
-            assert!(!dir.path().join("server.port").exists());
-            assert!(
-                std::fs::read_to_string(dir.path().join("server.log"))
-                    .unwrap()
-                    .contains("Address already in use")
+            assert!(again.status.success());
+            let again_json: serde_json::Value = serde_json::from_slice(&again.stdout).unwrap();
+            assert_eq!(again_json["pid"], initial["pid"]);
+            assert_eq!(again_json["server_url"], url);
+            assert_eq!(again_json["rpc_url"], format!("{url}/rpc"));
+            assert!(again_json.get("ui_url").is_none());
+
+            assert!(!foreground.status.success());
+            assert!(String::from_utf8_lossy(&foreground.stderr).contains("Another LGTM instance"));
+        }
+    }
+
+    mod when_running_status {
+        use super::*;
+
+        #[test]
+        fn should_report_running_server_and_rpc_urls_in_text_and_json() {
+            // Arrange
+            let instance = Instance(tempfile::tempdir().unwrap());
+            let dir = instance.0.path();
+            assert!(command(dir, &["up", "--port", "0"]).status.success());
+
+            // Act
+            let json_state = discovery(dir);
+            let text_status = command(dir, &["status"]);
+
+            // Assert
+            let url = json_state["server_url"].as_str().unwrap();
+            assert_eq!(json_state["running"], true);
+            assert_eq!(json_state["rpc_url"], format!("{url}/rpc"));
+            assert!(json_state.get("ui_url").is_none());
+
+            assert!(text_status.status.success());
+            let text = String::from_utf8_lossy(&text_status.stdout);
+            assert!(!text.contains("UI:"));
+            assert!(text.contains(&format!("Server: {url}")));
+            assert!(text.contains(&format!("RPC: {url}/rpc")));
+        }
+    }
+
+    mod when_serving_http_and_rpc_requests {
+        use super::*;
+
+        #[tokio::test]
+        async fn should_serve_health_and_connect_rpc_while_returning_404_for_static_routes() {
+            // Arrange
+            let instance = Instance(tempfile::tempdir().unwrap());
+            let dir = instance.0.path();
+            assert!(command(dir, &["up", "--port", "0"]).status.success());
+            let state = discovery(dir);
+            let url = state["server_url"].as_str().unwrap().to_owned();
+            let client = reqwest::Client::builder().no_proxy().build().unwrap();
+            let grpc = proto::lgtm::v1::GreeterServiceClient::new(
+                connectrpc::client::HttpClient::plaintext_http2_only(),
+                connectrpc::client::ClientConfig::new(url.parse().unwrap())
+                    .with_protocol(connectrpc::Protocol::Grpc),
             );
+
+            // Act
+            let reply = grpc
+                .say_hello(proto::lgtm::v1::SayHelloRequest {
+                    name: "gRPC".into(),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            let root_get = client.get(&url).send().await.unwrap();
+            let missing_asset = client
+                .get(format!("{url}/missing.js"))
+                .send()
+                .await
+                .unwrap();
+            let health = client.get(format!("{url}/health")).send().await.unwrap();
+
+            // Assert
+            assert_eq!(reply.into_owned().message, "Hello, gRPC!");
+            assert_eq!(root_get.status(), 404);
+            assert_eq!(missing_asset.status(), 404);
+            assert_eq!(health.status(), 200);
+            assert_eq!(
+                health.json::<serde_json::Value>().await.unwrap()["pid"],
+                state["pid"]
+            );
+
+            for prefix in ["", "/rpc"] {
+                let response = client
+                    .post(format!("{url}{prefix}/lgtm.v1.GreeterService/SayHello"))
+                    .json(&serde_json::json!({"name": "Package"}))
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), 200);
+                assert_eq!(
+                    response.json::<serde_json::Value>().await.unwrap()["message"],
+                    "Hello, Package!"
+                );
+            }
+        }
+    }
+
+    mod when_running_down {
+        use super::*;
+
+        #[test]
+        fn should_stop_background_daemon_remove_port_file_and_log_shutdown() {
+            // Arrange
+            let instance = Instance(tempfile::tempdir().unwrap());
+            let dir = instance.0.path();
+            assert!(command(dir, &["up", "--port", "0"]).status.success());
+
+            // Act
+            let down = command(dir, &["down"]);
+
+            // Assert
+            assert!(down.status.success());
+            assert!(!dir.join("server.port").exists());
+            let status = command(dir, &["status"]);
+            assert!(String::from_utf8_lossy(&status.stdout).contains("not running"));
+            let json_status = command(dir, &["status", "--json"]);
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&json_status.stdout).unwrap(),
+                serde_json::json!({"running": false})
+            );
+            let log = std::fs::read_to_string(dir.join("server.log")).unwrap();
+            assert!(log.contains("Server stopped"));
+            assert!(!log.contains('\u{1b}'));
         }
     }
 }

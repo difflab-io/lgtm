@@ -25,7 +25,15 @@ pub fn detach(_store: &Store) -> Result<()> {
 pub async fn up(port: u16, store: &Store, json: bool) -> Result<()> {
     let instance = ensure_running(port, store).await?;
     if json {
-        println!("{}", discovery_json(&instance));
+        println!(
+            "{}",
+            serde_json::json!({
+                "running": true,
+                "pid": instance.pid,
+                "server_url": instance.url(),
+                "rpc_url": format!("{}/rpc", instance.url()),
+            })
+        );
     } else {
         announce(&instance, store);
     }
@@ -61,7 +69,12 @@ pub async fn status(store: &Store, json: bool) -> Result<()> {
     let instance = active(&client()?, store).await;
     if json {
         let discovery = match instance {
-            Some(instance) => discovery_json(&instance),
+            Some(instance) => serde_json::json!({
+                "running": true,
+                "pid": instance.pid,
+                "server_url": instance.url(),
+                "rpc_url": format!("{}/rpc", instance.url()),
+            }),
             None => serde_json::json!({"running": false}),
         };
         println!("{discovery}");
@@ -125,15 +138,6 @@ pub(crate) async fn ensure_running(port: u16, store: &Store) -> Result<Instance>
         store.path("server.log").display(),
         String::from_utf8_lossy(&launch.stderr).trim()
     )
-}
-
-fn discovery_json(instance: &Instance) -> serde_json::Value {
-    serde_json::json!({
-        "running": true,
-        "pid": instance.pid,
-        "server_url": instance.url(),
-        "rpc_url": format!("{}/rpc", instance.url()),
-    })
 }
 
 fn announce(instance: &Instance, store: &Store) {
