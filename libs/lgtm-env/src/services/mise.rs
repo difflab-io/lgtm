@@ -374,7 +374,7 @@ mod tests {
                 // Arrange
                 let temp = tempfile::tempdir().unwrap();
                 let workspace_root = temp.path();
-                let global_cfg = workspace_root.join("global.toml");
+                let global_cfg = workspace_root.join("global.json");
                 std::fs::write(
                     workspace_root.join("Cargo.toml"),
                     "[package]\nname = \"demo\"\n",
@@ -382,8 +382,8 @@ mod tests {
                 .unwrap();
                 std::fs::create_dir_all(workspace_root.join(".lgtm")).unwrap();
                 std::fs::write(
-                    workspace_root.join(".lgtm/config.toml"),
-                    "[mise.tasks.greet]\ndescription = \"Say hello\"\nrun = \"echo hello\"\n",
+                    workspace_root.join(".lgtm/config.json"),
+                    "{\n  \"mise\": {\n    \"tasks\": {\n      \"greet\": {\n        \"description\": \"Say hello\",\n        \"run\": \"echo hello\"\n      }\n    }\n  }\n}\n",
                 )
                 .unwrap();
                 let service = MiseService::new(ConfigService::with_global_config_path(global_cfg));

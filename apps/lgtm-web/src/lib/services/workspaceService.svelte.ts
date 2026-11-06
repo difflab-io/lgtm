@@ -5,6 +5,10 @@ import {
   type WorkspaceClient,
   type WorkspaceNode,
   type FileContent,
+  type ConfigFormat,
+  type ConfigScope,
+  type ResolvedConfigSnapshot,
+  type ThemeMode,
   type LspDiagnostic,
   type LspFileDiagnosticsEvent,
   type LspServerStatusEvent,
@@ -18,9 +22,12 @@ export interface FolderRefresh {
 
 export interface WorkspaceTab {
   id: string
-  kind: 'file' | 'diagnostics'
+  kind: 'file' | 'diagnostics' | 'config'
   title: string
   path?: string
+  lspPath?: string
+  configScope?: ConfigScope
+  configFormat?: ConfigFormat
   languageId?: string | null
   content: string
   readonly: boolean
@@ -33,6 +40,8 @@ export class WorkspaceService {
   defaultRoot = $state('')
   root = $state('~/.lgtm/workspace')
   recentWorkspaces = $state<string[]>([])
+  configSnapshot = $state<ResolvedConfigSnapshot | null>(null)
+  lineWrapping = $state(true)
   entries = $state<WorkspaceNode[]>([])
   loading = $state(true)
   error = $state<string | null>(null)
@@ -56,12 +65,22 @@ export class WorkspaceService {
   private active = true
   private dirtyPath: string | null = null
   private dirtyContent: string | null = null
+  private dirtyConfig: {
+    scope: ConfigScope
+    format?: ConfigFormat
+    content: string
+  } | null = null
   private saveTimer: ReturnType<typeof setTimeout> | null = null
   private inFlightSave: Promise<void> | null = null
   private openRequestSeq = 0
+  private onThemeSnapshot?: (theme: ThemeMode) => void
 
   constructor(private client: WorkspaceClient) {
     this.lsp = new LspService(client)
+  }
+
+  setThemeHandler(handler: (theme: ThemeMode) => void) {
+    this.onThemeSnapshot = handler
   }
 
   get blocked() {
@@ -87,27 +106,51 @@ export class WorkspaceService {
   }
 
   get selectedTitle() {
-    if (this.activeTab?.kind === 'diagnostics') return this.activeTab.title
+    if (this.activeTab?.kind === 'diagnostics' || this.activeTab?.kind === 'config') {
+      return this.activeTab.title
+    }
     return this.selected ? this.selected.name : 'No file selected'
   }
 
   get selectedPath() {
     if (this.activeTab?.kind === 'diagnostics') return this.activeTab.title
+    if (this.activeTab?.kind === 'config') return this.activeTab.path ?? this.activeTab.title
     return this.selected?.path
+  }
+
+  get activeEditorFilename(): string {
+    if (this.activeTab?.kind === 'config') {
+      return (
+        this.activeTab.path?.split(/[\\/]/).at(-1) ??
+        (this.activeTab.configFormat === 'yaml' ? 'config.yaml' : 'config.json')
+      )
+    }
+    if (this.activeTab?.kind === 'diagnostics') return 'diagnostics.md'
+    return this.selected?.name ?? 'diagnostics.md'
   }
 
   get breadcrumbs(): string[] {
     if (this.activeTab?.kind === 'diagnostics') return [this.activeTab.title]
+    if (this.activeTab?.kind === 'config') {
+      return ['.lgtm', this.activeEditorFilename]
+    }
     if (!this.selected) return []
     return this.selected.path.split(/[\\/]/).filter(Boolean)
   }
 
+  private get activeLspPath(): string | undefined {
+    if (this.activeTab?.kind === 'config') {
+      return this.activeTab.lspPath ?? this.activeTab.path
+    }
+    return this.selected?.path
+  }
+
   get activeDiagnostics(): LspDiagnostic[] {
-    return this.lsp.getDiagnosticsForPath(this.selected?.path)
+    return this.lsp.getDiagnosticsForPath(this.activeLspPath)
   }
 
   get activeLanguageId(): string | null {
-    if (this.activeTab?.kind === 'diagnostics') {
+    if (this.activeTab?.kind === 'diagnostics' || this.activeTab?.kind === 'config') {
       return this.activeTab.languageId ?? null
     }
     return this.fileContent?.languageId ?? null
@@ -186,11 +229,105 @@ export class WorkspaceService {
       this.lsp.reset()
       this.clearSelected()
       this.treeVersion++
+      if (path && this.client.configUpdate) {
+        void this.client
+          .configUpdate(
+            {
+              workspace: {
+                activeRoot: result.root,
+                recentRoots: this.recentWorkspaces,
+              },
+            },
+            'global',
+          )
+          .then((snapshot) => {
+            if (this.active) this.applyConfigSnapshot(snapshot)
+          })
+          .catch(() => {})
+      } else {
+        void this.loadConfig()
+      }
       void this.syncLspState()
     } catch (error) {
       if (this.active) this.error = errorMessage(error)
     } finally {
       if (this.active) this.loading = false
+    }
+  }
+
+  async loadConfig() {
+    if (!this.active || !this.client.configGet) return
+    try {
+      const snapshot = await this.client.configGet()
+      if (!this.active) return
+      this.applyConfigSnapshot(snapshot)
+    } catch {
+      // Keep current in-memory defaults if config is unavailable or malformed on disk.
+    }
+  }
+
+  async setThemePreference(theme: ThemeMode) {
+    this.onThemeSnapshot?.(theme)
+    if (!this.client.configUpdate) return
+    try {
+      const snapshot = await this.client.configUpdate({ appearance: { theme } }, null)
+      if (!this.active) return
+      this.applyConfigSnapshot(snapshot)
+      await this.refreshCleanConfigTabs()
+    } catch (error) {
+      if (this.active) this.openingError = errorMessage(error)
+    }
+  }
+
+  handleConfigUpdated(snapshot: ResolvedConfigSnapshot) {
+    if (!this.active) return
+    this.applyConfigSnapshot(snapshot)
+    if (!this.dirtyConfig) {
+      void this.refreshCleanConfigTabs()
+    }
+  }
+
+  async openSettingsTab(scope: ConfigScope = 'global', format?: ConfigFormat) {
+    const requestId = ++this.openRequestSeq
+    await this.flushSave()
+    if (requestId !== this.openRequestSeq || !this.client.configOpenDocument) return
+    this.selected = null
+    this.fileLoading = true
+    this.openingError = null
+    try {
+      const doc = await this.client.configOpenDocument(scope, format ?? null)
+      if (!this.active || requestId !== this.openRequestSeq) return
+      const tabId = `config:${doc.scope}`
+      this.upsertTab({
+        id: tabId,
+        kind: 'config',
+        title: doc.title,
+        path: doc.path,
+        lspPath: doc.lspPath,
+        configScope: doc.scope,
+        configFormat: doc.format,
+        languageId: doc.languageId,
+        content: doc.content,
+        readonly: false,
+        dirty: false,
+      })
+      this.activeTabId = tabId
+      this.selectionOffset = null
+      this.fileContent = {
+        content: doc.content,
+        revision: doc.revision,
+        languageId: doc.languageId,
+      }
+      this.fileVersion++
+      this.focusRequest++
+      void this.syncLspState()
+    } catch (error) {
+      if (this.active && requestId === this.openRequestSeq) {
+        this.fileContent = null
+        this.openingError = errorMessage(error)
+      }
+    } finally {
+      if (this.active && requestId === this.openRequestSeq) this.fileLoading = false
     }
   }
 
@@ -273,6 +410,10 @@ export class WorkspaceService {
         name: tab.title,
         kind: 'file',
       })
+      return
+    }
+    if (tab.kind === 'config' && tab.configScope) {
+      await this.openSettingsTab(tab.configScope, tab.configFormat)
       return
     }
     await this.flushSave()
@@ -362,13 +503,15 @@ export class WorkspaceService {
   }
 
   async requestHover(offset: number): Promise<CodeEditorHoverResult | null> {
-    if (!this.selected) return null
-    return this.lsp.requestHover(this.selected.path, offset)
+    const targetPath = this.activeLspPath
+    if (!targetPath) return null
+    return this.lsp.requestHover(targetPath, offset)
   }
 
   async gotoDefinition(offset: number): Promise<void> {
-    if (!this.selected) return
-    const locations = await this.lsp.getDefinitions(this.selected.path, offset)
+    const targetPath = this.activeLspPath
+    if (!targetPath) return
+    const locations = await this.lsp.getDefinitions(targetPath, offset)
     const first = locations[0]
     if (!first) return
     await this.jumpToLocation(first.path, first.offset)
@@ -393,7 +536,28 @@ export class WorkspaceService {
   }
 
   updateContent(content: string) {
-    if (!this.selected || !this.fileContent || this.fileContent.content === content) return
+    if (!this.fileContent || this.fileContent.content === content) return
+    if (this.activeTab?.kind === 'config' && this.activeTab.configScope) {
+      const scope = this.activeTab.configScope
+      const format = this.activeTab.configFormat
+      const tabId = `config:${scope}`
+      this.fileContent = { ...this.fileContent, content }
+      this.tabs = this.tabs.map((tab) =>
+        tab.id === tabId ? { ...tab, content, dirty: true } : tab,
+      )
+      this.dirtyConfig = { scope, format, content }
+      const lspPath = this.activeLspPath
+      if (lspPath) {
+        this.lsp.notifyDidChange(lspPath, content)
+      }
+      if (this.saveTimer) clearTimeout(this.saveTimer)
+      this.saveTimer = setTimeout(() => {
+        this.saveTimer = null
+        void this.flushSave()
+      }, 150)
+      return
+    }
+    if (!this.selected) return
     this.fileContent = { ...this.fileContent, content }
     const tabId = `file:${this.selected.path}`
     this.tabs = this.tabs.map((tab) => (tab.id === tabId ? { ...tab, content, dirty: true } : tab))
@@ -414,6 +578,39 @@ export class WorkspaceService {
     }
     if (this.inFlightSave) {
       await this.inFlightSave
+    }
+    while (this.dirtyConfig && this.client.configWriteDocument) {
+      const { scope, format, content } = this.dirtyConfig
+      this.dirtyConfig = null
+      this.saving = true
+      const task = this.client
+        .configWriteDocument(scope, content, format ?? null)
+        .then(async (savedDoc) => {
+          if (!this.active) return
+          const tabId = `config:${scope}`
+          this.tabs = this.tabs.map((tab) =>
+            tab.id === tabId && tab.content === content
+              ? { ...tab, dirty: false, lspPath: savedDoc.lspPath }
+              : tab,
+          )
+          if (this.activeTabId === tabId && this.fileContent?.content === content) {
+            this.fileContent = {
+              ...this.fileContent,
+              revision: savedDoc.revision,
+              languageId: savedDoc.languageId,
+            }
+          }
+          await this.loadConfig()
+        })
+        .catch((error) => {
+          if (this.active) this.openingError = errorMessage(error)
+        })
+        .finally(() => {
+          if (this.active) this.saving = false
+          this.inFlightSave = null
+        })
+      this.inFlightSave = task
+      await task
     }
     while (this.dirtyPath && this.dirtyContent !== null) {
       const path = this.dirtyPath
@@ -457,6 +654,7 @@ export class WorkspaceService {
     }
     this.dirtyPath = null
     this.dirtyContent = null
+    this.dirtyConfig = null
     this.selected = null
     this.fileContent = null
     this.openingError = null
@@ -621,12 +819,64 @@ export class WorkspaceService {
       clearTimeout(this.saveTimer)
       this.saveTimer = null
     }
+    if (this.dirtyConfig && this.client.configWriteDocument) {
+      void this.client.configWriteDocument(
+        this.dirtyConfig.scope,
+        this.dirtyConfig.content,
+        this.dirtyConfig.format ?? null,
+      )
+      this.dirtyConfig = null
+    }
     if (this.dirtyPath && this.dirtyContent !== null) {
       void this.client.write(this.dirtyPath, this.dirtyContent)
       this.dirtyPath = null
       this.dirtyContent = null
     }
     this.active = false
+  }
+
+  private applyConfigSnapshot(snapshot: ResolvedConfigSnapshot) {
+    this.configSnapshot = snapshot
+    const effectiveTheme = snapshot.effective.appearance?.theme ?? 'system'
+    this.onThemeSnapshot?.(effectiveTheme)
+    this.lineWrapping = snapshot.effective.editor?.lineWrapping ?? true
+    const recentRoots = snapshot.effective.workspace?.recentRoots ?? []
+    if (recentRoots.length > 0) {
+      this.recentWorkspaces = recentRoots.includes(this.root)
+        ? recentRoots
+        : [...recentRoots, this.root]
+    }
+  }
+
+  private async refreshCleanConfigTabs() {
+    if (!this.active || !this.client.configOpenDocument) return
+    for (const tab of this.tabs) {
+      if (tab.kind !== 'config' || !tab.configScope || tab.dirty) continue
+      try {
+        const doc = await this.client.configOpenDocument(tab.configScope, tab.configFormat ?? null)
+        if (!this.active) return
+        this.tabs = this.tabs.map((item) =>
+          item.id === tab.id && !item.dirty
+            ? {
+                ...item,
+                title: doc.title,
+                path: doc.path,
+                lspPath: doc.lspPath,
+                content: doc.content,
+              }
+            : item,
+        )
+        if (this.activeTabId === tab.id && this.fileContent && !tab.dirty) {
+          this.fileContent = {
+            content: doc.content,
+            revision: doc.revision,
+            languageId: doc.languageId,
+          }
+        }
+      } catch {
+        // Ignore refresh failures if config document cannot be read.
+      }
+    }
   }
 
   private sortEntries(entries: WorkspaceNode[]) {

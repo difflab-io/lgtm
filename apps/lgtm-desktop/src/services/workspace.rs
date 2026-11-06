@@ -5,6 +5,11 @@ use std::{
     sync::Arc,
 };
 
+use lgtm_config::{
+    ConfigDocument, ConfigFormat, ConfigScope, ConfigService, ResolvedConfigSnapshot,
+    UserSettingsPatch,
+};
+
 use crate::{
     error::{Result, error},
     models::{FileContent, Workspace, WorkspaceListing, WorkspaceNode},
@@ -21,6 +26,8 @@ pub struct WorkspaceService {
     workspace: Workspace,
     /// Whether the active workspace was explicitly chosen on disk.
     custom_root: bool,
+    /// Configuration service resolving global and workspace settings.
+    config_service: ConfigService,
     /// Desktop LSP service bound to the active workspace lifecycle.
     lsp_service: Arc<LspService>,
 }
@@ -34,11 +41,13 @@ impl WorkspaceService {
 
     /// Selects the default workspace under `home` and binds `lsp_service` to workspace lifecycle operations.
     pub fn with_lsp(home: PathBuf, lsp_service: Arc<LspService>) -> Self {
+        let config_service = ConfigService::from_home(home.clone());
         let default_workspace = Workspace::from_home(home);
         Self {
             workspace: default_workspace.clone(),
             default_workspace,
             custom_root: false,
+            config_service,
             lsp_service,
         }
     }
@@ -60,6 +69,20 @@ impl WorkspaceService {
                 self.workspace = Workspace::from_path(candidate);
                 self.custom_root = true;
             }
+        } else if !self.custom_root
+            && let Ok(snapshot) = self.config_service.get_settings_snapshot(None)
+            && let Some(saved_root) = snapshot.effective.workspace.active_root
+        {
+            let candidate = PathBuf::from(saved_root.trim());
+            if candidate.is_dir() {
+                if candidate == self.default_workspace.root {
+                    self.workspace = self.default_workspace.clone();
+                    self.custom_root = false;
+                } else {
+                    self.workspace = Workspace::from_path(candidate);
+                    self.custom_root = true;
+                }
+            }
         }
         let root = self.get_root()?;
         self.lsp_service
@@ -68,6 +91,108 @@ impl WorkspaceService {
             root: root.to_string_lossy().into_owned(),
             entries: self.get_entries("")?,
         })
+    }
+
+    /// Returns the resolved nested configuration snapshot across defaults, global config, and the active workspace config.
+    pub fn get_config_snapshot(&self) -> Result<ResolvedConfigSnapshot> {
+        let root = self.get_root().ok();
+        self.config_service
+            .get_settings_snapshot(root.as_deref())
+            .map_err(|err| error("config", err.to_string()))
+    }
+
+    /// Applies a nested `UserSettingsPatch` to `scope` (or routes each leaf by project override presence when `scope` is `None`).
+    pub fn update_config(
+        &self,
+        patch: UserSettingsPatch,
+        scope: Option<ConfigScope>,
+    ) -> Result<ResolvedConfigSnapshot> {
+        let root = self.get_root().ok();
+        let snapshot = self
+            .config_service
+            .update_settings(root.as_deref(), scope, patch)
+            .map_err(|err| error("config", err.to_string()))?;
+        if let Some(ws_root) = root.as_deref() {
+            let global_path = PathBuf::from(&snapshot.global_path);
+            if global_path.is_file()
+                && let Ok(content) = fs::read_to_string(&global_path)
+            {
+                let _ = self.lsp_service.did_save(ws_root, &global_path, &content);
+            }
+            let project_path = PathBuf::from(&snapshot.project_path);
+            if project_path.is_file()
+                && let Ok(content) = fs::read_to_string(&project_path)
+            {
+                let _ = self.lsp_service.did_save(ws_root, &project_path, &content);
+            }
+        }
+        self.lsp_service.emit_config_updated(&snapshot);
+        Ok(snapshot)
+    }
+
+    /// Ensures the global or project configuration file and schema exist on disk, synchronizes LSP, and returns the document.
+    pub fn open_config_document(
+        &self,
+        scope: ConfigScope,
+        format: Option<ConfigFormat>,
+    ) -> Result<ConfigDocument> {
+        let root = self.get_root()?;
+        let doc = self
+            .config_service
+            .open_config_document(Some(&root), scope, format)
+            .map_err(|err| error("config", err.to_string()))?;
+        let _ = self
+            .lsp_service
+            .open_or_sync_file(&root, Path::new(&doc.path), &doc.content);
+        Ok(doc)
+    }
+
+    /// Writes raw editor text to the global or project configuration file, notifies LSP `didSave`, and returns the updated document and optional snapshot.
+    pub fn write_config_document(
+        &self,
+        scope: ConfigScope,
+        content: &str,
+        format: Option<ConfigFormat>,
+    ) -> Result<(ConfigDocument, Option<ResolvedConfigSnapshot>)> {
+        let root = self.get_root()?;
+        let (doc, snapshot) = self
+            .config_service
+            .write_config_document(Some(&root), scope, content, format)
+            .map_err(|err| error("config", err.to_string()))?;
+        let _ = self
+            .lsp_service
+            .did_save(&root, Path::new(&doc.path), &doc.content);
+        if let Some(resolved) = &snapshot {
+            self.lsp_service.emit_config_updated(resolved);
+        }
+        Ok((doc, snapshot))
+    }
+
+    /// Resolves either a workspace-relative path or an active global/project config path for LSP operations.
+    pub fn get_lsp_file_path(&self, relative_or_config: &str) -> Result<PathBuf> {
+        let candidate = Path::new(relative_or_config);
+        let lgtm_home = self.config_service.get_lgtm_home_dir();
+        if let Ok(canon_home) = lgtm_home.canonicalize()
+            && let Ok(canon_candidate) = candidate.canonicalize()
+            && canon_candidate.parent() == Some(canon_home.as_path())
+            && matches!(
+                canon_candidate.file_name().and_then(|n| n.to_str()),
+                Some("config.json" | "config.yaml" | "config.yml")
+            )
+        {
+            return Ok(canon_candidate);
+        }
+        if matches!(
+            relative_or_config,
+            ".lgtm/config.json" | ".lgtm/config.yaml" | ".lgtm/config.yml"
+        ) {
+            let root = self.get_root()?;
+            let resolved = root.join(relative_or_config).canonicalize()?;
+            if resolved.starts_with(&root) {
+                return Ok(resolved);
+            }
+        }
+        self.get_entry_path(relative_or_config)
     }
 
     /// Lists visible entries inside a workspace-relative directory.

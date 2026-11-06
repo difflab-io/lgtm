@@ -154,8 +154,13 @@ sequenceDiagram
 | `lsp_get_state` | UI -> Host | `() -> LspWorkspaceSnapshot` | Return all tracked language server statuses and file diagnostics for the active workspace. |
 | `lsp_get_diagnostics_buffer` | UI -> Host | `(languageId?: string) -> LspDiagnosticsBuffer` | Render a read-only plain-text diagnostics report for all active servers or a single language. |
 | `lsp_restart` | UI -> Host | `(languageId: string) -> LspServerStatusEvent` | Restart all sessions for `languageId` in the active workspace and re-open tracked documents. |
+| `config_get` | UI -> Host | `() -> ResolvedConfigSnapshot` | Return effective deep-merged `UserSettings` plus global and project `UserSettingsPatch` trees. |
+| `config_update` | UI -> Host | `(patch: UserSettingsPatch, scope?: ConfigScope \| null) -> ResolvedConfigSnapshot` | Apply a nested `UserSettingsPatch` (routing per leaf by project override presence when `scope` is `null`) and emit `config-updated`. |
+| `config_open_document` | UI -> Host | `(scope?: ConfigScope \| null, format?: ConfigFormat \| null) -> ConfigDocument` | Ensure `config.json` / `config.yaml` and `schemas/config.schema.json` exist, synchronize LSP (`biome lsp-proxy` or `yaml-language-server`), and return the document for `Cmd+,` editing. |
+| `config_write_document` | UI -> Host | `(scope: ConfigScope, content: string, format?: ConfigFormat \| null) -> ConfigDocument` | Write raw JSON/YAML config text to disk, notify LSP `didSave`, and emit `config-updated` when valid. |
 | `lsp-status` | Host -> UI | `LspServerStatusEvent` | Real-time language server lifecycle status and error/warning counts. |
-| `lsp-diagnostics` | Host -> UI | `LspFileDiagnosticsEvent` | Real-time workspace-relative file diagnostics with UTF-16 offsets. |
+| `lsp-diagnostics` | Host -> UI | `LspFileDiagnosticsEvent` | Real-time workspace-relative or global config file diagnostics with UTF-16 offsets. |
+| `config-updated` | Host -> UI | `ResolvedConfigSnapshot` | Live resolved nested settings snapshot emitted after `config_update` or valid `config_write_document`. |
 | `workspace-quit-requested` | Host -> UI | `()` | Signals the frontend to flush pending saves before calling `workspace_finish_quit`. |
 
 ## Implementation

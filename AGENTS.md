@@ -17,9 +17,9 @@
 
 - `apps/lgtm-forge/src/`: `rpc/` (Connect handlers) -> `services/` (`ReviewService`) -> `models/`, `forge/` (`RemoteForge`), `extensions/` (`git`, `gitoxide`, `octocrab`), `snapshots.rs`, `utils.rs`.
 - `apps/lgtm-cli/src/`: `commands/` (one file per command group), `models/` (`From<Proto>` + `print`), `rpc_client.rs`, `daemon.rs`, `store.rs`.
-- `apps/lgtm-desktop/src/`: `app.rs` (Tauri IPC handlers), `services/` (`WorkspaceService`, `DesktopLspService`), `models/`, `error.rs`.
-- `apps/lgtm-web/src/lib/`: `clients/` (Tauri/RPC adapters), `services/` (reactive Svelte 5 state), `models/`, `components/`.
-- `libs/`: `lgtm-config` (`.lgtm/config.toml` + language discovery), `lgtm-db` (private SeaORM entities + named repositories), `lgtm-env` (managed `mise` binary lifecycle + `.lgtm/mise.toml` synthesis), `lgtm-lsp` (`LgtmLspManager`, `LspCacheService`, stdio JSON-RPC), `lgtm-ui` (portable Helical UI components and services).
+- `apps/lgtm-desktop/src/`: `app.rs` (Tauri Specta IPC handlers), `services/` (`WorkspaceService`, `DesktopLspService`), `models/`, `error.rs`.
+- `apps/lgtm-web/src/lib/`: `gen/bindings.ts` (Specta TypeScript bindings), `clients/` (Tauri/RPC adapters), `services/` (reactive Svelte 5 state), `models/`, `components/`.
+- `libs/`: `lgtm-config` (`.lgtm/config.{json,yaml}` nested settings, JSON Schema, + language discovery), `lgtm-db` (private SeaORM entities + named repositories), `lgtm-env` (managed `mise` binary lifecycle + `.lgtm/mise.toml` synthesis), `lgtm-lsp` (`LgtmLspManager`, `LspCacheService`, stdio JSON-RPC), `lgtm-ui` (portable Helical UI components and services).
 - `e2e/`: `common/`, `forge/`, `cli/`, `nvim/`, `desktop/`.
 
 ```mermaid

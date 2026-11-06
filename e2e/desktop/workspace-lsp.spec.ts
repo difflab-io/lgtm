@@ -1,5 +1,5 @@
 import { test, expect, entry, createFile, renameEntry, exists } from './fixtures'
-import { writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 const SUPPORTED_LSP_CASES = [
@@ -305,6 +305,150 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
         await expect(systemButton).toHaveAttribute('data-theme', 'system')
         await expect(page.locator('html')).not.toHaveClass(/dark/)
         await expect.poll(() => workspace.setThemeCalls).toEqual([null, 'light', 'dark', null])
+        await expect
+          .poll(async () => {
+            const raw = await readFile(join(workspace.lgtmHomeDir, 'config.json'), 'utf8').catch(
+              () => '',
+            )
+            return raw.includes('"theme": "system"')
+          })
+          .toBe(true)
+      },
+    )
+
+    test(
+      'should route theme updates to project config when appearance.theme is already overridden in project config without clobbering sibling sections',
+      { tag: '@smoke' },
+      async ({ page, workspace }) => {
+        // Arrange
+        const globalConfigPath = join(workspace.lgtmHomeDir, 'config.json')
+        const projectConfigDir = join(workspace.root, '.lgtm')
+        const projectConfigPath = join(projectConfigDir, 'config.json')
+        await mkdir(projectConfigDir, { recursive: true })
+        await writeFile(
+          globalConfigPath,
+          JSON.stringify(
+            {
+              $schema: './schemas/config.schema.json',
+              appearance: { theme: 'dark' },
+              editor: { lineWrapping: false },
+            },
+            null,
+            2,
+          ) + '\n',
+          'utf8',
+        )
+        await writeFile(
+          projectConfigPath,
+          JSON.stringify(
+            {
+              $schema: './schemas/config.schema.json',
+              appearance: { theme: 'light' },
+            },
+            null,
+            2,
+          ) + '\n',
+          'utf8',
+        )
+
+        // Act
+        await page.reload()
+        const lightButton = page.getByRole('button', { name: 'Theme: light', exact: true })
+        await expect(lightButton).toBeVisible()
+        await entry(page, 'same.md').click()
+        await expect(page.locator('.cm-content')).not.toHaveClass(/cm-lineWrapping/)
+        await lightButton.click()
+
+        // Assert
+        const darkButton = page.getByRole('button', { name: 'Theme: dark', exact: true })
+        await expect(darkButton).toBeVisible()
+        await expect
+          .poll(async () => {
+            const projectRaw = await readFile(projectConfigPath, 'utf8')
+            return JSON.parse(projectRaw).appearance?.theme
+          })
+          .toBe('dark')
+        const globalSaved = JSON.parse(await readFile(globalConfigPath, 'utf8'))
+        expect(globalSaved.editor?.lineWrapping).toBe(false)
+      },
+    )
+  })
+
+  test.describe('When pressing Cmd+, to edit nested config.json or config.yaml in CodeEditor', () => {
+    test(
+      'should open global config with Cmd+, validate nested schema diagnostics and hover documentation, and live-apply JSON and YAML edits',
+      { tag: '@smoke' },
+      async ({ page, workspace }) => {
+        // Arrange
+        const lspButton = page.getByRole('button', { name: 'LSP status', exact: true })
+        const tablist = page.getByRole('tablist', { name: 'Open editors' })
+
+        // Act: open Settings (config.json) via Control+,
+        await page.keyboard.press('Control+,')
+
+        // Assert
+        await expect(
+          tablist.getByRole('tab', { name: 'Settings (config.json)', exact: true }),
+        ).toHaveAttribute('aria-selected', 'true')
+        expect(await exists(join(workspace.lgtmHomeDir, 'schemas/config.schema.json'))).toBe(true)
+        await expect(lspButton).toContainText('LSP: json (ready)')
+        await expect(page.locator('.cm-content')).toContainText('"appearance"')
+        await expect(page.locator('.cm-content')).toHaveClass(/cm-lineWrapping/)
+
+        // Act: hover over "theme" property in config.json to inspect schema hover documentation
+        const themeLine = page.locator('.cm-line', { hasText: '"theme"' }).first()
+        await themeLine.hover({ position: { x: 40, y: 8 } })
+        const hoverTooltip = page.locator('[data-slot="code-editor-hover"]')
+        await expect(hoverTooltip).toBeVisible()
+        await expect(hoverTooltip).toContainText('appearance.theme')
+
+        // Act: replace editor content with invalid nested theme value
+        const editorContent = page.locator('.cm-content')
+        await editorContent.click()
+        await page.keyboard.press('ControlOrMeta+a')
+        await page.keyboard.insertText('{\n  "appearance": {\n    "theme": "neon"\n  }\n}\n')
+
+        // Assert: schema diagnostic error squiggly appears
+        await expect(lspButton).toContainText('LSP: json (ready, 1 error)')
+        await expect(page.locator('.cm-lintRange-error')).toBeVisible()
+
+        // Act: replace editor content with valid nested JSON disabling lineWrapping and setting dark theme
+        await editorContent.click()
+        await page.keyboard.press('ControlOrMeta+a')
+        await page.keyboard.insertText(
+          '{\n  "$schema": "./schemas/config.schema.json",\n  "appearance": {\n    "theme": "dark"\n  },\n  "editor": {\n    "lineWrapping": false\n  }\n}\n',
+        )
+
+        // Assert: diagnostics clear and live UI updates theme and lineWrapping
+        await expect(lspButton).toContainText('LSP: json (ready)')
+        await expect(page.locator('.cm-lintRange-error')).toHaveCount(0)
+        await expect(page.getByRole('button', { name: 'Theme: dark', exact: true })).toBeVisible()
+        await expect(page.locator('html')).toHaveClass(/dark/)
+        await expect(page.locator('.cm-content')).not.toHaveClass(/cm-lineWrapping/)
+
+        // Act: switch to YAML global config and reopen with Control+,
+        await page
+          .getByRole('button', { name: 'Close Settings (config.json)', exact: true })
+          .click()
+        await rm(join(workspace.lgtmHomeDir, 'config.json'), { force: true })
+        await writeFile(
+          join(workspace.lgtmHomeDir, 'config.yaml'),
+          '# yaml-language-server: $schema=./schemas/config.schema.json\nappearance:\n  theme: light\neditor:\n  lineWrapping: true\n',
+          'utf8',
+        )
+        await page.keyboard.press('Control+,')
+
+        // Assert: YAML config opens and live-applies edits
+        await expect(
+          tablist.getByRole('tab', { name: 'Settings (config.yaml)', exact: true }),
+        ).toHaveAttribute('aria-selected', 'true')
+        await expect(lspButton).toContainText('LSP: yaml (ready)')
+        await editorContent.click()
+        await page.keyboard.press('ControlOrMeta+a')
+        await page.keyboard.insertText(
+          '# yaml-language-server: $schema=./schemas/config.schema.json\nappearance:\n  theme: dark\neditor:\n  lineWrapping: true\n',
+        )
+        await expect(page.getByRole('button', { name: 'Theme: dark', exact: true })).toBeVisible()
       },
     )
   })
