@@ -181,13 +181,21 @@ export class WorkspaceService {
     return [
       ...roots.map((path) => ({
         label:
-          path === this.defaultRoot || path === '~/.lgtm/workspace'
+          path === this.defaultRoot || this.isDefaultWorkspaceRoot(path)
             ? 'Local workspace'
             : (path.split(/[\\/]/).filter(Boolean).at(-1) ?? path),
         value: path,
       })),
       { label: 'Open folder…', value: '__open_folder__' },
     ]
+  }
+
+  private isDefaultWorkspaceRoot(path: string): boolean {
+    return (
+      path === '~/.lgtm/workspace' ||
+      path.endsWith('/.lgtm/workspace') ||
+      path.endsWith('\\.lgtm\\workspace')
+    )
   }
 
   get nodes() {
@@ -215,7 +223,7 @@ export class WorkspaceService {
     try {
       const result = await this.client.open(path)
       if (!this.active) return
-      if (!this.defaultRoot && !path) {
+      if (!this.defaultRoot && !path && this.isDefaultWorkspaceRoot(result.root)) {
         this.defaultRoot = result.root
       }
       this.root = result.root

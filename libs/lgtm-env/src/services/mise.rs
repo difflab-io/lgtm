@@ -17,12 +17,6 @@ pub struct MiseService {
     installer_url: String,
 }
 
-impl Default for MiseService {
-    fn default() -> Self {
-        Self::new(ConfigService::new())
-    }
-}
-
 impl MiseService {
     /// Creates a `MiseService` backed by `config_service` that searches `<lgtm_home>/bin/mise` and system paths.
     pub fn new(config_service: ConfigService) -> Self {
@@ -352,6 +346,12 @@ impl MiseService {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
+    }
+}
+
+impl Default for MiseService {
+    fn default() -> Self {
+        Self::new(ConfigService::new())
     }
 }
 

@@ -109,7 +109,6 @@ export interface WorkspaceClient {
   registerLspHandlers(handlers: {
     onStatus: (event: LspServerStatusEvent) => void
     onDiagnostics: (event: LspFileDiagnosticsEvent) => void
-    onConfigUpdated?: (snapshot: ResolvedConfigSnapshot) => void
   }): Promise<(() => void)[]>
 }
 
@@ -189,13 +188,6 @@ export const workspaceClient: WorkspaceClient = {
       listen<LspFileDiagnosticsEvent>('lsp-diagnostics', (event) => {
         handlers.onDiagnostics(event.payload)
       }),
-      ...(handlers.onConfigUpdated
-        ? [
-            listen<ResolvedConfigSnapshot>('config-updated', (event) => {
-              handlers.onConfigUpdated?.(event.payload)
-            }),
-          ]
-        : []),
     ]),
 }
 

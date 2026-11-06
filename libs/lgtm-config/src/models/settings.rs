@@ -270,14 +270,6 @@ impl EditorSettingsPatch {
     }
 }
 
-impl Default for EditorSettings {
-    fn default() -> Self {
-        Self {
-            line_wrapping: true,
-        }
-    }
-}
-
 impl UserSettings {
     // Public ------------------------------------------------------------------
 
@@ -308,6 +300,8 @@ impl UserSettings {
 }
 
 impl UserSettingsPatch {
+    // Public ------------------------------------------------------------------
+
     /// Generates the JSON Schema value for `UserSettingsPatch`.
     pub fn json_schema() -> serde_json::Value {
         let schema = schemars::schema_for!(UserSettingsPatch);
@@ -356,8 +350,6 @@ impl UserSettingsPatch {
             .join("\n"),
         }
     }
-
-    // Public ------------------------------------------------------------------
 
     /// Returns `true` if no nested settings leaf is set in this patch.
     pub fn is_empty(&self) -> bool {
@@ -417,14 +409,12 @@ impl UserSettingsPatch {
                 .and_then(|p| p.appearance.as_ref())
                 .and_then(|a| a.theme)
                 .is_some();
-            if overridden_in_project {
-                project
-                    .appearance
-                    .get_or_insert_with(Default::default)
-                    .theme = Some(theme);
+            let target = if overridden_in_project {
+                &mut project
             } else {
-                global.appearance.get_or_insert_with(Default::default).theme = Some(theme);
-            }
+                &mut global
+            };
+            target.appearance.get_or_insert_with(Default::default).theme = Some(theme);
         }
 
         if let Some(workspace) = &self.workspace {
@@ -433,34 +423,30 @@ impl UserSettingsPatch {
                     .and_then(|p| p.workspace.as_ref())
                     .and_then(|w| w.active_root.as_ref())
                     .is_some();
-                if overridden_in_project {
-                    project
-                        .workspace
-                        .get_or_insert_with(Default::default)
-                        .active_root = Some(active_root.clone());
+                let target = if overridden_in_project {
+                    &mut project
                 } else {
-                    global
-                        .workspace
-                        .get_or_insert_with(Default::default)
-                        .active_root = Some(active_root.clone());
-                }
+                    &mut global
+                };
+                target
+                    .workspace
+                    .get_or_insert_with(Default::default)
+                    .active_root = Some(active_root.clone());
             }
             if let Some(recent_roots) = &workspace.recent_roots {
                 let overridden_in_project = project_existing
                     .and_then(|p| p.workspace.as_ref())
                     .and_then(|w| w.recent_roots.as_ref())
                     .is_some();
-                if overridden_in_project {
-                    project
-                        .workspace
-                        .get_or_insert_with(Default::default)
-                        .recent_roots = Some(recent_roots.clone());
+                let target = if overridden_in_project {
+                    &mut project
                 } else {
-                    global
-                        .workspace
-                        .get_or_insert_with(Default::default)
-                        .recent_roots = Some(recent_roots.clone());
-                }
+                    &mut global
+                };
+                target
+                    .workspace
+                    .get_or_insert_with(Default::default)
+                    .recent_roots = Some(recent_roots.clone());
             }
         }
 
@@ -471,17 +457,15 @@ impl UserSettingsPatch {
                 .and_then(|p| p.editor.as_ref())
                 .and_then(|e| e.line_wrapping)
                 .is_some();
-            if overridden_in_project {
-                project
-                    .editor
-                    .get_or_insert_with(Default::default)
-                    .line_wrapping = Some(line_wrapping);
+            let target = if overridden_in_project {
+                &mut project
             } else {
-                global
-                    .editor
-                    .get_or_insert_with(Default::default)
-                    .line_wrapping = Some(line_wrapping);
-            }
+                &mut global
+            };
+            target
+                .editor
+                .get_or_insert_with(Default::default)
+                .line_wrapping = Some(line_wrapping);
         }
 
         let global_out = (!global.is_empty()).then_some(global);
@@ -598,6 +582,14 @@ impl UserSettingsPatch {
         let end = rest.find('`')?;
         let token = &rest[..end];
         (!token.is_empty()).then(|| token.to_string())
+    }
+}
+
+impl Default for EditorSettings {
+    fn default() -> Self {
+        Self {
+            line_wrapping: true,
+        }
     }
 }
 
