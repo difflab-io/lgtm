@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LGTM — Logo &amp; Brand System</title>
+    <style>
+      :root {
+        font-family:
+          Inter,
+          ui-sans-serif,
+          -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          sans-serif;
+        color: #1e293b;
+        background: #f8fafc;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 40px 24px 72px;
+      }
+      .container {
+        max-width: 1080px;
+        margin: 0 auto;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        padding-bottom: 24px;
+        border-bottom: 1px solid #e2e8f0;
+        margin-bottom: 36px;
+      }
+      .eyebrow {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #64748b;
+        margin-bottom: 6px;
+      }
+      h1 {
+        font-size: 24px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin: 0 0 6px;
+      }
+      header p {
+        margin: 0;
+        font-size: 13px;
+        color: #64748b;
+      }
+      section {
+        margin-bottom: 44px;
+      }
+      .section-header {
+        margin-bottom: 16px;
+      }
+      h2 {
+        font-size: 15px;
+        font-weight: 600;
+        margin: 0 0 4px;
+      }
+      .section-header p {
+        margin: 0;
+        font-size: 12px;
+        color: #64748b;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 16px;
+      }
+      .grid-wide {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+        gap: 16px;
+      }
+      .card {
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        background: #ffffff;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      .stage {
+        min-height: 200px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 28px;
+        background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
+        background-size: 16px 16px;
+      }
+      .stage.dark {
+        background-color: #090d16;
+        background-image: radial-gradient(#1e293b 1px, transparent 1px);
+      }
+      .stage img {
+        max-width: 100%;
+        height: auto;
+        display: block;
+      }
+      .meta {
+        padding: 12px 16px;
+        border-top: 1px solid #e2e8f0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        background: #ffffff;
+      }
+      .meta strong {
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .meta code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 11px;
+        color: #475569;
+        background: #f1f5f9;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+      .scale-row {
+        display: flex;
+        align-items: flex-end;
+        gap: 24px;
+        flex-wrap: wrap;
+        padding: 24px;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        background: #ffffff;
+      }
+      .scale-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        color: #64748b;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      .topbar-preview {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 16px;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        margin-top: 16px;
+      }
+      .topbar-preview.dark {
+        background: #0f172a;
+        border-color: #334155;
+        color: #f8fafc;
+      }
+      .topbar-left {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 12px;
+        font-weight: 500;
+      }
+      .badge {
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        border: 1px solid #e2e8f0;
+        background: #f8fafc;
+        color: #475569;
+      }
+      .topbar-preview.dark .badge {
+        background: #1e293b;
+        border-color: #334155;
+        color: #cbd5e1;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div>
+          <div class="eyebrow">LGTM Brand &amp; Icon System</div>
+          <h1>Diff-Styled Logo Explorations</h1>
+          <p>
+            Stacked diff marks (<code>+LG</code> / <code>-TM</code>), macOS/Tauri app tiles, and split-diff brand lockups (<code>+LG|TM-</code>) in uppercase and lowercase.
+          </p>
+        </div>
+        <img src="brand-split-upper.svg" alt="LGTM split brand logo" height="52" />
+      </header>
+
+      <section>
+        <div class="section-header">
+          <h2>1. Stacked Diff Marks (<code>+LG</code> / <code>-TM</code> &amp; <code>+lg</code> / <code>-tm</code>)</h2>
+          <p>Two-line unified diff hunk with addition row on line 1 and deletion row on line 2.</p>
+        </div>
+        <div class="grid">
+          <div class="card">
+            <div class="stage">
+              <img src="diff-stacked-upper.svg" alt="+LG / -TM stacked diff light" width="196" />
+            </div>
+            <div class="meta">
+              <strong>Uppercase · Light</strong>
+              <code>diff-stacked-upper.svg</code>
+            </div>
+          </div>
+          <div class="card">
+            <div class="stage">
+              <img src="diff-stacked-lower.svg" alt="+lg / -tm stacked diff light" width="196" />
+            </div>
+            <div class="meta">
+              <strong>Lowercase · Light</strong>
+              <code>diff-stacked-lower.svg</code>
+            </div>
+          </div>
+          <div class="card">
+            <div class="stage dark">
+              <img src="diff-stacked-dark-upper.svg" alt="+LG / -TM stacked diff dark" width="196" />
+            </div>
+            <div class="meta">
+              <strong>Uppercase · Dark</strong>
+              <code>diff-stacked-dark-upper.svg</code>
+            </div>
+          </div>
+          <div class="card">
+            <div class="stage dark">
+              <img src="diff-stacked-dark-lower.svg" alt="+lg / -tm stacked diff dark" width="196" />
+            </div>
+            <div class="meta">
+              <strong>Lowercase · Dark</strong>
+              <code>diff-stacked-dark-lower.svg</code>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-header">
+          <h2>2. App Tile Icons (macOS / Tauri Squircle)</h2>
+          <p>512×512 squircle app tiles with stacked addition and deletion diff pills.</p>
+        </div>
+        <div class="grid">
+          <div class="card">
+            <div class="stage">
+              <img src="app-tile-upper.svg" alt="App tile uppercase light" width="164" />
+            </div>
+            <div class="meta">
+              <strong>Tile Uppercase · Light</strong>
+              <code>app-tile-upper.svg</code>
+            </div>
+          </div>
+          <div class="card">
+            <div class="stage">
+              <img src="app-tile-lower.svg" alt="App tile lowercase light" width="164" />
+            </div>
+            <div class="meta">
+              <strong>Tile Lowercase · Light</strong>
+              <code>app-tile-lower.svg</code>
+            </div>
+          </div>
+          <div class="card">
+            <div class="stage dark">
+              <img src="app-tile-dark-upper.svg" alt="App tile uppercase dark" width="164" />
+            </div>
+            <div class="meta">
+              <strong>Tile Uppercase · Dark</strong>
+              <code>app-tile-dark-upper.svg</code>
+            </div>
+          </div>
+          <div class="card">
+            <div class="stage dark">
+              <img src="app-tile-dark-lower.svg" alt="App tile lowercase dark" width="164" />
+            </div>
+            <div class="meta">
+              <strong>Tile Lowercase · Dark</strong>
+              <code>app-tile-dark-lower.svg</code>
+            </div>
+          </div>
+        </div>
+
+        <div class="scale-row" style="margin-top: 16px">
+          <div class="scale-item">
+            <img src="app-tile-dark-upper.svg" alt="128px" width="128" height="128" />
+            <span>128×128</span>
+          </div>
+          <div class="scale-item">
+            <img src="app-tile-dark-upper.svg" alt="64px" width="64" height="64" />
+            <span>64×64</span>
+          </div>
+          <div class="scale-item">
+            <img src="app-tile-dark-upper.svg" alt="32px" width="32" height="32" />
+            <span>32×32</span>
+          </div>
+          <div class="scale-item">
+            <img src="app-tile-dark-lower.svg" alt="128px lower" width="128" height="128" />
+            <span>128×128 (lower)</span>
+          </div>
+          <div class="scale-item">
+            <img src="app-tile-dark-lower.svg" alt="64px lower" width="64" height="64" />
+            <span>64×64 (lower)</span>
+          </div>
+          <div class="scale-item">
+            <img src="app-tile-dark-lower.svg" alt="32px lower" width="32" height="32" />
+            <span>32×32 (lower)</span>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-header">
+          <h2>3. Split Diff Brand Lockups (<code>+LG|TM-</code> &amp; <code>+lg|tm-</code>)</h2>
+          <p>Side-by-side split diff styling with bookended operators (<code>+LG|TM-</code>).</p>
+        </div>
+        <div class="grid-wide">
+          <div class="card">
+            <div class="stage">
+              <img src="brand-split-upper.svg" alt="+LG|TM- split brand light" width="296" />
+            </div>
+            <div class="meta">
+              <strong>Two-Tone Rail Uppercase (<code>+LG|TM-</code>)</strong>
+              <code>brand-split-upper.svg</code>
+            </div>
+          </div>
+          <div class="card">
+            <div class="stage">
+              <img src="brand-split-lower.svg" alt="+lg|tm- split brand light" width="296" />
+            </div>
+            <div class="meta">
+              <strong>Two-Tone Rail Lowercase (<code>+lg|tm-</code>)</strong>
+              <code>brand-split-lower.svg</code>
+            </div>
+          </div>
+          <div class="card">
+            <div class="stage">
+              <img src="brand-split-solid-upper.svg" alt="+LG|TM- split brand solid upper" width="296" />
+            </div>
+            <div class="meta">
+              <strong>Solid Deep Rail Uppercase (<code>+LG|TM-</code>)</strong>
+              <code>brand-split-solid-upper.svg</code>
+            </div>
+          </div>
+          <div class="card">
+            <div class="stage">
+              <img src="brand-split-solid-lower.svg" alt="+lg|tm- split brand solid lower" width="296" />
+            </div>
+            <div class="meta">
+              <strong>Solid Deep Rail Lowercase (<code>+lg|tm-</code>)</strong>
+              <code>brand-split-solid-lower.svg</code>
+            </div>
+          </div>
+        </div>
+
+        <div class="topbar-preview">
+          <div class="topbar-left">
+            <img src="brand-split-upper.svg" alt="LGTM" height="28" />
+            <span>difflab-io / lgtm — PR #42</span>
+            <span class="badge">Active review</span>
+          </div>
+          <div class="topbar-left">
+            <img src="brand-split-lower.svg" alt="lgtm" height="28" />
+          </div>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>

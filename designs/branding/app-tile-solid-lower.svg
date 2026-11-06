@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="lgtm app tile icon with solid rail (+lg / -tm)">
+  <defs>
+    <clipPath id="squircle-clip">
+      <rect x="16" y="16" width="480" height="480" rx="112" />
+    </clipPath>
+    <style>
+      .word-add {
+        font-family: 'Inter Display', Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 174px;
+        font-weight: 800;
+        letter-spacing: -6px;
+        fill: #064e3b;
+        text-anchor: middle;
+      }
+      .word-del {
+        font-family: 'Inter Display', Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 174px;
+        font-weight: 800;
+        letter-spacing: -6px;
+        fill: #881337;
+        text-anchor: middle;
+      }
+    </style>
+  </defs>
+
+  <g clip-path="url(#squircle-clip)">
+    <!-- Top Half: +lg -->
+    <rect x="16" y="16" width="480" height="240" fill="#dcfce7" />
+    <rect x="16" y="16" width="156" height="240" fill="#15803d" />
+
+    <!-- Bottom Half: -tm -->
+    <rect x="16" y="256" width="480" height="240" fill="#ffe4e6" />
+    <rect x="16" y="256" width="156" height="240" fill="#be123c" />
+  </g>
+
+  <!-- + Sign inside Solid Addition Rail (center 94, 136) -->
+  <g fill="#ffffff">
+    <rect x="60" y="126" width="68" height="20" />
+    <rect x="84" y="102" width="20" height="68" />
+  </g>
+
+  <!-- - Sign inside Solid Deletion Rail (center 94, 376) -->
+  <rect x="60" y="366" width="68" height="20" fill="#ffffff" />
+
+  <!-- Code Area Letters (center of 172..496 = 334) -->
+  <text x="334" y="184" class="word-add">lg</text>
+  <text x="334" y="428" class="word-del">tm</text>
+</svg>

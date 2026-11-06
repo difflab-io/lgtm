@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 168 140" width="168" height="140" role="img" aria-label="LGTM dark compact stacked diff logo (+LG / -TM)">
+  <defs>
+    <clipPath id="card-clip">
+      <rect x="0" y="0" width="168" height="140" rx="22" />
+    </clipPath>
+    <style>
+      .word-add {
+        font-family: 'Inter Display', Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 56px;
+        font-weight: 800;
+        letter-spacing: -2px;
+        fill: #ecfdf5;
+        text-anchor: middle;
+      }
+      .word-del {
+        font-family: 'Inter Display', Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 56px;
+        font-weight: 800;
+        letter-spacing: -2px;
+        fill: #fff1f2;
+        text-anchor: middle;
+      }
+    </style>
+  </defs>
+
+  <g clip-path="url(#card-clip)">
+    <!-- Line 1: +LG -->
+    <rect x="0" y="0" width="168" height="70" fill="#064e3b" />
+    <rect x="0" y="0" width="52" height="70" fill="#047857" />
+
+    <!-- Line 2: -TM -->
+    <rect x="0" y="70" width="168" height="70" fill="#4c0519" />
+    <rect x="0" y="70" width="52" height="70" fill="#9f1239" />
+  </g>
+
+  <!-- + Sign inside Addition Rail (center 26, 35) -->
+  <g fill="#6ee7b7">
+    <rect x="14" y="31.5" width="24" height="7" />
+    <rect x="22.5" y="23" width="7" height="24" />
+  </g>
+
+  <!-- - Sign inside Deletion Rail (center 26, 105) -->
+  <rect x="14" y="101.5" width="24" height="7" fill="#fda4af" />
+
+  <!-- Code Area Letters (center of 52..168 = 110) -->
+  <text x="110" y="55" class="word-add">LG</text>
+  <text x="110" y="125" class="word-del">TM</text>
+</svg>
