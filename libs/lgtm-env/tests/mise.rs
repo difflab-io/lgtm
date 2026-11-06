@@ -331,8 +331,8 @@ mod given_a_workspace_with_an_existing_managed_mise_file {
             )
             .unwrap();
             std::fs::write(
-                workspace_root.join(".lgtm/config.toml"),
-                "[mise.tools]\nrust-analyzer = \"2026-01-01\"\n\n[mise.tasks.check]\ndescription = \"Custom clippy check\"\nrun = \"cargo clippy --all-targets\"\n",
+                workspace_root.join(".lgtm/config.json"),
+                "{\n  \"mise\": {\n    \"tools\": {\n      \"rust-analyzer\": \"2026-01-01\"\n    },\n    \"tasks\": {\n      \"check\": {\n        \"description\": \"Custom clippy check\",\n        \"run\": \"cargo clippy --all-targets\"\n      }\n    }\n  }\n}\n",
             )
             .unwrap();
             let config_service = ConfigService::from_home(home);
@@ -371,8 +371,8 @@ mod given_a_workspace_with_a_user_provided_root_mise_file {
             std::fs::write(&user_mise_path, user_mise_content).unwrap();
             std::fs::write(workspace_root.join("tsconfig.json"), "{}\n").unwrap();
             std::fs::write(
-                workspace_root.join(".lgtm/config.toml"),
-                "[lsp]\nenabled = true\nauto_install = true\n\n[mise.tasks.check]\ndescription = \"Custom TS check\"\nrun = \"tsc -p tsconfig.json --noEmit\"\n",
+                workspace_root.join(".lgtm/config.yaml"),
+                "lsp:\n  enabled: true\n  auto_install: true\nmise:\n  tasks:\n    check:\n      description: Custom TS check\n      run: tsc -p tsconfig.json --noEmit\n",
             )
             .unwrap();
 

@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use lgtm_config::ConfigService;
+use lgtm_config::{ConfigService, ResolvedConfigSnapshot};
 use lgtm_lsp::{
     LgtmLspManager, LspDiagnosticsBuffer, LspEvent, LspHoverResult, LspLocation,
     LspServerStatusEvent, LspWorkspaceSnapshot,
@@ -15,10 +16,11 @@ use crate::services::BridgeEventForwarder;
 #[derive(Clone)]
 pub struct LspService {
     manager: LgtmLspManager,
+    config_emitter: Arc<dyn Fn(&ResolvedConfigSnapshot) + Send + Sync>,
 }
 
 impl LspService {
-    /// Creates a desktop `LspService` wired to emit `lsp-status` and `lsp-diagnostics` events on `app_handle`.
+    /// Creates a desktop `LspService` wired to emit `lsp-status`, `lsp-diagnostics`, and `config-updated` events on `app_handle`.
     pub fn from_app_handle<R: tauri::Runtime>(
         app_handle: &tauri::AppHandle<R>,
         home: PathBuf,
@@ -26,6 +28,9 @@ impl LspService {
     ) -> Self {
         let config_service = ConfigService::from_home(home);
         let emit_handle = app_handle.clone();
+        #[cfg(any(test, feature = "e2e-bridge"))]
+        let config_forwarder = event_forwarder.clone();
+        let config_handle = app_handle.clone();
         let manager = LgtmLspManager::new(config_service, move |event| match event {
             LspEvent::Status(payload) => {
                 #[cfg(any(test, feature = "e2e-bridge"))]
@@ -46,17 +51,35 @@ impl LspService {
                 let _ = emit_handle.emit("lsp-diagnostics", payload);
             }
         });
-        Self { manager }
+        let config_emitter = Arc::new(move |snapshot: &ResolvedConfigSnapshot| {
+            #[cfg(any(test, feature = "e2e-bridge"))]
+            if let Some(cb) = &config_forwarder
+                && let Ok(val) = serde_json::to_value(snapshot)
+            {
+                cb("config-updated", val);
+            }
+            let _ = config_handle.emit("config-updated", snapshot.clone());
+        });
+        Self {
+            manager,
+            config_emitter,
+        }
     }
 
     /// Creates a no-op `LspService` for unit tests where no language servers are registered.
     pub fn noop(home: PathBuf) -> Self {
         Self {
             manager: LgtmLspManager::noop(ConfigService::from_home(home)),
+            config_emitter: Arc::new(|_| {}),
         }
     }
 
     // Public ------------------------------------------------------------------
+
+    /// Emits a `config-updated` event with the latest resolved configuration snapshot.
+    pub fn emit_config_updated(&self, snapshot: &ResolvedConfigSnapshot) {
+        (self.config_emitter)(snapshot);
+    }
 
     /// Shuts down language servers for `previous_root` when switching workspaces and warms up `next_root`.
     pub fn switch_workspace(&self, previous_root: Option<&Path>, next_root: &Path) {

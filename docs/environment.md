@@ -8,7 +8,7 @@ LGTM components (`lgtm-cli`, `lgtm-forge`, `lgtm-desktop`, `lgtm-config`, `lgtm-
 
 | Variable | Component | Default | Description |
 | --- | --- | --- | --- |
-| `LGTM_HOME` | `lgtm-cli`, `lgtm-forge`, `lgtm-config`, `lgtm-env` | `~/.lgtm` | Overrides the LGTM state, snapshot, database, managed `mise` binary (`$LGTM_HOME/bin/mise`), and global configuration directory (`$LGTM_HOME/config.toml`, `$LGTM_HOME/lgtm.db`, `$LGTM_HOME/snapshots`). |
+| `LGTM_HOME` | `lgtm-cli`, `lgtm-forge`, `lgtm-config`, `lgtm-env` | `~/.lgtm` | Overrides the LGTM state, snapshot, database, managed `mise` binary (`$LGTM_HOME/bin/mise`), and global configuration directory (`$LGTM_HOME/config.{json,yaml,yml}`, `$LGTM_HOME/schemas/config.schema.json`, `$LGTM_HOME/lgtm.db`, `$LGTM_HOME/snapshots`). |
 | `LGTM_MISE_INSTALLER_URL` | `lgtm-env` | `https://mise.run` | Overrides the installer script URL used when `MiseService` bootstraps a missing `mise` binary into `$LGTM_HOME/bin/mise`. |
 | `LGTM_DATABASE_URL` | `lgtm-forge`, `lgtm-cli` | `sqlite://$LGTM_HOME/lgtm.db?mode=rwc` | Explicit SeaORM database connection string (`sqlite://...` or `postgres://...`). Takes precedence over `DATABASE_URL`. |
 | `DATABASE_URL` | `lgtm-forge`, `lgtm-cli` | `sqlite://$LGTM_HOME/lgtm.db?mode=rwc` | Fallback database connection URL when `LGTM_DATABASE_URL` is unset. |
@@ -46,6 +46,7 @@ When `lgtm-env` (`MiseService`) and `lgtm-lsp` (`LgtmLspManager`) invoke or boot
 | --- | --- | --- | --- |
 | `LGTM_IPC_BRIDGE` | `lgtm-desktop` (`e2e-bridge` feature) | Unset | Set to `1` by the Playwright desktop E2E fixture when spawning `lgtm-desktop --ipc-bridge <home>` so `workspace_finish_quit` records shutdown without terminating the stdio bridge before the response flushes. |
 | `LGTM_E2E_PERMANENT_DELETE` | `lgtm-desktop` (`e2e-bridge` feature) | Unset | Set to `1` by the Playwright desktop E2E fixture so `WorkspaceService::delete` removes temporary test files directly instead of moving them into the host user's OS Trash (`~/.Trash`). Compiled only under `#[cfg(any(test, feature = "e2e-bridge"))]`. |
+| `LGTM_E2E_LSP_SCRIPT` | `lgtm-config` | Unset | Optional Node.js mock language server script path injected by the Playwright desktop E2E fixture so built-in language presets execute the deterministic mock LSP server while keeping `~/.lgtm/config.{json,yaml}` free of test-only language overrides. |
 | `LGTM_GITHUB_TEST_MODE` | `lgtm-forge` | Unset | When set to `1`, prevents `octocrab` from falling back to the developer's local `gh auth token` during offline cassette replay tests. |
 | `LGTM_GITHUB_TEST_API_URL` | `lgtm-forge` | Unset | Overrides the GitHub API base URI to point at the local E2E cassette recording/replay proxy server. |
 | `LGTM_E2E_GITHUB_MODE` | `e2e/common` | `replay` | Selects GitHub E2E transport mode: `replay` (strict offline cassette matching), `record` (live execution saving updated cassettes), or `live` (live verification without overwriting cassettes). |

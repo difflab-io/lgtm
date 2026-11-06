@@ -39,11 +39,31 @@
         windowBridge: client.themeWindowBridge?.(),
       }),
   )
+  workspace.setThemeHandler((nextTheme) => {
+    if (theme.preference !== nextTheme) {
+      theme.setPreference(nextTheme)
+    }
+  })
 
   // Lifecycle -----------------------------------------------------------------
   onMount(() => {
     let active = true
-    const unlisteners: (() => void)[] = [theme.init()]
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        !event.shiftKey &&
+        !event.altKey &&
+        event.key === ','
+      ) {
+        event.preventDefault()
+        void workspace.openSettingsTab('global')
+      }
+    }
+    window.addEventListener('keydown', handleKeydown)
+    const unlisteners: (() => void)[] = [
+      theme.init(),
+      () => window.removeEventListener('keydown', handleKeydown),
+    ]
     void workspace.open()
     if (client.isDesktop()) {
       void client
@@ -62,6 +82,7 @@
         .registerLspHandlers({
           onStatus: (event) => workspace.handleLspStatus(event),
           onDiagnostics: (event) => workspace.handleLspDiagnostics(event),
+          onConfigUpdated: (snapshot) => workspace.handleConfigUpdated(snapshot),
         })
         .then((stops) => {
           for (const stop of stops) {
@@ -130,7 +151,13 @@
       </Select>
     </div>
     <div class="ml-auto flex items-center gap-1">
-      <ThemeToggle value={theme.preference} onchange={(next) => theme.setPreference(next)} />
+      <ThemeToggle
+        value={theme.preference}
+        onchange={(next) => {
+          theme.setPreference(next)
+          void workspace.setThemePreference(next)
+        }}
+      />
     </div>
   </header>
   <Row class="min-h-0 flex-1 items-stretch gap-0">

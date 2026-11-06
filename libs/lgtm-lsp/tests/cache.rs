@@ -38,7 +38,7 @@ mod given_an_lsp_cache_service {
             let temp = TempDir::new().unwrap();
             let workspace_root = fs::canonicalize(temp.path()).unwrap();
             let config_service =
-                ConfigService::with_global_config_path(workspace_root.join(".lgtm/global.toml"));
+                ConfigService::with_global_config_path(workspace_root.join(".lgtm/global.json"));
             let config = config_service.get_config(&workspace_root).unwrap();
             let cache = LspCacheService::new();
             let languages = vec!["rust".to_string(), "typescript".to_string()];

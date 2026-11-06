@@ -1,10 +1,11 @@
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use specta::Type;
 
 use crate::error::{Result, error};
 
 /// Tauri IPC response payload returned by `workspace_read` and `workspace_write`, bundling the decoded UTF-8 document text, its SHA-256 content revision fingerprint for change tracking, and the initial LSP language and server status synchronized when the file is opened.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct FileContent {
     /// The UTF-8 source text of the file.

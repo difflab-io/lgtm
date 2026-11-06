@@ -29,19 +29,28 @@ impl ManagerFixture {
         let workspace_root = fs::canonicalize(temp.path()).unwrap();
         fs::create_dir_all(workspace_root.join(".lgtm")).unwrap();
         let script_path = write_mock_lsp_server(&workspace_root.join(".lgtm"));
-        let global_cfg = workspace_root.join(".lgtm/global.toml");
+        let global_cfg = workspace_root.join(".lgtm/global.json");
         fs::write(
             workspace_root.join("Cargo.toml"),
             "[package]\nname = \"demo\"\n",
         )
         .unwrap();
 
-        let default_cfg = format!(
-            "[languages.rust]\nenabled = true\nextensions = [\"rs\"]\nroot_markers = [\"Cargo.toml\"]\nmise_tools = {{}}\ncommand = \"node\"\nargs = [\"{}\"]\n",
-            script_path.display()
-        );
+        let default_cfg = serde_json::to_string_pretty(&json!({
+            "languages": {
+                "rust": {
+                    "enabled": true,
+                    "extensions": ["rs"],
+                    "root_markers": ["Cargo.toml"],
+                    "mise_tools": {},
+                    "command": "node",
+                    "args": [script_path.display().to_string()]
+                }
+            }
+        }))
+        .unwrap();
         fs::write(
-            workspace_root.join(".lgtm/config.toml"),
+            workspace_root.join(".lgtm/config.json"),
             config_body.unwrap_or(&default_cfg),
         )
         .unwrap();
@@ -265,8 +274,20 @@ mod given_a_workspace_with_unavailable_or_failing_language_servers {
         #[test]
         fn should_record_unavailable_status_with_error_message_and_short_circuit_repeat_spawns() {
             // Arrange
-            let missing_cfg = "[languages.rust]\nenabled = true\nextensions = [\"rs\"]\nroot_markers = [\"Cargo.toml\"]\nmise_tools = {}\ncommand = \"/nonexistent/lgtm-missing-lsp-binary\"\nargs = []\n";
-            let fixture = ManagerFixture::new(Some(missing_cfg));
+            let missing_cfg = serde_json::to_string_pretty(&json!({
+                "languages": {
+                    "rust": {
+                        "enabled": true,
+                        "extensions": ["rs"],
+                        "root_markers": ["Cargo.toml"],
+                        "mise_tools": {},
+                        "command": "/nonexistent/lgtm-missing-lsp-binary",
+                        "args": []
+                    }
+                }
+            }))
+            .unwrap();
+            let fixture = ManagerFixture::new(Some(&missing_cfg));
             let src_file = fixture.workspace_root.join("lib.rs");
             fs::write(&src_file, "fn main() {}\n").unwrap();
 
@@ -300,10 +321,25 @@ mod given_a_workspace_with_unavailable_or_failing_language_servers {
             let workspace_root = fs::canonicalize(temp.path()).unwrap();
             fs::create_dir_all(workspace_root.join(".lgtm")).unwrap();
             let script_path = write_mock_lsp_server(&workspace_root.join(".lgtm"));
-            let timeout_cfg = format!(
-                "[lsp]\nenabled = true\nauto_install = false\nrequest_timeout_ms = 250\n\n[languages.rust]\nenabled = true\nextensions = [\"rs\"]\nroot_markers = [\"Cargo.toml\"]\nmise_tools = {{}}\ncommand = \"node\"\nargs = [\"{}\"]\nenv = {{ MOCK_LSP_DELAY_MS = \"2000\" }}\n",
-                script_path.display()
-            );
+            let timeout_cfg = serde_json::to_string_pretty(&json!({
+                "lsp": {
+                    "enabled": true,
+                    "auto_install": false,
+                    "request_timeout_ms": 250
+                },
+                "languages": {
+                    "rust": {
+                        "enabled": true,
+                        "extensions": ["rs"],
+                        "root_markers": ["Cargo.toml"],
+                        "mise_tools": {},
+                        "command": "node",
+                        "args": [script_path.display().to_string()],
+                        "env": { "MOCK_LSP_DELAY_MS": "2000" }
+                    }
+                }
+            }))
+            .unwrap();
             let fixture = ManagerFixture::new(Some(&timeout_cfg));
             let src_file = fixture.workspace_root.join("lib.rs");
             fs::write(&src_file, "fn helper() {}\n").unwrap();
@@ -329,7 +365,7 @@ mod given_a_workspace_with_unavailable_or_failing_language_servers {
         #[test]
         fn should_no_op_without_spawning_processes() {
             // Arrange
-            let disabled_cfg = "[lsp]\nenabled = false\n";
+            let disabled_cfg = "{\"lsp\": {\"enabled\": false}}\n";
             let fixture = ManagerFixture::new(Some(disabled_cfg));
             let src_file = fixture.workspace_root.join("lib.rs");
             fs::write(&src_file, "fn main() {}\n").unwrap();
@@ -352,6 +388,54 @@ mod given_a_workspace_with_unavailable_or_failing_language_servers {
             assert!(noop_lang.is_none());
             assert!(noop_status.is_none());
             assert!(fixture.events.lock().unwrap().is_empty());
+        }
+    }
+}
+
+mod given_a_global_or_project_config_document {
+    use super::*;
+
+    mod when_opening_and_editing_nested_config_json_or_yaml {
+        use super::*;
+
+        #[test]
+        fn should_validate_schema_diagnostics_and_return_hover_documentation() {
+            // Arrange
+            let temp = TempDir::new().unwrap();
+            let home_root = fs::canonicalize(temp.path()).unwrap();
+            let workspace_root = home_root.join("workspace");
+            fs::create_dir_all(workspace_root.join(".lgtm")).unwrap();
+            let config_service = ConfigService::from_home(home_root.clone());
+            let global_config_path = home_root.join(".lgtm/config.json");
+            fs::create_dir_all(global_config_path.parent().unwrap()).unwrap();
+            let invalid_json = "{\n  \"appearance\": {\n    \"theme\": \"neon\"\n  }\n}\n";
+            fs::write(&global_config_path, invalid_json).unwrap();
+            let manager = LgtmLspManager::new(config_service, |_| {});
+
+            // Act
+            let (lang, status) =
+                manager.open_or_sync_file(&workspace_root, &global_config_path, invalid_json);
+            let snapshot_with_err = manager.get_workspace_snapshot(&workspace_root).unwrap();
+            let hover = manager
+                .get_hover(&workspace_root, &global_config_path, 26)
+                .unwrap()
+                .expect("expected schema hover documentation");
+
+            let valid_json = "{\n  \"appearance\": {\n    \"theme\": \"dark\"\n  },\n  \"editor\": {\n    \"lineWrapping\": false\n  }\n}\n";
+            manager
+                .did_change(&workspace_root, &global_config_path, valid_json)
+                .unwrap();
+            let snapshot_cleared = manager.get_workspace_snapshot(&workspace_root).unwrap();
+
+            // Assert
+            assert_eq!(lang, Some("json".to_string()));
+            assert_eq!(
+                status.expect("expected status").status,
+                LspServerStatus::Ready
+            );
+            assert_eq!(snapshot_with_err.diagnostics_by_path.len(), 1);
+            assert!(hover.contents.contains("appearance.theme"));
+            assert!(snapshot_cleared.diagnostics_by_path.is_empty());
         }
     }
 }

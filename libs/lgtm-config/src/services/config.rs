@@ -1,8 +1,15 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use serde::de::DeserializeOwned;
+use sha2::{Digest, Sha256};
+
 use crate::error::{LgtmConfigError, Result};
-use crate::models::config::{LanguageConfig, LgtmConfig};
+use crate::models::config::{LanguageConfig, LgtmConfig, LgtmConfigFileOverlay};
+use crate::models::settings::{
+    ConfigDocument, ConfigFormat, ConfigScope, DEFAULT_SCHEMA_RELATIVE_PATH,
+    ResolvedConfigSnapshot, UserSettings, UserSettingsPatch,
+};
 
 /// Environment variable passing the startup workspace directory from `lgtm-cli` to `lgtm-desktop`.
 pub const LGTM_WORKSPACE_ENV: &str = "LGTM_WORKSPACE";
@@ -10,23 +17,25 @@ pub const LGTM_WORKSPACE_ENV: &str = "LGTM_WORKSPACE";
 /// Environment variable overriding the `lgtm-desktop` binary path or executable name.
 pub const LGTM_DESKTOP_BIN_ENV: &str = "LGTM_DESKTOP_BIN";
 
-/// Resolves global and workspace-level LGTM configuration and workspace `.lgtm/` directory layout.
+const CONFIG_CANDIDATES: [&str; 3] = ["config.json", "config.yaml", "config.yml"];
+
+/// Resolves global and workspace-level LGTM configuration, JSON Schema files, and `.lgtm/` directory layout.
 #[derive(Debug, Clone, Default)]
 pub struct ConfigService {
     global_config_override: Option<PathBuf>,
 }
 
 impl ConfigService {
-    /// Creates a `ConfigService` that resolves the global config from `LGTM_HOME` or `~/.lgtm/config.toml`.
+    /// Creates a `ConfigService` that resolves the global config from `LGTM_HOME` or `~/.lgtm/config.{json,yaml,yml}`.
     pub fn new() -> Self {
         Self {
             global_config_override: None,
         }
     }
 
-    /// Creates a `ConfigService` rooted at `<home>/.lgtm/config.toml`.
+    /// Creates a `ConfigService` rooted at `<home>/.lgtm/config.json`.
     pub fn from_home(home: PathBuf) -> Self {
-        Self::with_global_config_path(home.join(".lgtm").join("config.toml"))
+        Self::with_global_config_path(home.join(".lgtm").join("config.json"))
     }
 
     /// Creates a `ConfigService` with an explicit global configuration file path.
@@ -57,17 +66,42 @@ impl ConfigService {
             .join(".lgtm")
     }
 
-    /// Returns the resolved path to the global `.lgtm/config.toml` file.
+    /// Returns the resolved path to the global `.lgtm/config.{json,yaml,yml}` file.
     pub fn get_global_config_path(&self) -> PathBuf {
         if let Some(override_path) = &self.global_config_override {
+            if override_path.is_file() {
+                return override_path.clone();
+            }
+            if let Some(parent) = override_path.parent()
+                && let Some(found) = Self::find_existing_config_in_dir(parent)
+            {
+                return found;
+            }
             return override_path.clone();
         }
-        self.get_lgtm_home_dir().join("config.toml")
+        let home_dir = self.get_lgtm_home_dir();
+        Self::find_existing_config_in_dir(&home_dir).unwrap_or_else(|| home_dir.join("config.json"))
     }
 
-    /// Returns the project configuration path (`<workspace>/.lgtm/config.toml`).
+    /// Returns the project configuration path (`<workspace>/.lgtm/config.{json,yaml,yml}`).
     pub fn get_project_config_path(workspace_root: &Path) -> PathBuf {
-        workspace_root.join(".lgtm").join("config.toml")
+        let dot_lgtm = workspace_root.join(".lgtm");
+        Self::find_existing_config_in_dir(&dot_lgtm).unwrap_or_else(|| dot_lgtm.join("config.json"))
+    }
+
+    /// Returns the global JSON Schema path (`~/.lgtm/schemas/config.schema.json`).
+    pub fn get_global_schema_path(&self) -> PathBuf {
+        self.get_lgtm_home_dir()
+            .join("schemas")
+            .join("config.schema.json")
+    }
+
+    /// Returns the workspace JSON Schema path (`<workspace>/.lgtm/schemas/config.schema.json`).
+    pub fn get_project_schema_path(workspace_root: &Path) -> PathBuf {
+        workspace_root
+            .join(".lgtm")
+            .join("schemas")
+            .join("config.schema.json")
     }
 
     /// Returns the LGTM-managed Mise file path (`<workspace>/.lgtm/mise.toml`).
@@ -80,23 +114,291 @@ impl ConfigService {
         workspace_root.join(".lgtm").join("cache").join(file_name)
     }
 
-    /// Loads and merges built-in presets, the global config, and the workspace project config.
+    /// Writes `schemas/config.schema.json` (and `~/.lgtm/biome.json` if absent) for global and optional project `.lgtm` directories.
+    pub fn ensure_schema_files(&self, workspace_root: Option<&Path>) -> Result<PathBuf> {
+        let home_dir = self.get_lgtm_home_dir();
+        let global_schema_path = self.get_global_schema_path();
+        if let Some(parent) = global_schema_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| LgtmConfigError::GlobalConfigIo {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        let schema_text = UserSettingsPatch::json_schema_pretty();
+        std::fs::write(&global_schema_path, &schema_text).map_err(|source| {
+            LgtmConfigError::GlobalConfigIo {
+                path: global_schema_path.clone(),
+                source,
+            }
+        })?;
+
+        let biome_path = home_dir.join("biome.json");
+        if !biome_path.exists() {
+            let _ = std::fs::write(
+                &biome_path,
+                "{\n  \"$schema\": \"https://biomejs.dev/schemas/latest/schema.json\",\n  \"json\": {\n    \"parser\": {\n      \"allowComments\": false\n    }\n  }\n}\n",
+            );
+        }
+
+        if let Some(ws) = workspace_root {
+            let dot_lgtm = ws.join(".lgtm");
+            if dot_lgtm.is_dir() {
+                let project_schema_path = Self::get_project_schema_path(ws);
+                if let Some(parent) = project_schema_path.parent() {
+                    std::fs::create_dir_all(parent).map_err(|source| {
+                        LgtmConfigError::ProjectConfigIo {
+                            path: parent.to_path_buf(),
+                            source,
+                        }
+                    })?;
+                }
+                std::fs::write(&project_schema_path, &schema_text).map_err(|source| {
+                    LgtmConfigError::ProjectConfigIo {
+                        path: project_schema_path,
+                        source,
+                    }
+                })?;
+            }
+        }
+
+        Ok(global_schema_path)
+    }
+
+    /// Loads and merges built-in runtime presets, the global config, and the workspace project config.
     pub fn get_config(&self, workspace_root: &Path) -> Result<LgtmConfig> {
         let mut config = LgtmConfig::default();
 
+        if let Some(script) = std::env::var_os("LGTM_E2E_LSP_SCRIPT")
+            .map(|val| val.to_string_lossy().trim().to_string())
+            .filter(|val| !val.is_empty())
+        {
+            for lang in config.languages.values_mut() {
+                lang.command = "node".to_string();
+                lang.args = vec![script.clone()];
+                lang.mise_tools.clear();
+            }
+        }
+
         let global_path = self.get_global_config_path();
         if global_path.is_file() {
-            let overlay = Self::read_global_config_file(&global_path)?;
-            config.merge(overlay);
+            let overlay: LgtmConfigFileOverlay = Self::read_global_file(&global_path)?;
+            config.merge_file_overlay(overlay);
         }
 
         let project_path = Self::get_project_config_path(workspace_root);
         if project_path.is_file() {
-            let overlay = Self::read_project_config_file(&project_path)?;
-            config.merge(overlay);
+            let overlay: LgtmConfigFileOverlay = Self::read_project_file(&project_path)?;
+            config.merge_file_overlay(overlay);
         }
 
         Ok(config)
+    }
+
+    /// Loads and deep-merges nested `UserSettings` across defaults, global config, and optional workspace project config.
+    pub fn get_settings_snapshot(
+        &self,
+        workspace_root: Option<&Path>,
+    ) -> Result<ResolvedConfigSnapshot> {
+        let global_path = self.get_global_config_path();
+        let global_patch = if global_path.is_file() {
+            Self::read_global_settings_patch(&global_path)?
+        } else {
+            UserSettingsPatch::default()
+        };
+
+        let (project_path, project_patch) = match workspace_root {
+            Some(ws) => {
+                let p_path = Self::get_project_config_path(ws);
+                let patch = if p_path.is_file() {
+                    Some(Self::read_project_settings_patch(&p_path)?)
+                } else {
+                    None
+                };
+                (p_path, patch)
+            }
+            None => (PathBuf::new(), None),
+        };
+
+        let mut effective = UserSettings::default();
+        effective.apply_patch(&global_patch);
+        if let Some(proj) = &project_patch {
+            effective.apply_patch(proj);
+        }
+
+        Ok(ResolvedConfigSnapshot {
+            effective,
+            global: global_patch,
+            project: project_patch,
+            global_path: global_path.to_string_lossy().to_string(),
+            project_path: project_path.to_string_lossy().to_string(),
+        })
+    }
+
+    /// Persists a nested `UserSettingsPatch` to `scope` (or routes each leaf by project override presence when `scope` is `None`).
+    pub fn update_settings(
+        &self,
+        workspace_root: Option<&Path>,
+        scope: Option<ConfigScope>,
+        patch: UserSettingsPatch,
+    ) -> Result<ResolvedConfigSnapshot> {
+        let _ = self.ensure_schema_files(workspace_root)?;
+
+        match scope {
+            Some(ConfigScope::Global) => {
+                let global_path = self.get_global_config_path();
+                self.apply_and_write_global_patch(&global_path, patch)?;
+            }
+            Some(ConfigScope::Project) => {
+                let Some(ws) = workspace_root else {
+                    return self.get_settings_snapshot(None);
+                };
+                let _ = self.ensure_workspace_dir(ws)?;
+                let _ = self.ensure_schema_files(Some(ws))?;
+                let project_path = Self::get_project_config_path(ws);
+                self.apply_and_write_project_patch(&project_path, patch)?;
+            }
+            None => {
+                let existing_project = match workspace_root {
+                    Some(ws) => {
+                        let p_path = Self::get_project_config_path(ws);
+                        if p_path.is_file() {
+                            Some((p_path.clone(), Self::read_project_settings_patch(&p_path)?))
+                        } else {
+                            None
+                        }
+                    }
+                    None => None,
+                };
+
+                let (global_part, project_part) =
+                    patch.split_by_project_overrides(existing_project.as_ref().map(|(_, p)| p));
+
+                if let (Some(proj_patch), Some((project_path, _))) =
+                    (project_part, existing_project)
+                {
+                    self.apply_and_write_project_patch(&project_path, proj_patch)?;
+                }
+                if let Some(glob_patch) = global_part {
+                    let global_path = self.get_global_config_path();
+                    self.apply_and_write_global_patch(&global_path, glob_patch)?;
+                }
+            }
+        }
+
+        self.get_settings_snapshot(workspace_root)
+    }
+
+    /// Ensures the target configuration document and its JSON Schema exist on disk and returns its raw text and LSP metadata.
+    pub fn open_config_document(
+        &self,
+        workspace_root: Option<&Path>,
+        scope: ConfigScope,
+        preferred_format: Option<ConfigFormat>,
+    ) -> Result<ConfigDocument> {
+        let target_path = self.resolve_document_path(workspace_root, scope, preferred_format)?;
+        let format = ConfigFormat::from_path(&target_path);
+
+        match scope {
+            ConfigScope::Global => {
+                let _ = self.ensure_schema_files(workspace_root)?;
+                if !target_path.is_file() {
+                    if let Some(parent) = target_path.parent() {
+                        std::fs::create_dir_all(parent).map_err(|source| {
+                            LgtmConfigError::GlobalConfigIo {
+                                path: parent.to_path_buf(),
+                                source,
+                            }
+                        })?;
+                    }
+                    let default_body = UserSettingsPatch::default_document(format);
+                    std::fs::write(&target_path, default_body).map_err(|source| {
+                        LgtmConfigError::GlobalConfigIo {
+                            path: target_path.clone(),
+                            source,
+                        }
+                    })?;
+                }
+            }
+            ConfigScope::Project => {
+                if let Some(ws) = workspace_root {
+                    let _ = self.ensure_workspace_dir(ws)?;
+                    let _ = self.ensure_schema_files(Some(ws))?;
+                }
+                if !target_path.is_file() {
+                    if let Some(parent) = target_path.parent() {
+                        std::fs::create_dir_all(parent).map_err(|source| {
+                            LgtmConfigError::ProjectConfigIo {
+                                path: parent.to_path_buf(),
+                                source,
+                            }
+                        })?;
+                    }
+                    let default_body = UserSettingsPatch::default_document(format);
+                    std::fs::write(&target_path, default_body).map_err(|source| {
+                        LgtmConfigError::ProjectConfigIo {
+                            path: target_path.clone(),
+                            source,
+                        }
+                    })?;
+                }
+            }
+        }
+
+        self.build_config_document(workspace_root, scope, &target_path)
+    }
+
+    /// Writes raw editor text to the `scope` configuration document and returns the updated document plus optional valid settings snapshot.
+    pub fn write_config_document(
+        &self,
+        workspace_root: Option<&Path>,
+        scope: ConfigScope,
+        content: &str,
+        preferred_format: Option<ConfigFormat>,
+    ) -> Result<(ConfigDocument, Option<ResolvedConfigSnapshot>)> {
+        let target_path = self.resolve_document_path(workspace_root, scope, preferred_format)?;
+        match scope {
+            ConfigScope::Global => {
+                let _ = self.ensure_schema_files(workspace_root)?;
+                if let Some(parent) = target_path.parent() {
+                    std::fs::create_dir_all(parent).map_err(|source| {
+                        LgtmConfigError::GlobalConfigIo {
+                            path: parent.to_path_buf(),
+                            source,
+                        }
+                    })?;
+                }
+                std::fs::write(&target_path, content).map_err(|source| {
+                    LgtmConfigError::GlobalConfigIo {
+                        path: target_path.clone(),
+                        source,
+                    }
+                })?;
+            }
+            ConfigScope::Project => {
+                if let Some(ws) = workspace_root {
+                    let _ = self.ensure_workspace_dir(ws)?;
+                    let _ = self.ensure_schema_files(Some(ws))?;
+                }
+                if let Some(parent) = target_path.parent() {
+                    std::fs::create_dir_all(parent).map_err(|source| {
+                        LgtmConfigError::ProjectConfigIo {
+                            path: parent.to_path_buf(),
+                            source,
+                        }
+                    })?;
+                }
+                std::fs::write(&target_path, content).map_err(|source| {
+                    LgtmConfigError::ProjectConfigIo {
+                        path: target_path.clone(),
+                        source,
+                    }
+                })?;
+            }
+        }
+
+        let doc = self.build_config_document(workspace_root, scope, &target_path)?;
+        let snapshot = self.get_settings_snapshot(workspace_root).ok();
+        Ok((doc, snapshot))
     }
 
     /// Ensures `<workspace>/.lgtm/` exists and registers `.lgtm/` in `<git-dir>/info/exclude`.
@@ -145,7 +447,7 @@ impl ConfigService {
         (workspace_root.to_path_buf(), None)
     }
 
-    /// Scans up to two directory levels under `workspace_root` to identify enabled languages.
+    /// Scans up to two directory levels under `workspace_root` to identify enabled workspace languages.
     pub fn detect_workspace_languages(config: &LgtmConfig, workspace_root: &Path) -> Vec<String> {
         let mut detected = BTreeSet::new();
         Self::scan_directory_languages(config, workspace_root, &mut detected, 2);
@@ -235,6 +537,289 @@ impl ConfigService {
 
     // Private -----------------------------------------------------------------
 
+    fn find_existing_config_in_dir(dir: &Path) -> Option<PathBuf> {
+        for candidate in CONFIG_CANDIDATES {
+            let path = dir.join(candidate);
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+        None
+    }
+
+    fn resolve_document_path(
+        &self,
+        workspace_root: Option<&Path>,
+        scope: ConfigScope,
+        preferred_format: Option<ConfigFormat>,
+    ) -> Result<PathBuf> {
+        match scope {
+            ConfigScope::Global => {
+                let current = self.get_global_config_path();
+                if current.is_file() && preferred_format.is_none() {
+                    return Ok(current);
+                }
+                if let Some(format) = preferred_format {
+                    let parent = current
+                        .parent()
+                        .map(Path::to_path_buf)
+                        .unwrap_or_else(|| self.get_lgtm_home_dir());
+                    return Ok(parent.join(format.default_file_name()));
+                }
+                Ok(current)
+            }
+            ConfigScope::Project => {
+                let Some(ws) = workspace_root else {
+                    return Err(LgtmConfigError::ProjectConfigIo {
+                        path: PathBuf::from(".lgtm/config.json"),
+                        source: std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            "no active workspace root",
+                        ),
+                    });
+                };
+                let current = Self::get_project_config_path(ws);
+                if current.is_file() && preferred_format.is_none() {
+                    return Ok(current);
+                }
+                if let Some(format) = preferred_format {
+                    return Ok(ws.join(".lgtm").join(format.default_file_name()));
+                }
+                Ok(current)
+            }
+        }
+    }
+
+    fn build_config_document(
+        &self,
+        workspace_root: Option<&Path>,
+        scope: ConfigScope,
+        target_path: &Path,
+    ) -> Result<ConfigDocument> {
+        let canonical =
+            std::fs::canonicalize(target_path).unwrap_or_else(|_| target_path.to_path_buf());
+        let content = std::fs::read_to_string(&canonical).map_err(|source| match scope {
+            ConfigScope::Global => LgtmConfigError::GlobalConfigIo {
+                path: canonical.clone(),
+                source,
+            },
+            ConfigScope::Project => LgtmConfigError::ProjectConfigIo {
+                path: canonical.clone(),
+                source,
+            },
+        })?;
+        let format = ConfigFormat::from_path(&canonical);
+        let file_name = canonical
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(format.default_file_name());
+        let title = match scope {
+            ConfigScope::Global => format!("Settings ({file_name})"),
+            ConfigScope::Project => format!("Project Settings (.lgtm/{file_name})"),
+        };
+        let lsp_path = match workspace_root {
+            Some(ws) => {
+                let canonical_ws = std::fs::canonicalize(ws).unwrap_or_else(|_| ws.to_path_buf());
+                canonical
+                    .strip_prefix(&canonical_ws)
+                    .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_else(|_| canonical.to_string_lossy().to_string())
+            }
+            None => canonical.to_string_lossy().to_string(),
+        };
+        let mut hasher = Sha256::new();
+        hasher.update(content.as_bytes());
+        let revision = format!("{:x}", hasher.finalize());
+
+        Ok(ConfigDocument {
+            scope,
+            format,
+            path: canonical.to_string_lossy().to_string(),
+            lsp_path,
+            title,
+            content,
+            revision,
+            language_id: format.language_id().to_string(),
+        })
+    }
+
+    fn apply_and_write_global_patch(
+        &self,
+        global_path: &Path,
+        patch: UserSettingsPatch,
+    ) -> Result<()> {
+        let format = ConfigFormat::from_path(global_path);
+        let mut current = if global_path.is_file() {
+            Self::read_global_settings_patch(global_path).unwrap_or_default()
+        } else {
+            UserSettingsPatch::default()
+        };
+        if format == ConfigFormat::Json && current.schema.is_none() {
+            current.schema = Some(DEFAULT_SCHEMA_RELATIVE_PATH.to_string());
+        }
+        current.merge_patch(patch);
+
+        if let Some(parent) = global_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| LgtmConfigError::GlobalConfigIo {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        let serialized = Self::serialize_patch(&current, format).map_err(|message| {
+            LgtmConfigError::GlobalConfigParse {
+                path: global_path.to_path_buf(),
+                message,
+            }
+        })?;
+        std::fs::write(global_path, serialized).map_err(|source| LgtmConfigError::GlobalConfigIo {
+            path: global_path.to_path_buf(),
+            source,
+        })
+    }
+
+    fn apply_and_write_project_patch(
+        &self,
+        project_path: &Path,
+        patch: UserSettingsPatch,
+    ) -> Result<()> {
+        let format = ConfigFormat::from_path(project_path);
+        let mut current = if project_path.is_file() {
+            Self::read_project_settings_patch(project_path).unwrap_or_default()
+        } else {
+            UserSettingsPatch::default()
+        };
+        if format == ConfigFormat::Json && current.schema.is_none() {
+            current.schema = Some(DEFAULT_SCHEMA_RELATIVE_PATH.to_string());
+        }
+        current.merge_patch(patch);
+
+        if let Some(parent) = project_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| LgtmConfigError::ProjectConfigIo {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        let serialized = Self::serialize_patch(&current, format).map_err(|message| {
+            LgtmConfigError::ProjectConfigParse {
+                path: project_path.to_path_buf(),
+                message,
+            }
+        })?;
+        std::fs::write(project_path, serialized).map_err(|source| {
+            LgtmConfigError::ProjectConfigIo {
+                path: project_path.to_path_buf(),
+                source,
+            }
+        })
+    }
+
+    fn serialize_patch(
+        patch: &UserSettingsPatch,
+        format: ConfigFormat,
+    ) -> std::result::Result<String, String> {
+        match format {
+            ConfigFormat::Json => {
+                let mut text =
+                    serde_json::to_string_pretty(patch).map_err(|err| err.to_string())?;
+                if !text.ends_with('\n') {
+                    text.push('\n');
+                }
+                Ok(text)
+            }
+            ConfigFormat::Yaml => {
+                let mut patch_without_schema = patch.clone();
+                patch_without_schema.schema = None;
+                let body =
+                    serde_yaml::to_string(&patch_without_schema).map_err(|err| err.to_string())?;
+                let mut out = format!(
+                    "# yaml-language-server: $schema={DEFAULT_SCHEMA_RELATIVE_PATH}\n{body}"
+                );
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+                Ok(out)
+            }
+        }
+    }
+
+    fn read_global_settings_patch(path: &Path) -> Result<UserSettingsPatch> {
+        let raw =
+            std::fs::read_to_string(path).map_err(|source| LgtmConfigError::GlobalConfigIo {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        if raw.trim().is_empty() {
+            return Ok(UserSettingsPatch::default());
+        }
+        Self::deserialize_by_format(path, &raw).map_err(|message| {
+            LgtmConfigError::GlobalConfigParse {
+                path: path.to_path_buf(),
+                message,
+            }
+        })
+    }
+
+    fn read_project_settings_patch(path: &Path) -> Result<UserSettingsPatch> {
+        let raw =
+            std::fs::read_to_string(path).map_err(|source| LgtmConfigError::ProjectConfigIo {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        if raw.trim().is_empty() {
+            return Ok(UserSettingsPatch::default());
+        }
+        Self::deserialize_by_format(path, &raw).map_err(|message| {
+            LgtmConfigError::ProjectConfigParse {
+                path: path.to_path_buf(),
+                message,
+            }
+        })
+    }
+
+    fn read_global_file<T: DeserializeOwned + Default>(path: &Path) -> Result<T> {
+        let raw =
+            std::fs::read_to_string(path).map_err(|source| LgtmConfigError::GlobalConfigIo {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        if raw.trim().is_empty() {
+            return Ok(T::default());
+        }
+        Self::deserialize_by_format(path, &raw).map_err(|message| {
+            LgtmConfigError::GlobalConfigParse {
+                path: path.to_path_buf(),
+                message,
+            }
+        })
+    }
+
+    fn read_project_file<T: DeserializeOwned + Default>(path: &Path) -> Result<T> {
+        let raw =
+            std::fs::read_to_string(path).map_err(|source| LgtmConfigError::ProjectConfigIo {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        if raw.trim().is_empty() {
+            return Ok(T::default());
+        }
+        Self::deserialize_by_format(path, &raw).map_err(|message| {
+            LgtmConfigError::ProjectConfigParse {
+                path: path.to_path_buf(),
+                message,
+            }
+        })
+    }
+
+    fn deserialize_by_format<T: DeserializeOwned>(
+        path: &Path,
+        raw: &str,
+    ) -> std::result::Result<T, String> {
+        match ConfigFormat::from_path(path) {
+            ConfigFormat::Json => serde_json::from_str::<T>(raw).map_err(|err| err.to_string()),
+            ConfigFormat::Yaml => serde_yaml::from_str::<T>(raw).map_err(|err| err.to_string()),
+        }
+    }
+
     fn scan_directory_languages(
         config: &LgtmConfig,
         dir: &Path,
@@ -259,6 +844,9 @@ impl ConfigService {
             let path = entry.path();
             if path.is_file() {
                 if let Some((lang_id, _)) = config.detect_file_language(&path) {
+                    if lang_id == "json" || lang_id == "yaml" {
+                        continue;
+                    }
                     detected.insert(lang_id);
                 }
             } else if remaining_depth > 0 && path.is_dir() {
@@ -270,30 +858,6 @@ impl ConfigService {
                 Self::scan_directory_languages(config, &path, detected, remaining_depth - 1);
             }
         }
-    }
-
-    fn read_global_config_file(path: &Path) -> Result<LgtmConfig> {
-        let raw =
-            std::fs::read_to_string(path).map_err(|source| LgtmConfigError::GlobalConfigIo {
-                path: path.to_path_buf(),
-                source,
-            })?;
-        toml::from_str(&raw).map_err(|source| LgtmConfigError::GlobalConfigParse {
-            path: path.to_path_buf(),
-            source: Box::new(source),
-        })
-    }
-
-    fn read_project_config_file(path: &Path) -> Result<LgtmConfig> {
-        let raw =
-            std::fs::read_to_string(path).map_err(|source| LgtmConfigError::ProjectConfigIo {
-                path: path.to_path_buf(),
-                source,
-            })?;
-        toml::from_str(&raw).map_err(|source| LgtmConfigError::ProjectConfigParse {
-            path: path.to_path_buf(),
-            source: Box::new(source),
-        })
     }
 
     fn ensure_git_exclude(workspace_root: &Path) {
@@ -415,16 +979,28 @@ mod tests {
                 // Arrange
                 let temp = tempfile::tempdir().unwrap();
                 let workspace_root = temp.path();
-                let global_cfg = workspace_root.join("global.toml");
+                let global_cfg = workspace_root.join("global.json");
                 std::fs::write(
                     &global_cfg,
-                    "[lsp]\nenabled = true\nauto_install = false\nrequest_timeout_ms = 7000\n\n[mise.tools]\nfd = \"latest\"\n",
+                    r#"{
+  "lsp": {
+    "enabled": true,
+    "auto_install": false,
+    "request_timeout_ms": 7000
+  },
+  "mise": {
+    "tools": {
+      "fd": "latest"
+    }
+  }
+}
+"#,
                 )
                 .unwrap();
                 std::fs::create_dir_all(workspace_root.join(".lgtm")).unwrap();
                 std::fs::write(
-                    workspace_root.join(".lgtm/config.toml"),
-                    "[lsp]\nenabled = true\nauto_install = true\nrequest_timeout_ms = 9000\n\n[mise.tasks.custom]\ndescription = \"Custom\"\nrun = \"echo custom\"\n",
+                    workspace_root.join(".lgtm/config.yaml"),
+                    "lsp:\n  enabled: true\n  auto_install: true\n  request_timeout_ms: 9000\nmise:\n  tasks:\n    custom:\n      description: Custom\n      run: echo custom\n",
                 )
                 .unwrap();
                 let service = ConfigService::with_global_config_path(global_cfg);

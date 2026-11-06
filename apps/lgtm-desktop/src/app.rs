@@ -1,11 +1,14 @@
-//! Tauri application state, lifecycle, and IPC command handlers.
+//! Tauri application state, lifecycle, Specta TypeScript binding generation, and IPC command handlers.
 use std::path::PathBuf;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
 
-use lgtm_config::ConfigService;
+use lgtm_config::{
+    ConfigDocument, ConfigFormat, ConfigScope, ConfigService, ResolvedConfigSnapshot,
+    UserSettingsPatch,
+};
 use lgtm_lsp::{
     LspDiagnosticsBuffer, LspHoverResult, LspLocation, LspServerStatusEvent, LspWorkspaceSnapshot,
 };
@@ -110,8 +113,57 @@ pub fn commands<R: tauri::Runtime>(invoke: tauri::ipc::Invoke<R>) -> bool {
         lsp_get_state,
         lsp_get_diagnostics_buffer,
         lsp_restart,
+        config_get,
+        config_update,
+        config_open_document,
+        config_write_document,
     ];
     handler(invoke)
+}
+
+/// Builds the `tauri-specta` command and type registry for exporting TypeScript bindings.
+pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
+    tauri_specta::Builder::<tauri::Wry>::new()
+        .error_handling(tauri_specta::ErrorHandlingMode::Throw)
+        .disable_serde_phases()
+        .dangerously_cast_bigints_to_number()
+        .commands(tauri_specta::collect_commands![
+            workspace_open,
+            workspace_pick_folder,
+            workspace_list,
+            workspace_read,
+            workspace_write,
+            workspace_create_file,
+            workspace_create_folder,
+            workspace_rename,
+            workspace_delete,
+            workspace_frontend_ready,
+            lsp_did_change,
+            lsp_hover,
+            lsp_goto_definition,
+            lsp_get_state,
+            lsp_get_diagnostics_buffer,
+            lsp_restart,
+            config_get,
+            config_update,
+            config_open_document,
+            config_write_document,
+        ])
+}
+
+/// Exports the TypeScript bindings file (`apps/lgtm-web/src/lib/gen/bindings.ts`) from the Specta registry.
+pub fn export_typescript_bindings_to(
+    path: &std::path::Path,
+) -> std::result::Result<String, String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+    let exporter =
+        specta_typescript::Typescript::default().header("// @ts-nocheck\n/* eslint-disable */\n");
+    specta_builder()
+        .export(exporter, path)
+        .map_err(|err| err.to_string())?;
+    std::fs::read_to_string(path).map_err(|err| err.to_string())
 }
 
 pub(crate) fn app_context<R: tauri::Runtime>() -> tauri::Context<R> {
@@ -166,6 +218,7 @@ async fn run_lsp_blocking<T: Send + 'static>(
 
 /// Opens the active or specified workspace directory and prepares workspace language servers.
 #[tauri::command]
+#[specta::specta]
 pub async fn workspace_open(
     state: State<'_, WorkspaceState>,
     path: Option<String>,
@@ -175,6 +228,7 @@ pub async fn workspace_open(
 
 /// Opens a native OS folder picker dialog.
 #[tauri::command]
+#[specta::specta]
 pub async fn workspace_pick_folder() -> Result<Option<String>> {
     Ok(rfd::AsyncFileDialog::new()
         .pick_folder()
@@ -184,6 +238,7 @@ pub async fn workspace_pick_folder() -> Result<Option<String>> {
 
 /// Lists visible entries inside a workspace-relative directory.
 #[tauri::command]
+#[specta::specta]
 pub async fn workspace_list(
     state: State<'_, WorkspaceState>,
     relative_path: String,
@@ -193,6 +248,7 @@ pub async fn workspace_list(
 
 /// Reads UTF-8 file contents and synchronizes the document with its language server.
 #[tauri::command]
+#[specta::specta]
 pub async fn workspace_read(
     state: State<'_, WorkspaceState>,
     relative_path: String,
@@ -202,6 +258,7 @@ pub async fn workspace_read(
 
 /// Writes UTF-8 file contents to disk and notifies the language server (`textDocument/didSave`).
 #[tauri::command]
+#[specta::specta]
 pub async fn workspace_write(
     state: State<'_, WorkspaceState>,
     relative_path: String,
@@ -212,6 +269,7 @@ pub async fn workspace_write(
 
 /// Creates a new file inside a workspace-relative directory.
 #[tauri::command]
+#[specta::specta]
 pub async fn workspace_create_file(
     state: State<'_, WorkspaceState>,
     name: String,
@@ -225,6 +283,7 @@ pub async fn workspace_create_file(
 
 /// Creates a new folder inside a workspace-relative directory.
 #[tauri::command]
+#[specta::specta]
 pub async fn workspace_create_folder(
     state: State<'_, WorkspaceState>,
     name: String,
@@ -238,6 +297,7 @@ pub async fn workspace_create_folder(
 
 /// Renames a workspace entry exclusively and closes its previous LSP document URI.
 #[tauri::command]
+#[specta::specta]
 pub async fn workspace_rename(
     state: State<'_, WorkspaceState>,
     relative_path: String,
@@ -248,6 +308,7 @@ pub async fn workspace_rename(
 
 /// Deletes a workspace entry and closes its LSP document URI.
 #[tauri::command]
+#[specta::specta]
 pub async fn workspace_delete(
     state: State<'_, WorkspaceState>,
     relative_path: String,
@@ -257,6 +318,7 @@ pub async fn workspace_delete(
 
 /// Marks the frontend quit lifecycle listener as ready.
 #[tauri::command]
+#[specta::specta]
 pub fn workspace_frontend_ready(state: State<'_, FrontendReady>) {
     state.0.store(true, Ordering::Relaxed);
 }
@@ -277,6 +339,7 @@ pub fn workspace_finish_quit<R: tauri::Runtime>(
 
 /// Synchronizes in-memory editor changes (`textDocument/didChange`) with the language server.
 #[tauri::command]
+#[specta::specta]
 pub async fn lsp_did_change(
     state: State<'_, WorkspaceState>,
     lsp: State<'_, LspState>,
@@ -284,7 +347,7 @@ pub async fn lsp_did_change(
     content: String,
 ) -> Result<()> {
     let (root, file_path) = run_blocking(state, move |w| {
-        Ok((w.get_root()?, w.get_entry_path(&relative_path)?))
+        Ok((w.get_root()?, w.get_lsp_file_path(&relative_path)?))
     })
     .await?;
     run_lsp_blocking(lsp, move |s| s.did_change(&root, &file_path, &content)).await
@@ -292,6 +355,7 @@ pub async fn lsp_did_change(
 
 /// Requests hover documentation (`textDocument/hover`) at a UTF-16 editor offset.
 #[tauri::command]
+#[specta::specta]
 pub async fn lsp_hover(
     state: State<'_, WorkspaceState>,
     lsp: State<'_, LspState>,
@@ -299,7 +363,7 @@ pub async fn lsp_hover(
     offset: u32,
 ) -> Result<Option<LspHoverResult>> {
     let (root, file_path) = run_blocking(state, move |w| {
-        Ok((w.get_root()?, w.get_entry_path(&relative_path)?))
+        Ok((w.get_root()?, w.get_lsp_file_path(&relative_path)?))
     })
     .await?;
     run_lsp_blocking(lsp, move |s| s.get_hover(&root, &file_path, offset)).await
@@ -307,6 +371,7 @@ pub async fn lsp_hover(
 
 /// Requests symbol definition locations (`textDocument/definition`) at a UTF-16 editor offset.
 #[tauri::command]
+#[specta::specta]
 pub async fn lsp_goto_definition(
     state: State<'_, WorkspaceState>,
     lsp: State<'_, LspState>,
@@ -314,7 +379,7 @@ pub async fn lsp_goto_definition(
     offset: u32,
 ) -> Result<Vec<LspLocation>> {
     let (root, file_path) = run_blocking(state, move |w| {
-        Ok((w.get_root()?, w.get_entry_path(&relative_path)?))
+        Ok((w.get_root()?, w.get_lsp_file_path(&relative_path)?))
     })
     .await?;
     run_lsp_blocking(lsp, move |s| s.get_definition(&root, &file_path, offset)).await
@@ -322,6 +387,7 @@ pub async fn lsp_goto_definition(
 
 /// Returns the current workspace LSP server statuses and diagnostics snapshot.
 #[tauri::command]
+#[specta::specta]
 pub async fn lsp_get_state(
     state: State<'_, WorkspaceState>,
     lsp: State<'_, LspState>,
@@ -332,6 +398,7 @@ pub async fn lsp_get_state(
 
 /// Renders a read-only diagnostics buffer for the active workspace, optionally filtered by `language_id`.
 #[tauri::command]
+#[specta::specta]
 pub async fn lsp_get_diagnostics_buffer(
     state: State<'_, WorkspaceState>,
     lsp: State<'_, LspState>,
@@ -346,6 +413,7 @@ pub async fn lsp_get_diagnostics_buffer(
 
 /// Restarts the language server for `language_id` in the active workspace.
 #[tauri::command]
+#[specta::specta]
 pub async fn lsp_restart(
     state: State<'_, WorkspaceState>,
     lsp: State<'_, LspState>,
@@ -353,4 +421,154 @@ pub async fn lsp_restart(
 ) -> Result<LspServerStatusEvent> {
     let root = run_blocking(state, move |w| w.get_root()).await?;
     run_lsp_blocking(lsp, move |s| s.restart_language_server(&root, &language_id)).await
+}
+
+/// Returns the resolved nested configuration snapshot across defaults, global settings, and project overrides.
+#[tauri::command]
+#[specta::specta]
+pub async fn config_get(state: State<'_, WorkspaceState>) -> Result<ResolvedConfigSnapshot> {
+    run_blocking(state, move |w| w.get_config_snapshot()).await
+}
+
+/// Applies a nested `UserSettingsPatch` to `scope` (or routes each leaf by project override presence when `scope` is `None`).
+#[tauri::command]
+#[specta::specta]
+pub async fn config_update(
+    state: State<'_, WorkspaceState>,
+    patch: UserSettingsPatch,
+    scope: Option<ConfigScope>,
+) -> Result<ResolvedConfigSnapshot> {
+    run_blocking(state, move |w| w.update_config(patch, scope)).await
+}
+
+/// Ensures the global or project configuration file and schema exist on disk, synchronizes LSP, and returns the document.
+#[tauri::command]
+#[specta::specta]
+pub async fn config_open_document(
+    state: State<'_, WorkspaceState>,
+    scope: Option<ConfigScope>,
+    format: Option<ConfigFormat>,
+) -> Result<ConfigDocument> {
+    run_blocking(state, move |w| {
+        w.open_config_document(scope.unwrap_or(ConfigScope::Global), format)
+    })
+    .await
+}
+
+/// Writes raw editor text to the global or project configuration file, notifies LSP `didSave`, and emits `config-updated` when valid.
+#[tauri::command]
+#[specta::specta]
+pub async fn config_write_document(
+    state: State<'_, WorkspaceState>,
+    scope: ConfigScope,
+    content: String,
+    format: Option<ConfigFormat>,
+) -> Result<ConfigDocument> {
+    let (doc, _) = run_blocking(state, move |w| {
+        w.write_config_document(scope, &content, format)
+    })
+    .await?;
+    Ok(doc)
+}
+
+// tests -----------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lgtm_config::{AppearanceSettingsPatch, EditorSettingsPatch, ThemeMode};
+    use tempfile::TempDir;
+
+    // tests -------------------------------------------------------------------
+
+    mod given_specta_command_registry {
+        use super::*;
+
+        mod when_exporting_typescript_bindings {
+            use super::*;
+
+            #[test]
+            fn should_generate_typescript_bindings_matching_nested_settings_and_commands() {
+                // Arrange
+                let target_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../lgtm-web/src/lib/gen/bindings.ts");
+
+                // Act
+                let generated = export_typescript_bindings_to(&target_path).unwrap();
+
+                // Assert
+                assert!(generated.contains("export type ThemeMode"));
+                assert!(generated.contains("export type ConfigScope"));
+                assert!(generated.contains("export type ConfigFormat"));
+                assert!(generated.contains("export type AppearanceSettings"));
+                assert!(generated.contains("export type WorkspaceSettings"));
+                assert!(generated.contains("export type EditorSettings"));
+                assert!(generated.contains("export type UserSettings"));
+                assert!(generated.contains("export type UserSettingsPatch"));
+                assert!(generated.contains("export type ResolvedConfigSnapshot"));
+                assert!(generated.contains("export type ConfigDocument"));
+                assert!(generated.contains("configGet"));
+                assert!(generated.contains("configUpdate"));
+                assert!(generated.contains("configOpenDocument"));
+                assert!(generated.contains("configWriteDocument"));
+            }
+        }
+    }
+
+    mod given_workspace_config_service_operations {
+        use super::*;
+
+        mod when_updating_and_opening_config_documents {
+            use super::*;
+
+            #[test]
+            fn should_persist_nested_settings_and_open_global_and_project_config_documents() {
+                // Arrange
+                let temp = TempDir::new().unwrap();
+                let mut service = WorkspaceService::from_home(temp.path().to_path_buf());
+                service.open(None).unwrap();
+
+                // Act
+                let initial = service.get_config_snapshot().unwrap();
+                let updated = service
+                    .update_config(
+                        UserSettingsPatch {
+                            schema: None,
+                            appearance: Some(AppearanceSettingsPatch {
+                                theme: Some(ThemeMode::Dark),
+                            }),
+                            workspace: None,
+                            editor: Some(EditorSettingsPatch {
+                                line_wrapping: Some(false),
+                            }),
+                        },
+                        None,
+                    )
+                    .unwrap();
+                let global_doc = service
+                    .open_config_document(ConfigScope::Global, None)
+                    .unwrap();
+                let (written_doc, written_snap) = service
+                    .write_config_document(
+                        ConfigScope::Global,
+                        "{\n  \"appearance\": {\n    \"theme\": \"light\"\n  }\n}\n",
+                        Some(ConfigFormat::Json),
+                    )
+                    .unwrap();
+
+                // Assert
+                assert_eq!(initial.effective.appearance.theme, ThemeMode::System);
+                assert!(initial.effective.editor.line_wrapping);
+                assert_eq!(updated.effective.appearance.theme, ThemeMode::Dark);
+                assert!(!updated.effective.editor.line_wrapping);
+                assert_eq!(global_doc.scope, ConfigScope::Global);
+                assert!(global_doc.content.contains("\"dark\""));
+                assert_ne!(global_doc.revision, written_doc.revision);
+                assert_eq!(
+                    written_snap.unwrap().effective.appearance.theme,
+                    ThemeMode::Light
+                );
+            }
+        }
+    }
 }

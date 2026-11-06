@@ -2,15 +2,17 @@
 
 ## Overview
 
-`lgtm-config` is the pure-Rust configuration, language discovery, and workspace `.lgtm/` directory layout library for LGTM (`lgtm-cli`, `lgtm-env`, `lgtm-lsp`, and `lgtm-desktop`). It merges global (`~/.lgtm/config.toml`) and project (`<workspace>/.lgtm/config.toml`) settings over built-in language presets (Rust, TypeScript, JavaScript, Python, Go, and Markdown), detects project roots and workspace languages, and registers `.lgtm/` idempotently in `<git-dir>/info/exclude`.
+`lgtm-config` is the pure-Rust configuration, JSON Schema generation, Specta type definition, language discovery, and workspace `.lgtm/` directory layout library for LGTM (`lgtm-cli`, `lgtm-env`, `lgtm-lsp`, and `lgtm-desktop`). It deep-merges global (`~/.lgtm/config.{json,yaml,yml}`) and project (`<workspace>/.lgtm/config.{json,yaml,yml}`) nested settings (`appearance.theme`, `workspace.activeRoot`, `workspace.recentRoots`, `editor.lineWrapping`) over defaults, provides built-in language presets (Rust, TypeScript, JavaScript, Python, Go, Markdown, `mise`-managed Biome `json`, and `yaml`), generates `schemas/config.schema.json` via `schemars`, detects project roots and workspace languages, and registers `.lgtm/` idempotently in `<git-dir>/info/exclude`.
 
 ## Requirement
 
 ### Functional
 
-- Load built-in language and tool presets, merge `~/.lgtm/config.toml` (or `$LGTM_HOME/config.toml`), and overlay `<workspace>/.lgtm/config.toml`.
-- Resolve a file's language from its extension and walk ancestor directories up to the workspace root to find the nearest project root marker.
-- Create `<workspace>/.lgtm/` and register `.lgtm/` in `<git-dir>/info/exclude` without modifying tracked `.gitignore` files.
+- Layered nested configuration: Load defaults (`UserSettings`), deep-merge `~/.lgtm/config.{json,yaml,yml}` (or `$LGTM_HOME/config.{json,yaml,yml}`), and overlay leaf-level overrides from `<workspace>/.lgtm/config.{json,yaml,yml}`.
+- Leaf-level override-aware patching: Route each modified leaf in `UserSettingsPatch` to `<workspace>/.lgtm/config.{json,yaml,yml}` when that leaf is already overridden in the project config, and otherwise to `~/.lgtm/config.{json,yaml,yml}` without clobbering sibling sections.
+- Schema and TypeScript parity: Derive `schemars::JsonSchema` and `specta::Type` on all nested settings and patch structs so `schemas/config.schema.json` and `apps/lgtm-web/src/lib/gen/bindings.ts` share a single Rust source of truth.
+- Language and root discovery: Resolve a file's language from its extension and walk ancestor directories up to the workspace boundary to find the nearest language root marker (`Cargo.toml`, `tsconfig.json`, `package.json`, `pyproject.toml`, `requirements.txt`, `go.mod`, `.marksman.toml`, `biome.json`, `biome.jsonc`, `.yamllint`).
+- Git worktree hygiene: Create `<workspace>/.lgtm/` and register `.lgtm/` idempotently in `<git-dir>/info/exclude` (supporting both standard `.git` directories and worktree `.git` pointer files) without modifying tracked `.gitignore` files.
 
 ### Non-Functional
 

@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 export { expect }
 export interface Workspace {
   root: string
+  lgtmHomeDir: string
   pickedFolder: string | null
   failWrites: boolean
   failLists: boolean
@@ -29,6 +30,9 @@ interface CommandArgs {
   content?: string
   offset?: number
   languageId?: string
+  patch?: unknown
+  scope?: string | null
+  format?: string | null
 }
 
 interface BridgeMessage {
@@ -235,61 +239,6 @@ export const test = base.extend<{
       await mkdir(lgtmHomeDir, { recursive: true })
       const mockLspScript = join(homeRoot, 'mock-lsp.mjs')
       await writeFile(mockLspScript, MOCK_LSP_SERVER_SOURCE, 'utf8')
-      const escapedScript = mockLspScript.replace(/\\/g, '\\\\')
-      await writeFile(
-        join(lgtmHomeDir, 'config.toml'),
-        [
-          '[languages.rust]',
-          'enabled = true',
-          'extensions = ["rs"]',
-          'root_markers = ["Cargo.toml"]',
-          'mise_tools = {}',
-          'command = "node"',
-          `args = ["${escapedScript}"]`,
-          '',
-          '[languages.typescript]',
-          'enabled = true',
-          'extensions = ["ts", "tsx"]',
-          'root_markers = ["tsconfig.json", "package.json"]',
-          'mise_tools = {}',
-          'command = "node"',
-          `args = ["${escapedScript}"]`,
-          '',
-          '[languages.javascript]',
-          'enabled = true',
-          'extensions = ["js", "jsx"]',
-          'root_markers = ["package.json", "jsconfig.json"]',
-          'mise_tools = {}',
-          'command = "node"',
-          `args = ["${escapedScript}"]`,
-          '',
-          '[languages.python]',
-          'enabled = true',
-          'extensions = ["py"]',
-          'root_markers = ["pyproject.toml", "requirements.txt"]',
-          'mise_tools = {}',
-          'command = "node"',
-          `args = ["${escapedScript}"]`,
-          '',
-          '[languages.go]',
-          'enabled = true',
-          'extensions = ["go"]',
-          'root_markers = ["go.mod"]',
-          'mise_tools = {}',
-          'command = "node"',
-          `args = ["${escapedScript}"]`,
-          '',
-          '[languages.markdown]',
-          'enabled = true',
-          'extensions = ["md", "markdown", "mdx"]',
-          'root_markers = [".marksman.toml"]',
-          'mise_tools = {}',
-          'command = "node"',
-          `args = ["${escapedScript}"]`,
-          '',
-        ].join('\n'),
-        'utf8',
-      )
 
       const tauriConfRaw = await readFile(
         join(repoRoot, 'apps/lgtm-desktop/tauri.conf.json'),
@@ -304,6 +253,7 @@ export const test = base.extend<{
 
       const workspace: Workspace = {
         root: initialRoot,
+        lgtmHomeDir,
         pickedFolder: null,
         failLists: false,
         failWrites: false,
@@ -342,6 +292,7 @@ export const test = base.extend<{
           ...process.env,
           LGTM_IPC_BRIDGE: '1',
           LGTM_E2E_PERMANENT_DELETE: '1',
+          LGTM_E2E_LSP_SCRIPT: mockLspScript,
         },
         stdio: ['pipe', 'pipe', 'inherit'],
       })

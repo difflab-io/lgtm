@@ -3,6 +3,10 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::models::settings::{
+    AppearanceSettingsPatch, EditorSettingsPatch, WorkspaceSettingsPatch,
+};
+
 /// Merged LGTM configuration combining built-in presets, global user settings, and project overrides.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -27,7 +31,7 @@ pub struct LspSettings {
     pub request_timeout_ms: u64,
 }
 
-/// Custom Mise tools and tasks configured in `.lgtm/config.toml`.
+/// Custom Mise tools and tasks configured in `.lgtm/config.{json,yaml,yml}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct MiseSettings {
@@ -37,7 +41,7 @@ pub struct MiseSettings {
     pub tasks: BTreeMap<String, MiseTaskConfig>,
 }
 
-/// A task definition in `.lgtm/config.toml`, represented as either a shell string or a detailed record.
+/// A task definition in `.lgtm/config.{json,yaml,yml}`, represented as either a shell string or a detailed record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum MiseTaskConfig {
@@ -79,8 +83,31 @@ pub struct LanguageConfig {
     pub default_tasks: BTreeMap<String, MiseTaskConfig>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct LspSettingsOverlay {
+    pub(crate) enabled: Option<bool>,
+    #[serde(alias = "autoInstall")]
+    pub(crate) auto_install: Option<bool>,
+    #[serde(alias = "requestTimeoutMs")]
+    pub(crate) request_timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct LgtmConfigFileOverlay {
+    #[serde(rename = "$schema")]
+    pub(crate) schema: Option<String>,
+    pub(crate) appearance: Option<AppearanceSettingsPatch>,
+    pub(crate) workspace: Option<WorkspaceSettingsPatch>,
+    pub(crate) editor: Option<EditorSettingsPatch>,
+    pub(crate) lsp: Option<LspSettingsOverlay>,
+    pub(crate) mise: Option<MiseSettings>,
+    pub(crate) languages: Option<BTreeMap<String, LanguageConfig>>,
+}
+
 impl LgtmConfig {
-    /// Builds the default LGTM configuration with presets for Rust, TypeScript, JavaScript, Python, Go, and Markdown.
+    /// Builds the default LGTM configuration with presets for Rust, TypeScript, JavaScript, Python, Go, Markdown, JSON, and YAML.
     pub fn default_presets() -> Self {
         let mut languages = BTreeMap::new();
 
@@ -245,6 +272,50 @@ impl LgtmConfig {
             },
         );
 
+        languages.insert(
+            "json".to_string(),
+            LanguageConfig {
+                enabled: true,
+                extensions: vec!["json".to_string(), "jsonc".to_string()],
+                root_markers: vec!["biome.json".to_string(), "biome.jsonc".to_string()],
+                mise_tools: BTreeMap::from([("biome".to_string(), "latest".to_string())]),
+                command: "biome".to_string(),
+                args: vec!["lsp-proxy".to_string()],
+                env: BTreeMap::new(),
+                initialization_options: None,
+                default_tasks: BTreeMap::new(),
+            },
+        );
+
+        languages.insert(
+            "yaml".to_string(),
+            LanguageConfig {
+                enabled: true,
+                extensions: vec!["yaml".to_string(), "yml".to_string()],
+                root_markers: vec![".yamllint".to_string()],
+                mise_tools: BTreeMap::from([
+                    ("node".to_string(), "lts".to_string()),
+                    ("npm:yaml-language-server".to_string(), "latest".to_string()),
+                ]),
+                command: "yaml-language-server".to_string(),
+                args: vec!["--stdio".to_string()],
+                env: BTreeMap::new(),
+                initialization_options: None,
+                default_tasks: BTreeMap::new(),
+            },
+        );
+
+        if let Some(script) = std::env::var_os("LGTM_E2E_LSP_SCRIPT")
+            .map(|val| val.to_string_lossy().trim().to_string())
+            .filter(|val| !val.is_empty())
+        {
+            for lang in languages.values_mut() {
+                lang.command = "node".to_string();
+                lang.args = vec![script.clone()];
+                lang.mise_tools.clear();
+            }
+        }
+
         Self {
             lsp: LspSettings::default(),
             mise: MiseSettings::default(),
@@ -279,6 +350,41 @@ impl LgtmConfig {
             }
         })
     }
+
+    // Private -----------------------------------------------------------------
+
+    pub(crate) fn merge_file_overlay(&mut self, overlay: LgtmConfigFileOverlay) {
+        let _ = (
+            overlay.schema,
+            overlay.appearance,
+            overlay.workspace,
+            overlay.editor,
+        );
+        if let Some(lsp) = overlay.lsp {
+            if let Some(enabled) = lsp.enabled {
+                self.lsp.enabled = enabled;
+            }
+            if let Some(auto_install) = lsp.auto_install {
+                self.lsp.auto_install = auto_install;
+            }
+            if let Some(timeout) = lsp.request_timeout_ms {
+                self.lsp.request_timeout_ms = timeout;
+            }
+        }
+        if let Some(mise) = overlay.mise {
+            for (tool, version) in mise.tools {
+                self.mise.tools.insert(tool, version);
+            }
+            for (task, config) in mise.tasks {
+                self.mise.tasks.insert(task, config);
+            }
+        }
+        if let Some(languages) = overlay.languages {
+            for (language_id, language_config) in languages {
+                self.languages.insert(language_id, language_config);
+            }
+        }
+    }
 }
 
 impl Default for LgtmConfig {
@@ -312,12 +418,14 @@ mod tests {
             use super::*;
 
             #[test]
-            fn should_include_rust_typescript_javascript_python_go_and_markdown() {
+            fn should_include_rust_typescript_javascript_python_go_markdown_json_and_yaml() {
                 // Arrange
                 let config = LgtmConfig::default();
 
                 // Act
                 let keys: Vec<String> = config.languages.keys().cloned().collect();
+                let json_preset = config.languages.get("json").unwrap();
+                let yaml_preset = config.languages.get("yaml").unwrap();
 
                 // Assert
                 assert_eq!(
@@ -325,12 +433,22 @@ mod tests {
                     vec![
                         "go".to_string(),
                         "javascript".to_string(),
+                        "json".to_string(),
                         "markdown".to_string(),
                         "python".to_string(),
                         "rust".to_string(),
                         "typescript".to_string(),
+                        "yaml".to_string(),
                     ]
                 );
+                assert_eq!(json_preset.command, "biome");
+                assert_eq!(json_preset.args, vec!["lsp-proxy".to_string()]);
+                assert_eq!(
+                    json_preset.mise_tools.get("biome"),
+                    Some(&"latest".to_string())
+                );
+                assert_eq!(yaml_preset.command, "yaml-language-server");
+                assert_eq!(yaml_preset.args, vec!["--stdio".to_string()]);
             }
         }
 
@@ -348,6 +466,8 @@ mod tests {
                 let py = config.detect_file_language(Path::new("scripts/run.py"));
                 let go = config.detect_file_language(Path::new("cmd/main.go"));
                 let md = config.detect_file_language(Path::new("README.md"));
+                let json = config.detect_file_language(Path::new(".lgtm/config.json"));
+                let yaml = config.detect_file_language(Path::new(".lgtm/config.yaml"));
                 let unknown = config.detect_file_language(Path::new("notes.txt"));
 
                 // Assert
@@ -356,6 +476,8 @@ mod tests {
                 assert_eq!(py.map(|(id, _)| id), Some("python".to_string()));
                 assert_eq!(go.map(|(id, _)| id), Some("go".to_string()));
                 assert_eq!(md.map(|(id, _)| id), Some("markdown".to_string()));
+                assert_eq!(json.map(|(id, _)| id), Some("json".to_string()));
+                assert_eq!(yaml.map(|(id, _)| id), Some("yaml".to_string()));
                 assert!(unknown.is_none());
             }
         }
