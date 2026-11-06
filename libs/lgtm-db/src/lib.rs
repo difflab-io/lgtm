@@ -76,6 +76,7 @@ pub use connection::{Database, Transaction};
 
 pub mod models;
 pub mod repositories;
+pub mod sync;
 
 /// Typed database discriminators.
 pub use entities::common as types;

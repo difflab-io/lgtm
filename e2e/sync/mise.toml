@@ -1,0 +1,3 @@
+[tasks.test]
+dir = "{{config_root}}/../.."
+run = "bun x vitest run --config e2e/sync/vitest.config.ts"

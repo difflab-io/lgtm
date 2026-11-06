@@ -170,3 +170,9 @@ Premise removes generic publication credentials such as `GH_TOKEN` from task env
 Private Rust unit tests, database integration tests and the plugin's Lua unit contracts remain in their existing app and library locations.
 
 Neovim runs a global preflight before test hooks create any PRs. It starts each selected editor profile and computes a native CodeDiff diff. Missing modules or native binaries fail the suite once, with the startup error. The installer always checks out each pinned revision, including on a fresh clone whose default HEAD already matches the pin.
+
+## PGlite sync POC
+
+Run `premise run poc:install`, `premise run poc:build`, then `premise run poc:test`. The sync suite under `e2e/sync/` starts independent PGlite backend processes and a separate authenticated sync service against disposable native PostgreSQL 17. It requires `initdb` and `pg_ctl`, or a supplied `LGTM_TEST_POSTGRES_URL` pointing at a disposable database. Its repository contracts run against both SQLite and PostgreSQL.
+
+For narrower iteration, use `premise run poc-test-remote -- notes.spec.ts`, `local-review.spec.ts` or `pr-review.spec.ts`. These cover offline and bidirectional notes, retry after a lost acknowledgment, conflicting edits, account isolation, local comparison kinds and forge-backed metadata. The PR test reuses the existing `backend/pr-review.json` recording and never contacts live GitHub. It does not record or perform live forge writes.

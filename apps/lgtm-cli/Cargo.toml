@@ -15,10 +15,12 @@ path = "src/main.rs"
 
 [features]
 default = ["sqlite"]
+pglite = ["dep:pglite-rs", "sea-orm/sqlx-postgres", "sea-orm-migration/sqlx-postgres"]
 sqlite = ["sea-orm/sqlx-sqlite", "sea-orm-migration/sqlx-sqlite"]
 postgres = ["sea-orm/sqlx-postgres", "sea-orm-migration/sqlx-postgres"]
 
 [dependencies]
+pglite-rs = { version = "=0.2.7", optional = true }
 base64 = "0.22"
 octocrab = { version = "0.54.1", default-features = false, features = ["default-client", "rustls", "rustls-ring", "timeout"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

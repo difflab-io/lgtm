@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#MISE description="Run the cloud service with persistent native PostgreSQL when Docker is unavailable"
+set -euo pipefail
+cluster="$PWD/.poc/cloud"
+mkdir -p "$cluster"
+if [[ ! -f "$cluster/PG_VERSION" ]]; then
+  initdb -D "$cluster" -U lgtm --auth=trust --no-locale -E UTF8 >/dev/null
+fi
+if pg_ctl -D "$cluster" status >/dev/null 2>&1; then
+  echo "This POC cloud cluster is already running" >&2
+  exit 1
+fi
+pg_ctl -D "$cluster" -l "$cluster/server.log" -o "-k '' -h 127.0.0.1 -p 55432" -w start >/dev/null
+trap 'pg_ctl -D "$cluster" -m fast -w stop >/dev/null' EXIT
+export LGTM_SYNC_DATABASE_URL="postgres://lgtm@127.0.0.1:55432/postgres"
+mise run //:poc:cloud

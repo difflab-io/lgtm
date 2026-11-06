@@ -2,7 +2,7 @@
 use sea_orm::entity::prelude::*;
 
 #[sea_orm::model]
-#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, serde::Serialize, serde::Deserialize)]
 #[sea_orm(table_name = "comments")]
 /// A root or reply in a context-owned thread. Local attribution is retained independently of remote IDs and posting state.
 pub struct Model {

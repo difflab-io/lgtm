@@ -1,4 +1,6 @@
 //! Disposable real databases for repository contracts.
+#[allow(dead_code)]
+pub mod sync;
 use lgtm_db::Database;
 #[cfg(feature = "postgres")]
 use uuid::Uuid;

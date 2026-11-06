@@ -13,6 +13,10 @@ use std::{sync::Arc, time::Duration};
 #[derive(Clone)]
 pub struct Database<C = DatabaseConnection> {
     pool: Arc<C>,
+    #[cfg(feature = "pglite")]
+    engine: Option<Arc<pglite::PGlite>>,
+    #[cfg(feature = "pglite")]
+    engine_lock: Option<Arc<std::fs::File>>,
     /// Human and agent identity operations.
     pub identities: IdentityRepository<C>,
     /// Review session operations.
@@ -25,6 +29,8 @@ pub struct Database<C = DatabaseConnection> {
     pub comments: CommentRepository<C>,
     /// Atomically saved results for local mutation retries.
     pub mutations: MutationRepository<C>,
+    /// POC snapshot and sync queue operations.
+    pub sync: crate::sync::SyncRepository<C>,
 }
 
 /// Client-owned transaction exposing the same repositories as a pool-backed client.
@@ -40,7 +46,12 @@ impl<C: ConnectionTrait + TransactionTrait> Database<C> {
             workspace: WorkspaceRepository::new(Arc::clone(&pool)),
             comments: CommentRepository::new(Arc::clone(&pool)),
             mutations: MutationRepository::new(Arc::clone(&pool)),
+            sync: crate::sync::SyncRepository::new(Arc::clone(&pool)),
             pool,
+            #[cfg(feature = "pglite")]
+            engine: None,
+            #[cfg(feature = "pglite")]
+            engine_lock: None,
         }
     }
 }
@@ -48,6 +59,30 @@ impl<C: ConnectionTrait + TransactionTrait> Database<C> {
 impl Database {
     /// Open a supported database and apply its private migration history. Returns an error for invalid URLs, unavailable drivers, connection failures or migration failures.
     pub async fn connect(url: &str) -> Result<Self> {
+        #[cfg(feature = "pglite")]
+        if let Some(path) = url.strip_prefix("pglite://") {
+            std::fs::create_dir_all(path)?;
+            let lock = std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .read(true)
+                .write(true)
+                .open(format!("{}.lock", path.trim_end_matches('/')))?;
+            fs2::FileExt::try_lock_exclusive(&lock).map_err(|_| {
+                invalid("PGlite data directory is already open by another LGTM process")
+            })?;
+            let engine = pglite::PGlite::open(path)
+                .await
+                .map_err(|e| invalid(e.to_string()))?;
+            let uri = engine
+                .unix_uri()
+                .await
+                .map_err(|e| invalid(e.to_string()))?;
+            let mut db = Self::connect_pool(&uri, 1).await?;
+            db.engine = Some(Arc::new(engine));
+            db.engine_lock = Some(Arc::new(lock));
+            return Ok(db);
+        }
         if !(url.starts_with("sqlite:")
             || url.starts_with("postgres:")
             || url.starts_with("postgresql:"))
@@ -80,9 +115,13 @@ impl Database {
         } else {
             None
         };
+        Self::connect_pool(url, if url.starts_with("sqlite:") { 1 } else { 8 }).await
+    }
+
+    async fn connect_pool(url: &str, connections: u32) -> Result<Self> {
         let mut options = ConnectOptions::new(url);
         options
-            .max_connections(if url.starts_with("sqlite:") { 1 } else { 8 })
+            .max_connections(connections)
             .connect_timeout(Duration::from_secs(10))
             .sqlx_logging(false);
         let pool = sea_orm::Database::connect(options).await?;
@@ -98,6 +137,10 @@ impl Database {
     /// Close the shared connection pool. Other cloned clients share the same pool.
     pub async fn close(&self) {
         let _ = self.pool.as_ref().clone().close().await;
+        #[cfg(feature = "pglite")]
+        if let Some(engine) = &self.engine {
+            let _ = engine.shutdown().await;
+        }
     }
 }
 
@@ -111,7 +154,14 @@ impl<C: ConnectionTrait> Database<C> {
 impl<C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>> Database<C> {
     /// Begin an atomic transaction, or a nested savepoint when called on a transaction.
     pub async fn begin(&self) -> Result<Transaction> {
-        Ok(Database::from_connection(self.pool.begin().await?))
+        let tx = Database::from_connection(self.pool.begin().await?);
+        #[cfg(feature = "pglite")]
+        let tx = Database {
+            engine: self.engine.clone(),
+            engine_lock: self.engine_lock.clone(),
+            ..tx
+        };
+        Ok(tx)
     }
 }
 
@@ -125,6 +175,11 @@ impl Database<DatabaseTransaction> {
             workspace,
             comments,
             mutations,
+            sync,
+            #[cfg(feature = "pglite")]
+                engine: _,
+            #[cfg(feature = "pglite")]
+                engine_lock: _,
         } = self;
         drop((
             identities,
@@ -133,6 +188,7 @@ impl Database<DatabaseTransaction> {
             workspace,
             comments,
             mutations,
+            sync,
         ));
         Arc::try_unwrap(pool)
             .map_err(|_| invalid("Transaction still has repository handles in use"))

@@ -48,6 +48,8 @@ export function isolatedEnv(home: string): NodeJS.ProcessEnv {
     'LGTM_E2E_GITHUB_SECONDARY_TOKEN',
     'LGTM_RPC_URL',
     'LGTM_DATABASE_URL',
+    'LGTM_SYNC_URL',
+    'LGTM_SYNC_TOKEN',
     'LGTM_BACKEND_ADDR',
     'LGTM_GITHUB_TEST_MODE',
     'LGTM_GITHUB_TEST_ACTOR',

@@ -11,9 +11,12 @@ license = "Apache-2.0"
 [features]
 default = ["sqlite"]
 sqlite = ["sea-orm/sqlx-sqlite", "sea-orm-migration/sqlx-sqlite"]
+pglite = ["postgres", "dep:pglite-rs"]
 postgres = ["sea-orm/sqlx-postgres", "sea-orm-migration/sqlx-postgres"]
 
 [dependencies]
+pglite-rs = { version = "=0.2.7", optional = true }
+serde_json = "1"
 sea-orm = { version = "=2.0.4", default-features = false, features = ["macros", "runtime-tokio-rustls", "with-uuid"] }
 sea-orm-migration = { version = "=2.0.4", default-features = false, features = ["runtime-tokio-rustls"] }
 serde = { version = "1", features = ["derive"] }
@@ -26,5 +29,4 @@ version = "1"
 features = ["v4", "serde"]
 
 [dev-dependencies]
-serde_json = "1"
 tempfile = "3"

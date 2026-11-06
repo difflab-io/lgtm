@@ -2,7 +2,7 @@
 use sea_orm::entity::prelude::*;
 
 #[sea_orm::model]
-#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, serde::Serialize, serde::Deserialize)]
 #[sea_orm(table_name = "sessions")]
 /// A review attempt over a context and reviewed commits. At most one session is active per context; completion metadata is retained.
 pub struct Model {

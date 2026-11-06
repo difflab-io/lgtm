@@ -2,7 +2,7 @@
 use sea_orm::entity::prelude::*;
 
 #[sea_orm::model]
-#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, serde::Serialize, serde::Deserialize)]
 #[sea_orm(table_name = "review_contexts")]
 /// Persistent notes, branch or forge-review conversations. Sessions share the context-owned thread and comment history.
 pub struct Model {

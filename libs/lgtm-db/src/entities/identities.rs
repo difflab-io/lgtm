@@ -2,7 +2,7 @@
 use sea_orm::entity::prelude::*;
 
 #[sea_orm::model]
-#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, serde::Serialize, serde::Deserialize)]
 #[sea_orm(table_name = "identities")]
 /// Logical human and agent identities referenced by sessions, threads and comments. Forge account bindings are independent of agent providers.
 pub struct Model {

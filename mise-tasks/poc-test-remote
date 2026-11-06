@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#MISE description="Run sync journeys against isolated native PostgreSQL 17 or supplied PostgreSQL"
+set -euo pipefail
+if [[ -n "${LGTM_TEST_POSTGRES_URL:-}" ]]; then
+  cargo test --locked -p lgtm-db --features postgres --test sync_repository
+  exec bun x vitest run --config e2e/sync/vitest.config.ts "$@"
+fi
+command -v initdb >/dev/null || { echo "Set LGTM_TEST_POSTGRES_URL or install PostgreSQL 17 for this task" >&2; exit 1; }
+cluster=$(mktemp -d /tmp/lgtm-sync-pg.XXXXXX)
+trap 'pg_ctl -D "$cluster/data" -m immediate stop >/dev/null 2>&1 || true; rm -rf "$cluster"' EXIT
+mkdir "$cluster/socket"
+initdb -D "$cluster/data" -U lgtm --auth=trust --no-locale -E UTF8 >/dev/null
+pg_ctl -D "$cluster/data" -l "$cluster/postgres.log" -o "-k $cluster/socket -h ''" -w start >/dev/null
+export LGTM_TEST_POSTGRES_URL="postgresql://lgtm@localhost/postgres?host=$cluster/socket"
+cargo test --locked -p lgtm-db --features postgres --test sync_repository
+bun x vitest run --config e2e/sync/vitest.config.ts "$@"

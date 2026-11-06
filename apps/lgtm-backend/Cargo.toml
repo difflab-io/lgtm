@@ -10,11 +10,13 @@ publish = false
 license = "Apache-2.0"
 
 [features]
-default = ["sqlite"]
+default = ["sqlite", "pglite"]
 sqlite = ["lgtm-db/sqlite"]
+pglite = ["lgtm-db/pglite"]
 postgres = ["lgtm-db/postgres"]
 
 [dependencies]
+lgtm-sync = { path = "../../libs/lgtm-sync" }
 base64 = "0.22"
 octocrab = { version = "0.54.1", default-features = false, features = ["default-client", "rustls", "rustls-ring", "timeout"] }
 url = "2"

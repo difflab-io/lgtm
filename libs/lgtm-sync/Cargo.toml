@@ -1,0 +1,10 @@
+[package]
+name = "lgtm-sync"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+anyhow = "1"
+lgtm-db = { path = "../lgtm-db", default-features = false }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

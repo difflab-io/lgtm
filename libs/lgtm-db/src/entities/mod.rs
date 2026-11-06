@@ -5,6 +5,8 @@ pub mod identities;
 pub mod mutation_receipts;
 pub mod review_contexts;
 pub mod sessions;
+pub mod sync_account;
+pub mod sync_reviews;
 pub mod threads;
 pub mod workspace_paths;
 

@@ -1,0 +1,14 @@
+FROM rust:1.94-bookworm AS build
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+COPY apps/lgtm-cli/Cargo.toml apps/lgtm-cli/Cargo.toml
+COPY apps/lgtm-backend/Cargo.toml apps/lgtm-backend/Cargo.toml
+COPY libs/lgtm-db libs/lgtm-db
+COPY libs/lgtm-sync libs/lgtm-sync
+COPY apps/lgtm-sync-service apps/lgtm-sync-service
+# Cargo resolves every workspace member; these stubs avoid building the local app.
+RUN mkdir -p apps/lgtm-cli/src apps/lgtm-backend/src && touch apps/lgtm-cli/build.rs apps/lgtm-backend/build.rs && printf 'fn main() {}\n' > apps/lgtm-cli/src/main.rs && printf 'fn main() {}\n' > apps/lgtm-backend/src/main.rs
+RUN cargo build --locked --release -p lgtm-sync-service
+FROM debian:bookworm-slim
+COPY --from=build /app/target/release/lgtm-sync-service /usr/local/bin/lgtm-sync-service
+ENTRYPOINT ["lgtm-sync-service"]
