@@ -2800,8 +2800,6 @@ dependencies = [
  "dirs",
  "fs2",
  "gix",
- "lgtm-config",
- "lgtm-env",
  "mime_guess",
  "nix 0.30.1",
  "octocrab",
