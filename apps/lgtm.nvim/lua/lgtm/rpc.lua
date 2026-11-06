@@ -7,6 +7,7 @@ local M = {
     "anchor_evidence",
     "diff_service",
     "file_reviews",
+    "local_snapshots",
   },
 }
 local initializing, waiting = false, {}

@@ -91,6 +91,7 @@ impl IdentityService for Api {
                 "anchor_evidence".into(),
                 "diff_service".into(),
                 "file_reviews".into(),
+                "local_snapshots".into(),
                 "rejected_submission_recovery".into(),
             ],
             ..Default::default()

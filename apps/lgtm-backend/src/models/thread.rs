@@ -106,6 +106,7 @@ impl Thread {
     /// Convert the domain value to its RPC representation.
     pub(crate) fn into_proto(self) -> p::Thread {
         let v = self;
+        let snapshot = v.evidence.as_ref().and_then(|e| e.snapshot.clone());
         let mut original = m::Anchor::into_proto(v.anchor);
         if let Some(evidence) = v.evidence {
             original.source = Some(m::AnchorSource::into_proto(evidence.source)).into();
@@ -118,6 +119,7 @@ impl Thread {
             .into();
         }
         p::Thread {
+            snapshot: snapshot.map(m::LocalSnapshot::into_proto).into(),
             id: v.id.to_string(),
             anchor: Some(original).into(),
             current_path: v.current_path.unwrap_or_default(),

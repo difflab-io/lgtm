@@ -5,6 +5,30 @@ use connectrpc::{
     ConnectError, Encodable, RequestContext, Response, ServiceRequest, ServiceResult,
 };
 impl ReviewService for Api {
+    #[tracing::instrument(name = "rpc_request", skip_all, fields(rpc.method = "lgtm.v1/get_thread_source"))]
+    async fn get_thread_source<'a>(
+        &'a self,
+        ctx: RequestContext,
+        request: ServiceRequest<'_, GetThreadSourceRequest>,
+    ) -> ServiceResult<impl Encodable<GetThreadSourceResponse> + Send + use<'a>> {
+        let request = request.to_owned_message();
+        self.reviews
+            .auth()
+            .requester(&ctx)
+            .await
+            .map_err(ConnectError::from)?;
+        let scope = m::ReviewScope::from_proto(&request.scope)?;
+        let (snapshot, content) = self
+            .reviews
+            .get_thread_source(&scope, &id(&request.thread_id)?)
+            .await
+            .map_err(ConnectError::from)?;
+        Response::ok(GetThreadSourceResponse {
+            snapshot: Some(snapshot.into_proto()).into(),
+            content,
+            ..Default::default()
+        })
+    }
     #[tracing::instrument(name = "rpc_request", skip_all, fields(rpc.method = "lgtm.v1/get_file_reviews"))]
     async fn get_file_reviews<'a>(
         &'a self,

@@ -22,6 +22,30 @@ zig = "0.16.0"
 [tasks.install]
 run = ["cargo fetch", "bun install --frozen-lockfile"]
 
+[tasks."poc:check"]
+description = "Check the integrated local snapshot prototype"
+run = "cargo check -p lgtm-backend --all-targets"
+
+[tasks."poc:build"]
+description = "Build the existing app with backend snapshot capture"
+depends = ["//apps/lgtm-cli:build"]
+
+[tasks."poc:test"]
+description = "Test snapshot persistence and existing source/anchor contracts"
+run = "cargo test -p lgtm-backend --test local_snapshots --test review_anchors --test workspace_service --test review_service --test review_rpc"
+
+[tasks."poc:test:postgres"]
+description = "Verify snapshot workflows on SQLite and PostgreSQL"
+run = "python3 mise-tasks/poc-postgres cargo test --locked -p lgtm-backend --features postgres --test local_snapshots"
+
+[tasks."poc:nvim"]
+description = "Exercise snapshot capture and historical source through real Neovim"
+depends = ["//e2e/nvim:install", "//apps/lgtm-cli:build"]
+run = "bun x vitest run --config e2e/nvim/vitest.config.ts notes.spec.ts local-review.spec.ts -t snapshot"
+
+[tasks."poc:lint"]
+run = "cargo clippy -p lgtm-backend --all-targets -- -D warnings"
+
 [tasks.build]
 depends = ["//apps/lgtm-cli:bundle"]
 run = ["cargo build --workspace", "bun run --filter lgtm-web build"]

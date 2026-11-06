@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+"""Run the PoC contracts with an existing URL or a disposable local PostgreSQL cluster."""
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+from urllib.parse import quote
+
+
+def main():
+    if os.environ.get("LGTM_TEST_POSTGRES_URL"):
+        return subprocess.call(sys.argv[1:])
+    for program in ("initdb", "pg_ctl", "createdb"):
+        if not shutil.which(program):
+            raise SystemExit("Set LGTM_TEST_POSTGRES_URL or install PostgreSQL tools")
+    # A short, private socket directory avoids TCP ports and existing user clusters.
+    with tempfile.TemporaryDirectory(prefix="lgtm-poc-pg-", dir="/tmp") as directory:
+        data = Path(directory) / "data"
+        subprocess.run(["initdb", "-D", str(data), "--no-locale", "--encoding=UTF8",
+                        "--auth=trust", "--username=lgtm"], check=True, stdout=subprocess.DEVNULL)
+        try:
+            subprocess.run(["pg_ctl", "-D", str(data), "-l", f"{directory}/postgres.log",
+                            "-o", f"-h '' -k {directory}", "-w", "start"], check=True,
+                           stdout=subprocess.DEVNULL)
+            subprocess.run(["createdb", "-h", directory, "-U", "lgtm", "lgtm_test"], check=True)
+            environment = dict(os.environ)
+            environment["LGTM_TEST_POSTGRES_URL"] = (
+                f"postgres://lgtm@localhost/lgtm_test?host={quote(directory, safe='')}"
+            )
+            return subprocess.call(sys.argv[1:], env=environment)
+        finally:
+            if (data / "postmaster.pid").exists():
+                subprocess.run(["pg_ctl", "-D", str(data), "-m", "immediate", "-w", "stop"],
+                               check=True, stdout=subprocess.DEVNULL)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

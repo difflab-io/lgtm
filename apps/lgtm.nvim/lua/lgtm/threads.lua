@@ -558,7 +558,7 @@ function M.open(state, threads, pane)
       height = height,
       border = "rounded",
       title = #threads == 1 and " Review thread " or " Review threads ",
-      footer = " c reply · e edit · dd delete · x resolve · q close ",
+      footer = " c reply · e edit · dd delete · x resolve · o original · q close ",
     })
   end
   vim.wo[win].number = false
@@ -696,6 +696,25 @@ function M.open(state, threads, pane)
   end)
   map("q", close)
   map("<Esc>", close)
+  map("o", function()
+    local row = selected()
+    if not row or not row.thread.snapshot then
+      require("lgtm.notifications").show("This thread has no local snapshot")
+      return
+    end
+    local thread = row.thread
+    require("lgtm.rpc").call("GetThreadSource", {
+      scope = state.scope,
+      threadId = thread.id,
+    }, function(err, result)
+      if err then
+        require("lgtm.notifications").error(err)
+        return
+      end
+      close()
+      require("lgtm.snapshots").open(result, thread.anchor)
+    end)
+  end)
   map("c", function()
     local row = selected()
     if not row then

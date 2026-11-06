@@ -13,6 +13,14 @@ use serde_json::{Value, json};
 
 #[derive(Subcommand)]
 pub enum CommentsCommand {
+    /// Read the original file retained when a local review comment or note was saved.
+    Source {
+        thread: String,
+        #[command(flatten)]
+        context: ContextArgs,
+        #[command(flatten)]
+        actor: ActorArgs,
+    },
     /// Synchronize or recover a locally saved PR draft without publishing its review.
     Sync {
         comment: String,
@@ -123,6 +131,17 @@ pub struct CommentsArgs {
 
 pub async fn run(args: CommentsArgs, store: &Store, json_output: bool) -> Result<()> {
     let result = match args.command {
+        CommentsCommand::Source {
+            thread,
+            context,
+            actor,
+        } => {
+            let client = client_for_actor(store, &actor).await?;
+            let scope = get_scope(&client, &context, None, false).await?;
+            client
+                .call("GetThreadSource", json!({"scope":scope,"threadId":thread}))
+                .await?
+        }
         CommentsCommand::List { context } => {
             let client = Client::new(store)?;
             let scope = get_scope(&client, &context, None, false).await?;

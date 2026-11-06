@@ -27,7 +27,14 @@ pub async fn databases() -> Vec<(ReviewService, String, tempfile::TempDir)> {
         temp.path().join("review.sqlite").display()
     );
     #[allow(unused_mut)]
-    let mut result = vec![(service(&url).await.unwrap(), url, temp)];
+    let mut result = vec![(
+        service(&url)
+            .await
+            .unwrap()
+            .with_snapshot_root(temp.path().join("local")),
+        url,
+        temp,
+    )];
     #[cfg(feature = "postgres")]
     {
         let url=std::env::var("LGTM_TEST_POSTGRES_URL").expect("postgres contract tests require LGTM_TEST_POSTGRES_URL pointing at a disposable database");
@@ -42,10 +49,14 @@ pub async fn databases() -> Vec<(ReviewService, String, tempfile::TempDir)> {
             "{url}{}options=-c%20search_path%3D{schema}",
             if url.contains('?') { '&' } else { '?' }
         );
+        let temporary = tempfile::tempdir().unwrap();
         result.push((
-            service(&url).await.unwrap(),
+            service(&url)
+                .await
+                .unwrap()
+                .with_snapshot_root(temporary.path().join("local")),
             url,
-            tempfile::tempdir().unwrap(),
+            temporary,
         ));
     }
     result

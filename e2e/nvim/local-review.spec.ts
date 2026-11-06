@@ -33,6 +33,51 @@ async function placement(e: Editor, id: string) {
 }
 
 for (const profile of profiles) {
+  describe(
+    `When preserving local review snapshots [${profile}]`,
+    { tags: [profile, 'local-review'] },
+    () => {
+      const fixture = useEditor(profile)
+      it('A staged review snapshot retains the selected index version and opens it in Neovim', async () => {
+        // Arrange
+        const { editor: e, runtime: r } = fixture()
+        const feedback = await prepareStagedFeedback(e, r)
+        const state = (await e.state())!
+        const thread = state.conversation.threads.find((t: Json) => t.id === feedback.rootId)
+        const snapshot = thread.snapshot
+        const actor = await e.value<string>('require("lgtm.rpc").identity')
+        const gitDir = join(r.home, 'local', snapshot.projectSlug)
+        const head = await r.git('rev-parse', 'HEAD')
+        const staged = await r.git('rev-parse', `:${feedback.path}`)
+
+        // Assert
+        expect(
+          await r.git(
+            '--git-dir',
+            gitDir,
+            'show',
+            `refs/lgtm/reviews/${state.review.id}:${feedback.path}`,
+          ),
+        ).toBe(feedback.stagedBytes.trim())
+        expect(
+          (await r.rpc('GetThreadSource', { scope: state.scope, threadId: thread.id }, actor))
+            .content,
+        ).toBe(feedback.stagedBytes)
+
+        // Act
+        await e.pane('new', 2)
+        await e.popup()
+        await e.keys('o')
+        await e.wait('vim.b.lgtm_snapshot ~= nil', 'original staged source')
+
+        // Assert
+        expect(await e.text()).toContain('selected')
+        expect(await e.value('vim.bo.readonly and not vim.bo.modifiable')).toBe(true)
+        expect(await r.git('rev-parse', 'HEAD')).toBe(head)
+        expect(await r.git('rev-parse', `:${feedback.path}`)).toBe(staged)
+      })
+    },
+  )
   describe(`When reviewing staged changes [${profile}]`, { tags: [profile] }, () => {
     const fixture = useEditor(profile)
 

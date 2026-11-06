@@ -33,10 +33,10 @@ thiserror = "2.0.20"
 connectrpc = { version = "0.9.1", default-features = false, features = ["server", "json"] }
 connectrpc-health = { version = "0.9.0", default-features = false }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "process"] }
+tempfile = "3"
 
 [dev-dependencies]
 axum = "0.8"
-tempfile = "3"
 connectrpc = { version = "0.9.1", default-features = false, features = ["client"] }
 connectrpc-health = "0.9.0"
 

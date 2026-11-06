@@ -36,6 +36,55 @@ async function prepareNote(e: Editor, r: TestHarness, body: string, reply?: stri
 }
 
 for (const profile of profiles) {
+  describe(`When preserving note snapshots [${profile}]`, { tags: [profile, 'notes'] }, () => {
+    const fixture = useEditor(profile)
+    it('A note snapshot opens the original saved file after a rewrite and restart', async () => {
+      // Arrange
+      const { editor: e, runtime: r } = fixture()
+      const file = await prepareBrowsingFile(r)
+      const head = await r.git('rev-parse', 'HEAD')
+      const index = await readFile(join(r.workspace, '.git/index'))
+
+      // Act
+      await e.edit(file)
+      await e.command('1,2Lgtm note')
+      await e.compose('Keep the original saved source')
+      const state = await e.lua(
+        'local s=require("lgtm.notes").states[vim.api.nvim_get_current_buf()]; return {scope=s.scope,conversation=s.conversation}',
+      )
+      const thread = state.conversation.threads[0]
+      const snapshot = thread.snapshot
+      const actor = await e.value<string>('require("lgtm.rpc").identity')
+
+      // Assert
+      expect(snapshot.projectSlug).toBeTruthy()
+      expect(snapshot.path).toBe('notes.txt')
+      const gitDir = join(r.home, 'local', snapshot.projectSlug)
+      expect(await r.git('--git-dir', gitDir, 'rev-parse', '--is-bare-repository')).toBe('true')
+      expect(await r.git('rev-parse', 'HEAD')).toBe(head)
+      expect(await readFile(join(r.workspace, '.git/index'))).toEqual(index)
+
+      // Act
+      await r.write('notes.txt', 'entirely rewritten\n')
+      await e.close()
+      await r.restart()
+      await e.start()
+      await e.edit(file)
+      await e.command('Lgtm notes')
+      await e.wait('vim.bo.filetype == "lgtm"', 'note thread list')
+      await e.keys('o')
+      await e.wait('vim.b.lgtm_snapshot ~= nil', 'original note source')
+
+      // Assert
+      expect(await e.text()).toContain('one\nchanged\nthree')
+      expect(await e.value('vim.bo.readonly and not vim.bo.modifiable')).toBe(true)
+      expect(await readFile(file, 'utf8')).toBe('entirely rewritten\n')
+      expect(
+        (await r.json(['comments', 'source', thread.id, '--notes', file, '--identity', actor]))
+          .content,
+      ).toBe('one\nchanged\nthree\n')
+    })
+  })
   describe(`When adding notes while browsing files [${profile}]`, { tags: [profile] }, () => {
     const fixture = useEditor(profile)
     it(

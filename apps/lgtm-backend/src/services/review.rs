@@ -22,6 +22,7 @@ pub struct ReviewService {
     database: Database,
     auth: AuthService,
     sources: super::diff::DiffService,
+    snapshots: super::SnapshotService,
 }
 
 /// Remote acknowledgments contain no copy of the comment, thread, or request body.
@@ -43,6 +44,7 @@ impl ReviewService {
             database,
             auth,
             sources: super::diff::DiffService::default(),
+            snapshots: super::SnapshotService::default(),
         }
     }
 
@@ -56,6 +58,11 @@ impl ReviewService {
 
     pub fn with_sources(mut self, sources: super::diff::DiffService) -> Self {
         self.sources = sources;
+        self
+    }
+
+    pub fn with_snapshot_root(mut self, local_root: std::path::PathBuf) -> Self {
+        self.snapshots = super::SnapshotService::new(local_root);
         self
     }
 
@@ -674,6 +681,9 @@ impl ReviewService {
             draft_body: None,
         };
         tx.sessions.insert(&sessions::Model::from(&s)).await?;
+        if comparison_kind != ComparisonKind::Notes {
+            self.snapshots.capture_review(&context, &s).await?;
+        }
         Self::record_mutation(&tx, &context.id, &actor.id, "start_session", guard, &s).await?;
         tx.commit().await?;
         Ok(s)
@@ -1180,6 +1190,36 @@ impl ReviewService {
 
     // Comments and notes ------------------------------------------------------
 
+    /// Read a scoped thread's original file from backend-owned Git storage.
+    pub async fn get_thread_source(
+        &self,
+        scope: &ReviewScope,
+        id: &Uuid,
+    ) -> Result<(LocalSnapshot, String)> {
+        let conversation = self
+            .get_scope_conversation(scope)
+            .await?
+            .ok_or_else(|| Error::NotFound("Context".into()))?;
+        let thread = conversation
+            .threads
+            .iter()
+            .find(|t| t.id == *id)
+            .ok_or_else(|| Error::NotFound("Thread in selected scope".into()))?;
+        let evidence = thread
+            .evidence
+            .as_ref()
+            .ok_or_else(|| Error::NotFound("Saved source evidence".into()))?;
+        let snapshot = evidence
+            .snapshot
+            .as_ref()
+            .ok_or_else(|| Error::NotFound("Local snapshot".into()))?;
+        let content = self
+            .snapshots
+            .get_content(snapshot, evidence.source.content_hash())
+            .await?;
+        Ok((snapshot.clone(), content))
+    }
+
     pub async fn get_comment(&self, context: &uuid::Uuid, id: &uuid::Uuid) -> Result<Comment> {
         let row = self
             .database
@@ -1235,7 +1275,7 @@ impl ReviewService {
         if guard.is_some() {
             Self::validate_local_context(&context).await?;
         }
-        if let Some(evidence) = &evidence {
+        let selected_source = if let Some(evidence) = &evidence {
             self.validate_anchor_evidence(
                 &context,
                 &s,
@@ -1243,9 +1283,21 @@ impl ReviewService {
                 evidence,
                 guard.and_then(|g| g.scope.as_ref()),
             )
-            .await?;
-        } else if matches!(anchor, Anchor::Line { .. }) {
-            return Err(invalid("Line comments require saved source evidence"));
+            .await?
+        } else {
+            if matches!(anchor, Anchor::Line { .. }) {
+                return Err(invalid("Line comments require saved source evidence"));
+            }
+            None
+        };
+        let thread_id = uuid::Uuid::new_v4();
+        let mut evidence = evidence;
+        if let (Some(evidence), Some((root, path, bytes))) = (&mut evidence, selected_source) {
+            evidence.snapshot = Some(
+                self.snapshots
+                    .capture_file(root, path, bytes, evidence.source.clone(), thread_id)
+                    .await?,
+            );
         }
         let source_path = Self::get_saved_source_location(
             &context,
@@ -1259,7 +1311,7 @@ impl ReviewService {
             source_path,
             orphan_reason: None,
             forge_observation: None,
-            id: uuid::Uuid::new_v4(),
+            id: thread_id,
             context_id: s.context_id,
             origin_session_id: Some(s.id),
             author: actor.clone(),
@@ -1388,21 +1440,35 @@ impl ReviewService {
                     "Select root notes; replies remain in their source thread",
                 ));
             }
-            if let Some(evidence) = target_evidence {
+            let selected_source = if let Some(evidence) = target_evidence {
                 self.validate_anchor_evidence(&target_context, &target, anchor, evidence, None)
-                    .await?;
-            } else if matches!(anchor, Anchor::Line { .. }) {
-                return Err(invalid("Line promotion requires target source evidence"));
+                    .await?
+            } else {
+                if matches!(anchor, Anchor::Line { .. }) {
+                    return Err(invalid("Line promotion requires target source evidence"));
+                }
+                None
+            };
+            let id = uuid::Uuid::new_v4();
+            let mut target_evidence = target_evidence.cloned();
+            if let (Some(evidence), Some((root, path, bytes))) =
+                (&mut target_evidence, selected_source)
+            {
+                evidence.snapshot = Some(
+                    self.snapshots
+                        .capture_file(root, path, bytes, evidence.source.clone(), id)
+                        .await?,
+                );
             }
             let source_path = Self::get_saved_source_location(&target_context, anchor, None)?
                 .map(|path| path.to_string_lossy().into_owned());
             let thread = Thread {
-                evidence: target_evidence.cloned(),
+                evidence: target_evidence,
                 current_path: None,
                 source_path,
                 orphan_reason: None,
                 forge_observation: None,
-                id: uuid::Uuid::new_v4(),
+                id,
                 context_id: target.context_id,
                 origin_session_id: Some(target.id),
                 author: source.author.clone(),
@@ -3322,7 +3388,7 @@ impl ReviewService {
         anchor: &Anchor,
         evidence: &AnchorEvidence,
         scope: Option<&ReviewScope>,
-    ) -> Result<()> {
+    ) -> Result<Option<(std::path::PathBuf, String, Vec<u8>)>> {
         use crate::database::types::SourceKind;
         evidence.validate()?;
         let (path, range, side) = match anchor {
@@ -3390,7 +3456,7 @@ impl ReviewService {
             ));
         }
         if context.key.is_forge_backed() {
-            return Ok(());
+            return Ok(None);
         }
         let (root, path) =
             if let Some(absolute) = Self::get_saved_source_location(context, anchor, scope)? {
@@ -3416,6 +3482,8 @@ impl ReviewService {
             };
         let check_working_index =
             session.comparison_kind == ComparisonKind::Working && kind == SourceKind::IndexFile;
+        let source_root = root.clone();
+        let source_path = path.clone();
         let (actual, bytes) = tokio::task::spawn_blocking(move || {
             let selected =
                 super::workspace::get_source(&root, &path, kind, source_commit.as_deref())?;
@@ -3440,7 +3508,7 @@ impl ReviewService {
         if captured != *evidence {
             return Err(Error::Conflict("Saved source or selected evidence changed; keep the body and refresh before commenting".into()));
         }
-        Ok(())
+        Ok(Some((source_root, source_path, bytes)))
     }
 
     fn get_saved_source_location(

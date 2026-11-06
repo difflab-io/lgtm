@@ -62,6 +62,9 @@ pub use forge_repository_url::ForgeRepositoryUrl;
 pub mod local_location;
 pub use local_location::LocalLocation;
 
+pub mod local_snapshot;
+pub use local_snapshot::LocalSnapshot;
+
 pub mod mutation_guard;
 pub use mutation_guard::MutationGuard;
 

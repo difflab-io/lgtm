@@ -70,7 +70,15 @@ message Thread {
   string version = 10;
   // Immutable absolute saved-file origin for notes; empty for repository-relative anchors.
   string source_path = 11;
+  // Backend-retained original file, independent of mutable working content.
+  LocalSnapshot snapshot = 12;
 }
+
+message LocalSnapshot { string project_slug = 1; string commit_oid = 2; string path = 3; }
+
+message GetThreadSourceRequest { ReviewScope scope = 1; string thread_id = 2; }
+
+message GetThreadSourceResponse { LocalSnapshot snapshot = 1; string content = 2; }
 
 message AddCommentRequest {
   reserved 1;
@@ -194,6 +202,7 @@ service ReviewService {
   rpc RefreshReview(RefreshReviewRequest) returns (RefreshReviewResponse);
   rpc CompleteReview(CompleteReviewRequest) returns (CompleteReviewResponse);
   rpc GetConversation(GetConversationRequest) returns (GetConversationResponse);
+  rpc GetThreadSource(GetThreadSourceRequest) returns (GetThreadSourceResponse);
   rpc AddComment(AddCommentRequest) returns (AddCommentResponse);
   rpc SyncDraftComment(SyncDraftCommentRequest) returns (SyncDraftCommentResponse);
   rpc Reply(ReplyRequest) returns (ReplyResponse);

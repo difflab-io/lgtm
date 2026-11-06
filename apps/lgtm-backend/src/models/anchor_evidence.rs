@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 /// Bounded immutable text evidence. This is not a full-file snapshot.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnchorEvidence {
+    /// Server-created durable source receipt, never accepted from client input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<super::LocalSnapshot>,
     pub source: AnchorSource,
     pub selected_text: String,
     pub context_before: String,
@@ -71,6 +74,9 @@ impl AnchorEvidence {
     }
 
     pub fn validate(&self) -> Result<()> {
+        if let Some(snapshot) = &self.snapshot {
+            snapshot.validate()?;
+        }
         self.source.validate()?;
         if self.selected_text.len() > 65536
             || self.context_before.len() > 8192
@@ -88,6 +94,7 @@ impl AnchorEvidence {
             return Err(invalid("File evidence does not match its saved bytes"));
         }
         Ok(Self {
+            snapshot: None,
             source,
             selected_text: String::new(),
             context_before: String::new(),
@@ -109,6 +116,7 @@ impl AnchorEvidence {
         let start = start as usize - 1;
         let end = end as usize;
         let evidence = Self {
+            snapshot: None,
             source,
             selected_text: lines[start..end].join("\n"),
             context_before: lines[start.saturating_sub(3)..start].join("\n"),
@@ -138,6 +146,7 @@ impl AnchorEvidence {
             ));
         }
         let evidence = m::AnchorEvidence {
+            snapshot: None,
             source: m::AnchorSource::from_proto(&v.source)?,
             selected_text: v.evidence.selected_text.clone(),
             context_before: v.evidence.context_before.clone(),

@@ -187,6 +187,29 @@ async fn should_promote_notes_atomically_with_attribution_and_safe_retries_after
             .output()
             .unwrap();
         assert!(output.status.success());
+        let committed = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.test",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "base",
+            ])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        assert!(committed.status.success());
+        let head = std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        let head = String::from_utf8(head.stdout).unwrap().trim().to_owned();
         let target = service
             .ensure_context(
                 ContextKey::Local {
@@ -220,7 +243,10 @@ async fn should_promote_notes_atomically_with_attribution_and_safe_retries_after
             .start_session(
                 &target,
                 &bob,
-                CommitContext::default(),
+                CommitContext {
+                    base: Some(head.clone()),
+                    head: Some(head),
+                },
                 crate::common::comparison(&target),
                 None,
             )

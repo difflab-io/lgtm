@@ -81,6 +81,11 @@ impl Client {
                 AddCommentRequest,
                 add_comment_with_options
             ),
+            "GetThreadSource" => invoke!(
+                ReviewServiceClient,
+                GetThreadSourceRequest,
+                get_thread_source_with_options
+            ),
             "SyncDraftComment" => invoke!(
                 ReviewServiceClient,
                 SyncDraftCommentRequest,
