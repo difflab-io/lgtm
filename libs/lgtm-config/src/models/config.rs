@@ -305,17 +305,6 @@ impl LgtmConfig {
             },
         );
 
-        if let Some(script) = std::env::var_os("LGTM_E2E_LSP_SCRIPT")
-            .map(|val| val.to_string_lossy().trim().to_string())
-            .filter(|val| !val.is_empty())
-        {
-            for lang in languages.values_mut() {
-                lang.command = "node".to_string();
-                lang.args = vec![script.clone()];
-                lang.mise_tools.clear();
-            }
-        }
-
         Self {
             lsp: LspSettings::default(),
             mise: MiseSettings::default(),

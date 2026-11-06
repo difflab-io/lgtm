@@ -82,7 +82,6 @@
         .registerLspHandlers({
           onStatus: (event) => workspace.handleLspStatus(event),
           onDiagnostics: (event) => workspace.handleLspDiagnostics(event),
-          onConfigUpdated: (snapshot) => workspace.handleConfigUpdated(snapshot),
         })
         .then((stops) => {
           for (const stop of stops) {
@@ -90,6 +89,17 @@
             else stop()
           }
           if (active) void workspace.syncLspState()
+        })
+        .catch(() => {})
+      void client
+        .registerConfigHandlers?.({
+          onConfigUpdated: (snapshot) => workspace.handleConfigUpdated(snapshot),
+        })
+        .then((stops) => {
+          for (const stop of stops) {
+            if (active) unlisteners.push(stop)
+            else stop()
+          }
         })
         .catch(() => {})
     }

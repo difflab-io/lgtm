@@ -175,13 +175,15 @@ impl ConfigService {
 
         let global_path = self.get_global_config_path();
         if global_path.is_file() {
-            let overlay: LgtmConfigFileOverlay = Self::read_global_file(&global_path)?;
+            let overlay: LgtmConfigFileOverlay =
+                Self::read_scoped_file(ConfigScope::Global, &global_path)?;
             config.merge_file_overlay(overlay);
         }
 
         let project_path = Self::get_project_config_path(workspace_root);
         if project_path.is_file() {
-            let overlay: LgtmConfigFileOverlay = Self::read_project_file(&project_path)?;
+            let overlay: LgtmConfigFileOverlay =
+                Self::read_scoped_file(ConfigScope::Project, &project_path)?;
             config.merge_file_overlay(overlay);
         }
 
@@ -194,8 +196,8 @@ impl ConfigService {
         workspace_root: Option<&Path>,
     ) -> Result<ResolvedConfigSnapshot> {
         let global_path = self.get_global_config_path();
-        let global_patch = if global_path.is_file() {
-            Self::read_global_settings_patch(&global_path)?
+        let global_patch: UserSettingsPatch = if global_path.is_file() {
+            Self::read_scoped_file(ConfigScope::Global, &global_path)?
         } else {
             UserSettingsPatch::default()
         };
@@ -204,7 +206,7 @@ impl ConfigService {
             Some(ws) => {
                 let p_path = Self::get_project_config_path(ws);
                 let patch = if p_path.is_file() {
-                    Some(Self::read_project_settings_patch(&p_path)?)
+                    Some(Self::read_scoped_file(ConfigScope::Project, &p_path)?)
                 } else {
                     None
                 };
@@ -240,7 +242,7 @@ impl ConfigService {
         match scope {
             Some(ConfigScope::Global) => {
                 let global_path = self.get_global_config_path();
-                self.apply_and_write_global_patch(&global_path, patch)?;
+                self.apply_and_write_scoped_patch(ConfigScope::Global, &global_path, patch)?;
             }
             Some(ConfigScope::Project) => {
                 let Some(ws) = workspace_root else {
@@ -249,14 +251,20 @@ impl ConfigService {
                 let _ = self.ensure_workspace_dir(ws)?;
                 let _ = self.ensure_schema_files(Some(ws))?;
                 let project_path = Self::get_project_config_path(ws);
-                self.apply_and_write_project_patch(&project_path, patch)?;
+                self.apply_and_write_scoped_patch(ConfigScope::Project, &project_path, patch)?;
             }
             None => {
                 let existing_project = match workspace_root {
                     Some(ws) => {
                         let p_path = Self::get_project_config_path(ws);
                         if p_path.is_file() {
-                            Some((p_path.clone(), Self::read_project_settings_patch(&p_path)?))
+                            Some((
+                                p_path.clone(),
+                                Self::read_scoped_file::<UserSettingsPatch>(
+                                    ConfigScope::Project,
+                                    &p_path,
+                                )?,
+                            ))
                         } else {
                             None
                         }
@@ -270,11 +278,19 @@ impl ConfigService {
                 if let (Some(proj_patch), Some((project_path, _))) =
                     (project_part, existing_project)
                 {
-                    self.apply_and_write_project_patch(&project_path, proj_patch)?;
+                    self.apply_and_write_scoped_patch(
+                        ConfigScope::Project,
+                        &project_path,
+                        proj_patch,
+                    )?;
                 }
                 if let Some(glob_patch) = global_part {
                     let global_path = self.get_global_config_path();
-                    self.apply_and_write_global_patch(&global_path, glob_patch)?;
+                    self.apply_and_write_scoped_patch(
+                        ConfigScope::Global,
+                        &global_path,
+                        glob_patch,
+                    )?;
                 }
             }
         }
@@ -291,51 +307,10 @@ impl ConfigService {
     ) -> Result<ConfigDocument> {
         let target_path = self.resolve_document_path(workspace_root, scope, preferred_format)?;
         let format = ConfigFormat::from_path(&target_path);
-
-        match scope {
-            ConfigScope::Global => {
-                let _ = self.ensure_schema_files(workspace_root)?;
-                if !target_path.is_file() {
-                    if let Some(parent) = target_path.parent() {
-                        std::fs::create_dir_all(parent).map_err(|source| {
-                            LgtmConfigError::GlobalConfigIo {
-                                path: parent.to_path_buf(),
-                                source,
-                            }
-                        })?;
-                    }
-                    let default_body = UserSettingsPatch::default_document(format);
-                    std::fs::write(&target_path, default_body).map_err(|source| {
-                        LgtmConfigError::GlobalConfigIo {
-                            path: target_path.clone(),
-                            source,
-                        }
-                    })?;
-                }
-            }
-            ConfigScope::Project => {
-                if let Some(ws) = workspace_root {
-                    let _ = self.ensure_workspace_dir(ws)?;
-                    let _ = self.ensure_schema_files(Some(ws))?;
-                }
-                if !target_path.is_file() {
-                    if let Some(parent) = target_path.parent() {
-                        std::fs::create_dir_all(parent).map_err(|source| {
-                            LgtmConfigError::ProjectConfigIo {
-                                path: parent.to_path_buf(),
-                                source,
-                            }
-                        })?;
-                    }
-                    let default_body = UserSettingsPatch::default_document(format);
-                    std::fs::write(&target_path, default_body).map_err(|source| {
-                        LgtmConfigError::ProjectConfigIo {
-                            path: target_path.clone(),
-                            source,
-                        }
-                    })?;
-                }
-            }
+        self.prepare_scoped_storage(scope, workspace_root)?;
+        if !target_path.is_file() {
+            let default_body = UserSettingsPatch::default_document(format);
+            Self::write_scoped_text(scope, &target_path, &default_body)?;
         }
 
         self.build_config_document(workspace_root, scope, &target_path)
@@ -350,45 +325,8 @@ impl ConfigService {
         preferred_format: Option<ConfigFormat>,
     ) -> Result<(ConfigDocument, Option<ResolvedConfigSnapshot>)> {
         let target_path = self.resolve_document_path(workspace_root, scope, preferred_format)?;
-        match scope {
-            ConfigScope::Global => {
-                let _ = self.ensure_schema_files(workspace_root)?;
-                if let Some(parent) = target_path.parent() {
-                    std::fs::create_dir_all(parent).map_err(|source| {
-                        LgtmConfigError::GlobalConfigIo {
-                            path: parent.to_path_buf(),
-                            source,
-                        }
-                    })?;
-                }
-                std::fs::write(&target_path, content).map_err(|source| {
-                    LgtmConfigError::GlobalConfigIo {
-                        path: target_path.clone(),
-                        source,
-                    }
-                })?;
-            }
-            ConfigScope::Project => {
-                if let Some(ws) = workspace_root {
-                    let _ = self.ensure_workspace_dir(ws)?;
-                    let _ = self.ensure_schema_files(Some(ws))?;
-                }
-                if let Some(parent) = target_path.parent() {
-                    std::fs::create_dir_all(parent).map_err(|source| {
-                        LgtmConfigError::ProjectConfigIo {
-                            path: parent.to_path_buf(),
-                            source,
-                        }
-                    })?;
-                }
-                std::fs::write(&target_path, content).map_err(|source| {
-                    LgtmConfigError::ProjectConfigIo {
-                        path: target_path.clone(),
-                        source,
-                    }
-                })?;
-            }
-        }
+        self.prepare_scoped_storage(scope, workspace_root)?;
+        Self::write_scoped_text(scope, &target_path, content)?;
 
         let doc = self.build_config_document(workspace_root, scope, &target_path)?;
         let snapshot = self.get_settings_snapshot(workspace_root).ok();
@@ -556,48 +494,43 @@ impl ConfigService {
         })
     }
 
-    fn apply_and_write_global_patch(
+    fn prepare_scoped_storage(
         &self,
-        global_path: &Path,
-        patch: UserSettingsPatch,
+        scope: ConfigScope,
+        workspace_root: Option<&Path>,
     ) -> Result<()> {
-        let format = ConfigFormat::from_path(global_path);
-        let mut current = if global_path.is_file() {
-            Self::read_global_settings_patch(global_path).unwrap_or_default()
-        } else {
-            UserSettingsPatch::default()
-        };
-        if format == ConfigFormat::Json && current.schema.is_none() {
-            current.schema = Some(DEFAULT_SCHEMA_RELATIVE_PATH.to_string());
-        }
-        current.merge_patch(patch);
-
-        if let Some(parent) = global_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|source| LgtmConfigError::GlobalConfigIo {
-                path: parent.to_path_buf(),
-                source,
-            })?;
-        }
-        let serialized = Self::serialize_patch(&current, format).map_err(|message| {
-            LgtmConfigError::GlobalConfigParse {
-                path: global_path.to_path_buf(),
-                message,
+        match scope {
+            ConfigScope::Global => {
+                let _ = self.ensure_schema_files(workspace_root)?;
             }
-        })?;
-        std::fs::write(global_path, serialized).map_err(|source| LgtmConfigError::GlobalConfigIo {
-            path: global_path.to_path_buf(),
-            source,
-        })
+            ConfigScope::Project => {
+                if let Some(ws) = workspace_root {
+                    let _ = self.ensure_workspace_dir(ws)?;
+                    let _ = self.ensure_schema_files(Some(ws))?;
+                }
+            }
+        }
+        Ok(())
     }
 
-    fn apply_and_write_project_patch(
+    fn write_scoped_text(scope: ConfigScope, target_path: &Path, content: &str) -> Result<()> {
+        if let Some(parent) = target_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|source| Self::scoped_io_error(scope, parent, source))?;
+        }
+        std::fs::write(target_path, content)
+            .map_err(|source| Self::scoped_io_error(scope, target_path, source))
+    }
+
+    fn apply_and_write_scoped_patch(
         &self,
-        project_path: &Path,
+        scope: ConfigScope,
+        path: &Path,
         patch: UserSettingsPatch,
     ) -> Result<()> {
-        let format = ConfigFormat::from_path(project_path);
-        let mut current = if project_path.is_file() {
-            Self::read_project_settings_patch(project_path).unwrap_or_default()
+        let format = ConfigFormat::from_path(path);
+        let mut current: UserSettingsPatch = if path.is_file() {
+            Self::read_scoped_file(scope, path).unwrap_or_default()
         } else {
             UserSettingsPatch::default()
         };
@@ -606,24 +539,9 @@ impl ConfigService {
         }
         current.merge_patch(patch);
 
-        if let Some(parent) = project_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|source| LgtmConfigError::ProjectConfigIo {
-                path: parent.to_path_buf(),
-                source,
-            })?;
-        }
-        let serialized = Self::serialize_patch(&current, format).map_err(|message| {
-            LgtmConfigError::ProjectConfigParse {
-                path: project_path.to_path_buf(),
-                message,
-            }
-        })?;
-        std::fs::write(project_path, serialized).map_err(|source| {
-            LgtmConfigError::ProjectConfigIo {
-                path: project_path.to_path_buf(),
-                source,
-            }
-        })
+        let serialized = Self::serialize_patch(&current, format)
+            .map_err(|message| Self::scoped_parse_error(scope, path, message))?;
+        Self::write_scoped_text(scope, path, &serialized)
     }
 
     fn serialize_patch(
@@ -655,72 +573,43 @@ impl ConfigService {
         }
     }
 
-    fn read_global_settings_patch(path: &Path) -> Result<UserSettingsPatch> {
-        let raw =
-            std::fs::read_to_string(path).map_err(|source| LgtmConfigError::GlobalConfigIo {
-                path: path.to_path_buf(),
-                source,
-            })?;
-        if raw.trim().is_empty() {
-            return Ok(UserSettingsPatch::default());
-        }
-        Self::deserialize_by_format(path, &raw).map_err(|message| {
-            LgtmConfigError::GlobalConfigParse {
-                path: path.to_path_buf(),
-                message,
-            }
-        })
-    }
-
-    fn read_project_settings_patch(path: &Path) -> Result<UserSettingsPatch> {
-        let raw =
-            std::fs::read_to_string(path).map_err(|source| LgtmConfigError::ProjectConfigIo {
-                path: path.to_path_buf(),
-                source,
-            })?;
-        if raw.trim().is_empty() {
-            return Ok(UserSettingsPatch::default());
-        }
-        Self::deserialize_by_format(path, &raw).map_err(|message| {
-            LgtmConfigError::ProjectConfigParse {
-                path: path.to_path_buf(),
-                message,
-            }
-        })
-    }
-
-    fn read_global_file<T: DeserializeOwned + Default>(path: &Path) -> Result<T> {
-        let raw =
-            std::fs::read_to_string(path).map_err(|source| LgtmConfigError::GlobalConfigIo {
-                path: path.to_path_buf(),
-                source,
-            })?;
+    fn read_scoped_file<T: DeserializeOwned + Default>(
+        scope: ConfigScope,
+        path: &Path,
+    ) -> Result<T> {
+        let raw = std::fs::read_to_string(path)
+            .map_err(|source| Self::scoped_io_error(scope, path, source))?;
         if raw.trim().is_empty() {
             return Ok(T::default());
         }
-        Self::deserialize_by_format(path, &raw).map_err(|message| {
-            LgtmConfigError::GlobalConfigParse {
-                path: path.to_path_buf(),
-                message,
-            }
-        })
+        Self::deserialize_by_format(path, &raw)
+            .map_err(|message| Self::scoped_parse_error(scope, path, message))
     }
 
-    fn read_project_file<T: DeserializeOwned + Default>(path: &Path) -> Result<T> {
-        let raw =
-            std::fs::read_to_string(path).map_err(|source| LgtmConfigError::ProjectConfigIo {
+    fn scoped_io_error(scope: ConfigScope, path: &Path, source: std::io::Error) -> LgtmConfigError {
+        match scope {
+            ConfigScope::Global => LgtmConfigError::GlobalConfigIo {
                 path: path.to_path_buf(),
                 source,
-            })?;
-        if raw.trim().is_empty() {
-            return Ok(T::default());
+            },
+            ConfigScope::Project => LgtmConfigError::ProjectConfigIo {
+                path: path.to_path_buf(),
+                source,
+            },
         }
-        Self::deserialize_by_format(path, &raw).map_err(|message| {
-            LgtmConfigError::ProjectConfigParse {
+    }
+
+    fn scoped_parse_error(scope: ConfigScope, path: &Path, message: String) -> LgtmConfigError {
+        match scope {
+            ConfigScope::Global => LgtmConfigError::GlobalConfigParse {
                 path: path.to_path_buf(),
                 message,
-            }
-        })
+            },
+            ConfigScope::Project => LgtmConfigError::ProjectConfigParse {
+                path: path.to_path_buf(),
+                message,
+            },
+        }
     }
 
     fn deserialize_by_format<T: DeserializeOwned>(
