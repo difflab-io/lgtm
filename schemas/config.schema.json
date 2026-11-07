@@ -36,6 +36,75 @@
       },
       "type": "object"
     },
+    "LanguageConfig": {
+      "description": "Language server and Mise tool preset for a single programming language.",
+      "properties": {
+        "args": {
+          "default": [],
+          "description": "Command-line arguments passed to the language server executable.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "description": "Executable name or path for the language server.",
+          "type": "string"
+        },
+        "default_tasks": {
+          "additionalProperties": {
+            "$ref": "#/$defs/MiseTaskConfig"
+          },
+          "default": {},
+          "description": "Default Mise tasks synthesized when this language is detected in a workspace.",
+          "type": "object"
+        },
+        "enabled": {
+          "description": "Whether this language preset is active.",
+          "type": "boolean"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Extra environment variables passed to the language server process.",
+          "type": "object"
+        },
+        "extensions": {
+          "description": "File extensions (without leading dots) mapped to this language.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "initialization_options": {
+          "description": "Optional JSON payload forwarded as `initializationOptions` during the LSP `initialize` handshake."
+        },
+        "mise_tools": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Mise tool specifications required to run this language server.",
+          "type": "object"
+        },
+        "root_markers": {
+          "description": "Marker files or directories that identify the language's project root.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "enabled",
+        "extensions",
+        "root_markers",
+        "mise_tools",
+        "command"
+      ],
+      "type": "object"
+    },
     "LineWrap": {
       "anyOf": [
         {
@@ -56,6 +125,65 @@
         }
       ],
       "description": "Line wrapping mode persisted under `editor.lineWrapping` (`\"off\"`, `\"auto\"`, or a column width)."
+    },
+    "LspSettingsPatch": {
+      "additionalProperties": false,
+      "description": "Sparse LSP settings overrides persisted under `lsp.*` in `config.json`.",
+      "properties": {
+        "autoInstall": {
+          "description": "Whether missing language server binaries should be installed via `mise install`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "enabled": {
+          "description": "Whether LSP integration is enabled for workspaces.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "requestTimeoutMs": {
+          "description": "Maximum duration in milliseconds to wait for an LSP JSON-RPC response.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "MiseTaskConfig": {
+      "anyOf": [
+        {
+          "description": "Shorthand shell command string.",
+          "type": "string"
+        },
+        {
+          "description": "Detailed task with an optional description and shell command.",
+          "properties": {
+            "description": {
+              "description": "Optional human-readable task summary.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "run": {
+              "description": "Shell command executed by `mise run`.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "A default Mise task definition for a language preset, represented as either a shell string or a detailed record."
     },
     "ThemeMode": {
       "description": "Supported color theme preferences persisted under `appearance.theme`.",
@@ -104,7 +232,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Sparse nested settings document and patch persisted in `config.json` and accepted by `config_update`.",
+  "description": "Sparse nested configuration document persisted in `~/.lgtm/config.json` and `<workspace>/.lgtm/config.json`.",
   "properties": {
     "$schema": {
       "description": "Optional JSON Schema reference URI for editor intelligence.",
@@ -135,6 +263,27 @@
       ],
       "description": "Partial code editor settings overrides (`editor.*`)."
     },
+    "languages": {
+      "additionalProperties": {
+        "$ref": "#/$defs/LanguageConfig"
+      },
+      "description": "Per-language LSP server and Mise toolchain overrides keyed by language ID (`languages.*`).",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "lsp": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LspSettingsPatch"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Partial LSP lifecycle and timeout overrides (`lsp.*`)."
+    },
     "workspace": {
       "anyOf": [
         {
@@ -147,6 +296,6 @@
       "description": "Partial workspace settings overrides (`workspace.*`)."
     }
   },
-  "title": "UserSettingsPatch",
+  "title": "LgtmConfigPatch",
   "type": "object"
 }

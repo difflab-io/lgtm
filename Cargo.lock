@@ -2870,7 +2870,6 @@ name = "lgtm-config"
 version = "0.1.0"
 dependencies = [
  "dirs",
- "figment",
  "optfield",
  "schemars",
  "serde",

@@ -153,9 +153,9 @@ sequenceDiagram
 | `lsp_get_state` | UI -> Host | `() -> LspWorkspaceSnapshot` | Return all tracked language server statuses and file diagnostics for the active workspace. |
 | `lsp_get_diagnostics_buffer` | UI -> Host | `(languageId?: string) -> LspDiagnosticsBuffer` | Render a read-only plain-text diagnostics report for all active servers or a single language. |
 | `lsp_restart` | UI -> Host | `(languageId: string) -> LspServerStatusEvent` | Restart all sessions for `languageId` in the active workspace and re-open tracked documents. |
-| `workspace_open_global_config` | UI -> Host | `() -> FileContent` | Ensure `~/.lgtm/config.json` exists with `$schema`, synchronize LSP (`biome lsp-proxy`), and return `FileContent` for `Cmd+,` editing. |
-| `workspace_open_local_config` | UI -> Host | `() -> FileContent` | Ensure `<workspace>/.lgtm/config.json` exists with `$schema`, synchronize LSP (`biome lsp-proxy`), and return `FileContent` for `Cmd+Shift+,` editing. |
-| `config_get` | UI -> Host | `() -> ResolvedConfigSnapshot` | Return effective deep-merged `UserSettings` plus global and project `UserSettingsPatch` trees. |
+| `workspace_open_global_config` | UI -> Host | `() -> FileContent` | Ensure `~/.lgtm/config.json` exists with `$schema`, synchronize LSP (`biome lsp-proxy`) asynchronously, and return `FileContent` for `Cmd+,` editing. |
+| `workspace_open_local_config` | UI -> Host | `() -> FileContent` | Ensure `~/.lgtm/config.json` exists, return an empty JSON temp buffer (`{\n}\n`) when `<workspace>/.lgtm/config.json` is absent (or read it if present), synchronize LSP (`biome lsp-proxy`) asynchronously, and return `FileContent` for `Cmd+Shift+,` editing. |
+| `config_get` | UI -> Host | `() -> ResolvedConfigSnapshot` | Return effective deep-merged `LgtmConfig` plus global and project `LgtmConfigPatch` trees. |
 | `lsp-status` | Host -> UI | `LspServerStatusEvent` | Real-time language server lifecycle status and error/warning counts. |
 | `lsp-diagnostics` | Host -> UI | `LspFileDiagnosticsEvent` | Real-time workspace-relative or global config file diagnostics with UTF-16 offsets. |
 | `config-updated` | Host -> UI | `ResolvedConfigSnapshot` | Live resolved nested settings snapshot emitted when `workspace_write` saves `~/.lgtm/config.json` or `<workspace>/.lgtm/config.json`. |
@@ -174,6 +174,7 @@ apps/
 │       ├── main.rs                    Desktop binary entrypoint and --ipc-bridge E2E mode
 │       ├── lib.rs                     Public crate exports
 │       ├── app.rs                     Tauri state registration, IPC command handlers, and quit lifecycle
+│       ├── events.rs                  AppEvents and EventSink emitter abstraction
 │       ├── error.rs                   Serializable IPC error codes and messages
 │       ├── models/
 │       │   ├── file_content.rs        UTF-8 FileContent with SHA-256 revision and LSP metadata

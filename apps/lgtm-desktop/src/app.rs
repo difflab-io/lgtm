@@ -10,54 +10,16 @@ use lgtm_lsp::{
     LspDiagnosticsBuffer, LspEvent, LspHoverResult, LspLocation, LspServerStatusEvent,
     LspWorkspaceSnapshot,
 };
-use tauri::{Emitter, Manager, State};
+use tauri::{Manager, State};
 
 #[cfg(any(test, feature = "e2e-bridge"))]
 use crate::services::BridgeEventForwarder;
 use crate::{
     error::{Result, error},
+    events::AppEvents,
     models::{FileContent, WorkspaceListing, WorkspaceNode},
     services::{LspService, WorkspaceService},
 };
-
-type EventSink = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
-
-/// Application-wide event emitter wired in `app.rs` to publish backend events to the webview and test bridge.
-#[derive(Clone)]
-pub struct AppEvents(EventSink);
-
-impl AppEvents {
-    #[cfg(any(test, feature = "e2e-bridge"))]
-    pub(crate) fn from_app_handle<R: tauri::Runtime>(
-        app_handle: &tauri::AppHandle<R>,
-        event_forwarder: Option<BridgeEventForwarder>,
-    ) -> Self {
-        let emit_handle = app_handle.clone();
-        Self(Arc::new(move |event, payload| {
-            if let Some(cb) = &event_forwarder {
-                cb(event, payload.clone());
-            }
-            let _ = emit_handle.emit(event, payload);
-        }))
-    }
-
-    #[cfg(not(any(test, feature = "e2e-bridge")))]
-    pub(crate) fn from_app_handle<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) -> Self {
-        let emit_handle = app_handle.clone();
-        Self(Arc::new(move |event, payload| {
-            let _ = emit_handle.emit(event, payload);
-        }))
-    }
-
-    // Public ------------------------------------------------------------------
-
-    /// Emits a named desktop event to the frontend webview and any registered test bridge forwarder.
-    pub fn emit<T: serde::Serialize>(&self, event: &str, payload: &T) {
-        if let Ok(value) = serde_json::to_value(payload) {
-            (self.0)(event, value);
-        }
-    }
-}
 
 /// Combined desktop host state managed by Tauri across all IPC command handlers.
 #[derive(Clone)]
@@ -423,7 +385,7 @@ pub async fn workspace_open(
         let effective_path = match path {
             Some(explicit) => Some(explicit),
             None if !w.is_custom_root() => config_service
-                .get_settings_snapshot(None)
+                .get_config_snapshot(None)
                 .ok()
                 .and_then(|snap| snap.effective.workspace.active_root)
                 .filter(|active| {
@@ -468,17 +430,18 @@ pub async fn workspace_read(
     relative_path: String,
 ) -> Result<FileContent> {
     let lsp_service = state.lsp.clone();
-    run_blocking(state, move |w| {
-        let mut file = w.get_file_content(&relative_path)?;
-        if let (Ok(root), Ok(path)) = (w.get_root(), w.get_entry_path(&relative_path)) {
-            let (language_id, lsp_status) =
-                lsp_service.open_or_sync_file(&root, &path, &file.content);
-            file.language_id = language_id;
-            file.lsp_status = lsp_status;
-        }
-        Ok(file)
+    let (mut file, root_and_path) = run_blocking(state, move |w| {
+        let file = w.get_file_content(&relative_path)?;
+        let root_and_path = w.get_root().ok().zip(w.get_entry_path(&relative_path).ok());
+        Ok((file, root_and_path))
     })
-    .await
+    .await?;
+    if let Some((root, path)) = root_and_path {
+        let (language_id, lsp_status) = lsp_service.open_or_sync_file(&root, &path, &file.content);
+        file.language_id = language_id;
+        file.lsp_status = lsp_status;
+    }
+    Ok(file)
 }
 
 /// Ensures the global `~/.lgtm/config.json` file exists, synchronizes LSP, and returns its contents.
@@ -486,35 +449,43 @@ pub async fn workspace_read(
 #[specta::specta]
 pub async fn workspace_open_global_config(state: State<'_, AppState>) -> Result<FileContent> {
     let lsp_service = state.lsp.clone();
-    run_blocking(state, move |w| {
-        let mut file = w.open_global_config()?;
-        if let (Ok(root), Ok(path)) = (w.get_root(), w.get_entry_path("~/.lgtm/config.json")) {
-            let (language_id, lsp_status) =
-                lsp_service.open_or_sync_file(&root, &path, &file.content);
-            file.language_id = language_id;
-            file.lsp_status = lsp_status;
-        }
-        Ok(file)
+    let (mut file, root_and_path) = run_blocking(state, move |w| {
+        let file = w.open_global_config()?;
+        let root_and_path = w
+            .get_root()
+            .ok()
+            .zip(w.get_entry_path("~/.lgtm/config.json").ok());
+        Ok((file, root_and_path))
     })
-    .await
+    .await?;
+    if let Some((root, path)) = root_and_path {
+        let (language_id, lsp_status) = lsp_service.open_or_sync_file(&root, &path, &file.content);
+        file.language_id = language_id;
+        file.lsp_status = lsp_status;
+    }
+    Ok(file)
 }
 
-/// Ensures the workspace `.lgtm/config.json` file exists, synchronizes LSP, and returns its contents.
+/// Ensures the global config exists, opens `.lgtm/config.json` (or an empty JSON temp buffer if absent), and synchronizes LSP.
 #[tauri::command]
 #[specta::specta]
 pub async fn workspace_open_local_config(state: State<'_, AppState>) -> Result<FileContent> {
     let lsp_service = state.lsp.clone();
-    run_blocking(state, move |w| {
-        let mut file = w.open_local_config()?;
-        if let (Ok(root), Ok(path)) = (w.get_root(), w.get_entry_path(".lgtm/config.json")) {
-            let (language_id, lsp_status) =
-                lsp_service.open_or_sync_file(&root, &path, &file.content);
-            file.language_id = language_id;
-            file.lsp_status = lsp_status;
-        }
-        Ok(file)
+    let (mut file, root_and_path) = run_blocking(state, move |w| {
+        let file = w.open_local_config()?;
+        let root_and_path = w
+            .get_root()
+            .ok()
+            .zip(w.get_entry_path(".lgtm/config.json").ok());
+        Ok((file, root_and_path))
     })
-    .await
+    .await?;
+    if let Some((root, path)) = root_and_path {
+        let (language_id, lsp_status) = lsp_service.open_or_sync_file(&root, &path, &file.content);
+        file.language_id = language_id;
+        file.lsp_status = lsp_status;
+    }
+    Ok(file)
 }
 
 /// Writes UTF-8 file contents to disk, notifies LSP `didSave`, and emits `config-updated` when a config file is saved.
@@ -528,19 +499,27 @@ pub async fn workspace_write(
     let lsp_service = state.lsp.clone();
     let config_service = state.config.clone();
     let events = state.events.clone();
-    run_blocking(state, move |w| {
+    let content_for_lsp = content.clone();
+    let (saved, save_context) = run_blocking(state, move |w| {
         let saved = w.write_file(&relative_path, &content)?;
-        if let (Ok(root), Ok(path)) = (w.get_root(), w.get_entry_path(&relative_path)) {
-            let _ = lsp_service.did_save(&root, &path, &content);
-            if w.is_config_path(&path)
-                && let Ok(snapshot) = config_service.get_settings_snapshot(Some(&root))
-            {
-                events.emit("config-updated", &snapshot);
-            }
-        }
-        Ok(saved)
+        let context = w
+            .get_root()
+            .ok()
+            .zip(w.get_entry_path(&relative_path).ok())
+            .map(|(root, path)| {
+                let is_cfg = w.is_config_path(&path);
+                (root, path, is_cfg)
+            });
+        Ok((saved, context))
     })
-    .await
+    .await?;
+    if let Some((root, path, is_cfg)) = save_context {
+        let _ = lsp_service.did_save(&root, &path, &content_for_lsp);
+        if is_cfg && let Ok(snapshot) = config_service.get_config_snapshot(Some(&root)) {
+            events.emit("config-updated", &snapshot);
+        }
+    }
+    Ok(saved)
 }
 
 /// Creates a new file inside a workspace-relative directory.
@@ -717,7 +696,7 @@ pub async fn config_get(state: State<'_, AppState>) -> Result<ResolvedConfigSnap
     run_blocking(state, move |w| {
         let root = w.get_root().ok();
         config_service
-            .get_settings_snapshot(root.as_deref())
+            .get_config_snapshot(root.as_deref())
             .map_err(|err| error("io", err.to_string()))
     })
     .await
@@ -753,8 +732,9 @@ mod tests {
                 assert!(generated.contains("export type AppearanceSettings"));
                 assert!(generated.contains("export type WorkspaceSettings"));
                 assert!(generated.contains("export type EditorSettings"));
-                assert!(generated.contains("export type UserSettings"));
-                assert!(generated.contains("export type UserSettingsPatch"));
+                assert!(generated.contains("export type LspSettings"));
+                assert!(generated.contains("export type LgtmConfig"));
+                assert!(generated.contains("export type LgtmConfigPatch"));
                 assert!(generated.contains("export type ResolvedConfigSnapshot"));
                 assert!(generated.contains("workspaceOpenGlobalConfig"));
                 assert!(generated.contains("workspaceOpenLocalConfig"));
@@ -770,7 +750,8 @@ mod tests {
             use super::*;
 
             #[test]
-            fn should_initialize_config_files_on_workspace_service_and_resolve_merged_snapshot() {
+            fn should_initialize_global_config_return_temp_buffer_for_missing_local_config_and_resolve_merged_snapshot()
+             {
                 // Arrange
                 let temp = TempDir::new().unwrap();
                 let mut workspace = WorkspaceService::from_home(temp.path().to_path_buf());
@@ -779,9 +760,12 @@ mod tests {
                 let config_service = ConfigService::from_home(temp.path().to_path_buf());
 
                 // Act
-                let initial = config_service.get_settings_snapshot(Some(&root)).unwrap();
+                let initial = config_service.get_config_snapshot(Some(&root)).unwrap();
+                let local_doc_before_save = workspace.open_local_config().unwrap();
+                let local_exists_before_save = root.join(".lgtm/config.json").exists();
+                let global_exists_after_open_local =
+                    temp.path().join(".lgtm/config.json").is_file();
                 let global_doc = workspace.open_global_config().unwrap();
-                let local_doc = workspace.open_local_config().unwrap();
                 let written_global = workspace
                     .write_file(
                         "~/.lgtm/config.json",
@@ -794,15 +778,19 @@ mod tests {
                         "{\n  \"appearance\": {\n    \"theme\": \"light\"\n  }\n}\n",
                     )
                     .unwrap();
-                let resolved = config_service.get_settings_snapshot(Some(&root)).unwrap();
+                let local_exists_after_save = root.join(".lgtm/config.json").is_file();
+                let resolved = config_service.get_config_snapshot(Some(&root)).unwrap();
 
                 // Assert
                 assert_eq!(initial.effective.appearance.theme, ThemeMode::System);
                 assert_eq!(initial.effective.editor.line_wrapping, LineWrap::Auto);
+                assert!(global_exists_after_open_local);
+                assert!(!local_exists_before_save);
+                assert_eq!(local_doc_before_save.content, "{\n}\n");
                 assert!(global_doc.content.contains("\"theme\": \"system\""));
-                assert!(local_doc.content.contains("\"theme\": \"system\""));
                 assert_ne!(global_doc.revision, written_global.revision);
-                assert_ne!(local_doc.revision, written_local.revision);
+                assert_ne!(local_doc_before_save.revision, written_local.revision);
+                assert!(local_exists_after_save);
                 assert!(
                     workspace
                         .is_config_path(&workspace.get_entry_path("~/.lgtm/config.json").unwrap())

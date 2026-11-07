@@ -245,11 +245,9 @@ export class WorkspaceService {
   /** Ensures `~/.lgtm/config.json` exists and opens it in `CodeEditor` as a standard file tab. */
   async openGlobalConfig() {
     if (!this.client.openGlobalConfig) return
-    const existingPath = this.settings.snapshot?.globalPath || '~/.lgtm/config.json'
-    const existingTab = this.tabs.find(
-      (tab) => tab.id === `file:${existingPath}` || tab.id === 'file:~/.lgtm/config.json',
-    )
-    if (existingTab && this.activeTabId === existingTab.id && this.fileContent) {
+    const path = '~/.lgtm/config.json'
+    const tabId = `file:${path}`
+    if (this.activeTabId === tabId && this.fileContent) {
       this.focusRequest++
       return
     }
@@ -260,14 +258,12 @@ export class WorkspaceService {
     this.openingError = null
     try {
       const content = await this.client.openGlobalConfig()
-      const snap = await this.settings.load()
+      void this.settings.load()
       if (!this.active || requestId !== this.openRequestSeq) return
-      const path = snap?.globalPath || '~/.lgtm/config.json'
       const title = 'Settings'
       this.selected = { path, name: title, kind: 'file' }
       this.fileContent = content
       this.lsp.recordFileStatus(content.lspStatus)
-      const tabId = `file:${path}`
       this.upsertTab({
         id: tabId,
         kind: 'file',

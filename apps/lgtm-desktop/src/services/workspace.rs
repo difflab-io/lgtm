@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use lgtm_config::UserSettingsPatch;
+use lgtm_config::LgtmConfigPatch;
 
 use crate::{
     error::{Result, error},
@@ -85,47 +85,32 @@ impl WorkspaceService {
 
     /// Ensures the global `~/.lgtm/config.json` file exists and reads its UTF-8 content.
     pub fn open_global_config(&self) -> Result<FileContent> {
-        fs::create_dir_all(&self.lgtm_home)?;
-        let biome_path = self.lgtm_home.join("biome.json");
-        if !biome_path.exists() {
-            fs::write(&biome_path, DEFAULT_BIOME_JSON)?;
-        }
-        let config_path = self.lgtm_home.join("config.json");
-        if !config_path.is_file() {
-            fs::write(&config_path, UserSettingsPatch::default_document())?;
-        }
+        self.ensure_global_config_file()?;
         self.get_file_content("~/.lgtm/config.json")
     }
 
-    /// Ensures the workspace `.lgtm/config.json` file exists and reads its UTF-8 content.
+    /// Ensures the global `~/.lgtm/config.json` exists and reads `.lgtm/config.json`, or returns an empty JSON temp buffer if `.lgtm/config.json` is absent.
     pub fn open_local_config(&self) -> Result<FileContent> {
+        self.ensure_global_config_file()?;
         let root = self.get_root()?;
-        let lgtm_dir = root.join(".lgtm");
-        fs::create_dir_all(&lgtm_dir)?;
-        let config_path = lgtm_dir.join("config.json");
-        if !config_path.is_file() {
-            fs::write(&config_path, UserSettingsPatch::default_document())?;
+        let config_path = root.join(".lgtm").join("config.json");
+        if config_path.is_file() {
+            return self.get_file_content(".lgtm/config.json");
         }
-        self.get_file_content(".lgtm/config.json")
+        FileContent::from_bytes(b"{\n}\n".to_vec())
     }
 
     /// Returns whether `path` points to the global `~/.lgtm/config.json` or active workspace `.lgtm/config.json`.
     pub fn is_config_path(&self, path: &Path) -> bool {
-        let Ok(canon) = path.canonicalize() else {
-            return false;
-        };
-        if self
-            .lgtm_home
-            .join("config.json")
-            .canonicalize()
-            .is_ok_and(|global| global == canon)
-        {
+        let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let global_path = self.lgtm_home.join("config.json");
+        if global_path.canonicalize().unwrap_or(global_path) == canon {
             return true;
         }
-        self.get_root()
-            .ok()
-            .and_then(|root| root.join(".lgtm/config.json").canonicalize().ok())
-            .is_some_and(|local| local == canon)
+        self.get_root().ok().is_some_and(|root| {
+            let local = root.join(".lgtm").join("config.json");
+            local.canonicalize().unwrap_or(local) == canon
+        })
     }
 
     /// Lists visible entries inside a workspace-relative directory.
@@ -195,6 +180,31 @@ impl WorkspaceService {
         if relative.is_empty() {
             return Err(error("unsupported", "Choose a file inside the workspace."));
         }
+        if content.len() as u64 > MAX_BYTES {
+            return Err(error(
+                "tooLarge",
+                "This file is larger than the 16 MB viewing limit.",
+            ));
+        }
+        if relative == ".lgtm/config.json" {
+            let root = self.get_root()?;
+            let lgtm_dir = root.join(".lgtm");
+            fs::create_dir_all(&lgtm_dir)?;
+            let path = lgtm_dir.join("config.json");
+            if let Ok(meta) = fs::symlink_metadata(&path)
+                && meta.file_type().is_symlink()
+            {
+                return Err(error("unsupported", "Linked files cannot be modified."));
+            }
+            let mut file = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&path)?;
+            file.write_all(content.as_bytes())?;
+            file.sync_all()?;
+            return FileContent::from_bytes(content.as_bytes().to_vec());
+        }
         if !self.is_global_config_reference(relative) {
             let root = self.get_root()?;
             let original = root.join(relative);
@@ -205,12 +215,6 @@ impl WorkspaceService {
         let path = self.get_entry_path(relative)?;
         if !fs::metadata(&path)?.is_file() {
             return Err(error("unsupported", "Choose a file inside the workspace."));
-        }
-        if content.len() as u64 > MAX_BYTES {
-            return Err(error(
-                "tooLarge",
-                "This file is larger than the 16 MB viewing limit.",
-            ));
         }
         let mut file = fs::OpenOptions::new()
             .write(true)
@@ -405,7 +409,13 @@ impl WorkspaceService {
     /// Resolves a workspace-relative path (or the global `~/.lgtm/config.json` path) to a canonical path on disk.
     pub fn get_entry_path(&self, relative: &str) -> Result<PathBuf> {
         if self.is_global_config_reference(relative) {
-            return Ok(self.lgtm_home.join("config.json").canonicalize()?);
+            let global_path = self.lgtm_home.join("config.json");
+            return Ok(global_path.canonicalize().unwrap_or(global_path));
+        }
+        if relative == ".lgtm/config.json" {
+            let root = self.get_root()?;
+            let local_path = root.join(".lgtm").join("config.json");
+            return Ok(local_path.canonicalize().unwrap_or(local_path));
         }
         let path = WorkspaceNode::validate_relative_path(relative)?;
         let root = self.get_root()?;
@@ -420,6 +430,19 @@ impl WorkspaceService {
     }
 
     // Private -----------------------------------------------------------------
+
+    fn ensure_global_config_file(&self) -> Result<PathBuf> {
+        fs::create_dir_all(&self.lgtm_home)?;
+        let biome_path = self.lgtm_home.join("biome.json");
+        if !biome_path.exists() {
+            fs::write(&biome_path, DEFAULT_BIOME_JSON)?;
+        }
+        let config_path = self.lgtm_home.join("config.json");
+        if !config_path.is_file() {
+            fs::write(&config_path, LgtmConfigPatch::default_document())?;
+        }
+        Ok(config_path)
+    }
 
     fn is_global_config_reference(&self, reference: &str) -> bool {
         if reference == "~/.lgtm/config.json" {

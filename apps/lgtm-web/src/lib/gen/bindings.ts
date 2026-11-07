@@ -17,7 +17,7 @@ export const commands = {
 	workspaceRead: (relativePath: string) => __TAURI_INVOKE<FileContent>("workspace_read", { relativePath }),
 	/**  Ensures the global `~/.lgtm/config.json` file exists, synchronizes LSP, and returns its contents. */
 	workspaceOpenGlobalConfig: () => __TAURI_INVOKE<FileContent>("workspace_open_global_config"),
-	/**  Ensures the workspace `.lgtm/config.json` file exists, synchronizes LSP, and returns its contents. */
+	/**  Ensures the global config exists, opens `.lgtm/config.json` (or an empty JSON temp buffer if absent), and synchronizes LSP. */
 	workspaceOpenLocalConfig: () => __TAURI_INVOKE<FileContent>("workspace_open_local_config"),
 	/**  Writes UTF-8 file contents to disk, notifies LSP `didSave`, and emits `config-updated` when a config file is saved. */
 	workspaceWrite: (relativePath: string, content: string) => __TAURI_INVOKE<FileContent>("workspace_write", { relativePath, content }),
@@ -82,6 +82,58 @@ export type FileContent = {
 	languageId?: string | null,
 	/**  Optional active LSP server status for the file's language and project root. */
 	lspStatus?: LspServerStatusEvent | null,
+};
+
+/**  Language server and Mise tool preset for a single programming language. */
+export type LanguageConfig = {
+	/**  Whether this language preset is active. */
+	enabled: boolean,
+	/**  File extensions (without leading dots) mapped to this language. */
+	extensions: string[],
+	/**  Marker files or directories that identify the language's project root. */
+	root_markers: string[],
+	/**  Mise tool specifications required to run this language server. */
+	mise_tools: { [key in string]: string },
+	/**  Executable name or path for the language server. */
+	command: string,
+	/**  Command-line arguments passed to the language server executable. */
+	args?: string[],
+	/**  Extra environment variables passed to the language server process. */
+	env?: { [key in string]: string },
+	/**  Default Mise tasks synthesized when this language is detected in a workspace. */
+	default_tasks?: { [key in string]: MiseTaskConfig },
+};
+
+/**  Complete resolved LGTM configuration combining built-in presets, global `~/.lgtm/config.json`, and project `<workspace>/.lgtm/config.json`. */
+export type LgtmConfig = {
+	/**  Optional JSON Schema reference URI for editor intelligence. */
+	$schema?: string | null,
+	/**  Appearance and theme settings (`appearance.*`). */
+	appearance?: AppearanceSettings,
+	/**  Workspace history and active folder settings (`workspace.*`). */
+	workspace?: WorkspaceSettings,
+	/**  Code editor display settings (`editor.*`). */
+	editor?: EditorSettings,
+	/**  Global LSP lifecycle and timeout settings (`lsp.*`). */
+	lsp?: LspSettings,
+	/**  Per-language LSP server and Mise toolchain definitions keyed by language ID (`languages.*`). */
+	languages?: { [key in string]: LanguageConfig },
+};
+
+/**  Sparse nested configuration document persisted in `~/.lgtm/config.json` and `<workspace>/.lgtm/config.json`. */
+export type LgtmConfigPatch = {
+	/**  Optional JSON Schema reference URI for editor intelligence. */
+	$schema?: string | null,
+	/**  Partial appearance settings overrides (`appearance.*`). */
+	appearance?: AppearanceSettingsPatch | null,
+	/**  Partial workspace settings overrides (`workspace.*`). */
+	workspace?: WorkspaceSettingsPatch | null,
+	/**  Partial code editor settings overrides (`editor.*`). */
+	editor?: EditorSettingsPatch | null,
+	/**  Partial LSP lifecycle and timeout overrides (`lsp.*`). */
+	lsp?: LspSettingsPatch | null,
+	/**  Per-language LSP server and Mise toolchain overrides keyed by language ID (`languages.*`). */
+	languages?: { [key in string]: LanguageConfig } | null,
 };
 
 /**  Line wrapping mode persisted under `editor.lineWrapping` (`"off"`, `"auto"`, or a column width). */
@@ -193,6 +245,42 @@ export type LspServerStatusEvent = {
 	warningCount: number,
 };
 
+/**  Settings controlling LSP server startup, automatic tool installation, and request timeouts (`lsp.*`). */
+export type LspSettings = {
+	/**  Whether LSP integration is enabled for workspaces. */
+	enabled?: boolean,
+} & ({
+	/**  Whether missing language server binaries should be installed via `mise install`. */
+	autoInstall?: boolean,
+} & {
+	/**  Whether missing language server binaries should be installed via `mise install`. */
+	auto_install?: boolean,
+}) & ({
+	/**  Maximum duration in milliseconds to wait for an LSP JSON-RPC response. */
+	requestTimeoutMs?: number,
+} & {
+	/**  Maximum duration in milliseconds to wait for an LSP JSON-RPC response. */
+	request_timeout_ms?: number,
+});
+
+/**  Sparse LSP settings overrides persisted under `lsp.*` in `config.json`. */
+export type LspSettingsPatch = {
+	/**  Whether LSP integration is enabled for workspaces. */
+	enabled?: boolean | null,
+} & ({
+	/**  Whether missing language server binaries should be installed via `mise install`. */
+	autoInstall?: boolean | null,
+} & {
+	/**  Whether missing language server binaries should be installed via `mise install`. */
+	auto_install?: boolean | null,
+}) & ({
+	/**  Maximum duration in milliseconds to wait for an LSP JSON-RPC response. */
+	requestTimeoutMs?: number | null,
+} & {
+	/**  Maximum duration in milliseconds to wait for an LSP JSON-RPC response. */
+	request_timeout_ms?: number | null,
+});
+
 /**  Complete snapshot of all active language servers and file diagnostics for a workspace. */
 export type LspWorkspaceSnapshot = {
 	/**  Canonical root directory of the workspace. */
@@ -203,14 +291,25 @@ export type LspWorkspaceSnapshot = {
 	diagnosticsByPath: { [key in string]: LspDiagnostic[] },
 };
 
-/**  Merged nested settings snapshot together with per-scope patch trees returned to the frontend. */
+/**  A default Mise task definition for a language preset, represented as either a shell string or a detailed record. */
+export type MiseTaskConfig = 
+/**  Shorthand shell command string. */
+string | 
+/**  Detailed task with an optional description and shell command. */
+{ 
+/**  Optional human-readable task summary. */
+description?: string | null; 
+/**  Shell command executed by `mise run`. */
+run: string };
+
+/**  Merged configuration snapshot together with per-scope patch trees returned to the frontend. */
 export type ResolvedConfigSnapshot = {
-	/**  Effective deep-merged settings (project leaf overrides layered over global settings and defaults). */
-	effective: UserSettings,
-	/**  Sparse global settings loaded from `~/.lgtm/config.json`. */
-	global: UserSettingsPatch,
-	/**  Sparse project settings loaded from `<workspace>/.lgtm/config.json`, if present. */
-	project: UserSettingsPatch | null,
+	/**  Effective deep-merged configuration (project leaf overrides layered over global settings and defaults). */
+	effective: LgtmConfig,
+	/**  Sparse global configuration loaded from `~/.lgtm/config.json`. */
+	global: LgtmConfigPatch,
+	/**  Sparse project configuration loaded from `<workspace>/.lgtm/config.json`, if present. */
+	project: LgtmConfigPatch | null,
 	/**  Absolute path to the active global config file. */
 	globalPath: string,
 	/**  Absolute path to the active project config file. */
@@ -225,30 +324,6 @@ export type ThemeMode =
 "light" | 
 /**  Force the dark color scheme. */
 "dark";
-
-/**  Complete resolved nested settings tree combining defaults, global settings, and project overrides. */
-export type UserSettings = {
-	/**  Optional JSON Schema reference URI for editor intelligence. */
-	$schema?: string | null,
-	/**  Appearance and theme settings (`appearance.*`). */
-	appearance?: AppearanceSettings,
-	/**  Workspace history and active folder settings (`workspace.*`). */
-	workspace?: WorkspaceSettings,
-	/**  Code editor display settings (`editor.*`). */
-	editor?: EditorSettings,
-};
-
-/**  Sparse nested settings document and patch persisted in `config.json` and accepted by `config_update`. */
-export type UserSettingsPatch = {
-	/**  Optional JSON Schema reference URI for editor intelligence. */
-	$schema?: string | null,
-	/**  Partial appearance settings overrides (`appearance.*`). */
-	appearance?: AppearanceSettingsPatch | null,
-	/**  Partial workspace settings overrides (`workspace.*`). */
-	workspace?: WorkspaceSettingsPatch | null,
-	/**  Partial code editor settings overrides (`editor.*`). */
-	editor?: EditorSettingsPatch | null,
-};
 
 /**  A workspace failure returned to the application. */
 export type WorkspaceError = {

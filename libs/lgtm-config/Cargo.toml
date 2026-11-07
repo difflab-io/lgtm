@@ -10,7 +10,6 @@ license = "Apache-2.0"
 
 [dependencies]
 dirs = "6"
-figment = "0.10"
 optfield = "0.3"
 schemars = "1"
 serde = { version = "1", features = ["derive"] }
