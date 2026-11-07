@@ -329,9 +329,10 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
         await page.keyboard.press('Meta+,')
 
         // Assert
-        await expect(
-          tablist.getByRole('tab', { name: 'Settings (config.json)', exact: true }),
-        ).toHaveAttribute('aria-selected', 'true')
+        await expect(tablist.getByRole('tab', { name: 'Settings', exact: true })).toHaveAttribute(
+          'aria-selected',
+          'true',
+        )
         await expect(lspButton).toContainText('LSP: json (ready)')
         await expect(page.locator('.cm-content')).toContainText(
           'https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v0.1.0/schemas/config.schema.json',
@@ -356,7 +357,7 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
         // Act: open local project config (.lgtm/config.json) via Cmd+Shift+, (Meta+Shift+,) and override theme to light
         await page.keyboard.press('Meta+Shift+,')
         await expect(
-          tablist.getByRole('tab', { name: 'Project Settings (.lgtm/config.json)', exact: true }),
+          tablist.getByRole('tab', { name: 'Settings (project)', exact: true }),
         ).toHaveAttribute('aria-selected', 'true')
         await editorContent.click()
         await page.keyboard.press('ControlOrMeta+a')
@@ -364,9 +365,15 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
           '{\n  "$schema": "https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v0.1.0/schemas/config.schema.json",\n  "appearance": {\n    "theme": "light"\n  }\n}\n',
         )
 
-        // Assert: local config override live-applies light theme while preserving global lineWrapping off
+        // Assert: local config override live-applies light theme while preserving global lineWrapping off, and pressing Cmd+, again activates the existing Settings tab without duplicating it
         await expect(page.locator('html')).not.toHaveClass(/dark/)
         await expect(page.locator('.cm-content')).not.toHaveClass(/cm-lineWrapping/)
+        await page.keyboard.press('Meta+,')
+        await expect(tablist.getByRole('tab', { name: 'Settings', exact: true })).toHaveCount(1)
+        await expect(tablist.getByRole('tab', { name: 'Settings', exact: true })).toHaveAttribute(
+          'aria-selected',
+          'true',
+        )
         const globalSaved = JSON.parse(
           await readFile(join(workspace.lgtmHomeDir, 'config.json'), 'utf8'),
         )
