@@ -17,7 +17,6 @@ pub use models::settings::AppearanceSettingsPatch;
 pub use models::settings::ConfigDocument;
 pub use models::settings::ConfigFormat;
 pub use models::settings::ConfigScope;
-pub use models::settings::ConfigValidationIssue;
 pub use models::settings::DEFAULT_SCHEMA_RELATIVE_PATH;
 pub use models::settings::EditorSettings;
 pub use models::settings::EditorSettingsPatch;
