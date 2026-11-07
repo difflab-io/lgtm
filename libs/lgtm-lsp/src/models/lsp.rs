@@ -306,7 +306,13 @@ pub(crate) fn render_diagnostics_buffer(
         let rel_path = Path::new(path)
             .strip_prefix(workspace_root)
             .map(|rel| rel.display().to_string())
-            .unwrap_or_else(|_| path.clone());
+            .unwrap_or_else(|_| {
+                if Path::new(path).ends_with(".lgtm/config.json") {
+                    "~/.lgtm/config.json".to_string()
+                } else {
+                    path.clone()
+                }
+            });
         for diag in diags {
             matching_entries += 1;
             let severity_label = match diag.severity {

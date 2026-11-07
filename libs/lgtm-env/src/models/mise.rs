@@ -5,13 +5,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 
-/// Representation of the LGTM-managed `.lgtm/mise.toml` file.
+/// Representation of an LGTM-managed `mise.toml` file (`~/.lgtm/mise.toml` or `<workspace>/.lgtm/mise.toml`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct GeneratedMiseFile {
-    /// Tool versions synthesized from detected languages and user-configured `[tools]` in `.lgtm/mise.toml`.
+    /// Tool versions synthesized from detected languages and user-configured `[tools]` in `mise.toml`.
     #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
     pub tools: BTreeMap<String, String>,
-    /// Task definitions synthesized from detected languages and user-configured `[tasks]` in `.lgtm/mise.toml`.
+    /// Task definitions synthesized from detected languages and user-configured `[tasks]` in `mise.toml`.
     #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
     pub tasks: BTreeMap<String, MiseTaskEntry>,
 }
@@ -75,7 +75,17 @@ impl GeneratedMiseFile {
 
     // Public ------------------------------------------------------------------
 
-    /// Merges user-defined tools and tasks from an existing `.lgtm/mise.toml` file onto this model.
+    /// Adds or updates a managed dev tool entry (`tool = version`) in `[tools]`.
+    pub fn add_dev_tool(&mut self, tool: impl Into<String>, version: impl Into<String>) {
+        self.tools.insert(tool.into(), version.into());
+    }
+
+    /// Removes a managed dev tool entry from `[tools]` and returns its previous version if present.
+    pub fn remove_dev_tool(&mut self, tool: &str) -> Option<String> {
+        self.tools.remove(tool)
+    }
+
+    /// Merges user-defined tools and tasks from an existing `mise.toml` file onto this model.
     pub fn merge_existing(&mut self, existing: Self) {
         for (tool, version) in existing.tools {
             self.tools.insert(tool, version);
@@ -150,9 +160,12 @@ mod tests {
                 // Act
                 let mut generated = GeneratedMiseFile::from_config(&config, &detected);
                 generated.merge_existing(existing);
+                generated.add_dev_tool("biome", "latest");
+                let removed = generated.remove_dev_tool("biome");
                 let rendered = generated.render_toml().unwrap();
 
                 // Assert
+                assert_eq!(removed, Some("latest".to_string()));
                 assert_eq!(
                     generated.tools.get("rust-analyzer"),
                     Some(&"latest".to_string())

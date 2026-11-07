@@ -1,12 +1,10 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use figment::{Figment, providers::Serialized};
 use serde::de::DeserializeOwned;
 
 use crate::error::{LgtmConfigError, Result};
-use crate::models::config::{LanguageConfig, LgtmConfig, LgtmConfigFileOverlay};
-use crate::models::settings::{ResolvedConfigSnapshot, UserSettings, UserSettingsPatch};
+use crate::models::config::{LanguageConfig, LgtmConfig, LgtmConfigPatch, ResolvedConfigSnapshot};
 
 #[derive(Debug, Clone, Copy)]
 enum ConfigScope {
@@ -14,7 +12,7 @@ enum ConfigScope {
     Project,
 }
 
-/// Resolves global and workspace-level LGTM configuration, JSON Schema files, and `.lgtm/` directory layout.
+/// Resolves global (`~/.lgtm/config.json`) and workspace (`<workspace>/.lgtm/config.json`) configuration, JSON Schema files, and `.lgtm/` directory layout.
 #[derive(Debug, Clone, Default)]
 pub struct ConfigService {
     global_config_override: Option<PathBuf>,
@@ -68,12 +66,17 @@ impl ConfigService {
             .unwrap_or_else(|| self.get_lgtm_home_dir().join("config.json"))
     }
 
+    /// Returns the global LGTM-managed Mise file path (`<lgtm_home>/mise.toml`).
+    pub fn get_global_mise_path(&self) -> PathBuf {
+        self.get_lgtm_home_dir().join("mise.toml")
+    }
+
     /// Returns the project configuration path (`<workspace>/.lgtm/config.json`).
     pub fn get_project_config_path(workspace_root: &Path) -> PathBuf {
         workspace_root.join(".lgtm").join("config.json")
     }
 
-    /// Returns the LGTM-managed Mise file path (`<workspace>/.lgtm/mise.toml`).
+    /// Returns the workspace LGTM-managed Mise file path (`<workspace>/.lgtm/mise.toml`).
     pub fn get_managed_mise_path(workspace_root: &Path) -> PathBuf {
         workspace_root.join(".lgtm").join("mise.toml")
     }
@@ -85,46 +88,19 @@ impl ConfigService {
 
     /// Loads and merges built-in runtime presets, the global config, and the workspace project config.
     pub fn get_config(&self, workspace_root: &Path) -> Result<LgtmConfig> {
-        let mut config = LgtmConfig::default();
-
-        if let Some(script) = std::env::var_os("LGTM_E2E_LSP_SCRIPT")
-            .map(|val| val.to_string_lossy().trim().to_string())
-            .filter(|val| !val.is_empty())
-        {
-            for lang in config.languages.values_mut() {
-                lang.command = "node".to_string();
-                lang.args = vec![script.clone()];
-                lang.mise_tools.clear();
-            }
-        }
-
-        let global_path = self.get_global_config_path();
-        if global_path.is_file() {
-            let overlay: LgtmConfigFileOverlay =
-                Self::read_scoped_file(ConfigScope::Global, &global_path)?;
-            Self::apply_config_overlay(&mut config, overlay);
-        }
-
-        let project_path = Self::get_project_config_path(workspace_root);
-        if project_path.is_file() {
-            let overlay: LgtmConfigFileOverlay =
-                Self::read_scoped_file(ConfigScope::Project, &project_path)?;
-            Self::apply_config_overlay(&mut config, overlay);
-        }
-
-        Ok(config)
+        Ok(self.get_config_snapshot(Some(workspace_root))?.effective)
     }
 
-    /// Loads and deep-merges nested `UserSettings` across defaults, global config, and optional workspace project config.
-    pub fn get_settings_snapshot(
+    /// Loads and deep-merges nested `LgtmConfig` across built-in defaults, global `~/.lgtm/config.json`, and optional workspace `<workspace>/.lgtm/config.json`.
+    pub fn get_config_snapshot(
         &self,
         workspace_root: Option<&Path>,
     ) -> Result<ResolvedConfigSnapshot> {
         let global_path = self.get_global_config_path();
-        let global_patch: UserSettingsPatch = if global_path.is_file() {
+        let global_patch: LgtmConfigPatch = if global_path.is_file() {
             Self::read_scoped_file(ConfigScope::Global, &global_path)?
         } else {
-            UserSettingsPatch::default()
+            LgtmConfigPatch::default()
         };
 
         let (project_path, project_patch) = match workspace_root {
@@ -140,7 +116,7 @@ impl ConfigService {
             None => (PathBuf::new(), None),
         };
 
-        let effective = Self::resolve_effective_settings(&global_patch, project_patch.as_ref());
+        let effective = Self::resolve_effective_config(&global_patch, project_patch.as_ref());
         let resolved_global = std::fs::canonicalize(&global_path).unwrap_or(global_path);
         let resolved_project = std::fs::canonicalize(&project_path).unwrap_or(project_path);
 
@@ -208,41 +184,16 @@ impl ConfigService {
 
     // Private -----------------------------------------------------------------
 
-    fn apply_config_overlay(config: &mut LgtmConfig, overlay: LgtmConfigFileOverlay) {
-        let _ = (
-            overlay.schema,
-            overlay.appearance,
-            overlay.workspace,
-            overlay.editor,
-        );
-        if let Some(lsp) = overlay.lsp {
-            if let Some(enabled) = lsp.enabled {
-                config.lsp.enabled = enabled;
-            }
-            if let Some(auto_install) = lsp.auto_install {
-                config.lsp.auto_install = auto_install;
-            }
-            if let Some(timeout) = lsp.request_timeout_ms {
-                config.lsp.request_timeout_ms = timeout;
-            }
-        }
-        if let Some(languages) = overlay.languages {
-            for (language_id, language_config) in languages {
-                config.languages.insert(language_id, language_config);
-            }
-        }
-    }
-
-    fn resolve_effective_settings(
-        global_patch: &UserSettingsPatch,
-        project_patch: Option<&UserSettingsPatch>,
-    ) -> UserSettings {
-        let mut figment = Figment::from(Serialized::defaults(UserSettings::default()))
-            .merge(Serialized::defaults(global_patch));
+    fn resolve_effective_config(
+        global_patch: &LgtmConfigPatch,
+        project_patch: Option<&LgtmConfigPatch>,
+    ) -> LgtmConfig {
+        let mut config = LgtmConfig::default();
+        config.apply_patch(global_patch);
         if let Some(proj) = project_patch {
-            figment = figment.merge(Serialized::defaults(proj));
+            config.apply_patch(proj);
         }
-        figment.extract::<UserSettings>().unwrap_or_default()
+        config
     }
 
     fn read_scoped_file<T: DeserializeOwned + Default>(

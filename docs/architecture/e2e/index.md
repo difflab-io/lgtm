@@ -160,7 +160,8 @@ e2e/
     ├── fixture.ts
     ├── fixtures.ts
     ├── workspace-file-tree.spec.ts
-    └── workspace-lsp.spec.ts
+    ├── workspace-lsp.spec.ts
+    └── workspace-settings.spec.ts
 ```
 
 ### Why Tauri E2E uses `MockRuntime` over stdio instead of WebDriver or TypeScript mocks

@@ -1,5 +1,5 @@
 use lgtm_config::{
-    ConfigService, DEFAULT_SCHEMA_URL, LgtmConfigError, LineWrap, ThemeMode, UserSettingsPatch,
+    ConfigService, DEFAULT_SCHEMA_URL, LgtmConfigError, LgtmConfigPatch, LineWrap, ThemeMode,
 };
 
 // tests -----------------------------------------------------------------------
@@ -34,6 +34,10 @@ mod given_a_git_backed_workspace_without_an_existing_dot_lgtm_directory {
             // Assert
             assert_eq!(lgtm_dir, workspace_root.join(".lgtm"));
             assert_eq!(config_service.get_lgtm_home_dir(), home.join(".lgtm"));
+            assert_eq!(
+                config_service.get_global_mise_path(),
+                home.join(".lgtm/mise.toml")
+            );
             assert!(lgtm_dir.is_dir());
             assert!(exclude_contents.lines().any(|line| line.trim() == ".lgtm/"));
         }
@@ -43,7 +47,7 @@ mod given_a_git_backed_workspace_without_an_existing_dot_lgtm_directory {
 mod given_malformed_global_or_project_config_files {
     use super::*;
 
-    mod when_loading_merged_configuration_or_settings_snapshot {
+    mod when_loading_merged_configuration_or_config_snapshot {
         use super::*;
 
         #[test]
@@ -63,8 +67,8 @@ mod given_malformed_global_or_project_config_files {
             )
             .unwrap();
             let global_err = service.get_config(&workspace_root).unwrap_err();
-            let global_settings_err = service
-                .get_settings_snapshot(Some(&workspace_root))
+            let global_snapshot_err = service
+                .get_config_snapshot(Some(&workspace_root))
                 .unwrap_err();
 
             std::fs::write(
@@ -78,8 +82,8 @@ mod given_malformed_global_or_project_config_files {
             )
             .unwrap();
             let project_err = service.get_config(&workspace_root).unwrap_err();
-            let project_settings_err = service
-                .get_settings_snapshot(Some(&workspace_root))
+            let project_snapshot_err = service
+                .get_config_snapshot(Some(&workspace_root))
                 .unwrap_err();
 
             // Assert
@@ -88,7 +92,7 @@ mod given_malformed_global_or_project_config_files {
                 LgtmConfigError::GlobalConfigParse { .. }
             ));
             assert!(matches!(
-                global_settings_err,
+                global_snapshot_err,
                 LgtmConfigError::GlobalConfigParse { .. }
             ));
             assert!(matches!(
@@ -96,7 +100,7 @@ mod given_malformed_global_or_project_config_files {
                 LgtmConfigError::ProjectConfigParse { .. }
             ));
             assert!(matches!(
-                project_settings_err,
+                project_snapshot_err,
                 LgtmConfigError::ProjectConfigParse { .. }
             ));
         }
@@ -106,11 +110,11 @@ mod given_malformed_global_or_project_config_files {
 mod given_global_and_project_nested_json_configs {
     use super::*;
 
-    mod when_resolving_settings {
+    mod when_resolving_unified_config_and_snapshot {
         use super::*;
 
         #[test]
-        fn should_recursively_merge_project_leaf_overrides_over_global_settings_and_defaults() {
+        fn should_recursively_merge_project_leaf_overrides_over_global_config_and_defaults() {
             // Arrange
             let temp = tempfile::tempdir().unwrap();
             let home = temp.path().join("home");
@@ -130,6 +134,10 @@ mod given_global_and_project_nested_json_configs {
   },
   "editor": {
     "lineWrapping": 100
+  },
+  "lsp": {
+    "autoInstall": false,
+    "requestTimeoutMs": 7000
   }
 }
 "#,
@@ -137,17 +145,17 @@ mod given_global_and_project_nested_json_configs {
             .unwrap();
             std::fs::write(
                 workspace_root.join(".lgtm/config.json"),
-                "{\n  \"$schema\": \"https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v0.1.0/schemas/config.schema.json\",\n  \"appearance\": {\n    \"theme\": \"light\"\n  }\n}\n",
+                "{\n  \"$schema\": \"https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v0.1.0/schemas/config.schema.json\",\n  \"appearance\": {\n    \"theme\": \"light\"\n  },\n  \"lsp\": {\n    \"requestTimeoutMs\": 9000\n  }\n}\n",
             )
             .unwrap();
             let service = ConfigService::from_home(home);
 
             // Act
-            let snapshot = service
-                .get_settings_snapshot(Some(&workspace_root))
-                .unwrap();
+            let snapshot = service.get_config_snapshot(Some(&workspace_root)).unwrap();
+            let config = service.get_config(&workspace_root).unwrap();
 
             // Assert
+            assert_eq!(snapshot.effective, config);
             assert_eq!(snapshot.effective.appearance.theme, ThemeMode::Light);
             assert_eq!(
                 snapshot.effective.workspace.active_root,
@@ -161,6 +169,8 @@ mod given_global_and_project_nested_json_configs {
                 snapshot.effective.editor.line_wrapping,
                 LineWrap::Column(100)
             );
+            assert!(!snapshot.effective.lsp.auto_install);
+            assert_eq!(snapshot.effective.lsp.request_timeout_ms, 9000);
         }
     }
 }
@@ -181,7 +191,7 @@ mod given_schema_generation {
                 .join("schemas/config.schema.json");
 
             // Act
-            let generated = UserSettingsPatch::json_schema_pretty();
+            let generated = LgtmConfigPatch::json_schema_pretty();
             if std::env::var_os("LGTM_WRITE_SCHEMA").is_some() {
                 if let Some(parent) = repo_schema_path.parent() {
                     std::fs::create_dir_all(parent).unwrap();

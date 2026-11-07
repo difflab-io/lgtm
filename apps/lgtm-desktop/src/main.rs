@@ -2,6 +2,7 @@
 
 mod app;
 pub mod error;
+pub mod events;
 pub mod models;
 pub mod services;
 

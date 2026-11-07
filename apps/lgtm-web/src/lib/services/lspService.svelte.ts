@@ -57,7 +57,18 @@ export class LspService {
   /** Returns the diagnostics list for a workspace-relative or config file path. */
   getDiagnosticsForPath(path?: string | null): LspDiagnostic[] {
     if (!path) return []
-    return this.diagnostics[path] ?? []
+    if (this.diagnostics[path]) return this.diagnostics[path]
+    if (path === '~/.lgtm/config.json') {
+      for (const [key, list] of Object.entries(this.diagnostics)) {
+        if (
+          key !== '.lgtm/config.json' &&
+          (key.endsWith('/.lgtm/config.json') || key.endsWith('\\.lgtm\\config.json'))
+        ) {
+          return list
+        }
+      }
+    }
+    return []
   }
 
   /** Returns the language server status matching `activeLanguageId` or the first active server. */

@@ -395,3 +395,52 @@ mod given_a_workspace_with_a_user_provided_root_mise_file {
         }
     }
 }
+
+mod given_global_and_project_dev_tool_management {
+    use super::*;
+
+    mod when_adding_and_removing_dev_tools {
+        use super::*;
+
+        #[test]
+        fn should_manage_global_and_workspace_dev_tools_in_mise_toml_separately_from_config_json() {
+            // Arrange
+            let temp = tempfile::tempdir().unwrap();
+            let home = temp.path().join("home");
+            let workspace_root = temp.path().join("workspace");
+            std::fs::create_dir_all(&workspace_root).unwrap();
+            std::fs::write(
+                workspace_root.join("Cargo.toml"),
+                "[package]\nname = \"sample\"\n",
+            )
+            .unwrap();
+            let config_service = ConfigService::from_home(home.clone());
+            let mise_service = MiseService::new(config_service);
+
+            // Act
+            let global_added = mise_service.add_dev_tool(None, "biome", "1.9.4").unwrap();
+            let project_added = mise_service
+                .add_dev_tool(Some(&workspace_root), "cargo-nextest", "latest")
+                .unwrap();
+            let project_removed = mise_service
+                .remove_dev_tool(Some(&workspace_root), "cargo-nextest")
+                .unwrap();
+            let global_removed = mise_service.remove_dev_tool(None, "biome").unwrap();
+
+            // Assert
+            assert_eq!(global_added.tools.get("biome"), Some(&"1.9.4".to_string()));
+            assert!(home.join(".lgtm/mise.toml").is_file());
+            assert_eq!(project_added.tools.get("biome"), Some(&"1.9.4".to_string()));
+            assert_eq!(
+                project_added.tools.get("cargo-nextest"),
+                Some(&"latest".to_string())
+            );
+            assert_eq!(
+                project_added.tools.get("rust-analyzer"),
+                Some(&"latest".to_string())
+            );
+            assert!(!project_removed.tools.contains_key("cargo-nextest"));
+            assert!(!global_removed.tools.contains_key("biome"));
+        }
+    }
+}

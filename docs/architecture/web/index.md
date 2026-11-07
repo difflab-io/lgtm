@@ -93,11 +93,11 @@ sequenceDiagram
     WsSvc->>Client: openGlobalConfig()
     Client->>Host: invoke("workspace_open_global_config")
     Host-->>Client: FileContent (~/.lgtm/config.json)
-    WsSvc->>SetSvc: load()
+    WsSvc->>SetSvc: void load()
     SetSvc->>Client: configGet()
     Client->>Host: invoke("config_get")
     Host-->>SetSvc: ResolvedConfigSnapshot
-    WsSvc-->>User: Open tab "~/.lgtm/config.json" in CodeEditor
+    WsSvc-->>User: Open tab "Settings" (~/.lgtm/config.json) in CodeEditor
 
     User->>WsSvc: Edit JSON buffer -> 150ms debounce -> flushSave()
     WsSvc->>Client: write("~/.lgtm/config.json", content)
@@ -114,8 +114,8 @@ sequenceDiagram
 | `WorkspaceService.init` | `init(): Promise<void>` | Load initial settings snapshot, open the remembered or default workspace root, and mark the frontend ready for quit handshakes. |
 | `WorkspaceService.openWorkspace` | `openWorkspace(path?: string): Promise<void>` | Flush pending saves, open the target workspace directory, refresh `LspService`, and record the root in `SettingsService`. |
 | `WorkspaceService.selectFile` | `selectFile(relativePath: string): Promise<void>` | Read a workspace file, open or focus its editor tab, and synchronize LSP status. |
-| `WorkspaceService.openGlobalConfig` | `openGlobalConfig(): Promise<void>` | Ensure `~/.lgtm/config.json` exists with `$schema`, attach Biome JSON LSP, and open it as a standard file tab (`Cmd+,`). |
-| `WorkspaceService.openLocalConfig` | `openLocalConfig(): Promise<void>` | Ensure `<workspace>/.lgtm/config.json` exists with `$schema`, attach Biome JSON LSP, and open it as a standard file tab (`Cmd+Shift+,`). |
+| `WorkspaceService.openGlobalConfig` | `openGlobalConfig(): Promise<void>` | Focus the existing `Settings` tab if already open, or ensure `~/.lgtm/config.json` exists with `$schema`, attach Biome JSON LSP asynchronously, and open it as a `Settings` tab (`Cmd+,`). |
+| `WorkspaceService.openLocalConfig` | `openLocalConfig(): Promise<void>` | Focus the existing `Settings (project)` tab if already open, or ensure `~/.lgtm/config.json` exists, open an empty JSON temp buffer (`{\n}\n`) when `<workspace>/.lgtm/config.json` is absent, attach Biome JSON LSP asynchronously, and open it as a `Settings (project)` tab (`Cmd+Shift+,`). |
 | `WorkspaceService.scheduleSave` / `flushSave` | `scheduleSave(content: string): void` / `flushSave(): Promise<void>` | Forward live `didChange` updates to `LspService` and persist dirty buffers after `150ms` or before navigation/quit. |
 | `LspService.refresh` | `refresh(): Promise<void>` | Fetch the current `LspWorkspaceSnapshot` (`servers` and `diagnostics`) for the active workspace. |
 | `LspService.hover` / `gotoDefinition` | `hover(path: string, offset: number)` / `gotoDefinition(path: string, offset: number)` | Query LSP hover Markdown or definition locations at a UTF-16 code-unit offset. |

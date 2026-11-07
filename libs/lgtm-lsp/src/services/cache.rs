@@ -258,13 +258,19 @@ impl LspCacheService {
             );
             let (total_errors, total_warnings) =
                 Self::count_workspace_diagnostics(&guard, &workspace_root, &key.language_id);
-            if let Some(status) = guard.statuses.get_mut(key) {
-                status.error_count = total_errors;
-                status.warning_count = total_warnings;
-                Some(status.clone())
-            } else {
-                None
+            let mut updated = None;
+            for (status_key, status) in guard.statuses.iter_mut() {
+                if status_key.workspace_root == workspace_root
+                    && status_key.language_id == key.language_id
+                {
+                    status.error_count = total_errors;
+                    status.warning_count = total_warnings;
+                    if status_key == key || updated.is_none() {
+                        updated = Some(status.clone());
+                    }
+                }
             }
+            updated
         };
 
         let file_event = LspFileDiagnosticsEvent {
@@ -410,8 +416,12 @@ impl LspCacheService {
     }
 
     fn to_workspace_relative(workspace_root: &Path, path: &Path) -> String {
-        path.strip_prefix(workspace_root)
-            .map(|rel| rel.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_else(|_| path.to_string_lossy().to_string())
+        if let Ok(rel) = path.strip_prefix(workspace_root) {
+            return rel.to_string_lossy().replace('\\', "/");
+        }
+        if path.ends_with(".lgtm/config.json") {
+            return "~/.lgtm/config.json".to_string();
+        }
+        path.to_string_lossy().to_string()
     }
 }
