@@ -8,16 +8,16 @@
 
 ### Functional
 
-- Detect an existing `mise` binary in `<lgtm_home>/bin/mise` or standard system paths and verify it with `mise --version`.
-- Download and install `mise` into `<lgtm_home>/bin/mise` automatically when no usable binary is present.
-- Generate `<workspace>/.lgtm/mise.toml` from detected workspace languages and configuration overrides.
-- List and run workspace tasks, install language server tools, and construct isolated `mise exec` commands.
+- Manage developer tooling required for building, linting, formatting, testing, and powering diagnostics.
+- Allow global and project-level management of developer tooling.
+- Provide first-class support for Rust, TypeScript, JavaScript, Python, Go, and Markdown.
+- Enable adding support for additional languages (future).
 
 ### Non-Functional
 
-- Never overwrite system binaries or user-owned root `mise.toml` files, and scope subprocesses to `<workspace>/.lgtm/mise.toml`.
-- Write `<workspace>/.lgtm/mise.toml` deterministically and only when its contents change.
-- Support hermetic test isolation with a custom installer URL and disabled host `PATH` scanning.
+- Use `mise` for developer tool management instead of a custom tool manager.
+- Hide IDE-backed `mise` usage for projects that do not use `mise`, and integrate cleanly with projects that do.
+- Enable exporting managed `mise` configuration into the project (future, for example via an `lgtm env export` command).
 
 ## Design
 

@@ -9,15 +9,14 @@
 ### Functional
 
 - Open the default workspace (`~/.lgtm/workspace`) or any selected folder, list files and directories, and create, read, save, rename, or move entries to the OS Trash.
-- Detect workspace languages on open, generate `<workspace>/.lgtm/mise.toml`, and start matching language servers in the background.
+- Provide language server integration for any workspace opened in the desktop application.
 - Synchronize open files, unsaved editor changes, file saves, renames, and deletions with active language servers.
 - Stream live language server statuses and file diagnostics to the UI, and provide hover documentation, go-to-definition, read-only diagnostics buffers, and server restarts.
 - Flush pending auto-saves and stop child language server processes cleanly before closing the window or switching workspaces.
 
 ### Non-Functional
 
-- Run filesystem and language server work off the UI thread so typing and navigation stay responsive while tools install or index.
-- Reject relative paths and symlinks that resolve outside the active workspace root.
+- Manage background services and child processes efficiently so the desktop application stays low-latency and nimble.
 
 ## Design
 

@@ -1,5 +1,7 @@
 # End-to-end testing — software architecture
 
+<!-- TODO: Move this file to the `docs/` root directory (`docs/e2e.md`); E2E test harness documentation is not software architecture. -->
+
 ## Overview
 
 `e2e/` is the end-to-end verification suite for LGTM across the `lgtm-forge` backend, `lgtm-cli` binary, `lgtm.nvim` Neovim plugin shell, and `lgtm-desktop` Tauri application. Each suite runs real compiled Rust binaries against isolated temporary workspaces and `LGTM_HOME` directories without mocks in the application layer. For `lgtm-desktop`, Playwright drives the production Svelte UI in headless Chromium and WebKit while routing every `window.__TAURI_INTERNALS__.invoke` command and backend event through a feature-gated Rust stdio bridge (`lgtm-desktop --ipc-bridge`) backed by `tauri::test::MockRuntime`.
