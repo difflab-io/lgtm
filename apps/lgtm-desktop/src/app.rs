@@ -351,15 +351,27 @@ pub(crate) fn app_context<R: tauri::Runtime>() -> tauri::Context<R> {
 
 /// User-requested quit coordinates with the frontend before exiting.
 pub fn handle_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
-    if let tauri::RunEvent::ExitRequested {
-        code: None, api, ..
-    } = event
-        && let Some(state) = app.try_state::<AppState>()
-        && state.frontend_ready.load(Ordering::Relaxed)
-        && !app.webview_windows().is_empty()
-    {
-        api.prevent_exit();
-        state.events.emit("workspace-quit-requested", &());
+    match event {
+        tauri::RunEvent::Ready => {
+            #[cfg(target_os = "macos")]
+            let _ = app.show();
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }
+        tauri::RunEvent::ExitRequested {
+            code: None, api, ..
+        } => {
+            if let Some(state) = app.try_state::<AppState>()
+                && state.frontend_ready.load(Ordering::Relaxed)
+                && !app.webview_windows().is_empty()
+            {
+                api.prevent_exit();
+                state.events.emit("workspace-quit-requested", &());
+            }
+        }
+        _ => {}
     }
 }
 
