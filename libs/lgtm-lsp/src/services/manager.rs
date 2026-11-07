@@ -794,6 +794,26 @@ impl LgtmLspManager {
         file_path.ends_with(".lgtm/config.json")
     }
 
+    fn enrich_schema_markdown_descriptions(value: &mut Value) {
+        match value {
+            Value::Object(map) => {
+                if let Some(Value::String(desc)) = map.get("description").cloned() {
+                    map.entry("markdownDescription".to_string())
+                        .or_insert(Value::String(desc));
+                }
+                for child in map.values_mut() {
+                    Self::enrich_schema_markdown_descriptions(child);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    Self::enrich_schema_markdown_descriptions(item);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn collect_config_diagnostics(file_path: &Path, text: &str) -> Vec<LspDiagnostic> {
         if !Self::is_lgtm_config_file(file_path) || text.trim().is_empty() {
             return Vec::new();
@@ -1216,6 +1236,32 @@ impl LgtmLspManager {
         }
 
         session.notify("initialized", json!({}))?;
+        if language_id == "json" {
+            let mut schema = LgtmConfigPatch::json_schema();
+            Self::enrich_schema_markdown_descriptions(&mut schema);
+            let _ = session.notify(
+                "workspace/didChangeConfiguration",
+                json!({
+                    "settings": {
+                        "json": {
+                            "validate": { "enable": true },
+                            "schemas": [
+                                {
+                                    "url": lgtm_config::DEFAULT_SCHEMA_URL,
+                                    "fileMatch": [
+                                        "/.lgtm/config.json",
+                                        "*/.lgtm/config.json",
+                                        ".lgtm/config.json",
+                                        "config.json"
+                                    ],
+                                    "schema": schema
+                                }
+                            ]
+                        }
+                    }
+                }),
+            );
+        }
         Ok(session)
     }
 
@@ -1385,7 +1431,11 @@ impl LgtmLspManager {
                 return Some((handle, doc.text));
             }
         }
-        let content = std::fs::read_to_string(file_path).ok()?;
+        let content = self
+            .cache_service
+            .get_document(file_path)
+            .map(|doc| doc.text)
+            .or_else(|| std::fs::read_to_string(file_path).ok())?;
         let _ = self.open_or_sync_file(workspace_root, file_path, &content);
         let doc = self.cache_service.get_document(file_path)?;
         let key = LspSessionKey::new(&doc.workspace_root, &doc.language_id, &doc.project_root);
@@ -1394,7 +1444,7 @@ impl LgtmLspManager {
     }
 
     fn format_hover_contents(contents: &HoverContents) -> String {
-        match contents {
+        let raw = match contents {
             HoverContents::Scalar(marked) => Self::format_marked_string(marked),
             HoverContents::Array(items) => items
                 .iter()
@@ -1403,7 +1453,44 @@ impl LgtmLspManager {
                 .collect::<Vec<_>>()
                 .join("\n\n"),
             HoverContents::Markup(markup) => markup.value.clone(),
+        };
+        Self::unescape_markdown_punctuation(&raw)
+    }
+
+    fn unescape_markdown_punctuation(input: &str) -> String {
+        let mut out = String::with_capacity(input.len());
+        let mut chars = input.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '\\'
+                && let Some(&next) = chars.peek()
+                && matches!(
+                    next,
+                    '\\' | '`'
+                        | '*'
+                        | '_'
+                        | '{'
+                        | '}'
+                        | '['
+                        | ']'
+                        | '('
+                        | ')'
+                        | '<'
+                        | '>'
+                        | '#'
+                        | '+'
+                        | '-'
+                        | '.'
+                        | '!'
+                        | '"'
+                )
+            {
+                out.push(next);
+                chars.next();
+                continue;
+            }
+            out.push(ch);
         }
+        out
     }
 
     fn format_marked_string(marked: &MarkedString) -> String {

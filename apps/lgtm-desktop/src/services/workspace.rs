@@ -12,7 +12,6 @@ use crate::{
 };
 
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
-const DEFAULT_BIOME_JSON: &str = "{\n  \"$schema\": \"https://biomejs.dev/schemas/latest/schema.json\",\n  \"json\": {\n    \"parser\": {\n      \"allowComments\": false\n    }\n  }\n}\n";
 
 /// Browses and mutates entries within the active local workspace directory.
 pub struct WorkspaceService {
@@ -418,10 +417,6 @@ impl WorkspaceService {
 
     fn ensure_global_config_file(&self) -> Result<PathBuf> {
         fs::create_dir_all(&self.lgtm_home)?;
-        let biome_path = self.lgtm_home.join("biome.json");
-        if !biome_path.exists() {
-            fs::write(&biome_path, DEFAULT_BIOME_JSON)?;
-        }
         let config_path = self.lgtm_home.join("config.json");
         if !config_path.is_file() {
             fs::write(&config_path, LgtmConfigPatch::default_document())?;

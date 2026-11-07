@@ -154,8 +154,8 @@ sequenceDiagram
 | `lsp_get_state` | UI -> Host | `() -> LspWorkspaceSnapshot` | Return all tracked language server statuses and file diagnostics for the active workspace. |
 | `lsp_get_diagnostics_buffer` | UI -> Host | `(languageId?: string) -> LspDiagnosticsBuffer` | Render a read-only plain-text diagnostics report for all active servers or a single language. |
 | `lsp_restart` | UI -> Host | `(languageId: string) -> LspServerStatusEvent` | Restart all sessions for `languageId` in the active workspace and re-open tracked documents. |
-| `workspace_open_global_config` | UI -> Host | `() -> FileContent` | Ensure `~/.lgtm/config.json` exists with `$schema`, synchronize LSP (`biome lsp-proxy`) asynchronously, and return `FileContent` for `Cmd+,` editing. |
-| `workspace_open_local_config` | UI -> Host | `() -> FileContent` | Ensure `~/.lgtm/config.json` exists, return an empty JSON temp buffer (`{\n}\n`) when `<workspace>/.lgtm/config.json` is absent (or read it if present), synchronize LSP (`biome lsp-proxy`) asynchronously, and return `FileContent` for `Cmd+Shift+,` editing. |
+| `workspace_open_global_config` | UI -> Host | `() -> FileContent` | Ensure `~/.lgtm/config.json` exists with `$schema`, synchronize LSP (`vscode-json-language-server --stdio`) asynchronously, and return `FileContent` for `Cmd+,` editing. |
+| `workspace_open_local_config` | UI -> Host | `() -> FileContent` | Ensure `~/.lgtm/config.json` exists, return an empty JSON temp buffer (`{\n}\n`) when `<workspace>/.lgtm/config.json` is absent (or read it if present), synchronize LSP (`vscode-json-language-server --stdio`) asynchronously, and return `FileContent` for `Cmd+Shift+,` editing. |
 | `config_get` | UI -> Host | `() -> ResolvedConfigSnapshot` | Return effective deep-merged `LgtmConfig` plus global and project `LgtmConfigPatch` trees. |
 | `lsp-status` | Host -> UI | `LspServerStatusEvent` | Real-time language server lifecycle status and error/warning counts. |
 | `lsp-diagnostics` | Host -> UI | `LspFileDiagnosticsEvent` | Real-time workspace-relative or global config file diagnostics with UTF-16 offsets. |
