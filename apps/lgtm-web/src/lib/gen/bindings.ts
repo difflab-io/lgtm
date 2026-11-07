@@ -43,7 +43,7 @@ export const commands = {
 	configGet: () => __TAURI_INVOKE<ResolvedConfigSnapshot>("config_get"),
 	/**  Applies a nested `UserSettingsPatch` to `scope` (or routes each leaf by project override presence when `scope` is `None`). */
 	configUpdate: (patch: UserSettingsPatch, scope: ConfigScope | null) => __TAURI_INVOKE<ResolvedConfigSnapshot>("config_update", { patch, scope }),
-	/**  Ensures the global or project configuration file and schema exist on disk, synchronizes LSP, and returns the document. */
+	/**  Ensures the global or project configuration file exists on disk, synchronizes LSP, and returns the document. */
 	configOpenDocument: (scope: ConfigScope | null, format: ConfigFormat | null) => __TAURI_INVOKE<ConfigDocument>("config_open_document", { scope, format }),
 	/**  Writes raw editor text to the global or project configuration file, notifies LSP `didSave`, and emits `config-updated` when valid. */
 	configWriteDocument: (scope: ConfigScope, content: string, format: ConfigFormat | null) => __TAURI_INVOKE<ConfigDocument>("config_write_document", { scope, content, format }),
@@ -122,17 +122,12 @@ export type FileContent = {
 
 /**  Line wrapping mode persisted under `editor.lineWrapping` (`"off"`, `"auto"`, or a column width). */
 export type LineWrap = 
-/**  Preset line wrapping mode (`"off"` or `"auto"`). */
-LineWrapPreset | 
-/**  Fixed character column width at which lines wrap. */
-number;
-
-/**  Named line wrapping presets persisted under `editor.lineWrapping`. */
-export type LineWrapPreset = 
 /**  Disable line wrapping (`off`). */
 "off" | 
 /**  Wrap lines automatically at the editor viewport width (`auto`). */
-"auto";
+"auto" | 
+/**  Fixed character column width at which lines wrap. */
+number;
 
 /**  A single diagnostic normalized to both UTF-16 flat editor offsets and 0-based line/character coordinates. */
 export type LspDiagnostic = {
