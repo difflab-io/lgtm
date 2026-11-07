@@ -122,13 +122,17 @@ function handleMessage(msg) {
     return;
   }
   if (msg.method === 'textDocument/hover') {
+    const uri = msg.params.textDocument.uri;
+    const isConfig = uri.endsWith('/.lgtm/config.json') || uri.endsWith('\\\\.lgtm\\\\config.json');
     send({
       jsonrpc: '2.0',
       id: msg.id,
       result: {
         contents: {
           kind: 'markdown',
-          value: '\`\`\`rust\\npub fn helper() -> i32\\n\`\`\`\\n\\n---\\n\\nComputes the **workspace** answer using \`helper\`.',
+          value: isConfig
+            ? 'Resolved appearance settings section \\\\(\\\`appearance\\\\.\\\\*\\\`\\\\)\\\\.'
+            : '\`\`\`rust\\npub fn helper() -> i32\\n\`\`\`\\n\\n---\\n\\nComputes the **workspace** answer using \`helper\`.',
         },
         range: {
           start: { line: msg.params.position.line, character: 0 },

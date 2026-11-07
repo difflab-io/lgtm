@@ -80,6 +80,18 @@ test.describe(
             'aria-selected',
             'true',
           )
+          await page
+            .locator('.cm-line', { hasText: '"appearance"' })
+            .first()
+            .hover({
+              position: { x: 24, y: 8 },
+            })
+          const hoverTooltip = page.locator('[data-slot="code-editor-hover"]')
+          await expect(hoverTooltip).toBeVisible()
+          await expect(hoverTooltip).toContainText(
+            'Resolved appearance settings section (appearance.*).',
+          )
+          await expect(hoverTooltip).not.toContainText('\\(')
         },
       )
     })

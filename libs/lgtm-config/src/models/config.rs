@@ -392,12 +392,20 @@ impl LgtmConfig {
             LanguageConfig {
                 enabled: true,
                 extensions: vec!["json".to_string(), "jsonc".to_string()],
-                root_markers: vec!["biome.json".to_string(), "biome.jsonc".to_string()],
-                mise_tools: BTreeMap::from([("biome".to_string(), "latest".to_string())]),
-                command: "biome".to_string(),
-                args: vec!["lsp-proxy".to_string()],
+                root_markers: Vec::new(),
+                mise_tools: BTreeMap::from([
+                    ("node".to_string(), "22".to_string()),
+                    (
+                        "npm:vscode-langservers-extracted".to_string(),
+                        "latest".to_string(),
+                    ),
+                ]),
+                command: "vscode-json-language-server".to_string(),
+                args: vec!["--stdio".to_string()],
                 env: BTreeMap::new(),
-                initialization_options: None,
+                initialization_options: Some(serde_json::json!({
+                    "provideFormatter": true
+                })),
                 default_tasks: BTreeMap::new(),
             },
         );
@@ -576,10 +584,12 @@ mod tests {
                         "typescript".to_string(),
                     ]
                 );
-                assert_eq!(json_preset.command, "biome");
-                assert_eq!(json_preset.args, vec!["lsp-proxy".to_string()]);
+                assert_eq!(json_preset.command, "vscode-json-language-server");
+                assert_eq!(json_preset.args, vec!["--stdio".to_string()]);
                 assert_eq!(
-                    json_preset.mise_tools.get("biome"),
+                    json_preset
+                        .mise_tools
+                        .get("npm:vscode-langservers-extracted"),
                     Some(&"latest".to_string())
                 );
             }
