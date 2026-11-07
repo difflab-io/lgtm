@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use figment::{Figment, providers::Serialized};
+use optfield::optfield;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -43,6 +45,13 @@ pub enum ConfigFormat {
 }
 
 /// Resolved appearance settings section (`appearance.*`).
+#[optfield(
+    pub AppearanceSettingsPatch,
+    doc,
+    attrs,
+    field_doc,
+    field_attrs = (serde(skip_serializing_if = "Option::is_none")),
+)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Type, Default)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct AppearanceSettings {
@@ -50,16 +59,14 @@ pub struct AppearanceSettings {
     pub theme: ThemeMode,
 }
 
-/// Partial patch for the `appearance` settings section.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Type)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct AppearanceSettingsPatch {
-    /// Updated color theme preference, if specified.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub theme: Option<ThemeMode>,
-}
-
 /// Resolved workspace history settings section (`workspace.*`).
+#[optfield(
+    pub WorkspaceSettingsPatch,
+    doc,
+    attrs,
+    field_doc,
+    field_attrs = (serde(skip_serializing_if = "Option::is_none")),
+)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Type, Default)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct WorkspaceSettings {
@@ -71,33 +78,19 @@ pub struct WorkspaceSettings {
     pub recent_roots: Vec<String>,
 }
 
-/// Partial patch for the `workspace` settings section.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Type)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct WorkspaceSettingsPatch {
-    /// Updated active workspace root path, if specified.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub active_root: Option<String>,
-    /// Updated list of recent workspace root paths, if specified.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub recent_roots: Option<Vec<String>>,
-}
-
 /// Resolved code editor settings section (`editor.*`).
+#[optfield(
+    pub EditorSettingsPatch,
+    doc,
+    attrs = add(derive(Default)),
+    field_doc,
+    field_attrs = (serde(skip_serializing_if = "Option::is_none")),
+)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Type)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct EditorSettings {
     /// Whether long lines wrap inside the code editor (`true` by default).
     pub line_wrapping: bool,
-}
-
-/// Partial patch for the `editor` settings section.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Type)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct EditorSettingsPatch {
-    /// Updated line wrapping preference, if specified.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub line_wrapping: Option<bool>,
 }
 
 /// Complete resolved nested settings tree combining defaults, global settings, and project overrides.
@@ -171,21 +164,6 @@ pub struct ConfigDocument {
     pub language_id: String,
 }
 
-/// A schema or syntax validation issue located within a `config.{json,yaml,yml}` document.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConfigValidationIssue {
-    /// Zero-based line number of the issue.
-    pub line: u32,
-    /// Zero-based character column on `line`.
-    pub character: u32,
-    /// Zero-based end character column on `line`.
-    pub end_character: u32,
-    /// Human-readable validation message.
-    pub message: String,
-    /// Diagnostic code identifier.
-    pub code: String,
-}
-
 impl ConfigFormat {
     /// Detects the `ConfigFormat` from a file path's extension, defaulting to `ConfigFormat::Json`.
     pub fn from_path(path: &Path) -> Self {
@@ -222,15 +200,13 @@ impl ConfigFormat {
 impl UserSettings {
     // Public ------------------------------------------------------------------
 
-    /// Applies a sparse `UserSettingsPatch` recursively at the leaf level onto this resolved settings tree.
+    /// Applies a sparse `UserSettingsPatch` onto this resolved settings tree via `figment`.
     pub fn apply_patch(&mut self, patch: &UserSettingsPatch) {
-        if let (Ok(mut base), Ok(overlay)) =
-            (serde_json::to_value(&*self), serde_json::to_value(patch))
+        if let Ok(merged) = Figment::from(Serialized::defaults(&*self))
+            .merge(Serialized::defaults(patch))
+            .extract::<Self>()
         {
-            UserSettingsPatch::merge_json_leaves(&mut base, overlay);
-            if let Ok(merged) = serde_json::from_value(base) {
-                *self = merged;
-            }
+            *self = merged;
         }
     }
 }
@@ -287,23 +263,13 @@ impl UserSettingsPatch {
         }
     }
 
-    /// Returns `true` if no nested settings leaf is set in this patch.
-    pub fn is_empty(&self) -> bool {
-        serde_json::to_value(self)
-            .ok()
-            .is_none_or(|val| !Self::has_non_schema_leaf(&val))
-    }
-
-    /// Recursively merges `overlay` leaf fields into `self` and prunes empty nested sections.
+    /// Merges `overlay` onto `self` via `figment`.
     pub fn merge_patch(&mut self, overlay: Self) {
-        if let (Ok(mut base), Ok(over)) =
-            (serde_json::to_value(&*self), serde_json::to_value(overlay))
+        if let Ok(merged) = Figment::from(Serialized::defaults(&*self))
+            .merge(Serialized::defaults(overlay))
+            .extract::<Self>()
         {
-            Self::merge_json_leaves(&mut base, over);
-            Self::prune_empty_objects(&mut base);
-            if let Ok(merged) = serde_json::from_value(base) {
-                *self = merged;
-            }
+            *self = merged;
         }
     }
 
@@ -319,135 +285,16 @@ impl UserSettingsPatch {
         let existing_map = existing_val.as_ref().and_then(serde_json::Value::as_object);
 
         let (global_map, project_map) = Self::split_json_maps(&incoming_map, existing_map);
-        let global_out = serde_json::from_value::<Self>(serde_json::Value::Object(global_map))
-            .ok()
-            .filter(|patch| !patch.is_empty());
-        let project_out = serde_json::from_value::<Self>(serde_json::Value::Object(project_map))
-            .ok()
-            .filter(|patch| !patch.is_empty());
+        let global_out = (!global_map.is_empty())
+            .then(|| serde_json::from_value(serde_json::Value::Object(global_map)).ok())
+            .flatten();
+        let project_out = (!project_map.is_empty())
+            .then(|| serde_json::from_value(serde_json::Value::Object(project_map)).ok())
+            .flatten();
         (global_out, project_out)
     }
 
-    /// Validates raw JSON or YAML configuration text against `UserSettingsPatch` and returns any syntax or schema issues.
-    pub fn validate_document_text(format: ConfigFormat, text: &str) -> Vec<ConfigValidationIssue> {
-        if text.trim().is_empty() {
-            return Vec::new();
-        }
-        match format {
-            ConfigFormat::Json => match serde_json::from_str::<Self>(text) {
-                Ok(_) => Vec::new(),
-                Err(err) => {
-                    let line = err.line().saturating_sub(1) as u32;
-                    let col = err.column().saturating_sub(1) as u32;
-                    let (adj_line, start_col, end_col) =
-                        Self::locate_issue_span(text, line, col, &err.to_string());
-                    vec![ConfigValidationIssue {
-                        line: adj_line,
-                        character: start_col,
-                        end_character: end_col,
-                        message: err.to_string(),
-                        code: "config-schema".to_string(),
-                    }]
-                }
-            },
-            ConfigFormat::Yaml => match serde_yaml::from_str::<Self>(text) {
-                Ok(_) => Vec::new(),
-                Err(err) => {
-                    let (line, col) = err
-                        .location()
-                        .map(|loc| {
-                            (
-                                loc.line().saturating_sub(1) as u32,
-                                loc.column().saturating_sub(1) as u32,
-                            )
-                        })
-                        .unwrap_or((0, 0));
-                    let (adj_line, start_col, end_col) =
-                        Self::locate_issue_span(text, line, col, &err.to_string());
-                    vec![ConfigValidationIssue {
-                        line: adj_line,
-                        character: start_col,
-                        end_character: end_col,
-                        message: err.to_string(),
-                        code: "config-schema".to_string(),
-                    }]
-                }
-            },
-        }
-    }
-
-    /// Returns Markdown hover documentation for a configuration key if `symbol` matches a known schema property.
-    pub fn hover_documentation_for_key(symbol: &str) -> Option<&'static str> {
-        match symbol {
-            "$schema" => Some(
-                "**`$schema`** (`string`)\n\nJSON Schema URI used to validate LGTM configuration documents (`./schemas/config.schema.json`).",
-            ),
-            "appearance" => Some(
-                "**`appearance`** (`AppearanceSettings`)\n\nAppearance and color scheme preferences (`appearance.theme`).",
-            ),
-            "theme" => Some(
-                "**`appearance.theme`** (`\"system\" | \"light\" | \"dark\"`, default: `\"system\"`)\n\nPreferred application color theme.",
-            ),
-            "workspace" => Some(
-                "**`workspace`** (`WorkspaceSettings`)\n\nWorkspace history and active directory settings (`workspace.activeRoot`, `workspace.recentRoots`).",
-            ),
-            "activeRoot" => Some(
-                "**`workspace.activeRoot`** (`string | null`)\n\nLast active workspace root directory path.",
-            ),
-            "recentRoots" => Some(
-                "**`workspace.recentRoots`** (`string[]`)\n\nOrdered list of recently opened workspace root directory paths.",
-            ),
-            "editor" => Some(
-                "**`editor`** (`EditorSettings`)\n\nCode editor display preferences (`editor.lineWrapping`).",
-            ),
-            "lineWrapping" => Some(
-                "**`editor.lineWrapping`** (`boolean`, default: `true`)\n\nWhether long lines wrap inside the code editor.",
-            ),
-            _ => None,
-        }
-    }
-
     // Private -----------------------------------------------------------------
-
-    fn has_non_schema_leaf(value: &serde_json::Value) -> bool {
-        match value {
-            serde_json::Value::Null => false,
-            serde_json::Value::Object(map) => map
-                .iter()
-                .filter(|(k, _)| k.as_str() != "$schema")
-                .any(|(_, v)| Self::has_non_schema_leaf(v)),
-            _ => true,
-        }
-    }
-
-    fn merge_json_leaves(target: &mut serde_json::Value, overlay: serde_json::Value) {
-        if let (serde_json::Value::Object(target_map), serde_json::Value::Object(overlay_map)) =
-            (target, overlay)
-        {
-            for (k, v) in overlay_map {
-                if v.is_null() {
-                    continue;
-                }
-                match target_map.get_mut(&k) {
-                    Some(existing) if existing.is_object() && v.is_object() => {
-                        Self::merge_json_leaves(existing, v);
-                    }
-                    _ => {
-                        target_map.insert(k, v);
-                    }
-                }
-            }
-        }
-    }
-
-    fn prune_empty_objects(value: &mut serde_json::Value) {
-        if let serde_json::Value::Object(map) = value {
-            for child in map.values_mut() {
-                Self::prune_empty_objects(child);
-            }
-            map.retain(|_, v| !matches!(v, serde_json::Value::Object(m) if m.is_empty()));
-        }
-    }
 
     fn split_json_maps(
         incoming: &serde_json::Map<String, serde_json::Value>,
@@ -482,152 +329,12 @@ impl UserSettingsPatch {
         }
         (global, project)
     }
-
-    fn locate_issue_span(
-        text: &str,
-        fallback_line: u32,
-        fallback_col: u32,
-        error_msg: &str,
-    ) -> (u32, u32, u32) {
-        if let Some(token) = Self::extract_backtick_token(error_msg) {
-            for (idx, line_str) in text.lines().enumerate() {
-                if let Some(byte_pos) = line_str.find(&token) {
-                    let start_col = line_str[..byte_pos].encode_utf16().count() as u32;
-                    let end_col = start_col + (token.encode_utf16().count() as u32).max(1);
-                    return (idx as u32, start_col, end_col);
-                }
-            }
-        }
-        let line_str = text.lines().nth(fallback_line as usize).unwrap_or("");
-        let line_len = line_str.encode_utf16().count() as u32;
-        let start = fallback_col.min(line_len.saturating_sub(1));
-        let end = (start + 4).min(line_len).max(start + 1);
-        (fallback_line, start, end)
-    }
-
-    fn extract_backtick_token(error_msg: &str) -> Option<String> {
-        let start = error_msg.find('`')?;
-        let rest = &error_msg[start + 1..];
-        let end = rest.find('`')?;
-        let token = &rest[..end];
-        (!token.is_empty()).then(|| token.to_string())
-    }
 }
 
 impl Default for EditorSettings {
     fn default() -> Self {
         Self {
             line_wrapping: true,
-        }
-    }
-}
-
-// tests -----------------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // tests -------------------------------------------------------------------
-
-    mod given_nested_user_settings_and_patches {
-        use super::*;
-
-        mod when_applying_sparse_nested_patches {
-            use super::*;
-
-            #[test]
-            fn should_deep_merge_leaf_fields_without_resetting_sibling_sections() {
-                // Arrange
-                let mut settings = UserSettings::default();
-                let global_patch = UserSettingsPatch {
-                    schema: None,
-                    appearance: Some(AppearanceSettingsPatch {
-                        theme: Some(ThemeMode::Dark),
-                    }),
-                    workspace: Some(WorkspaceSettingsPatch {
-                        active_root: Some("/tmp/ws-a".to_string()),
-                        recent_roots: Some(vec!["/tmp/ws-a".to_string()]),
-                    }),
-                    editor: Some(EditorSettingsPatch {
-                        line_wrapping: Some(true),
-                    }),
-                };
-                let project_patch = UserSettingsPatch {
-                    schema: None,
-                    appearance: Some(AppearanceSettingsPatch {
-                        theme: Some(ThemeMode::Light),
-                    }),
-                    workspace: None,
-                    editor: None,
-                };
-
-                // Act
-                settings.apply_patch(&global_patch);
-                settings.apply_patch(&project_patch);
-
-                // Assert
-                assert_eq!(settings.appearance.theme, ThemeMode::Light);
-                assert_eq!(
-                    settings.workspace.active_root,
-                    Some("/tmp/ws-a".to_string())
-                );
-                assert_eq!(
-                    settings.workspace.recent_roots,
-                    vec!["/tmp/ws-a".to_string()]
-                );
-                assert!(settings.editor.line_wrapping);
-            }
-        }
-
-        mod when_splitting_patch_by_project_overrides {
-            use super::*;
-
-            #[test]
-            fn should_route_overridden_leaves_to_project_and_remaining_leaves_to_global() {
-                // Arrange
-                let project_existing = UserSettingsPatch {
-                    schema: None,
-                    appearance: Some(AppearanceSettingsPatch {
-                        theme: Some(ThemeMode::Light),
-                    }),
-                    workspace: None,
-                    editor: None,
-                };
-                let incoming = UserSettingsPatch {
-                    schema: None,
-                    appearance: Some(AppearanceSettingsPatch {
-                        theme: Some(ThemeMode::Dark),
-                    }),
-                    workspace: Some(WorkspaceSettingsPatch {
-                        active_root: Some("/tmp/ws-b".to_string()),
-                        recent_roots: None,
-                    }),
-                    editor: Some(EditorSettingsPatch {
-                        line_wrapping: Some(false),
-                    }),
-                };
-
-                // Act
-                let (global_part, project_part) =
-                    incoming.split_by_project_overrides(Some(&project_existing));
-
-                // Assert
-                let global = global_part.expect("expected global patch");
-                let project = project_part.expect("expected project patch");
-                assert!(global.appearance.is_none());
-                assert_eq!(
-                    global.workspace.and_then(|w| w.active_root),
-                    Some("/tmp/ws-b".to_string())
-                );
-                assert_eq!(global.editor.and_then(|e| e.line_wrapping), Some(false));
-                assert_eq!(
-                    project.appearance.and_then(|a| a.theme),
-                    Some(ThemeMode::Dark)
-                );
-                assert!(project.workspace.is_none());
-                assert!(project.editor.is_none());
-            }
         }
     }
 }

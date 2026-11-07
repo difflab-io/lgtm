@@ -56,9 +56,9 @@ export type AppearanceSettings = {
 	theme?: ThemeMode,
 };
 
-/**  Partial patch for the `appearance` settings section. */
+/**  Resolved appearance settings section (`appearance.*`). */
 export type AppearanceSettingsPatch = {
-	/**  Updated color theme preference, if specified. */
+	/**  Preferred application color theme (`system`, `light`, or `dark`). */
 	theme?: ThemeMode | null,
 };
 
@@ -102,9 +102,9 @@ export type EditorSettings = {
 	lineWrapping?: boolean,
 };
 
-/**  Partial patch for the `editor` settings section. */
+/**  Resolved code editor settings section (`editor.*`). */
 export type EditorSettingsPatch = {
-	/**  Updated line wrapping preference, if specified. */
+	/**  Whether long lines wrap inside the code editor (`true` by default). */
 	lineWrapping?: boolean | null,
 };
 
@@ -311,11 +311,11 @@ export type WorkspaceSettings = {
 	recentRoots?: string[],
 };
 
-/**  Partial patch for the `workspace` settings section. */
+/**  Resolved workspace history settings section (`workspace.*`). */
 export type WorkspaceSettingsPatch = {
-	/**  Updated active workspace root path, if specified. */
+	/**  Last active workspace root directory path. */
 	activeRoot?: string | null,
-	/**  Updated list of recent workspace root paths, if specified. */
+	/**  Recently opened workspace root directory paths. */
 	recentRoots?: string[] | null,
 };
 

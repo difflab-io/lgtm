@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use optfield::optfield;
 use serde::{Deserialize, Serialize};
 
 use crate::models::settings::{
@@ -20,14 +21,24 @@ pub struct LgtmConfig {
 }
 
 /// Settings controlling LSP server startup, automatic tool installation, and request timeouts.
+#[optfield(
+    pub(crate) LspSettingsOverlay,
+    attrs = (
+        derive(Debug, Clone, Default, Deserialize),
+        serde(default, deny_unknown_fields),
+    ),
+    field_attrs,
+)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LspSettings {
     /// Whether LSP integration is enabled for workspaces.
     pub enabled: bool,
     /// Whether missing language server binaries should be installed via `mise install`.
+    #[serde(alias = "autoInstall")]
     pub auto_install: bool,
     /// Maximum duration in milliseconds to wait for an LSP JSON-RPC response.
+    #[serde(alias = "requestTimeoutMs")]
     pub request_timeout_ms: u64,
 }
 
@@ -81,16 +92,6 @@ pub struct LanguageConfig {
     /// Default Mise tasks synthesized when this language is detected in a workspace.
     #[serde(default)]
     pub default_tasks: BTreeMap<String, MiseTaskConfig>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub(crate) struct LspSettingsOverlay {
-    pub(crate) enabled: Option<bool>,
-    #[serde(alias = "autoInstall")]
-    pub(crate) auto_install: Option<bool>,
-    #[serde(alias = "requestTimeoutMs")]
-    pub(crate) request_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

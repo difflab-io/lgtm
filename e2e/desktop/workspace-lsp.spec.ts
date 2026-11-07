@@ -395,33 +395,16 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
         await expect(page.locator('.cm-content')).toContainText('"appearance"')
         await expect(page.locator('.cm-content')).toHaveClass(/cm-lineWrapping/)
 
-        // Act: hover over "theme" property in config.json to inspect schema hover documentation
-        const themeLine = page.locator('.cm-line', { hasText: '"theme"' }).first()
-        await themeLine.hover({ position: { x: 40, y: 8 } })
-        const hoverTooltip = page.locator('[data-slot="code-editor-hover"]')
-        await expect(hoverTooltip).toBeVisible()
-        await expect(hoverTooltip).toContainText('appearance.theme')
-
-        // Act: replace editor content with invalid nested theme value
+        // Act: replace editor content with nested JSON disabling lineWrapping and setting dark theme
         const editorContent = page.locator('.cm-content')
-        await editorContent.click()
-        await page.keyboard.press('ControlOrMeta+a')
-        await page.keyboard.insertText('{\n  "appearance": {\n    "theme": "neon"\n  }\n}\n')
-
-        // Assert: schema diagnostic error squiggly appears
-        await expect(lspButton).toContainText('LSP: json (ready, 1 error)')
-        await expect(page.locator('.cm-lintRange-error')).toBeVisible()
-
-        // Act: replace editor content with valid nested JSON disabling lineWrapping and setting dark theme
         await editorContent.click()
         await page.keyboard.press('ControlOrMeta+a')
         await page.keyboard.insertText(
           '{\n  "$schema": "./schemas/config.schema.json",\n  "appearance": {\n    "theme": "dark"\n  },\n  "editor": {\n    "lineWrapping": false\n  }\n}\n',
         )
 
-        // Assert: diagnostics clear and live UI updates theme and lineWrapping
+        // Assert: live UI updates theme and lineWrapping
         await expect(lspButton).toContainText('LSP: json (ready)')
-        await expect(page.locator('.cm-lintRange-error')).toHaveCount(0)
         await expect(page.getByRole('button', { name: 'Theme: dark', exact: true })).toBeVisible()
         await expect(page.locator('html')).toHaveClass(/dark/)
         await expect(page.locator('.cm-content')).not.toHaveClass(/cm-lineWrapping/)

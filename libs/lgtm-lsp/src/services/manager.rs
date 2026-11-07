@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
-use lgtm_config::{ConfigFormat, ConfigService, LanguageConfig, UserSettingsPatch};
+use lgtm_config::{ConfigService, LanguageConfig};
 use lgtm_env::MiseService;
 use lsp_types::{
     DiagnosticSeverity, GotoDefinitionResponse, Hover, HoverContents, MarkedString, NumberOrString,
@@ -255,7 +255,6 @@ impl LgtmLspManager {
         let project_root = Self::canonical_or_owned(&project_root);
         let key = LspSessionKey::new(&workspace_root, &language_id, &project_root);
 
-        let is_config_doc = self.is_lgtm_config_file(&file_path);
         let handle = self.ensure_session(
             &workspace_root,
             &project_root,
@@ -273,57 +272,40 @@ impl LgtmLspManager {
             content,
         );
 
-        if let Some(handle) = handle {
-            if let Some(uri) = path_to_file_uri(&file_path) {
-                match sync_action {
-                    LspDocumentSyncAction::Opened(doc) => {
-                        let _ = handle.notify(
-                            "textDocument/didOpen",
-                            json!({
-                                "textDocument": {
-                                    "uri": uri,
-                                    "languageId": doc.language_id,
-                                    "version": doc.version,
-                                    "text": doc.text,
-                                }
-                            }),
-                        );
-                    }
-                    LspDocumentSyncAction::Changed(doc) => {
-                        let _ = handle.notify(
-                            "textDocument/didChange",
-                            json!({
-                                "textDocument": {
-                                    "uri": uri,
-                                    "version": doc.version,
-                                },
-                                "contentChanges": [{ "text": doc.text }],
-                            }),
-                        );
-                    }
-                    LspDocumentSyncAction::Unchanged(_) => {}
+        if let Some(handle) = handle
+            && let Some(uri) = path_to_file_uri(&file_path)
+        {
+            match sync_action {
+                LspDocumentSyncAction::Opened(doc) => {
+                    let _ = handle.notify(
+                        "textDocument/didOpen",
+                        json!({
+                            "textDocument": {
+                                "uri": uri,
+                                "languageId": doc.language_id,
+                                "version": doc.version,
+                                "text": doc.text,
+                            }
+                        }),
+                    );
                 }
+                LspDocumentSyncAction::Changed(doc) => {
+                    let _ = handle.notify(
+                        "textDocument/didChange",
+                        json!({
+                            "textDocument": {
+                                "uri": uri,
+                                "version": doc.version,
+                            },
+                            "contentChanges": [{ "text": doc.text }],
+                        }),
+                    );
+                }
+                LspDocumentSyncAction::Unchanged(_) => {}
             }
-        } else if is_config_doc {
-            let ready_event = self.cache_service.set_status(
-                key.clone(),
-                LspServerStatusEvent {
-                    workspace_root: workspace_root.to_string_lossy().to_string(),
-                    language_id: language_id.clone(),
-                    project_root: project_root.to_string_lossy().to_string(),
-                    status: LspServerStatus::Ready,
-                    command: language_config.command.clone(),
-                    message: None,
-                    error_count: 0,
-                    warning_count: 0,
-                },
-            );
-            (self.event_sink)(LspEvent::Status(ready_event));
         }
 
-        if is_config_doc {
-            self.publish_config_schema_diagnostics(&key, &file_path, content);
-        } else if let Some(diag_event) = self
+        if let Some(diag_event) = self
             .cache_service
             .get_file_diagnostics(&workspace_root, &file_path)
         {
@@ -363,9 +345,6 @@ impl LgtmLspManager {
                                 "contentChanges": [{ "text": content }],
                             }),
                         )?;
-                    }
-                    if self.is_lgtm_config_file(&file_path) {
-                        self.publish_config_schema_diagnostics(&key, &file_path, content);
                     }
                 }
                 LspDocumentSyncAction::Unchanged(_) | LspDocumentSyncAction::Opened(_) => {}
@@ -433,12 +412,6 @@ impl LgtmLspManager {
         }
         let workspace_root = Self::canonical_or_owned(workspace_root);
         let file_path = Self::canonical_or_owned(file_path);
-        if self.is_lgtm_config_file(&file_path) {
-            let text = self.cache_service.get_document_or_disk_text(&file_path);
-            if let Some(schema_hover) = Self::compute_config_schema_hover(&text, offset) {
-                return Ok(Some(schema_hover));
-            }
-        }
         let Some((handle, text)) = self.resolve_file_session(&workspace_root, &file_path) else {
             return Ok(None);
         };
@@ -1127,7 +1100,7 @@ impl LgtmLspManager {
         let file_path = Self::canonical_or_owned(&raw_file_path);
         let text = cache_service.get_document_or_disk_text(&file_path);
 
-        let mut mapped: Vec<LspDiagnostic> = published
+        let mapped: Vec<LspDiagnostic> = published
             .diagnostics
             .into_iter()
             .map(|item| {
@@ -1158,17 +1131,6 @@ impl LgtmLspManager {
                 }
             })
             .collect();
-
-        if Self::is_config_file_name(&file_path) {
-            for diag in Self::compute_config_schema_diagnostics(&file_path, &text) {
-                if !mapped
-                    .iter()
-                    .any(|existing| existing.line == diag.line && existing.message == diag.message)
-                {
-                    mapped.push(diag);
-                }
-            }
-        }
 
         let (file_event, updated_status) =
             cache_service.set_file_diagnostics(session_key, &file_path, mapped);
@@ -1265,112 +1227,6 @@ impl LgtmLspManager {
             end_offset,
             line,
             character,
-        })
-    }
-
-    fn is_lgtm_config_file(&self, file_path: &Path) -> bool {
-        if Self::is_config_file_name(file_path) {
-            return true;
-        }
-        let global = Self::canonical_or_owned(&self.config_service.get_global_config_path());
-        file_path == global
-    }
-
-    fn is_config_file_name(file_path: &Path) -> bool {
-        let Some(name) = file_path.file_name().and_then(|n| n.to_str()) else {
-            return false;
-        };
-        if !matches!(name, "config.json" | "config.yaml" | "config.yml") {
-            return false;
-        }
-        file_path
-            .parent()
-            .and_then(|p| p.file_name())
-            .and_then(|n| n.to_str())
-            .is_some_and(|parent| parent == ".lgtm")
-    }
-
-    fn compute_config_schema_diagnostics(file_path: &Path, text: &str) -> Vec<LspDiagnostic> {
-        let format = ConfigFormat::from_path(file_path);
-        UserSettingsPatch::validate_document_text(format, text)
-            .into_iter()
-            .map(|issue| {
-                let from = position_to_offset(text, issue.line, issue.character);
-                let to = position_to_offset(text, issue.line, issue.end_character).max(from + 1);
-                LspDiagnostic {
-                    from,
-                    to,
-                    line: issue.line,
-                    character: issue.character,
-                    end_line: issue.line,
-                    end_character: issue.end_character,
-                    severity: LspDiagnosticSeverity::Error,
-                    message: issue.message,
-                    source: Some("lgtm-config".to_string()),
-                    code: Some(issue.code),
-                }
-            })
-            .collect()
-    }
-
-    fn publish_config_schema_diagnostics(
-        &self,
-        key: &LspSessionKey,
-        file_path: &Path,
-        content: &str,
-    ) {
-        let schema_diags = Self::compute_config_schema_diagnostics(file_path, content);
-        let (file_event, updated_status) =
-            self.cache_service
-                .set_file_diagnostics(key, file_path, schema_diags);
-        (self.event_sink)(LspEvent::Diagnostics(file_event));
-        if let Some(status_event) = updated_status {
-            (self.event_sink)(LspEvent::Status(status_event));
-        }
-    }
-
-    fn compute_config_schema_hover(text: &str, offset: u32) -> Option<LspHoverResult> {
-        let units: Vec<(u32, char)> = {
-            let mut pos = 0u32;
-            let mut out = Vec::new();
-            for ch in text.chars() {
-                out.push((pos, ch));
-                pos += ch.len_utf16() as u32;
-            }
-            out
-        };
-        if units.is_empty() {
-            return None;
-        }
-        let is_ident = |c: char| c.is_ascii_alphanumeric() || c == '$' || c == '_';
-        let mut idx = units
-            .iter()
-            .position(|(pos, _)| *pos >= offset)
-            .unwrap_or(units.len() - 1);
-        if units[idx].1 == '"' && idx + 1 < units.len() && is_ident(units[idx + 1].1) {
-            idx += 1;
-        } else if !is_ident(units[idx].1) && idx > 0 && is_ident(units[idx - 1].1) {
-            idx -= 1;
-        }
-        if !is_ident(units[idx].1) {
-            return None;
-        }
-        let mut start = idx;
-        while start > 0 && is_ident(units[start - 1].1) {
-            start -= 1;
-        }
-        let mut end = idx;
-        while end + 1 < units.len() && is_ident(units[end + 1].1) {
-            end += 1;
-        }
-        let token: String = units[start..=end].iter().map(|(_, c)| *c).collect();
-        let doc = UserSettingsPatch::hover_documentation_for_key(&token)?;
-        let from = units[start].0;
-        let to = units[end].0 + (units[end].1.len_utf16() as u32);
-        Some(LspHoverResult {
-            contents: doc.to_string(),
-            from: Some(from),
-            to: Some(to),
         })
     }
 }
