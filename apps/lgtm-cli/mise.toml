@@ -90,7 +90,7 @@ $arch = switch ($env:PROCESSOR_ARCHITECTURE.ToLowerInvariant()) {
 New-Item -ItemType Directory -Force -Path $env:PREMISE_ARTIFACT_DIR | Out-Null
 $version = $env:RELEASE_VERSION -replace '^v', ''
 $archivePath = Join-Path $env:PREMISE_ARTIFACT_DIR "lgtm-${version}-windows-${arch}.tar.gz"
-tar -C $releaseDir -czf $archivePath lgtm.exe
+& "$env:SystemRoot\System32\tar.exe" -C $releaseDir -czf $archivePath lgtm.exe
 if ($LASTEXITCODE -ne 0) { throw 'tar archive creation failed' }
 '''
 
