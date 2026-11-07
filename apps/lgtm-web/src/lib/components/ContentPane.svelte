@@ -74,9 +74,10 @@
         <CodeEditor
           bind:this={editorRef}
           value={workspace.fileContent.content}
-          filename={workspace.selected?.name ?? 'diagnostics.md'}
+          filename={workspace.activeEditorFilename}
           label={workspace.selectedTitle}
           readonly={workspace.activeTab?.readonly ?? false}
+          lineWrapping={workspace.settings.lineWrapping}
           diagnostics={editorDiagnostics}
           selectionOffset={workspace.selectionOffset}
           onchange={(content) => workspace.updateContent(content)}

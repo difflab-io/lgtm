@@ -1,7 +1,8 @@
 use serde::Serialize;
+use specta::Type;
 
 /// A workspace failure returned to the application.
-#[derive(Debug, PartialEq, Eq, Serialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceError {
     /// A stable code that identifies the failure.

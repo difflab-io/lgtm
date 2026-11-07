@@ -15,9 +15,12 @@ lgtm-config = { path = "../../libs/lgtm-config" }
 lgtm-lsp = { path = "../../libs/lgtm-lsp" }
 rfd = "0.15"
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", optional = true }
+serde_json = "1"
 sha2 = "0.10"
+specta = { version = "=2.0.0-rc.26", features = ["derive", "function"] }
+specta-typescript = "0.0.13"
 tauri = { version = "=2.11.6", features = [] }
+tauri-specta = { version = "=2.0.0-rc.26", features = ["derive", "typescript"] }
 trash = "=5.2.9"
 
 [target.'cfg(unix)'.dependencies]
@@ -33,4 +36,4 @@ tempfile = "3"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
-e2e-bridge = ["dep:serde_json", "tauri/test"]
+e2e-bridge = ["tauri/test"]

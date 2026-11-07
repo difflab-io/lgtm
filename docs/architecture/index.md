@@ -147,7 +147,7 @@ lgtm/
 │   ├── lgtm-forge/     Rust services and shared Protobuf schema
 │   └── lgtm-web/       SvelteKit desktop/web shell and generated client
 ├── libs/
-│   ├── lgtm-config/    Global/workspace TOML config and language discovery SDK
+│   ├── lgtm-config/    Global/workspace JSON config, JSON Schema, and language discovery SDK
 │   ├── lgtm-db/        Private Rust library
 │   ├── lgtm-env/       Managed mise binary installation and .lgtm/mise.toml synthesis SDK
 │   ├── lgtm-lsp/       Stdio JSON-RPC 2.0 language server orchestration SDK
@@ -168,6 +168,7 @@ The installed CLI serves backend RPCs and embedded frontend assets in one proces
 - [Database architecture](db/index.md).
 - [CLI architecture](cli/index.md).
 - [Desktop application architecture](desktop/index.md).
+- [Web frontend architecture](web/index.md).
 - [Configuration library architecture](config/index.md).
 - [Environment library architecture](env/index.md).
 - [LSP SDK architecture](lsp/index.md).

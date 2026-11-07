@@ -60,11 +60,11 @@ flowchart TB
     LSP_MGR --> SERVERS["Language Server Processes (stdio JSON-RPC 2.0)"]
 ```
 
-- `app.rs` (`lgtm-desktop`): Registers `WorkspaceState`, `LspState`, and `FrontendReady` in Tauri managed state, dispatches `workspace_*` and `lsp_*` IPC commands onto `spawn_blocking`, and coordinates the `RunEvent::ExitRequested` quit handshake.
-- `services::workspace::WorkspaceService` (`lgtm-desktop`): Owns the active `Workspace` root, validates workspace-relative paths, performs atomic file/folder CRUD, and notifies `services::lsp::LspService` on workspace switches (`switch_workspace`), file reads (`open_or_sync_file`), writes (`did_save`), renames (`did_close`), and deletes (`did_close`).
+- `app.rs` (`lgtm-desktop`): Registers a unified `AppState` (`workspace`, `config`, `lsp`, `frontend_ready`, `events`) in Tauri managed state, dispatches `workspace_*`, `lsp_*`, and `config_get` IPC commands onto `spawn_blocking`, emits `config-updated` when `workspace_write` saves a configuration file, and coordinates the `RunEvent::ExitRequested` quit handshake.
+- `services::workspace::WorkspaceService` (`lgtm-desktop`): Owns the active `Workspace` root, validates workspace-relative paths (plus `~/.lgtm/config.json` and `.lgtm/config.json`), opens global and local configuration files (`open_global_config`, `open_local_config`), and performs atomic file/folder CRUD.
 - `services::lsp::LspService` (`lgtm-desktop`): Bridges `lgtm-lsp`'s `LgtmLspManager` to the Tauri `AppHandle` (and optional E2E stdio bridge forwarder), translating `LspEvent::Status` and `LspEvent::Diagnostics` callbacks into `app_handle.emit("lsp-status", ...)` and `app_handle.emit("lsp-diagnostics", ...)`.
 - `LgtmLspManager` & `LspCacheService` (`lgtm-lsp`): Manage per-`(workspace_root, language_id, project_root)` stdio JSON-RPC 2.0 sessions, cache open UTF-8 document snapshots and diagnostics, and coordinate with `MiseService` (`lgtm-env`) and `ConfigService` (`lgtm-config`) to launch language servers.
-- `WorkspaceService` & `LspService` (`lgtm-web`): Reactive Svelte 5 `$state` services that manage open editor tabs, 150ms debounced auto-save (`flushSave`), live `lsp_did_change` notifications, active language server indicators, and read-only diagnostics buffer tabs.
+- `WorkspaceService`, `LspService`, & `SettingsService` (`lgtm-web`): Reactive Svelte 5 `$state` services that manage open editor tabs, 150ms debounced auto-save (`flushSave`), live `lsp_did_change` notifications, active language server indicators, read-only diagnostics buffer tabs, and live `config-updated` preference synchronization. See [Web frontend architecture](../web/index.md).
 
 ### Data and Control Flow
 
@@ -154,8 +154,12 @@ sequenceDiagram
 | `lsp_get_state` | UI -> Host | `() -> LspWorkspaceSnapshot` | Return all tracked language server statuses and file diagnostics for the active workspace. |
 | `lsp_get_diagnostics_buffer` | UI -> Host | `(languageId?: string) -> LspDiagnosticsBuffer` | Render a read-only plain-text diagnostics report for all active servers or a single language. |
 | `lsp_restart` | UI -> Host | `(languageId: string) -> LspServerStatusEvent` | Restart all sessions for `languageId` in the active workspace and re-open tracked documents. |
+| `workspace_open_global_config` | UI -> Host | `() -> FileContent` | Ensure `~/.lgtm/config.json` exists with `$schema`, synchronize LSP (`biome lsp-proxy`), and return `FileContent` for `Cmd+,` editing. |
+| `workspace_open_local_config` | UI -> Host | `() -> FileContent` | Ensure `<workspace>/.lgtm/config.json` exists with `$schema`, synchronize LSP (`biome lsp-proxy`), and return `FileContent` for `Cmd+Shift+,` editing. |
+| `config_get` | UI -> Host | `() -> ResolvedConfigSnapshot` | Return effective deep-merged `UserSettings` plus global and project `UserSettingsPatch` trees. |
 | `lsp-status` | Host -> UI | `LspServerStatusEvent` | Real-time language server lifecycle status and error/warning counts. |
-| `lsp-diagnostics` | Host -> UI | `LspFileDiagnosticsEvent` | Real-time workspace-relative file diagnostics with UTF-16 offsets. |
+| `lsp-diagnostics` | Host -> UI | `LspFileDiagnosticsEvent` | Real-time workspace-relative or global config file diagnostics with UTF-16 offsets. |
+| `config-updated` | Host -> UI | `ResolvedConfigSnapshot` | Live resolved nested settings snapshot emitted when `workspace_write` saves `~/.lgtm/config.json` or `<workspace>/.lgtm/config.json`. |
 | `workspace-quit-requested` | Host -> UI | `()` | Signals the frontend to flush pending saves before calling `workspace_finish_quit`. |
 
 ## Implementation

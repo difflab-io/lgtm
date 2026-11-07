@@ -23,9 +23,9 @@ describe(
         const { runtime } = fixture()
         await initLocalRepo(runtime)
         await runtime.write(
-          '.lgtm/config.toml',
+          '.lgtm/mise.toml',
           [
-            '[mise.tasks.greet]',
+            '[tasks.greet]',
             'description = "Print greeting marker"',
             'run = "echo lgtm-mise-greet-ok"',
             '',
@@ -75,12 +75,13 @@ describe(
       const { runtime } = fixture()
       await initLocalRepo(runtime)
       await runtime.write(
-        '.lgtm/config.toml',
+        '.lgtm/config.json',
+        `${JSON.stringify({ lsp: { auto_install: false } }, null, 2)}\n`,
+      )
+      await runtime.write(
+        '.lgtm/mise.toml',
         [
-          '[lsp]',
-          'auto_install = false',
-          '',
-          '[mise.tasks.write-marker]',
+          '[tasks.write-marker]',
           'description = "Write marker file"',
           'run = "printf \'managed-run-ok\' > .lgtm/marker.txt"',
           '',

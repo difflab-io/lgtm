@@ -2,37 +2,59 @@ import { invoke, isTauri } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { ThemeWindowBridge } from 'lgtm-ui'
+import {
+  commands,
+  type AppearanceSettings,
+  type AppearanceSettingsPatch,
+  type EditorSettings,
+  type EditorSettingsPatch,
+  type FileContent,
+  type LineWrap,
+  type LspDiagnostic,
+  type LspDiagnosticsBuffer,
+  type LspHoverResult,
+  type LspLocation,
+  type LspServerStatus,
+  type LspServerStatusEvent,
+  type LspWorkspaceSnapshot,
+  type ResolvedConfigSnapshot,
+  type ThemeMode,
+  type UserSettings,
+  type UserSettingsPatch,
+  type WorkspaceError,
+  type WorkspaceListing,
+  type WorkspaceSettings,
+  type WorkspaceSettingsPatch,
+} from '../gen/bindings'
+
+export type {
+  AppearanceSettings,
+  AppearanceSettingsPatch,
+  EditorSettings,
+  EditorSettingsPatch,
+  FileContent,
+  LineWrap,
+  LspDiagnostic,
+  LspDiagnosticsBuffer,
+  LspHoverResult,
+  LspLocation,
+  LspServerStatus,
+  LspServerStatusEvent,
+  LspWorkspaceSnapshot,
+  ResolvedConfigSnapshot,
+  ThemeMode,
+  UserSettings,
+  UserSettingsPatch,
+  WorkspaceError,
+  WorkspaceListing,
+  WorkspaceSettings,
+  WorkspaceSettingsPatch,
+}
 
 export interface WorkspaceNode {
   path: string
   name: string
   kind: 'directory' | 'file' | 'unavailable'
-}
-
-export type LspServerStatus = 'starting' | 'ready' | 'unavailable' | 'error'
-
-export interface LspServerStatusEvent {
-  workspaceRoot: string
-  languageId: string
-  projectRoot: string
-  status: LspServerStatus
-  command: string
-  message?: string | null
-  errorCount: number
-  warningCount: number
-}
-
-export interface LspDiagnostic {
-  from: number
-  to: number
-  line: number
-  character: number
-  endLine: number
-  endCharacter: number
-  severity: 'error' | 'warning' | 'info' | 'hint'
-  message: string
-  source?: string | null
-  code?: string | null
 }
 
 export interface LspFileDiagnosticsEvent {
@@ -42,39 +64,6 @@ export interface LspFileDiagnosticsEvent {
   diagnostics: LspDiagnostic[]
 }
 
-export interface LspHoverResult {
-  contents: string
-  from?: number | null
-  to?: number | null
-}
-
-export interface LspLocation {
-  path: string
-  offset: number
-  endOffset: number
-  line: number
-  character: number
-}
-
-export interface LspWorkspaceSnapshot {
-  workspaceRoot: string
-  servers: LspServerStatusEvent[]
-  diagnosticsByPath: Record<string, LspDiagnostic[]>
-}
-
-export interface LspDiagnosticsBuffer {
-  title: string
-  languageId?: string | null
-  content: string
-}
-
-export interface FileContent {
-  content: string
-  revision: string
-  languageId?: string | null
-  lspStatus?: LspServerStatusEvent | null
-}
-
 export interface WorkspaceClient {
   isDesktop(): boolean
   themeWindowBridge?(): ThemeWindowBridge | undefined
@@ -82,6 +71,8 @@ export interface WorkspaceClient {
   pickFolder(): Promise<string | null>
   list(path: string): Promise<WorkspaceNode[]>
   read(path: string): Promise<FileContent>
+  openGlobalConfig?(): Promise<FileContent>
+  openLocalConfig?(): Promise<FileContent>
   write(path: string, content: string): Promise<FileContent>
   createFile(name: string, parentPath?: string): Promise<WorkspaceNode>
   createFolder(name: string, parentPath?: string): Promise<WorkspaceNode>
@@ -96,6 +87,10 @@ export interface WorkspaceClient {
   lspGetState(): Promise<LspWorkspaceSnapshot>
   lspGetDiagnosticsBuffer(languageId?: string): Promise<LspDiagnosticsBuffer>
   lspRestart(languageId: string): Promise<LspServerStatusEvent>
+  configGet?(): Promise<ResolvedConfigSnapshot>
+  registerConfigHandlers?(handlers: {
+    onConfigUpdated: (snapshot: ResolvedConfigSnapshot) => void
+  }): Promise<(() => void)[]>
   registerLspHandlers(handlers: {
     onStatus: (event: LspServerStatusEvent) => void
     onDiagnostics: (event: LspFileDiagnosticsEvent) => void
@@ -129,6 +124,8 @@ export const workspaceClient: WorkspaceClient = {
   pickFolder: () => invoke('workspace_pick_folder'),
   list: (relativePath) => invoke('workspace_list', { relativePath }),
   read: (relativePath) => invoke('workspace_read', { relativePath }),
+  openGlobalConfig: () => commands.workspaceOpenGlobalConfig(),
+  openLocalConfig: () => commands.workspaceOpenLocalConfig(),
   write: (relativePath, content) => invoke('workspace_write', { relativePath, content }),
   createFile: (name, parentPath = '') => invoke('workspace_create_file', { name, parentPath }),
   createFolder: (name, parentPath = '') => invoke('workspace_create_folder', { name, parentPath }),
@@ -158,6 +155,13 @@ export const workspaceClient: WorkspaceClient = {
   lspGetDiagnosticsBuffer: (languageId?: string) =>
     invoke('lsp_get_diagnostics_buffer', languageId ? { languageId } : {}),
   lspRestart: (languageId: string) => invoke('lsp_restart', { languageId }),
+  configGet: () => commands.configGet(),
+  registerConfigHandlers: (handlers) =>
+    Promise.all([
+      listen<ResolvedConfigSnapshot>('config-updated', (event) => {
+        handlers.onConfigUpdated(event.payload)
+      }),
+    ]),
   registerLspHandlers: (handlers) =>
     Promise.all([
       listen<LspServerStatusEvent>('lsp-status', (event) => {
@@ -169,6 +173,7 @@ export const workspaceClient: WorkspaceClient = {
     ]),
 }
 
+/** Converts an unknown error value into a displayable message string. */
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   if (typeof error === 'object' && error && 'message' in error) return String(error.message)

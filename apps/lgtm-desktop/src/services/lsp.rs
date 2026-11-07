@@ -1,58 +1,34 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use lgtm_config::ConfigService;
 use lgtm_lsp::{
     LgtmLspManager, LspDiagnosticsBuffer, LspEvent, LspHoverResult, LspLocation,
     LspServerStatusEvent, LspWorkspaceSnapshot,
 };
-use tauri::Emitter;
 
 use crate::error::{Result, error};
-#[cfg(any(test, feature = "e2e-bridge"))]
-use crate::services::BridgeEventForwarder;
 
-/// Desktop-scoped LSP orchestration service managing Tauri event forwarding, workspace transitions, and cleanup.
+/// Desktop LSP orchestration service delegating workspace lifecycle and document operations to `LgtmLspManager`.
 #[derive(Clone)]
 pub struct LspService {
     manager: LgtmLspManager,
 }
 
 impl LspService {
-    /// Creates a desktop `LspService` wired to emit `lsp-status` and `lsp-diagnostics` events on `app_handle`.
-    pub fn from_app_handle<R: tauri::Runtime>(
-        app_handle: &tauri::AppHandle<R>,
-        home: PathBuf,
-        #[cfg(any(test, feature = "e2e-bridge"))] event_forwarder: Option<BridgeEventForwarder>,
-    ) -> Self {
-        let config_service = ConfigService::from_home(home);
-        let emit_handle = app_handle.clone();
-        let manager = LgtmLspManager::new(config_service, move |event| match event {
-            LspEvent::Status(payload) => {
-                #[cfg(any(test, feature = "e2e-bridge"))]
-                if let Some(cb) = &event_forwarder
-                    && let Ok(val) = serde_json::to_value(&payload)
-                {
-                    cb("lsp-status", val);
-                }
-                let _ = emit_handle.emit("lsp-status", payload);
-            }
-            LspEvent::Diagnostics(payload) => {
-                #[cfg(any(test, feature = "e2e-bridge"))]
-                if let Some(cb) = &event_forwarder
-                    && let Ok(val) = serde_json::to_value(&payload)
-                {
-                    cb("lsp-diagnostics", val);
-                }
-                let _ = emit_handle.emit("lsp-diagnostics", payload);
-            }
-        });
-        Self { manager }
+    /// Creates an `LspService` backed by `config_service` that forwards `LspEvent` notifications to `on_event`.
+    pub fn new<F>(config_service: ConfigService, on_event: F) -> Self
+    where
+        F: Fn(LspEvent) + Send + Sync + 'static,
+    {
+        Self {
+            manager: LgtmLspManager::new(config_service, on_event),
+        }
     }
 
-    /// Creates a no-op `LspService` for unit tests where no language servers are registered.
-    pub fn noop(home: PathBuf) -> Self {
+    /// Creates a no-op `LspService` for unit tests where no language servers are spawned.
+    pub fn noop(config_service: ConfigService) -> Self {
         Self {
-            manager: LgtmLspManager::noop(ConfigService::from_home(home)),
+            manager: LgtmLspManager::noop(config_service),
         }
     }
 

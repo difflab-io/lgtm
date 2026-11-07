@@ -2,11 +2,13 @@
 
 ## Hard Rules
 
-- Run builds, formatters, linters, and tests through project [Mise tasks](mise.toml) invoked by Premise (`premise run format`, `premise run lint`, `premise run test`, `premise run e2e:smoke`). Keep task scripts tracked and generated outputs ignored.
+- Run builds, formatters, linters, and tests through project [Mise tasks](mise.toml) invoked by Premise (`premise run format`, `premise run lint`, `premise run test`, `premise run e2e:smoke`). Keep task scripts tracked and generated outputs ignored. Define Mise tasks and tools in `[.]mise.toml` files (such as `.lgtm/mise.toml`), never inside `.lgtm/config.json`.
+- Store generated JSON Schemas under [`schemas/`](schemas/) at the repository root and reference them via versioned jsDelivr tag URLs (`https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v<version>/schemas/...`) rather than writing local schema copies into `.lgtm/`.
 - During alpha, update branch-introduced contracts directly without compatibility shims or duplicate fields.
 - Expose database queries and mutations only through named repository methods in [`libs/lgtm-db`](libs/lgtm-db/src/lib.rs). Keep SeaORM `Entity` and `ActiveModel` types `pub(crate)`; never expose raw connections, query builders, or raw SQL to callers.
-- Models validate, map data, and implement pure domain behavior; services own persistence orchestration, transactions, and external I/O.
-- Give each file and service a single responsibility; extract distinct capabilities (such as caching or desktop lifecycle orchestration) into dedicated model and service modules with their own integration suites.
+- Models validate, map data, and implement pure domain behavior; services own persistence orchestration, cross-scope configuration merging, transactions, and external I/O.
+- Give each file and service a single responsibility; extract distinct capabilities (such as caching, configuration, or LSP orchestration) into dedicated model and service modules with their own integration suites, combine host services into a single `AppState` in `apps/lgtm-desktop/src/app.rs`, and wire event handling and cross-service coordination in the application entry point (`app.rs` / `Shell.svelte`) rather than emitting framework events or calling sibling services inside domain services.
+- Configure user preferences by editing `~/.lgtm/config.json` and `<workspace>/.lgtm/config.json` directly in the editor and applying resolved settings when config files are saved, rather than exposing programmatic preference-mutation UI buttons or RPCs.
 - Keep CLI review and comment commands as thin RPC clients over `lgtm-forge`. Preserve daemon and health behavior; do not embed review persistence in `lgtm-cli`.
 - Establish tracing spans at CLI/RPC boundaries (`#[tracing::instrument]`). Services emit tracing events and never store request spans.
 - Preserve pinned Neovim dependencies in the plugin setup, source-switch installer, and E2E harness (including NuiComponents/NUI and optional Kak).
@@ -15,22 +17,19 @@
 
 ## Organization
 
-- `apps/lgtm-forge/src/`: `rpc/` (Connect handlers) -> `services/` (`ReviewService`) -> `models/`, `forge/` (`RemoteForge`), `extensions/` (`git`, `gitoxide`, `octocrab`), `snapshots.rs`, `utils.rs`.
-- `apps/lgtm-cli/src/`: `commands/` (one file per command group), `models/` (`From<Proto>` + `print`), `rpc_client.rs`, `daemon.rs`, `store.rs`.
-- `apps/lgtm-desktop/src/`: `app.rs` (Tauri IPC handlers), `services/` (`WorkspaceService`, `DesktopLspService`), `models/`, `error.rs`.
-- `apps/lgtm-web/src/lib/`: `clients/` (Tauri/RPC adapters), `services/` (reactive Svelte 5 state), `models/`, `components/`.
-- `libs/`: `lgtm-config` (`.lgtm/config.toml` + language discovery), `lgtm-db` (private SeaORM entities + named repositories), `lgtm-env` (managed `mise` binary lifecycle + `.lgtm/mise.toml` synthesis), `lgtm-lsp` (`LgtmLspManager`, `LspCacheService`, stdio JSON-RPC), `lgtm-ui` (portable Helical UI components and services).
-- `e2e/`: `common/`, `forge/`, `cli/`, `nvim/`, `desktop/`.
-
-```mermaid
-flowchart LR
-    CLI["lgtm-cli: commands + view models"] --> RPC["lgtm-forge/rpc: transport handlers"]
-    RPC --> Service["services: stateful orchestration"]
-    Service --> Model["models: pure domain logic + mappers"]
-    Service --> Repo["lgtm-db/repositories: named queries"]
-    Repo --> Entity["lgtm-db/entities: private SeaORM rows"]
-    Service --> Ext["extensions: git, gitoxide, octocrab"]
-    Service --> Utils["utils: paths, URLs, descriptors"]
+```text
+apps/
+├── lgtm-cli/       # Thin RPC CLI client, daemon launcher, and terminal/JSON view models
+├── lgtm-desktop/   # Tauri desktop host and Specta IPC command handlers
+├── lgtm-forge/     # Connect RPC backend, review orchestration, and Git/GitHub adapters
+└── lgtm-web/       # Svelte 5 desktop frontend
+libs/
+├── lgtm-config/    # Nested .lgtm/config.json settings, JSON Schema, and language discovery
+├── lgtm-db/        # Private SeaORM entities and named repositories
+├── lgtm-env/       # Managed mise binary lifecycle and .lgtm/mise.toml synthesis
+├── lgtm-lsp/       # Language server process manager, cache service, and stdio JSON-RPC client
+└── lgtm-ui/        # Portable Helical UI components and services
+e2e/                # Vitest E2E suites (common, forge, cli, nvim, desktop)
 ```
 
 - [Proposed] Name architecture documentation and E2E suite directories for `lgtm-forge` as `forge` (`docs/architecture/forge/` and `e2e/forge/`) rather than `backend`.
@@ -75,6 +74,7 @@ impl CommentAnchor {
 
 ### Desktop & Helical UI Components
 
+- Document all public TypeScript service classes and methods with `/** ... */` JSDoc comments, and maintain Difflab-template architecture documentation for frontend services under `docs/architecture/`.
 - Compose `@cloudvoyant/helical-svelte` primitives directly in `apps/lgtm-web`; build missing reusable primitives and services in `libs/lgtm-ui` per Helical UI conventions (`@ark-ui/svelte`, orthogonal `cva` + `VariantProps` in `styles.ts`, `cn` + semantic Tailwind tokens, and app-agnostic `types.ts`) for upstreaming.
 - Style components and shell layouts with Tailwind utilities and `cva` variants; restrict `apps/lgtm-web/src/app.css` to theme imports and global element resets, and extract repeated Svelte markup/class patterns into local `{#snippet}` blocks or subcomponents.
 - Style IDE menus, context menus, and tab bars compactly with square item highlights (`rounded-none`), full-row submenu trigger hover targets, neutral surface hover/focus tokens (`--accent`, `--ring`), workspace-relative breadcrumbs, and icon-based diagnostic badges only when counts are non-zero.
@@ -90,6 +90,7 @@ impl CommentAnchor {
 
 - Colocate unit tests in `#[cfg(test)] mod tests` after a `// tests ---` separator padded to column 80; place shared unit fixtures in `src/tests/`.
 - Put integration suites directly under `tests/<area>.rs` with shared fixtures in `tests/common/mod.rs` (never `tests/integration/` or `tests/support/`). Cover core module behaviors, edge cases, and failure modes at library integration boundaries to keep E2E suites focused on cross-tier wiring.
+- Do not write custom JSON schema validation/parsing logic or unit tests for schema validation and serialization; rely on library crates and test domain behavior through public service boundaries.
 - Structure all Rust unit and integration tests with nested `mod given_*` and `mod when_*` modules and `fn should_<behavior>()` leaf cases:
 
 ```rust

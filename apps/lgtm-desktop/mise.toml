@@ -145,7 +145,17 @@ set -eu
 if [ "${PREMISE_TEMPLATE_TEST:-}" = "1" ]; then
   cargo tauri build --debug --no-bundle
 else
-  cargo tauri dev
+  web_port="${LGTM_WEB_PORT:-$(node -e '
+    const net = require("node:net");
+    const srv = net.createServer();
+    srv.once("error", () => {
+      const fb = net.createServer();
+      fb.listen(0, "127.0.0.1", () => { console.log(fb.address().port); fb.close(); });
+    });
+    srv.listen(5173, "127.0.0.1", () => { console.log(5173); srv.close(); });
+  ')}"
+  export LGTM_WEB_PORT="$web_port"
+  cargo tauri dev --config "{\"build\":{\"devUrl\":\"http://127.0.0.1:${web_port}\"}}"
 fi
 '''
 
@@ -157,7 +167,17 @@ set -eu
 if [ "${PREMISE_TEMPLATE_TEST:-}" = "1" ]; then
   cargo tauri build --debug --no-bundle
 else
-  cargo tauri dev
+  web_port="${LGTM_WEB_PORT:-$(node -e '
+    const net = require("node:net");
+    const srv = net.createServer();
+    srv.once("error", () => {
+      const fb = net.createServer();
+      fb.listen(0, "127.0.0.1", () => { console.log(fb.address().port); fb.close(); });
+    });
+    srv.listen(5173, "127.0.0.1", () => { console.log(5173); srv.close(); });
+  ')}"
+  export LGTM_WEB_PORT="$web_port"
+  cargo tauri dev --config "{\"build\":{\"devUrl\":\"http://127.0.0.1:${web_port}\"}}"
 fi
 '''
 

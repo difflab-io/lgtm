@@ -237,12 +237,10 @@ impl LgtmLspManager {
         let workspace_root = Self::canonical_or_owned(workspace_root);
         let file_path = Self::canonical_or_owned(file_path);
 
-        let Ok(config) = self
+        let config = self
             .cache_service
             .get_or_load_workspace_config(&self.config_service, &workspace_root)
-        else {
-            return (None, None);
-        };
+            .unwrap_or_default();
         let Some((language_id, lang_cfg)) = config.detect_file_language(&file_path) else {
             return (None, None);
         };
@@ -266,43 +264,44 @@ impl LgtmLspManager {
             Duration::from_millis(config.lsp.request_timeout_ms),
         );
 
-        if let Some(handle) = handle {
-            let sync_action = self.cache_service.sync_document(
-                &workspace_root,
-                &project_root,
-                &file_path,
-                &language_id,
-                content,
-            );
-            if let Some(uri) = path_to_file_uri(&file_path) {
-                match sync_action {
-                    LspDocumentSyncAction::Opened(doc) => {
-                        let _ = handle.notify(
-                            "textDocument/didOpen",
-                            json!({
-                                "textDocument": {
-                                    "uri": uri,
-                                    "languageId": doc.language_id,
-                                    "version": doc.version,
-                                    "text": doc.text,
-                                }
-                            }),
-                        );
-                    }
-                    LspDocumentSyncAction::Changed(doc) => {
-                        let _ = handle.notify(
-                            "textDocument/didChange",
-                            json!({
-                                "textDocument": {
-                                    "uri": uri,
-                                    "version": doc.version,
-                                },
-                                "contentChanges": [{ "text": doc.text }],
-                            }),
-                        );
-                    }
-                    LspDocumentSyncAction::Unchanged(_) => {}
+        let sync_action = self.cache_service.sync_document(
+            &workspace_root,
+            &project_root,
+            &file_path,
+            &language_id,
+            content,
+        );
+
+        if let Some(handle) = handle
+            && let Some(uri) = path_to_file_uri(&file_path)
+        {
+            match sync_action {
+                LspDocumentSyncAction::Opened(doc) => {
+                    let _ = handle.notify(
+                        "textDocument/didOpen",
+                        json!({
+                            "textDocument": {
+                                "uri": uri,
+                                "languageId": doc.language_id,
+                                "version": doc.version,
+                                "text": doc.text,
+                            }
+                        }),
+                    );
                 }
+                LspDocumentSyncAction::Changed(doc) => {
+                    let _ = handle.notify(
+                        "textDocument/didChange",
+                        json!({
+                            "textDocument": {
+                                "uri": uri,
+                                "version": doc.version,
+                            },
+                            "contentChanges": [{ "text": doc.text }],
+                        }),
+                    );
+                }
+                LspDocumentSyncAction::Unchanged(_) => {}
             }
         }
 

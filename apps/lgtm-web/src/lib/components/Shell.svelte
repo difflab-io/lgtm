@@ -17,7 +17,7 @@
     SelectItemText,
   } from '@cloudvoyant/helical-svelte'
   import { FilePlus2, FolderPlus, PanelLeft, ChevronDown } from 'lucide-svelte'
-  import { ThemeService, ThemeToggle } from 'lgtm-ui'
+  import { ThemeService } from 'lgtm-ui'
   import { errorMessage, workspaceClient, type WorkspaceClient } from '../clients/workspaceClient'
   import { WorkspaceService } from '../services/workspaceService.svelte'
   import WorkspaceExplorer from './WorkspaceExplorer.svelte'
@@ -39,11 +39,35 @@
         windowBridge: client.themeWindowBridge?.(),
       }),
   )
-
   // Lifecycle -----------------------------------------------------------------
+  $effect(() => {
+    if (!workspace.settings.snapshot) return
+    const nextTheme = workspace.settings.theme
+    untrack(() => {
+      if (theme.preference !== nextTheme) {
+        theme.setPreference(nextTheme)
+      }
+    })
+  })
+
   onMount(() => {
     let active = true
-    const unlisteners: (() => void)[] = [theme.init()]
+    const handleKeydown = (event: KeyboardEvent) => {
+      const isComma = event.key === ',' || event.key === '<' || event.code === 'Comma'
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && isComma) {
+        event.preventDefault()
+        if (event.shiftKey || event.key === '<') {
+          void workspace.openLocalConfig()
+        } else {
+          void workspace.openGlobalConfig()
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeydown, true)
+    const unlisteners: (() => void)[] = [
+      theme.init(),
+      () => window.removeEventListener('keydown', handleKeydown, true),
+    ]
     void workspace.open()
     if (client.isDesktop()) {
       void client
@@ -69,6 +93,19 @@
             else stop()
           }
           if (active) void workspace.syncLspState()
+        })
+        .catch(() => {})
+      void client
+        .registerConfigHandlers?.({
+          onConfigUpdated: (snapshot) => {
+            workspace.settings.handleUpdated(snapshot)
+          },
+        })
+        .then((stops) => {
+          for (const stop of stops) {
+            if (active) unlisteners.push(stop)
+            else stop()
+          }
         })
         .catch(() => {})
     }
@@ -128,9 +165,6 @@
             >{/each}</SelectContent
         >
       </Select>
-    </div>
-    <div class="ml-auto flex items-center gap-1">
-      <ThemeToggle value={theme.preference} onchange={(next) => theme.setPreference(next)} />
     </div>
   </header>
   <Row class="min-h-0 flex-1 items-stretch gap-0">

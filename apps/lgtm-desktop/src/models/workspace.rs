@@ -1,6 +1,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;
+use specta::Type;
 
 use crate::error::{Result, error};
 
@@ -26,7 +27,7 @@ impl Workspace {
 }
 
 /// The workspace location and its top-level entries.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceListing {
     /// The absolute path to the workspace directory.
@@ -36,7 +37,7 @@ pub struct WorkspaceListing {
 }
 
 /// A file or folder listed in the workspace.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceNode {
     /// The path relative to the workspace root.
