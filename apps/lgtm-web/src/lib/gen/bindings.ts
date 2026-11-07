@@ -15,7 +15,11 @@ export const commands = {
 	workspaceList: (relativePath: string) => __TAURI_INVOKE<WorkspaceNode[]>("workspace_list", { relativePath }),
 	/**  Reads UTF-8 file contents and synchronizes the document with its language server. */
 	workspaceRead: (relativePath: string) => __TAURI_INVOKE<FileContent>("workspace_read", { relativePath }),
-	/**  Writes UTF-8 file contents to disk and notifies the language server (`textDocument/didSave`). */
+	/**  Ensures the global `~/.lgtm/config.json` file exists, synchronizes LSP, and returns its contents. */
+	workspaceOpenGlobalConfig: () => __TAURI_INVOKE<FileContent>("workspace_open_global_config"),
+	/**  Ensures the workspace `.lgtm/config.json` file exists, synchronizes LSP, and returns its contents. */
+	workspaceOpenLocalConfig: () => __TAURI_INVOKE<FileContent>("workspace_open_local_config"),
+	/**  Writes UTF-8 file contents to disk, notifies LSP `didSave`, and emits `config-updated` when a config file is saved. */
 	workspaceWrite: (relativePath: string, content: string) => __TAURI_INVOKE<FileContent>("workspace_write", { relativePath, content }),
 	/**  Creates a new file inside a workspace-relative directory. */
 	workspaceCreateFile: (name: string, parentPath: string | null) => __TAURI_INVOKE<WorkspaceNode>("workspace_create_file", { name, parentPath }),
@@ -41,12 +45,6 @@ export const commands = {
 	lspRestart: (languageId: string) => __TAURI_INVOKE<LspServerStatusEvent>("lsp_restart", { languageId }),
 	/**  Returns the resolved nested configuration snapshot across defaults, global settings, and project overrides. */
 	configGet: () => __TAURI_INVOKE<ResolvedConfigSnapshot>("config_get"),
-	/**  Applies a nested `UserSettingsPatch` to `scope` (or routes each leaf by project override presence when `scope` is `None`). */
-	configUpdate: (patch: UserSettingsPatch, scope: ConfigScope | null) => __TAURI_INVOKE<ResolvedConfigSnapshot>("config_update", { patch, scope }),
-	/**  Ensures the global or project configuration file exists on disk, synchronizes LSP, and returns the document. */
-	configOpenDocument: (scope: ConfigScope | null, format: ConfigFormat | null) => __TAURI_INVOKE<ConfigDocument>("config_open_document", { scope, format }),
-	/**  Writes raw editor text to the global or project configuration file, notifies LSP `didSave`, and emits `config-updated` when valid. */
-	configWriteDocument: (scope: ConfigScope, content: string, format: ConfigFormat | null) => __TAURI_INVOKE<ConfigDocument>("config_write_document", { scope, content, format }),
 };
 
 /* Types */
@@ -61,40 +59,6 @@ export type AppearanceSettingsPatch = {
 	/**  Preferred application color theme (`system`, `light`, or `dark`). */
 	theme?: ThemeMode | null,
 };
-
-/**  Raw text and LSP metadata for a global or project config file opened in `CodeEditor`. */
-export type ConfigDocument = {
-	/**  Scope of this configuration document (`global` or `project`). */
-	scope: ConfigScope,
-	/**  Serialization format (`json` or `yaml`). */
-	format: ConfigFormat,
-	/**  Absolute path on disk. */
-	path: string,
-	/**  Identifier passed as `relativePath` to `lsp_did_change`, `lsp_hover`, and `lsp_goto_definition`. */
-	lspPath: string,
-	/**  Tab title rendered in the editor tab bar (for example `Settings (config.json)`). */
-	title: string,
-	/**  Raw UTF-8 file content. */
-	content: string,
-	/**  SHA-256 content revision. */
-	revision: string,
-	/**  Detected language ID (`json` or `yaml`). */
-	languageId: string,
-};
-
-/**  Serialization format of a configuration file on disk. */
-export type ConfigFormat = 
-/**  JSON configuration file (`config.json`). */
-"json" | 
-/**  YAML configuration file (`config.yaml` or `config.yml`). */
-"yaml";
-
-/**  Configuration storage scope. */
-export type ConfigScope = 
-/**  User-wide configuration stored in `~/.lgtm/config.{json,yaml,yml}`. */
-"global" | 
-/**  Workspace-specific configuration stored in `<workspace>/.lgtm/config.{json,yaml,yml}`. */
-"project";
 
 /**  Resolved code editor settings section (`editor.*`). */
 export type EditorSettings = {
@@ -243,9 +207,9 @@ export type LspWorkspaceSnapshot = {
 export type ResolvedConfigSnapshot = {
 	/**  Effective deep-merged settings (project leaf overrides layered over global settings and defaults). */
 	effective: UserSettings,
-	/**  Sparse global settings loaded from `~/.lgtm/config.{json,yaml,yml}`. */
+	/**  Sparse global settings loaded from `~/.lgtm/config.json`. */
 	global: UserSettingsPatch,
-	/**  Sparse project settings loaded from `<workspace>/.lgtm/config.{json,yaml,yml}`, if present. */
+	/**  Sparse project settings loaded from `<workspace>/.lgtm/config.json`, if present. */
 	project: UserSettingsPatch | null,
 	/**  Absolute path to the active global config file. */
 	globalPath: string,
@@ -274,7 +238,7 @@ export type UserSettings = {
 	editor?: EditorSettings,
 };
 
-/**  Sparse nested settings document and patch persisted in `config.json` or `config.yaml` and accepted by `config_update`. */
+/**  Sparse nested settings document and patch persisted in `config.json` and accepted by `config_update`. */
 export type UserSettingsPatch = {
 	/**  Optional JSON Schema reference URI for editor intelligence. */
 	$schema?: string | null,

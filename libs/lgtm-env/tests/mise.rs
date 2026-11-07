@@ -366,8 +366,8 @@ mod given_a_workspace_with_a_user_provided_root_mise_file {
             std::fs::write(&user_mise_path, user_mise_content).unwrap();
             std::fs::write(workspace_root.join("tsconfig.json"), "{}\n").unwrap();
             std::fs::write(
-                workspace_root.join(".lgtm/config.yaml"),
-                "lsp:\n  enabled: true\n  auto_install: true\n",
+                workspace_root.join(".lgtm/config.json"),
+                "{\n  \"lsp\": {\n    \"enabled\": true,\n    \"auto_install\": true\n  }\n}\n",
             )
             .unwrap();
             std::fs::write(

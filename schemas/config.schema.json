@@ -104,7 +104,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Sparse nested settings document and patch persisted in `config.json` or `config.yaml` and accepted by `config_update`.",
+  "description": "Sparse nested settings document and patch persisted in `config.json` and accepted by `config_update`.",
   "properties": {
     "$schema": {
       "description": "Optional JSON Schema reference URI for editor intelligence.",

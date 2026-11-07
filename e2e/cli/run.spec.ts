@@ -74,7 +74,10 @@ describe(
       // Arrange
       const { runtime } = fixture()
       await initLocalRepo(runtime)
-      await runtime.write('.lgtm/config.yaml', ['lsp:', '  auto_install: false', ''].join('\n'))
+      await runtime.write(
+        '.lgtm/config.json',
+        `${JSON.stringify({ lsp: { auto_install: false } }, null, 2)}\n`,
+      )
       await runtime.write(
         '.lgtm/mise.toml',
         [
