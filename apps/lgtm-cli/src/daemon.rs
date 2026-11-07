@@ -177,11 +177,7 @@ pub(crate) fn disable_stdio_inheritance() {
     {
         use std::os::windows::io::AsRawHandle;
         unsafe extern "system" {
-            fn SetHandleInformation(
-                hObject: *mut std::ffi::c_void,
-                dwMask: u32,
-                dwFlags: u32,
-            ) -> i32;
+            fn SetHandleInformation(handle: *mut std::ffi::c_void, mask: u32, flags: u32) -> i32;
         }
         const HANDLE_FLAG_INHERIT: u32 = 0x0000_0001;
         unsafe {

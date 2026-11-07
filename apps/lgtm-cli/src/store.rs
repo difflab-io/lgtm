@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use fs2::FileExt;
 use std::{
     fs::{self, File, OpenOptions},
-    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -87,6 +86,7 @@ impl Store {
     pub fn foreground_pid_lock(&self) -> Result<File> {
         #[cfg(unix)]
         {
+            use std::io::Write;
             let mut file = private_file(&self.path("server.pid"))?;
             file.try_lock_exclusive()
                 .context("Another LGTM instance is starting or running")?;
