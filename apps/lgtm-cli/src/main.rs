@@ -100,6 +100,7 @@ fn main() {
                 })
             );
         } else {
+            tracing::error!("{error:#}");
             eprintln!("{error:#}");
         }
         std::process::exit(1);

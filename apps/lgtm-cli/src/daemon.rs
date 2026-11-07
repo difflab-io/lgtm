@@ -133,14 +133,15 @@ pub(crate) async fn ensure_running(port: u16, store: &Store) -> Result<Instance>
     };
     #[cfg(not(unix))]
     let launch_stderr = {
-        let log = crate::log::output(store)?;
+        store.ensure_exists()?;
+        disable_stdio_inheritance();
         let mut cmd = Command::new(std::env::current_exe()?);
         cmd.env("LGTM_HOME", store.dir())
             .args(["serve", "--daemonize", "--port"])
             .arg(port.to_string())
             .stdin(std::process::Stdio::null())
-            .stdout(log.try_clone()?)
-            .stderr(log);
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -169,4 +170,24 @@ fn announce(instance: &Instance, store: &Store) {
     println!("Server: {}", instance.url());
     println!("RPC: {}/rpc", instance.url());
     println!("Logs: {}", store.path("server.log").display());
+}
+
+pub(crate) fn disable_stdio_inheritance() {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        unsafe extern "system" {
+            fn SetHandleInformation(
+                hObject: *mut std::ffi::c_void,
+                dwMask: u32,
+                dwFlags: u32,
+            ) -> i32;
+        }
+        const HANDLE_FLAG_INHERIT: u32 = 0x0000_0001;
+        unsafe {
+            let _ = SetHandleInformation(std::io::stdin().as_raw_handle(), HANDLE_FLAG_INHERIT, 0);
+            let _ = SetHandleInformation(std::io::stdout().as_raw_handle(), HANDLE_FLAG_INHERIT, 0);
+            let _ = SetHandleInformation(std::io::stderr().as_raw_handle(), HANDLE_FLAG_INHERIT, 0);
+        }
+    }
 }

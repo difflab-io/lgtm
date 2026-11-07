@@ -27,6 +27,7 @@ pub fn run(args: OpenArgs, json: bool) -> anyhow::Result<()> {
     let executable = ConfigService::resolve_desktop_executable().map_err(map_config_error)?;
     let workspace_path = workspace_dir.to_string_lossy().to_string();
 
+    crate::daemon::disable_stdio_inheritance();
     Command::new(&executable)
         .arg(&workspace_path)
         .env(LGTM_WORKSPACE_ENV, &workspace_path)
