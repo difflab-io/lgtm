@@ -8,16 +8,16 @@
 
 ### Functional
 
-- Automatic language server pooling: Start and reuse one stdio JSON-RPC 2.0 server session per `(workspace_root, language_id, project_root)` when matching files are opened.
-- Document lifecycle synchronization: Send `textDocument/didOpen`, `textDocument/didChange`, `textDocument/didSave`, and `textDocument/didClose` notifications as files are opened, edited, saved, renamed, or deleted.
-- UTF-16 offset coordinate translation: Convert between flat 0-based UTF-16 character offsets used by CodeMirror 6 and 0-based `(line, character)` positions required by LSP 3.17 entirely in Rust.
-- Diagnostics streaming and text buffers: Parse `textDocument/publishDiagnostics` notifications, emit workspace-relative `LspEvent::Diagnostics` and `LspEvent::Status` events, and format full plain-text diagnostics buffers (`LspDiagnosticsBuffer`) for viewing in read-only editor tabs.
-- Hover and go-to-definition: Resolve `textDocument/hover` (`LspHoverResult`) and `textDocument/definition` (`Vec<LspLocation>`) from a file path and UTF-16 cursor offset.
+- Start and reuse one language server session per `(workspace_root, language_id, project_root)` when matching files open.
+- Synchronize document open, change, save, and close notifications as workspace files change.
+- Translate between 0-based UTF-16 character offsets and LSP `(line, character)` coordinates.
+- Stream file diagnostics and server statuses, and render plain-text diagnostics buffers for read-only inspection.
+- Resolve hover documentation and go-to-definition locations from a file path and cursor offset.
 
 ### Non-Functional
 
-- Graceful degradation: If a language server binary or `mise` toolchain is missing or fails to initialize, transition the server status to `unavailable` with a descriptive message without blocking file viewing or editing.
-- Clean process lifecycle: Terminate child language server processes via `shutdown`/`exit` and `SIGKILL` fallback when workspaces close or the desktop app exits.
+- Report `unavailable` server status with a clear message when a toolchain or language server is missing without blocking file viewing or editing.
+- Terminate child language server processes cleanly when workspaces switch or the application exits.
 
 ## Design
 

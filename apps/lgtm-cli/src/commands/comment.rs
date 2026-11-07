@@ -1,10 +1,10 @@
 use clap::{Args, Subcommand};
+use lgtm_forge::{
+    extensions::git::get_cwd_git_dir,
+    proto::lgtm::v1::{CreateCommentRequest, DeleteCommentRequest, UpdateCommentRequest},
+};
 
 use crate::{
-    backend::{
-        extensions::git::get_cwd_git_dir,
-        proto::lgtm::v1::{CreateCommentRequest, DeleteCommentRequest, UpdateCommentRequest},
-    },
     models::{
         ActorArgs, Comment, DeleteCommentCommandOutput, LocalArgs, parse_comment_id, parse_nonempty,
     },

@@ -59,15 +59,15 @@ The web task needs a running backend for RPC calls. The combined task starts bot
 ## 3. CLI and libraries
 
 ```sh
-premise run run:cli -- up --no-open
-premise run run:cli -- review list --json
+premise run run:cli -- up
+premise run run:cli -- review list --local --json
 premise run run:cli -- run --list
-premise run run:cli -- ui --no-open
+premise run run:cli -- open .
 premise run run:cli -- status
 premise run run:cli -- down
 ```
 
-The `lgtm-cli` package builds the backend/DB source and web assets into the `lgtm` executable. `up` starts or reuses one background application on macOS/Linux, `status` reports its URLs, `ui` prints/opens its URL, `run` synchronizes `<workspace>/.lgtm/mise.toml` via `lgtm-config` and proxies tasks through `mise`, and `down` stops the identified process. `LGTM_HOME` isolates runtime files; `LGTM_RPC_URL` selects an existing RPC endpoint. Review list calls the hello demonstration; other domain operations are explicit unimplemented stubs.
+The `lgtm-cli` package links `lgtm-forge`, `lgtm-db`, `lgtm-config`, and `lgtm-env` directly as Cargo workspace dependencies. `up` starts or reuses one background `lgtm-forge` RPC daemon on macOS/Linux, `status` reports its `server_url` and `rpc_url`, `open [<path>]` (or `lgtm [<path>]`) launches the `lgtm-desktop` application rooted at that workspace directory, `run` synchronizes `<workspace>/.lgtm/mise.toml` via `lgtm-config` and proxies tasks through `mise`, and `down` stops the identified background daemon. `LGTM_HOME` isolates runtime files; `LGTM_RPC_URL` selects an existing RPC endpoint.
 
 ### Neovim shell
 
@@ -84,14 +84,10 @@ premise run nvim:install-released-plugin
 premise run build
 premise run //apps/lgtm-web:generate
 premise run //apps/lgtm-forge:build
-premise run //apps/lgtm-cli:bundle
+premise run //apps/lgtm-cli:build
 ```
 
-The shared schemas live under `apps/lgtm-forge/proto/lgtm/v1/`: `hello.proto` defines the greeting API, `review.proto` defines the hello-review API. Backend build tasks regenerate the TypeScript client inside the web app, so no separate client package is needed.
-
-The backend's `build.rs` generates Rust protocol code. The CLI bundle task builds the backend and static web app. It copies backend and database sources, generated Rust protocol files and web assets into `apps/lgtm-cli/bundle`. The bundled entry point is `bundle/backend/mod.rs`.
-
-Git ignores that generated directory, but Cargo includes it in the CLI package. The CLI build script embeds the assets and compiles the copied backend source. Before a raw Cargo build in a fresh checkout, run the bundle task.
+The shared schemas live under `apps/lgtm-forge/proto/lgtm/v1/`: `hello.proto` defines the greeting API, `review.proto` defines the review and comment API. Backend build tasks regenerate the TypeScript client inside `apps/lgtm-web`, and `apps/lgtm-forge/build.rs` generates the Rust Connect server and client stubs consumed directly by `lgtm-forge` and `lgtm-cli`.
 
 To call the standalone backend through Connect JSON, start it and send a greeting request:
 
@@ -101,7 +97,7 @@ curl --fail http://127.0.0.1:8080/lgtm.v1.GreeterService/SayHello \
   --data '{"name":"World"}'
 ```
 
-The response contains `Hello, World!`. The packaged CLI exposes the same method at `http://127.0.0.1:8080/rpc/lgtm.v1.GreeterService/SayHello` by default.
+The response contains `Hello, World!`. The CLI background daemon exposes the same method at `http://127.0.0.1:8080/rpc/lgtm.v1.GreeterService/SayHello` by default.
 
 ## 5. Checks
 
@@ -115,7 +111,7 @@ premise run //e2e/desktop:smoke
 premise run //e2e/desktop:test
 ```
 
-Use project task addresses such as `premise run //apps/lgtm-forge:test` for focused checks. Run full E2E only for final validation or shared-fixture changes. The reduced suites cover hello-review, CLI safety, daemon/UI and Neovim loading; offline cassette tests preserve recorder/replay behavior. See [E2E](../e2e/README.md) for recording limits and commands.
+Use project task addresses such as `premise run //apps/lgtm-forge:test` for focused checks. Run full E2E only for final validation or shared-fixture changes. See [E2E](../e2e/README.md) for recording limits and commands.
 
 ### Database checks
 
@@ -124,25 +120,13 @@ premise run //libs/lgtm-db:test
 premise run //apps/lgtm-forge:test
 ```
 
-The DB package is a dummy data facade, with no SQL drivers, migrations or PostgreSQL matrix. Existing user databases remain untouched and unused. Backend and DB project tasks run their current public contracts through the tracked `test-rust-project` task.
+## 6. CI and distribution
 
-## 6. CLI distribution
+All Cargo workspace crates (`lgtm-cli`, `lgtm-desktop`, `lgtm-forge`, `lgtm-db`, `lgtm-config`, `lgtm-env`, `lgtm-lsp`) set `publish = false` and all Bun packages (`lgtm-web`, `lgtm-ui`) set `"private": true`. LGTM currently uses binary-only distribution via GitHub Releases: GoReleaser builds multi-platform `lgtm` CLI archives from the workspace root, and Tauri builds native `lgtm-desktop` installers. See [CI, Release, and Publishing Architecture](ci.md) for full details on Premise CLI (`pm`) release orchestration and the future `crates.io` publishing roadmap ([CLO-212](https://linear.app/cloudvoyant/issue/CLO-212/support-and-test-binary-only-multi-crate-and-parent-bundled-workspace)).
 
-Only `lgtm-cli` publishes. The backend and database manifests set `publish = false`, and the Bun manifests set `private: true`. The installed executable includes the backend and web assets, so it needs no Bun, Node, Buf, or source checkout at runtime.
-
-Make sure that the package and archive configuration are valid without uploading:
+Validate the GoReleaser configuration and workspace CLI compilation locally without uploading:
 
 ```sh
-premise run release:check
+mise run release:check
 mise exec -- goreleaser build --snapshot --single-target --clean --config .goreleaser.yaml
 ```
-
-The archive configuration selects macOS and Linux for arm64 and x86_64. Build the full matrix on macOS with Xcode command-line tools. macOS targets use Apple's linker, and Linux targets use Zig.
-
-To trigger a release candidate, put the exact marker `[publish-rc]` in the HEAD commit message and push the feature branch. Premise runs workspace checks, prepares the RC tag, and publishes eligible packages. Pull request events run checks without publishing.
-
-The package job needs the `CRATES_TOKEN` organization or repository secret. Make sure that the registry contains the new version before reporting publication as complete.
-
-Use `premise run release:cli` for an authorized GitHub archive release. Use `premise run publish:cli` for an authorized crates.io release. GitHub publication needs `GITHUB_TOKEN`, and direct Cargo publication needs `CARGO_REGISTRY_TOKEN` or `cargo login`.
-
-Premise's current generic artifact selection skips monorepo archive publication. The explicit archive task handles that path. See the [architecture guide](architecture/index.md#packaging-flow) for the package boundaries.

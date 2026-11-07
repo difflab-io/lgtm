@@ -1,11 +1,9 @@
 //! Diff hunk and diff line models for terminal and JSON review output.
 
+use lgtm_forge::proto::lgtm::v1::{DiffHunkDetail, DiffLineDetail};
 use serde_json::{Value, json};
 
-use crate::{
-    backend::proto::lgtm::v1::{DiffHunkDetail, DiffLineDetail},
-    models::common::format_diff_line_kind,
-};
+use crate::models::common::format_diff_line_kind;
 
 /// Single line within a diff hunk.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -1,5 +1,7 @@
 # End-to-end testing — software architecture
 
+<!-- TODO: Move this file to the `docs/` root directory (`docs/e2e.md`); E2E test harness documentation is not software architecture. -->
+
 ## Overview
 
 `e2e/` is the end-to-end verification suite for LGTM across the `lgtm-forge` backend, `lgtm-cli` binary, `lgtm.nvim` Neovim plugin shell, and `lgtm-desktop` Tauri application. Each suite runs real compiled Rust binaries against isolated temporary workspaces and `LGTM_HOME` directories without mocks in the application layer. For `lgtm-desktop`, Playwright drives the production Svelte UI in headless Chromium and WebKit while routing every `window.__TAURI_INTERNALS__.invoke` command and backend event through a feature-gated Rust stdio bridge (`lgtm-desktop --ipc-bridge`) backed by `tauri::test::MockRuntime`.
@@ -8,16 +10,15 @@
 
 ### Functional
 
-- Full-stack binary execution: Exercise compiled `lgtm-forge`, `lgtm`, Neovim (`nvim --headless`), and `lgtm-desktop` binaries against real filesystem and Git state rather than TypeScript service stubs.
-- Real Tauri IPC routing and ACL verification: Execute desktop browser tests through `tauri::test::get_ipc_response` with `tauri::generate_context!()` so missing `#[tauri::command]` registrations, capability ACL denials (`capabilities/default.json`), and Rust `WorkspaceService`/`LspService` errors fail E2E immediately.
-- Bidirectional Tauri event streaming: Forward asynchronous backend events (`lsp-status`, `lsp-diagnostics`, and `workspace-quit-requested`) from `LspService` and `lgtm-desktop` to Playwright browser listeners in real time.
-- Offline deterministic provider replay: Replay recorded GitHub REST/GraphQL exchanges and Git object bundles via `github-cassette.ts` with strict request matching, runtime UUID binding, and mutation barriers.
+- Run compiled `lgtm-forge`, `lgtm`, Neovim, and `lgtm-desktop` binaries against real filesystem and Git state.
+- Route desktop browser tests through the real Tauri IPC command table and capability ACLs.
+- Stream backend `lsp-status`, `lsp-diagnostics`, and `workspace-quit-requested` events to Playwright browser tests in real time.
+- Replay recorded GitHub REST, GraphQL, and Git exchanges offline during pull request E2E tests.
 
 ### Non-Functional
 
-- Production binary isolation: Gate `tauri/test` (`MockRuntime`), `--ipc-bridge`, `BridgeEventForwarder`, and `LGTM_E2E_PERMANENT_DELETE` behind `#[cfg(any(test, feature = "e2e-bridge"))]` so production desktop builds (`cargo tauri build` and `cargo tauri dev`) contain zero test runtime or headless stdio bridge code.
-- Isolated Vite dependency cache: Configure `e2e/desktop/vite.config.ts` with `cacheDir: 'e2e/desktop/.vite'` so E2E static builds never invalidate `apps/lgtm-web`'s development dependency optimizer cache (`node_modules/.vite`).
-- Workspace and host hygiene: Scope all E2E filesystem mutations, SQLite databases, Git repositories, and `.lgtm/` configurations to temporary per-test directories and clean up child language server processes on teardown.
+- Exclude test runtime and stdio bridge code from production desktop builds.
+- Isolate all E2E filesystem, database, and Git state in temporary per-test directories and stop child language server processes on teardown.
 
 ## Design
 

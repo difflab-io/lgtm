@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use fs2::FileExt;
 use std::{
     fs::{self, File, OpenOptions},
-    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -80,15 +79,30 @@ impl Store {
 
     pub fn clear_port(&self) {
         fs::remove_file(self.path("server.port")).ok();
+        #[cfg(not(unix))]
+        fs::remove_file(self.path("server.stop")).ok();
     }
 
     pub fn foreground_pid_lock(&self) -> Result<File> {
-        let mut file = private_file(&self.path("server.pid"))?;
-        file.try_lock_exclusive()
-            .context("Another LGTM instance is starting or running")?;
-        file.set_len(0)?;
-        write!(file, "{}", std::process::id())?;
-        Ok(file)
+        #[cfg(unix)]
+        {
+            use std::io::Write;
+            let mut file = private_file(&self.path("server.pid"))?;
+            file.try_lock_exclusive()
+                .context("Another LGTM instance is starting or running")?;
+            file.set_len(0)?;
+            write!(file, "{}", std::process::id())?;
+            Ok(file)
+        }
+        #[cfg(not(unix))]
+        {
+            let lock_file = private_file(&self.path("server.lock"))?;
+            lock_file
+                .try_lock_exclusive()
+                .context("Another LGTM instance is starting or running")?;
+            fs::write(self.path("server.pid"), std::process::id().to_string())?;
+            Ok(lock_file)
+        }
     }
 }
 

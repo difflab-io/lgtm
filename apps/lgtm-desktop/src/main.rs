@@ -9,9 +9,7 @@ fn main() {
     #[cfg(any(test, feature = "e2e-bridge"))]
     {
         let mut args = std::env::args().skip(1);
-        if let Some(flag) = args.next()
-            && flag == "--ipc-bridge"
-        {
+        if args.next().as_deref() == Some("--ipc-bridge") {
             let home = args
                 .next()
                 .map(std::path::PathBuf::from)

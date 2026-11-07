@@ -7,7 +7,7 @@ pub mod diff;
 pub mod review;
 
 pub use command_output::{
-    AddCommandOutput, CommitCommandOutput, PushCommandOutput, RunCommandOutput,
+    AddCommandOutput, CommitCommandOutput, OpenCommandOutput, PushCommandOutput, RunCommandOutput,
 };
 pub use comment::{Comment, DeleteCommentCommandOutput};
 pub use common::{

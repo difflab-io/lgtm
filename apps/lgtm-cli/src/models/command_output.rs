@@ -1,15 +1,12 @@
-//! Command outputs for `lgtm add`, `lgtm commit`, `lgtm push`, and `lgtm run`.
+//! Command outputs for `lgtm add`, `lgtm commit`, `lgtm push`, `lgtm run`, and `lgtm open`.
 // TODO: Split each `*CommandOutput` model into its own module file under `models/`.
 
+use lgtm_env::MiseTaskSummary;
+use lgtm_forge::proto::lgtm::v1::{AddResponse, CommitResponse, PushResponse};
+use serde::Serialize;
 use serde_json::json;
 
-use crate::{
-    backend::{
-        env::MiseTaskSummary,
-        proto::lgtm::v1::{AddResponse, CommitResponse, PushResponse},
-    },
-    models::common::{Identity, short_sha},
-};
+use crate::models::common::{Identity, short_sha};
 
 /// Command output for `lgtm add`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -211,6 +208,32 @@ impl RunCommandOutput {
                     );
                 }
             }
+        }
+    }
+}
+
+/// Command output for `lgtm open` (or `lgtm [<path>]`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct OpenCommandOutput {
+    pub workspace_path: String,
+    pub executable: String,
+}
+
+impl OpenCommandOutput {
+    // Public ------------------------------------------------------------------
+
+    /// Print the opened desktop workspace path in terminal or `--json` format.
+    pub fn print(&self, json: bool) {
+        if json {
+            println!(
+                "{}",
+                json!({
+                    "workspace_path": self.workspace_path,
+                    "executable": self.executable,
+                })
+            );
+        } else {
+            println!("Opened LGTM Desktop at {}", self.workspace_path);
         }
     }
 }

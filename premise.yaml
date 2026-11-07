@@ -19,6 +19,11 @@ workspace:
             check_platforms:
                 - linux
                 - macos
+                - windows
+            release_platforms:
+                - linux
+                - macos
+                - windows
           answers:
             name: lgtm-cli
         - name: lgtm-desktop

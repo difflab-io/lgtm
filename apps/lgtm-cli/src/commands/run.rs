@@ -1,9 +1,8 @@
 use clap::Args;
+use lgtm_config::ConfigService;
+use lgtm_env::MiseService;
 
-use crate::{
-    backend::{config::ConfigService, env::MiseService},
-    models::RunCommandOutput,
-};
+use crate::models::RunCommandOutput;
 
 /// Arguments for the `lgtm run` command.
 #[derive(Args, Debug, Clone)]

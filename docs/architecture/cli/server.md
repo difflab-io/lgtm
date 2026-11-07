@@ -2,21 +2,21 @@
 
 ## Overview
 
-The server module serves embedded web assets and backend methods through one local HTTP listener.
+The server module hosts the `lgtm-forge` Connect/gRPC router and a `/health` endpoint through a single local Axum HTTP listener.
 
 ## Requirement
 
 ### Functional
 
-- FR1: Serve the bundled UI and its static assets.
-- FR2: Route browser and native clients to the same backend.
-- FR3: Expose a health response with the server PID.
-- FR4: Record the actual listening port and clear it after shutdown.
+- Serve Connect and gRPC review endpoints at `/rpc` and root service paths.
+- Return the server PID from `GET /health`.
+- Return HTTP `404` for other `GET` and `HEAD` requests.
+- Record the listening port on startup and clear it on shutdown.
 
 ### Non-Functional
 
-- NFR1: Serve the installed application without a frontend development server.
-- NFR2: Limit connection draining to five seconds after a shutdown signal.
+- Prevent a foreground server from overwriting a running daemon's port file.
+- Drain active connections within five seconds after a shutdown signal.
 
 ## Design
 
@@ -29,32 +29,29 @@ let store = Store::new()?;
 serve(0, &store, false).await?;
 ```
 
-The call runs until shutdown or failure. Use `detached = true` only after daemon detachment. For foreground CLI use, run `lgtm up --foreground --no-open`.
-
+The call runs until shutdown or failure. Use `detached = true` only after daemon detachment. For foreground CLI use, run `lgtm up --foreground`.
 
 ### Components and Responsibilities
 
 ```mermaid
 flowchart TD
-    CLIENT["Browser or API client"] --> SERVER["One Axum listener"]
-    SERVER --> ASSETS["Embedded web assets"]
-    SERVER --> RPC["Backend router: /rpc and root methods"]
+    CLIENT["CLI or RPC client"] --> SERVER["One Axum listener"]
+    SERVER --> RPC["lgtm_forge::connect_default_router: /rpc and root methods"]
     SERVER --> HEALTH["GET /health: process ID"]
     SERVER --> STORE["Store: record listening port"]
 ```
 
 - Axum owns the HTTP listener and request routing.
-- The generated asset table maps URLs to embedded bytes and content types.
-- `backend::router` provides hello-review, greeting and health services through the stateless dummy DB facade; startup does not open a database or create forge clients.
+- `lgtm_forge::connect_default_router` provides the `ReviewService`, `GreeterService`, and gRPC health services backed by `lgtm-db`.
 - `Store` records the listening port and protects foreground ownership.
 - Tokio receives shutdown signals and bounds connection draining.
 - `tracing` records server startup and shutdown through the log module.
 
 ### Data and Control Flow
 
-`serve` creates the runtime directory and establishes PID-file ownership. It binds the listener, builds the router, and records the assigned port. The CLI's readiness probe succeeds once the listener handles `/health`.
+`serve` creates the runtime directory and establishes PID-file ownership. It binds the listener, builds the `lgtm-forge` router, and records the assigned port. The CLI's readiness probe succeeds once the listener handles `/health`.
 
-Browser requests use `/rpc`. Native clients use root service paths. UI requests resolve through the embedded asset table.
+Connect clients use `/rpc/*` or root service paths; non-health `GET` and `HEAD` requests receive `404 Not Found`.
 
 On SIGTERM or Ctrl-C, the server marks backend health as stopped and begins graceful shutdown. It waits up to five seconds for connections, then removes `server.port`.
 
@@ -66,34 +63,25 @@ On SIGTERM or Ctrl-C, the server marks backend health as stopped and begins grac
 | Route              | Response                         |
 | ------------------ | -------------------------------- |
 | `GET /health`      | JSON containing the process PID  |
-| `GET /`            | Embedded `index.html`            |
-| Asset GET or HEAD  | Asset content and content type   |
-| Unknown asset      | HTTP `404`                       |
-| `/rpc/*`           | Browser RPC calls                |
-| Root service paths | Native gRPC and Connect requests |
-
-Query parameters do not change asset lookup or grant filesystem access. The hello-review page does not select a checkout.
+| Other `GET`/`HEAD` | HTTP `404`                       |
+| `/rpc/*`           | Connect and gRPC requests        |
+| Root service paths | Connect and gRPC requests        |
 
 ## Implementation
 
-### Static assets
-
-The CLI build script generates `assets.rs` in Cargo's output directory. Each entry uses `include_bytes!` and a detected content type. Responses use `Cache-Control: no-cache`.
-
 ### Backend routing
 
-Axum mounts a copy of the backend service at `/rpc`. Its fallback serves GET/HEAD assets and forwards other requests to the backend service. There is no separate UI process or backend process in the installed application.
+Axum mounts a copy of the `lgtm-forge` Connect service at `/rpc`. Its fallback returns `404 Not Found` for `GET`/`HEAD` requests and forwards other requests (`POST`) to the Connect service.
 
 ### Process ownership and shutdown
 
 Foreground mode obtains a lock on the same `server.pid` file that `daemonize` uses in background mode. This prevents a foreground server from overwriting a running daemon's port file.
 
-A one-shot notification starts the bounded drain after the signal handler begins shutdown. Graceful exit removes the port file. An abrupt process termination can leave files behind, so discovery also probes the server.
+A one-shot notification starts the bounded drain after the signal handler begins shutdown. Graceful exit removes the port file. An abrupt process termination can leave files behind, so discovery also probes `/health`.
 
 ## References
 
 - [Server implementation](../../../apps/lgtm-cli/src/server.rs).
-- [Asset build script](../../../apps/lgtm-cli/build.rs).
 - [Lifecycle tests](../../../apps/lgtm-cli/tests/daemon.rs).
 - [Shared application architecture](../index.md).
 - [Store module](store.md).

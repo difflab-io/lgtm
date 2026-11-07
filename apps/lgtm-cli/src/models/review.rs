@@ -3,22 +3,20 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::Context;
+use lgtm_forge::proto::lgtm::v1::{
+    CloseReviewResponse, CreateReviewResponse, ListReviewsResponse, RefreshReviewResponse,
+    ReviewSummary, SessionSummary, ShowReviewResponse,
+};
 use serde_json::{Value, json};
 
-use crate::{
-    backend::proto::lgtm::v1::{
-        CloseReviewResponse, CreateReviewResponse, ListReviewsResponse, RefreshReviewResponse,
-        ReviewSummary, SessionSummary, ShowReviewResponse,
+use crate::models::{
+    comment::Comment,
+    common::{
+        CommentAnchor, Identity, ReviewGroupBy, ReviewOutcome, format_review_status,
+        format_section_banner, format_session_outcome, format_session_state, format_sub_banner,
+        short_sha,
     },
-    models::{
-        comment::Comment,
-        common::{
-            CommentAnchor, Identity, ReviewGroupBy, ReviewOutcome, format_review_status,
-            format_section_banner, format_session_outcome, format_session_state, format_sub_banner,
-            short_sha,
-        },
-        diff::DiffHunk,
-    },
+    diff::DiffHunk,
 };
 
 /// Review summary header.

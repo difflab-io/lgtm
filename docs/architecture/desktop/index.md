@@ -8,16 +8,15 @@
 
 ### Functional
 
-- Workspace lifecycle management (`WorkspaceService`): Open the default workspace (`~/.lgtm/workspace`) or any chosen directory on disk, list directories and files while hiding internal `.lgtm` metadata, and create, read, save, rename, or move entries to the OS Trash with path-traversal and symlink-escape protection.
-- Automatic environment and LSP warmup on workspace switch: When opening or switching a workspace, terminate language servers from the previous workspace, discover workspace languages via `lgtm-config`, synchronize `<workspace>/.lgtm/mise.toml` via `lgtm-env`, write `<workspace>/.lgtm/cache/discovery.json` via `lgtm-lsp`, and warm up language servers on background threads.
-- Real-time editor and LSP synchronization: Synchronize file open (`workspace_read` -> `textDocument/didOpen`), in-memory buffer edits (`lsp_did_change` -> `textDocument/didChange`), file saves (`workspace_write` -> `textDocument/didSave`), and file renames/deletes (`textDocument/didClose`) between the CodeMirror 6 editor and active language server sessions.
-- Asynchronous event streaming and IDE controls: Emit `lsp-status` and `lsp-diagnostics` Tauri events from background reader threads to update the header `LspStatusMenu`, file tree diagnostic badges, editor squiggles, hover tooltips (`lsp_hover`), go-to-definition jumps (`lsp_goto_definition`), read-only diagnostics buffers (`lsp_get_diagnostics_buffer`), and server restarts (`lsp_restart`).
-- Coordinated quit handshake: Intercept window/application close (`RunEvent::ExitRequested`), emit `workspace-quit-requested` so the Svelte frontend flushes pending debounced edits, and invoke `workspace_finish_quit` to terminate all child language server processes before exiting.
+- Open the default workspace (`~/.lgtm/workspace`) or any selected folder, list files and directories, and create, read, save, rename, or move entries to the OS Trash.
+- Provide language server integration for any workspace opened in the desktop application.
+- Synchronize open files, unsaved editor changes, file saves, renames, and deletions with active language servers.
+- Stream live language server statuses and file diagnostics to the UI, and provide hover documentation, go-to-definition, read-only diagnostics buffers, and server restarts.
+- Flush pending auto-saves and stop child language server processes cleanly before closing the window or switching workspaces.
 
 ### Non-Functional
 
-- Non-blocking UI thread: Execute all filesystem and LSP IPC commands on Tauri's blocking thread pool (`spawn_blocking`) and warm up language servers asynchronously so workspace opening and typing remain responsive even when `mise` installs toolchains or language servers index large projects.
-- Sandboxed workspace boundaries: Canonicalize all paths and reject symlinks or relative paths that resolve outside the active workspace root.
+- Manage background services and child processes efficiently so the desktop application stays low-latency and nimble.
 
 ## Design
 

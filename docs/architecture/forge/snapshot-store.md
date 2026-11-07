@@ -8,19 +8,15 @@
 
 ### Functional
 
-- **Local-only shadow storage**: Restrict `SnapshotStore` and `gitoxide` to `--local` workflows; never mirror commits into `~/.lgtm/snapshots/$repoSlug` for remote pull request reviews.
-- **External VCS compatibility**: Interoperate with native `git` and `jj` commands, branches, and linked worktrees by delegating non-local checkout operations and diffs to standard `git`.
-- **Worktree and branch isolation**: Share one snapshot repository per canonical repository (`common_dir`) across linked worktrees while isolating shadow state and refs per branch.
-- **Non-destructive shadow staging and commits**: Stage worktree files and commit onto `refs/lgtm/snapshots/<branch>` via `gitoxide` without mutating the checkout's `.git/index`, `HEAD`, or branch refs.
-- **Idempotent worktree snapshots**: Reuse the existing shadow commit when starting or refreshing a `--local` review if worktree files have not changed.
-- **Agent-assisted comment anchor relocation**: Allow agents and users to move comment anchors across lines and files after automated diff and anchor tracking while preserving original coordinates.
-- **Concurrent overlapping sessions**: Support simultaneous active `Draft` sessions for human and agent participants on the same review.
+- Stage worktree files and create shadow commits on `refs/lgtm/snapshots/<branch>` for `--local` reviews.
+- Share one snapshot repository per canonical repository across linked worktrees while isolating shadow refs per branch.
+- Reuse the existing shadow commit when starting or refreshing a `--local` review if worktree files have not changed.
+- Track comment anchor line shifts across shadow commits and allow agents or users to relocate comments across lines and files.
 
 ### Non-Functional
 
-- **Working checkout invariance**: Leave working files, `.git/index`, `HEAD`, and remote refs unchanged during `--local` operations.
-- **Clear adapter separation**: Use `gitoxide` (`gix`) exclusively inside `SnapshotStore` for `--local` shadow repositories, and wrap standard `git` (`extensions::git`) for working-checkout operations and `ForgeBacked` diffs.
-- **Pure domain models**: Keep `DiffHunk` (`ShowReview` hunk rendering) and `CommentAnchor` (`validate_line`, `recompute_shifts`) as pure in-memory models with no VCS adapter dependencies.
+- Leave working files, `.git/index`, `HEAD`, and remote refs unchanged during `--local` operations.
+- Restrict shadow repository storage strictly to `--local` workflows and never copy remote pull request commits into `~/.lgtm/snapshots`.
 
 ## Design
 

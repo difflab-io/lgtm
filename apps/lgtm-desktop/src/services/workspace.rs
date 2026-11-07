@@ -26,15 +26,23 @@ pub struct WorkspaceService {
 }
 
 impl WorkspaceService {
-    /// Selects the default workspace under the supplied home directory with a no-op LSP service.
-    pub fn from_home(home: PathBuf) -> Self {
-        let lsp_service = Arc::new(LspService::noop(home.clone()));
-        Self::with_lsp(home, lsp_service)
-    }
-
-    /// Selects the default workspace under `home` and binds `lsp_service` to workspace lifecycle operations.
-    pub fn with_lsp(home: PathBuf, lsp_service: Arc<LspService>) -> Self {
+    /// Creates a workspace service rooted at `workspace_path` when provided and valid on disk (otherwise `<home>/.lgtm/workspace`) and binds `lsp_service`.
+    pub fn new(
+        home: PathBuf,
+        workspace_path: Option<PathBuf>,
+        lsp_service: Arc<LspService>,
+    ) -> Self {
         let default_workspace = Workspace::from_home(home);
+        if let Some(path) = workspace_path.filter(|path| path.is_dir())
+            && path != default_workspace.root
+        {
+            return Self {
+                workspace: Workspace::from_path(path),
+                default_workspace,
+                custom_root: true,
+                lsp_service,
+            };
+        }
         Self {
             workspace: default_workspace.clone(),
             default_workspace,
@@ -384,7 +392,12 @@ mod tests {
     impl WorkspaceFixture {
         fn new() -> Self {
             let home = TempDir::new().unwrap();
-            let service = WorkspaceService::from_home(home.path().to_path_buf());
+            let home_path = home.path().to_path_buf();
+            let service = WorkspaceService::new(
+                home_path.clone(),
+                None,
+                Arc::new(LspService::noop(home_path)),
+            );
             Self { home, service }
         }
 
@@ -416,6 +429,31 @@ mod tests {
                     fixture.default_root().canonicalize().unwrap()
                 );
                 assert!(opened.entries.is_empty());
+            }
+
+            #[test]
+            fn should_open_configured_workspace_path_when_provided() {
+                // Arrange
+                let home = TempDir::new().unwrap();
+                let workspace_dir = TempDir::new().unwrap();
+                fs::write(workspace_dir.path().join("main.rs"), "fn main() {}\n").unwrap();
+                let lsp_service = Arc::new(LspService::noop(home.path().to_path_buf()));
+                let mut service = WorkspaceService::new(
+                    home.path().to_path_buf(),
+                    Some(workspace_dir.path().to_path_buf()),
+                    lsp_service,
+                );
+
+                // Act
+                let opened = service.open(None).unwrap();
+
+                // Assert
+                assert_eq!(
+                    PathBuf::from(&opened.root),
+                    workspace_dir.path().canonicalize().unwrap()
+                );
+                assert_eq!(opened.entries.len(), 1);
+                assert_eq!(opened.entries[0].name, "main.rs");
             }
 
             #[test]

@@ -23,6 +23,7 @@ impl CliWorkspace {
         std::fs::create_dir_all(repo.join("src")).unwrap();
 
         Self::git(&repo, &["init", "-q", "-b", "feature/diff-260"]);
+        Self::git(&repo, &["config", "core.autocrlf", "false"]);
         Self::git(&repo, &["config", "user.name", "Ada Lovelace"]);
         Self::git(&repo, &["config", "user.email", "ada@example.com"]);
         std::fs::write(

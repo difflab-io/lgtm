@@ -4,6 +4,12 @@ use std::path::{Path, PathBuf};
 use crate::error::{LgtmConfigError, Result};
 use crate::models::config::{LanguageConfig, LgtmConfig};
 
+/// Environment variable passing the startup workspace directory from `lgtm-cli` to `lgtm-desktop`.
+pub const LGTM_WORKSPACE_ENV: &str = "LGTM_WORKSPACE";
+
+/// Environment variable overriding the `lgtm-desktop` binary path or executable name.
+pub const LGTM_DESKTOP_BIN_ENV: &str = "LGTM_DESKTOP_BIN";
+
 /// Resolves global and workspace-level LGTM configuration and workspace `.lgtm/` directory layout.
 #[derive(Debug, Clone, Default)]
 pub struct ConfigService {
@@ -146,6 +152,87 @@ impl ConfigService {
         detected.into_iter().collect()
     }
 
+    /// Validates that `path` (or the current directory when `None`) is an existing directory and returns its canonical path.
+    pub fn resolve_workspace_dir(path: Option<&Path>) -> Result<PathBuf> {
+        let target = path.unwrap_or_else(|| Path::new("."));
+        if !target.exists() {
+            return Err(LgtmConfigError::WorkspaceDirectoryNotFound {
+                path: target.to_path_buf(),
+            });
+        }
+        if !target.is_dir() {
+            return Err(LgtmConfigError::WorkspacePathNotDirectory {
+                path: target.to_path_buf(),
+            });
+        }
+        std::fs::canonicalize(target).map_err(|source| LgtmConfigError::WorkspaceCanonicalize {
+            path: target.to_path_buf(),
+            source,
+        })
+    }
+
+    /// Resolves the workspace directory passed to `lgtm-desktop` via `LGTM_WORKSPACE` or the first non-flag CLI argument.
+    pub fn resolve_desktop_workspace() -> Option<PathBuf> {
+        if let Some(env_path) = std::env::var_os(LGTM_WORKSPACE_ENV)
+            .map(PathBuf::from)
+            .filter(|path| !path.as_os_str().is_empty())
+        {
+            return Some(env_path);
+        }
+        let first = std::env::args_os().nth(1)?;
+        if first.to_string_lossy().starts_with('-') {
+            return None;
+        }
+        Some(PathBuf::from(first))
+    }
+
+    /// Resolves the `lgtm-desktop` executable from `LGTM_DESKTOP_BIN`, a sibling binary, `PATH`, or macOS `.app` bundles.
+    pub fn resolve_desktop_executable() -> Result<PathBuf> {
+        if let Some(configured) = std::env::var_os(LGTM_DESKTOP_BIN_ENV)
+            .map(PathBuf::from)
+            .filter(|path| !path.as_os_str().is_empty())
+        {
+            if configured.is_file() {
+                return Ok(std::fs::canonicalize(&configured).unwrap_or(configured));
+            }
+            if let Some(found) = Self::find_in_path(&configured) {
+                return Ok(found);
+            }
+            return Err(LgtmConfigError::DesktopExecutableNotFound {
+                detail: format!(
+                    "Configured {LGTM_DESKTOP_BIN_ENV} '{}' does not exist",
+                    configured.display()
+                ),
+            });
+        }
+
+        let bin_name = Self::desktop_binary_name();
+        if let Ok(current_exe) = std::env::current_exe()
+            && let Some(exe_dir) = current_exe.parent()
+        {
+            let sibling = exe_dir.join(bin_name);
+            if sibling.is_file() {
+                return Ok(std::fs::canonicalize(&sibling).unwrap_or(sibling));
+            }
+        }
+
+        if let Some(found) = Self::find_in_path(Path::new(bin_name)) {
+            return Ok(found);
+        }
+
+        for candidate in Self::macos_app_candidates() {
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+
+        Err(LgtmConfigError::DesktopExecutableNotFound {
+            detail: format!(
+                "Could not find lgtm-desktop executable; set {LGTM_DESKTOP_BIN_ENV} or install LGTM Desktop"
+            ),
+        })
+    }
+
     // Private -----------------------------------------------------------------
 
     fn scan_directory_languages(
@@ -248,6 +335,36 @@ impl ConfigService {
             return Some(workspace_root.join(resolved));
         }
         None
+    }
+
+    fn desktop_binary_name() -> &'static str {
+        if cfg!(windows) {
+            "lgtm-desktop.exe"
+        } else {
+            "lgtm-desktop"
+        }
+    }
+
+    fn find_in_path(binary: &Path) -> Option<PathBuf> {
+        if binary.components().count() > 1 {
+            return None;
+        }
+        let path_var = std::env::var_os("PATH")?;
+        std::env::split_paths(&path_var)
+            .map(|dir| dir.join(binary))
+            .find(|candidate| candidate.is_file())
+    }
+
+    fn macos_app_candidates() -> Vec<PathBuf> {
+        let mut candidates = vec![
+            PathBuf::from("/Applications/lgtm-desktop.app/Contents/MacOS/lgtm-desktop"),
+            PathBuf::from("/Applications/LGTM.app/Contents/MacOS/lgtm-desktop"),
+        ];
+        if let Some(home) = dirs::home_dir() {
+            candidates.push(home.join("Applications/lgtm-desktop.app/Contents/MacOS/lgtm-desktop"));
+            candidates.push(home.join("Applications/LGTM.app/Contents/MacOS/lgtm-desktop"));
+        }
+        candidates
     }
 }
 
@@ -360,6 +477,57 @@ mod tests {
                         "typescript".to_string(),
                     ]
                 );
+            }
+        }
+
+        mod when_resolving_workspace_dir {
+            use super::*;
+
+            #[test]
+            fn should_canonicalize_existing_directory() {
+                // Arrange
+                let temp = tempfile::tempdir().unwrap();
+                let nested = temp.path().join("project");
+                std::fs::create_dir_all(&nested).unwrap();
+
+                // Act
+                let resolved = ConfigService::resolve_workspace_dir(Some(&nested)).unwrap();
+
+                // Assert
+                assert_eq!(resolved, std::fs::canonicalize(&nested).unwrap());
+            }
+
+            #[test]
+            fn should_reject_nonexistent_directory() {
+                // Arrange
+                let temp = tempfile::tempdir().unwrap();
+                let missing = temp.path().join("missing");
+
+                // Act
+                let err = ConfigService::resolve_workspace_dir(Some(&missing)).unwrap_err();
+
+                // Assert
+                assert!(matches!(
+                    err,
+                    LgtmConfigError::WorkspaceDirectoryNotFound { .. }
+                ));
+            }
+
+            #[test]
+            fn should_reject_file_path() {
+                // Arrange
+                let temp = tempfile::tempdir().unwrap();
+                let file_path = temp.path().join("README.md");
+                std::fs::write(&file_path, "# demo\n").unwrap();
+
+                // Act
+                let err = ConfigService::resolve_workspace_dir(Some(&file_path)).unwrap_err();
+
+                // Assert
+                assert!(matches!(
+                    err,
+                    LgtmConfigError::WorkspacePathNotDirectory { .. }
+                ));
             }
         }
     }

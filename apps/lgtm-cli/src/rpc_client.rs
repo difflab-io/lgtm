@@ -8,7 +8,9 @@ use connectrpc::{
     client::{ClientConfig, HttpClient},
 };
 
-use crate::{backend::proto::lgtm::v1::ReviewServiceClient, daemon, store::Store};
+use lgtm_forge::proto::lgtm::v1::ReviewServiceClient;
+
+use crate::{daemon, store::Store};
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(30);
 

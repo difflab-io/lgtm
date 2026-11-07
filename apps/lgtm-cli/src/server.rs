@@ -1,4 +1,5 @@
-use crate::{backend, store::Store};
+use std::{future::IntoFuture, time::Duration};
+
 use axum::{
     Json, Router,
     body::Body,
@@ -7,26 +8,31 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use std::{future::IntoFuture, time::Duration};
 use tower::ServiceExt;
 
-mod assets {
-    include!(concat!(env!("OUT_DIR"), "/assets.rs"));
-}
+use crate::store::Store;
 
 // api -------------------------------------------------------------------------
 
 pub async fn serve(port: u16, store: &Store, detached: bool) -> anyhow::Result<()> {
     store.ensure_exists()?;
-    // daemonize owns the same PID-file lock in background mode.
-    let _lock = if detached {
+    // daemonize owns the same PID-file lock in background mode on Unix.
+    let _lock = if detached && cfg!(unix) {
         None
     } else {
         Some(store.foreground_pid_lock()?)
     };
-    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await?;
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
+        .await
+        .map_err(|err| {
+            if err.kind() == std::io::ErrorKind::AddrInUse {
+                anyhow::Error::new(err).context("Address already in use")
+            } else {
+                anyhow::Error::new(err)
+            }
+        })?;
     let port = listener.local_addr()?.port();
-    let (router, health) = backend::connect_default_router().await?;
+    let (router, health) = lgtm_forge::connect_default_router().await?;
     let rpc = router.into_axum_service();
     let app = Router::new()
         .route(
@@ -36,15 +42,18 @@ pub async fn serve(port: u16, store: &Store, detached: bool) -> anyhow::Result<(
         .nest_service("/rpc", rpc.clone())
         .fallback(dispatch)
         .with_state(rpc);
+    #[cfg(not(unix))]
+    std::fs::remove_file(store.path("server.stop")).ok();
     store.write_port(port)?;
     tracing::info!(port, pid = std::process::id(), "Server started");
     if !detached {
-        println!("LGTM UI and RPC server listening on http://127.0.0.1:{port}");
+        println!("LGTM RPC server listening on http://127.0.0.1:{port}");
     }
+    let stop_path = store.path("server.stop");
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let serving = axum::serve(listener, app)
         .with_graceful_shutdown(async move {
-            signal().await;
+            signal(&stop_path).await;
             health.shutdown();
             let _ = shutdown_tx.send(());
         })
@@ -54,8 +63,9 @@ pub async fn serve(port: u16, store: &Store, detached: bool) -> anyhow::Result<(
         result = &mut serving => result,
         _ = shutdown_rx => tokio::time::timeout(Duration::from_secs(5), &mut serving).await.unwrap_or(Ok(())),
     };
-    store.clear_port();
     tracing::info!("Server stopped");
+    drop(_lock);
+    store.clear_port();
     result?;
     Ok(())
 }
@@ -67,20 +77,7 @@ async fn dispatch(
     request: Request<Body>,
 ) -> Response {
     if request.method() == Method::GET || request.method() == Method::HEAD {
-        let path = request.uri().path().trim_start_matches('/');
-        let path = if path.is_empty() { "index.html" } else { path };
-        return match assets::get(path) {
-            Some((bytes, mime)) => (
-                [("content-type", mime), ("cache-control", "no-cache")],
-                if request.method() == Method::HEAD {
-                    &[][..]
-                } else {
-                    bytes
-                },
-            )
-                .into_response(),
-            None => StatusCode::NOT_FOUND.into_response(),
-        };
+        return StatusCode::NOT_FOUND.into_response();
     }
     match rpc.oneshot(request).await {
         Ok(response) => response.into_response(),
@@ -88,13 +85,29 @@ async fn dispatch(
     }
 }
 
-async fn signal() {
-    #[cfg(unix)]
-    {
-        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("install termination handler");
-        tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = term.recv() => {} }
+#[cfg(unix)]
+async fn signal(_stop_path: &std::path::Path) {
+    let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("install termination handler");
+    tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = term.recv() => {} }
+}
+
+#[cfg(not(unix))]
+async fn signal(stop_path: &std::path::Path) {
+    let pid = std::process::id().to_string();
+    let wait_for_stop_file = async {
+        loop {
+            if std::fs::read_to_string(stop_path)
+                .ok()
+                .is_some_and(|content| content.trim() == pid)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    };
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {},
+        _ = wait_for_stop_file => {},
     }
-    #[cfg(not(unix))]
-    tokio::signal::ctrl_c().await.ok();
 }

@@ -35,6 +35,7 @@ flowchart LR
 
 - [Proposed] Name architecture documentation and E2E suite directories for `lgtm-forge` as `forge` (`docs/architecture/forge/` and `e2e/forge/`) rather than `backend`.
 - [Proposed] Preserve existing documentation template headings and structure; use `NA/WIP` for unimplemented sections.
+- [Proposed] Centralize shared workspace path resolution and desktop executable discovery in [`libs/lgtm-config`](libs/lgtm-config/src/lib.rs) rather than duplicating configuration across `lgtm-cli` and `lgtm-desktop`.
 
 ## Style
 
@@ -46,6 +47,7 @@ flowchart LR
 - Use one inherent `impl` block per type per file: constructors first, `// Public` operations next, `// Private` helpers last, and trait `impl` blocks after the inherent block. Pad section headers with hyphens to column 80.
 - Name public repository and service reads `get_*`. Name mutating operations and factories with imperative verbs (`promote`, `publish_session`).
 - Call library and generated client methods directly; do not add pass-through wrapper aliases.
+- [Proposed] Prefer a single `new` constructor accepting `Option<...>` parameters over multiple overlapping constructors when callers only need one construction path.
 - Use `uuid::Uuid` for internal IDs, `repository_url` (with `_url` suffix only for full URLs) for normalized remote addresses, and `git_dir` for canonical local `.git` directories.
 - Humans require `email`; agents require `provider` and `model` and have no email. Model review contexts as `Local` or `ForgeBacked` and reject remote operations on `Local` contexts.
 
@@ -83,6 +85,8 @@ impl CommentAnchor {
 
 - Document all environment variables that affect LGTM behavior in [`docs/environment.md`](docs/environment.md).
 - Use soft wraps for Markdown prose (one source line per paragraph). Keep diagrams as inline Mermaid fences and prefer file trees, tables, and short code snippets over long prose.
+- [Proposed] Write documentation in plain, concise English (`/simple-english`): use short sentences, active voice, simple tenses, and no bold lead-ins in lists, and rely on Mermaid diagrams and tables rather than long prose paragraphs.
+- [Proposed] In architecture `## Requirement` sections, do not prefix bullets with `FR` or `NFR` labels; state `### Functional` requirements as user-facing capabilities and `### Non-Functional` requirements as performance, security, isolation, and reliability characteristics without internal crate or implementation fluff.
 
 ## Testing
 
@@ -132,6 +136,7 @@ mod tests {
 - Organize Vitest specs under `e2e/` using `describe('Given ... / When ...')` or `describe('When ...')` blocks and space-separated `it('should <behavior>')` titles (do not use `should_snake_case` in TypeScript).
 - Separate `// Arrange`, `// Act`, and `// Assert` blocks with comments. Keep feature setup in adjacent `*.fixtures.ts` files and export only helpers used across modules.
 - Separate desktop workspace E2E suites into `Given a new workspace` (creation, persistence, and reopening) and `Given an existing workspace` (viewing, editing, creating, renaming, conflict handling, and deleting entries) with nested `When ...` action blocks.
+- [Proposed] Separate daemon lifecycle tests (`apps/lgtm-cli/tests/daemon.rs`, `e2e/cli/daemon.spec.ts`) into `Given a stopped daemon` and `Given a running daemon` contexts with nested `When ...` blocks for each action (`up`, `status`, `down`, and HTTP/RPC requests), and keep `lgtm open` tests in dedicated `open` suites (`apps/lgtm-cli/tests/open.rs`, `e2e/cli/open.spec.ts`) structured with an outer `When running open` block and inner `Given ...` blocks for each precondition combination.
 
 ```typescript
 describe(

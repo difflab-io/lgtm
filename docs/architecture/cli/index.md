@@ -2,23 +2,23 @@
 
 ## Overview
 
-`lgtm-cli` parses user and agent commands, manages the local daemon lifecycle (`up`, `down`, `status`, `ui`), and acts as a Connect RPC client to `lgtm-forge` for staging (`add`), committing (`commit`), pushing (`push`), review workflows (`review list|new|refresh|show|close`), and comment workflows (`comment new|update|delete`).
+`lgtm-cli` parses user and agent commands, manages the local `lgtm-forge` RPC daemon lifecycle (`up`, `down`, `status`), launches the `lgtm-desktop` IDE (`open [<path>]` or `lgtm [<path>]`), proxies workspace tasks (`run`), and acts as a Connect RPC client to `lgtm-forge` for staging (`add`), committing (`commit`), pushing (`push`), review workflows (`review list|new|refresh|show|close`), and comment workflows (`comment new|update|delete`).
 
 ## Requirement
 
 ### Functional
 
-- Unified local and remote commands: Use the same command surface for local snapshot reviews (`--local`) and remote pull request reviews.
-- Branch-aware defaults: Default `review list`, `review refresh`, `review show`, `review close`, and `comment new` to the latest review on the current branch when the review number or name is omitted.
-- Agent identity support: Allow AI assistants to pass `--as <agent-name>` on commits and comments without switching the user's active Git or GitHub account.
-- Human and machine output: Render inline unified diffs and threaded comments in the terminal by default, and emit structured JSON on stdout when `--json` is passed.
-- Daemon and browser management: Start, discover, inspect, and stop the background server and open the web interface from one runtime directory.
+- Stage, commit, push, review diffs, and manage comments on local snapshots (`--local`) and remote pull requests using one command surface.
+- Default `review list`, `review refresh`, `review show`, `review close`, and `comment new` to the latest review on the current branch when the review selector is omitted.
+- Let AI agents pass `--as <agent-name>` on review and comment commands without changing the user's Git or GitHub credentials.
+- Render inline unified diffs and threaded comments in the terminal by default, or emit structured JSON with `--json`.
+- Start, inspect, and stop the background RPC daemon (`up`, `status`, `down`), run workspace tasks (`run`), and open workspaces in the desktop app (`open [<path>]` or `lgtm [<path>]`).
 
 ### Non-Functional
 
-- Fast command execution: Reuse the running background daemon so CLI invocations return quickly.
-- Clean process isolation: Detach the background daemon process before starting asynchronous worker threads.
-- Predictable exit codes: Report all command and RPC errors on stderr (or as structured JSON with `--json`) with a nonzero exit code.
+- Reuse the running background daemon so CLI commands complete with low latency.
+- Detach the daemon process cleanly before starting asynchronous worker threads.
+- Report command and RPC failures on stderr (or as JSON with `--json`) and exit with a nonzero status code.
 
 ## Design
 
@@ -27,9 +27,13 @@
 Run local snapshot reviews, remote GitHub pull request reviews, and daemon lifecycle commands:
 
 ```sh
-# Start the background daemon and inspect status
-lgtm up --no-open
+# Start the background RPC daemon and inspect status
+lgtm up
 lgtm status --json
+
+# Open the current workspace (or a target directory) in LGTM Desktop
+lgtm open .
+lgtm ./my-repo
 
 # Local snapshot and review flow (checkout and remote untouched)
 lgtm add src/ --local
@@ -49,8 +53,7 @@ lgtm comment new "Fixed error mapping" --reply-to 101 --as claude-sonnet-4-5
 lgtm comment delete 102 --as claude-sonnet-4-5
 lgtm review close feature/diff-241#42 --with comment --body "Ready for re-review"
 
-# Open the web UI or stop the daemon
-lgtm ui
+# Stop the background RPC daemon
 lgtm down
 ```
 
@@ -58,25 +61,24 @@ lgtm down
 
 #### Modules
 
-- [Daemon](daemon.md): Start, discover, and stop the background server.
-- [Server](server.md): Serve embedded web assets and `lgtm-forge` Connect RPC endpoints.
+- [Daemon](daemon.md): Start, discover, and stop the background `lgtm-forge` RPC server.
+- [Server](server.md): Serve `/health` and `lgtm-forge` Connect RPC endpoints.
 - [Store](store.md): Own runtime paths (`~/.lgtm`), snapshot directories (`~/.lgtm/snapshots/$repoSlug`), and PID/port files.
-- `commands/`: One command group per file (`add.rs`, `commit.rs`, `push.rs`, `review.rs`, `comment.rs`, `run.rs`, `ui.rs`).
-- `models.rs`: Shared command arguments (`ReviewOutcomeArg`, `ReviewGroupByArg`) and output formatting helpers.
-- `rpc_client.rs`: Generated Connect RPC client for `lgtm-forge` and daemon endpoint discovery.
-- `ui.rs`: Browser launching shared by `up` and `ui`.
-- Bundled forge (`bundle/backend/`): Embedded `lgtm-forge` and `lgtm-db` services compiled into the single `lgtm` binary.
-- `lgtm-config`: Linked workspace crate owning `.lgtm/config.toml` resolution, `.lgtm/mise.toml` synthesis, and `lgtm run` task execution.
+- `commands/`: One command group per file (`add.rs`, `commit.rs`, `open.rs`, `push.rs`, `review.rs`, `comment.rs`, `run.rs`).
+- `models/`: CLI view models transforming Protobuf payloads into terminal and `--json` outputs.
+- `rpc_client.rs`: Generated Connect RPC client (`lgtm_forge::proto::lgtm::v1::ReviewServiceClient`) and daemon endpoint discovery.
+- Direct workspace crate dependencies (`Cargo.toml`): Links `lgtm-forge`, `lgtm-db`, `lgtm-config`, and `lgtm-env` directly via Cargo `path` dependencies.
 
 ```mermaid
 flowchart TD
     MAIN["main: parse command"] --> STORE["Store: runtime directory (~/.lgtm)"]
     MAIN --> DAEMON["daemon: up / down / status"]
     MAIN --> SERVER["server: serve"]
-    MAIN --> COMMANDS["commands: add / commit / push / review / comment / run / ui"]
+    MAIN --> COMMANDS["commands: open / add / commit / push / review / comment / run"]
     COMMANDS --> CLIENT["rpc_client: ReviewServiceClient"]
-    COMMANDS --> MISE["lgtm_config: MiseService"]
-    COMMANDS --> UI["ui: browser launch"]
+    COMMANDS --> MISE["lgtm_env: MiseService"]
+    MISE --> CFG["lgtm_config: ConfigService"]
+    COMMANDS --> DESK["lgtm-desktop executable"]
     CLIENT --> FORGE["lgtm-forge Connect RPC (/rpc)"]
     MAIN --> LOG["log: server logging"]
 ```
@@ -107,10 +109,10 @@ sequenceDiagram
 
 | Command | Action |
 | --- | --- |
-| `up [--port PORT] [--foreground] [--no-open]` | Start or reuse the background server and optionally open the web UI |
-| `down` | Stop the running background server |
-| `status [--json]` | Report daemon PID, port, and endpoint URLs |
-| `ui [--port PORT] [--no-open] [--json]` | Ensure server readiness and print/open the web UI URL |
+| `up [--port PORT] [--foreground] [--json]` | Start or reuse the background `lgtm-forge` RPC server |
+| `down` | Stop the running background RPC server |
+| `status [--json]` | Report daemon PID, `server_url`, and `rpc_url` |
+| `open [<path>] [--json]` / `lgtm [<path>] [--json]` | Launch the `lgtm-desktop` application opened at `<path>` (default `.`) |
 | `run [--list] [<task>] [<args>...] [--json]` | Synchronize `<workspace>/.lgtm/mise.toml` and list or proxy tasks via `mise` |
 | `add <paths>... [--local] [--json]` | Stage paths in the working checkout or in `~/.lgtm/snapshots/$repoSlug` (`--local`) |
 | `commit [--as <agent-name>] [--local] [-m <message>] [--json]` | Create a checkout commit or a shadow snapshot commit (`--local`) |
@@ -134,18 +136,20 @@ The default port is `8080`; `0` selects an available port. `LGTM_HOME` selects t
 ```text
 apps/lgtm-cli/src/
 ├── main.rs          Root parsing and dispatch
-├── models.rs        Shared command arguments (ReviewOutcomeArg, ReviewGroupByArg)
+├── daemon.rs        Background RPC daemon lifecycle (up, down, status)
+├── server.rs        Axum HTTP server (/health and /rpc)
+├── store.rs         Runtime directory (~/.lgtm) PID and port files
 ├── rpc_client.rs    Connect RPC transport and daemon discovery
-├── ui.rs            Shared browser launcher
+├── models/          CLI view models and output formatting
 └── commands/
-    ├── mod.rs       Command module exports and shared helpers
+    ├── mod.rs       Command module exports
+    ├── open.rs      Desktop application workspace launcher (`lgtm open [path]`)
     ├── add.rs       Add command parser and RPC callback
     ├── commit.rs    Commit command parser and RPC callback
     ├── push.rs      Push command parser and RPC callback
     ├── review.rs    Review list, new, refresh, show, and close callbacks
     ├── comment.rs   Comment new, update, and delete callbacks
-    ├── run.rs       Managed Mise task listing and execution proxy
-    └── ui.rs        Browser command
+    └── run.rs       Managed Mise task listing and execution proxy
 ```
 
 Command files place local types first, then command argument structs, command callbacks, and private helpers.
@@ -158,9 +162,9 @@ Clap derives argument parsing from Rust structs and enums. The internal `serve` 
 
 Background startup spawns a fresh copy of the executable that calls `daemon::detach` before creating a Tokio runtime. The foreground caller keeps its own runtime while polling for server readiness.
 
-### Forge inclusion
+### Workspace crate linking
 
-The bundled `backend` module comes from `bundle/backend/mod.rs`. The tracked bundle task copies `lgtm-forge` and `lgtm-db` sources, generated Protobuf/Connect types, and static frontend assets before compilation. The same `lgtm-forge` implementation serves standalone and bundled deployments, and CLI review commands act purely as RPC clients without embedding database persistence directly.
+`apps/lgtm-cli/Cargo.toml` links `lgtm-forge`, `lgtm-db`, `lgtm-config`, and `lgtm-env` directly via Cargo `path` dependencies. The same `lgtm-forge` implementation serves standalone and daemon deployments, and CLI review commands act purely as RPC clients without embedding database persistence directly.
 
 ## References
 

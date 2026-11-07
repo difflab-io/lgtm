@@ -8,16 +8,15 @@
 
 ### Functional
 
-- **Human commit authorship in local workflows**: Attribute all local and checkout commits (`lgtm commit` and `lgtm commit --local`) to the human user (`git config user.name` and `user.email`), whether run directly by the user or by an agent acting for the user.
-- **Future remote-triggered agent PRs**: Reserve agent-authored commits and agent-authored pull requests for future remote-orchestrated workflows initiated by external triggers, where code authorship becomes mixed once human reviewers or committers participate.
-- **Session and comment identity attribution**: Distinguish `Human` identities (`email`, `forge_login`) from `Agent` identities (`provider`, `model`, sponsored by the managing `Human`) on review sessions and comments.
-- **Concurrent human and agent sessions**: Allow human and agent `Draft` sessions to overlap on the same review so an agent can review code, relocate comment anchors, reply, and close its session while the user's `Draft` session remains open.
-- **Remote AI disclosure banners**: Attach an AI-generated disclosure banner whenever an agent is involved in authoring or updating a comment or review session on a remote forge, and parse that banner back into an `Agent` identity on import.
+- Attribute local and checkout commits (`lgtm commit` and `lgtm commit --local`) to the human user from `git config`.
+- Attribute review sessions and comments to human identities (`email`, `forge_login`) or agent identities (`provider`, `model`).
+- Allow human and agent draft sessions to overlap on the same review.
+- Attach an AI disclosure banner when an agent authors or updates a remote session or comment, and parse that banner back into an agent identity on import.
 
 ### Non-Functional
 
-- **Non-invasive credentials**: Never mutate the user's active `git config` or `gh auth` account when `--as <agent>` is passed on review or comment commands.
-- **Schema integrity**: Enforce `Human` vs. `Agent` field rules and `managed_by_id` foreign keys in SQL constraints.
+- Never modify the user's `git config` or `gh auth` credentials when `--as <agent>` is passed.
+- Preserve agent attribution on refresh even if a remote comment banner is edited externally.
 
 ## Design
 

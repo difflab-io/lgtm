@@ -19,14 +19,23 @@ pub fn detach(store: &Store) -> Result<()> {
 
 #[cfg(not(unix))]
 pub fn detach(_store: &Store) -> Result<()> {
-    bail!("Background mode requires macOS or Linux; use lgtm up --foreground")
+    Ok(())
 }
 
-pub async fn up(port: u16, open_browser: bool, store: &Store) -> Result<()> {
+pub async fn up(port: u16, store: &Store, json: bool) -> Result<()> {
     let instance = ensure_running(port, store).await?;
-    announce(&instance, store);
-    if open_browser {
-        crate::ui::open(&instance.url());
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "running": true,
+                "pid": instance.pid,
+                "server_url": instance.url(),
+                "rpc_url": format!("{}/rpc", instance.url()),
+            })
+        );
+    } else {
+        announce(&instance, store);
     }
     Ok(())
 }
@@ -42,7 +51,7 @@ pub async fn down(store: &Store) -> Result<()> {
         nix::sys::signal::Signal::SIGTERM,
     )?;
     #[cfg(not(unix))]
-    bail!("Use Ctrl-C to stop the foreground server on this platform");
+    std::fs::write(store.path("server.stop"), instance.pid.to_string())?;
     for _ in 0..50 {
         if !store.path("server.port").exists() {
             println!("LGTM stopped");
@@ -63,7 +72,6 @@ pub async fn status(store: &Store, json: bool) -> Result<()> {
             Some(instance) => serde_json::json!({
                 "running": true,
                 "pid": instance.pid,
-                "ui_url": instance.url(),
                 "server_url": instance.url(),
                 "rpc_url": format!("{}/rpc", instance.url()),
             }),
@@ -107,18 +115,43 @@ pub(crate) async fn ensure_running(port: u16, store: &Store) -> Result<Instance>
     if let Some(instance) = active(&client, store).await {
         return Ok(instance);
     }
-    let launch = Command::new(std::env::current_exe()?)
-        .env("LGTM_HOME", store.dir())
-        .args(["serve", "--daemonize", "--port"])
-        .arg(port.to_string())
-        .output()
-        .context("Start the bundled LGTM server")?;
-    if !launch.status.success() {
-        bail!(
-            "Could not daemonize the LGTM server: {}",
-            String::from_utf8_lossy(&launch.stderr).trim()
-        );
-    }
+    #[cfg(unix)]
+    let launch_stderr = {
+        let launch = Command::new(std::env::current_exe()?)
+            .env("LGTM_HOME", store.dir())
+            .args(["serve", "--daemonize", "--port"])
+            .arg(port.to_string())
+            .output()
+            .context("Start the bundled LGTM server")?;
+        if !launch.status.success() {
+            bail!(
+                "Could not daemonize the LGTM server: {}",
+                String::from_utf8_lossy(&launch.stderr).trim()
+            );
+        }
+        String::from_utf8_lossy(&launch.stderr).trim().to_owned()
+    };
+    #[cfg(not(unix))]
+    let launch_stderr = {
+        store.ensure_exists()?;
+        disable_stdio_inheritance();
+        let mut cmd = Command::new(std::env::current_exe()?);
+        cmd.env("LGTM_HOME", store.dir())
+            .args(["serve", "--daemonize", "--port"])
+            .arg(port.to_string())
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+            const DETACHED_PROCESS: u32 = 0x0000_0008;
+            cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
+        }
+        cmd.spawn().context("Start the bundled LGTM server")?;
+        String::new()
+    };
     for _ in 0..50 {
         if let Some(instance) = active(&client, store).await {
             return Ok(instance);
@@ -128,14 +161,29 @@ pub(crate) async fn ensure_running(port: u16, store: &Store) -> Result<Instance>
     bail!(
         "LGTM did not become ready; check {}. {}",
         store.path("server.log").display(),
-        String::from_utf8_lossy(&launch.stderr).trim()
+        launch_stderr
     )
 }
 
 fn announce(instance: &Instance, store: &Store) {
     println!("LGTM is running (pid {})", instance.pid);
-    println!("UI: {}", instance.url());
     println!("Server: {}", instance.url());
-    println!("Browser RPC: {}/rpc", instance.url());
+    println!("RPC: {}/rpc", instance.url());
     println!("Logs: {}", store.path("server.log").display());
+}
+
+pub(crate) fn disable_stdio_inheritance() {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        unsafe extern "system" {
+            fn SetHandleInformation(handle: *mut std::ffi::c_void, mask: u32, flags: u32) -> i32;
+        }
+        const HANDLE_FLAG_INHERIT: u32 = 0x0000_0001;
+        unsafe {
+            let _ = SetHandleInformation(std::io::stdin().as_raw_handle(), HANDLE_FLAG_INHERIT, 0);
+            let _ = SetHandleInformation(std::io::stdout().as_raw_handle(), HANDLE_FLAG_INHERIT, 0);
+            let _ = SetHandleInformation(std::io::stderr().as_raw_handle(), HANDLE_FLAG_INHERIT, 0);
+        }
+    }
 }

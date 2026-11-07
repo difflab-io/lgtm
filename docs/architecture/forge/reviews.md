@@ -10,13 +10,12 @@ NA/WIP.
 
 ### Functional
 
-- FR1: Return a hello response through the shared generated RPC.
-- FR2: Trim names and use `World` for empty input.
+- Return a greeting response from the review service RPC endpoint.
+- Trim input names and default empty names to `World`.
 
 ### Non-Functional
 
-- NFR1: Keep model conversion outside RPC handlers.
-- NFR2: Perform no storage, Git or forge mutations.
+- Perform no database, Git, or remote forge writes during the greeting check.
 
 ## Design
 

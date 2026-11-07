@@ -8,16 +8,16 @@
 
 ### Functional
 
-- Presence detection (`find_mise_binary`, `is_mise_installed`): Probe `<lgtm_home>/bin/mise` first and then standard user/system paths (`PATH`, `~/.local/bin/mise`, `~/.local/share/mise/bin/mise`, `/opt/homebrew/bin/mise`, `/usr/local/bin/mise`, `/usr/bin/mise`), verifying executable usability via `mise --version`.
-- Automatic binary installation (`ensure_mise_binary`, `install_mise_binary`): When `mise` is absent, download and execute the official installer script (`https://mise.run` or `$LGTM_MISE_INSTALLER_URL`) with `MISE_INSTALL_PATH=<lgtm_home>/bin/mise` so LGTM commands and language server toolchains work out of the box without manual prerequisites.
-- Hermetic isolation mode (`MiseService::with_isolated_env`): Allow integration tests and sandboxed callers to disable host system path scanning and supply a local installer URL so missing-binary detection and installation are deterministically verifiable.
-- Managed `.lgtm/mise.toml` synthesis (`GeneratedMiseFile`, `sync_workspace_mise`): Combine detected workspace languages, `[lsp]` auto-install rules, and `[mise]` tool/task overrides into `<workspace>/.lgtm/mise.toml` with `dir = "{{cwd}}"`.
-- Task and tool execution (`get_tasks`, `run_task`, `install_tools`, `build_exec_command`): List synthesized tasks, run `mise run <task>`, install language server packages via `mise install`, and construct isolated `mise exec` commands for `lgtm-lsp`.
+- Manage developer tooling required for building, linting, formatting, testing, and powering diagnostics.
+- Allow global and project-level management of developer tooling.
+- Provide first-class support for Rust, TypeScript, JavaScript, Python, Go, and Markdown.
+- Enable adding support for additional languages (future).
 
 ### Non-Functional
 
-- Non-intrusive host footprint: Never overwrite system binaries or user-owned root `mise.toml` files; install the managed binary strictly under `<lgtm_home>/bin/mise` and scope subprocesses with `MISE_CONFIG_FILE=<workspace>/.lgtm/mise.toml` and `MISE_GLOBAL_CONFIG_FILE=<workspace>/.lgtm/mise.toml`.
-- Deterministic file synthesis: Use `BTreeMap` for all `[tools]` and `[tasks]` maps and write `<workspace>/.lgtm/mise.toml` only when its rendered TOML differs from the file on disk.
+- Use `mise` for developer tool management instead of a custom tool manager.
+- Hide IDE-backed `mise` usage for projects that do not use `mise`, and integrate cleanly with projects that do.
+- Enable exporting managed `mise` configuration into the project (future, for example via an `lgtm env export` command).
 
 ## Design
 

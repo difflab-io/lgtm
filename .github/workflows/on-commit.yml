@@ -3,9 +3,11 @@ name: On Commit
 'on':
   pull_request:
     branches: [main]
+  push:
+    branches-ignore: [main]
 
 concurrency:
-  group: on-commit-pr-${{ github.event.pull_request.number }}
+  group: ${{ github.event_name == 'push' && format('on-commit-push-{0}', github.ref_name) || format('on-commit-pr-{0}', github.head_ref || github.ref_name) }}
   cancel-in-progress: true
 
 permissions:
@@ -14,6 +16,7 @@ permissions:
 
 jobs:
   plan:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-22.04
     permissions:
       contents: read
@@ -112,6 +115,7 @@ jobs:
 
   # TODO: Move E2E into the Premise flow when it supports test suites.
   e2e-linux:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-22.04
     permissions:
       contents: read
@@ -130,6 +134,7 @@ jobs:
 
   # TODO: Move E2E into the Premise flow when it supports test suites.
   e2e-macos:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: macos-latest
     permissions:
       contents: read

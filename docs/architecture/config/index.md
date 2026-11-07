@@ -8,14 +8,14 @@
 
 ### Functional
 
-- Layered configuration: Load built-in language and tool presets, merge `~/.lgtm/config.toml` (or `$LGTM_HOME/config.toml`), and overlay `<workspace>/.lgtm/config.toml`.
-- Language and root discovery: Resolve a file's language from its extension and walk ancestor directories up to the workspace boundary to find the nearest language root marker (`Cargo.toml`, `tsconfig.json`, `package.json`, `pyproject.toml`, `requirements.txt`, `go.mod`, `.marksman.toml`).
-- Git worktree hygiene: Create `<workspace>/.lgtm/` and register `.lgtm/` idempotently in `<git-dir>/info/exclude` (supporting both standard `.git` directories and worktree `.git` pointer files) without modifying tracked `.gitignore` files.
+- Load built-in language and tool presets, merge `~/.lgtm/config.toml` (or `$LGTM_HOME/config.toml`), and overlay `<workspace>/.lgtm/config.toml`.
+- Resolve a file's language from its extension and walk ancestor directories up to the workspace root to find the nearest project root marker.
+- Create `<workspace>/.lgtm/` and register `.lgtm/` in `<git-dir>/info/exclude` without modifying tracked `.gitignore` files.
 
 ### Non-Functional
 
-- Deterministic output: Use `BTreeMap` and `BTreeSet` across all configuration and language discovery models so merged configurations and detected language lists are deterministic.
-- Pure configuration boundary: Keep `lgtm-config` free of subprocess execution; delegate `mise` binary management and `.lgtm/mise.toml` synthesis/execution to [`lgtm-env`](../env/index.md).
+- Produce deterministic merged configurations and language lists across platforms.
+- Perform configuration loading and discovery without spawning subprocesses.
 
 ## Design
 
