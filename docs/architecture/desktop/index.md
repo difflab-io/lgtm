@@ -201,6 +201,7 @@ When compiled with the `e2e-bridge` feature and launched with `--ipc-bridge <hom
 
 ## References
 
+- [Desktop event handling & service orchestration](events.md).
 - [LSP library (`lgtm-lsp`) architecture](../lsp/index.md).
 - [Environment library (`lgtm-env`) architecture](../env/index.md).
 - [Configuration library (`lgtm-config`) architecture](../config/index.md).

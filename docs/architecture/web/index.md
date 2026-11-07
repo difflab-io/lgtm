@@ -107,6 +107,56 @@ sequenceDiagram
     SetSvc-->>User: Reactive theme & lineWrapping applied immediately
 ```
 
+### Event Handling and Push Propagation
+
+`lgtm-web` does not use an internal frontend event bus; UI state propagates synchronously through Svelte 5 `$state` runes and `$effect` blocks. Tauri event listeners in `workspaceClient.ts` are used strictly for unsolicited push notifications from `lgtm-desktop` (`AppEvents::emit_to_webview`) and native window close hooks, wired in `Shell.svelte` `onMount`.
+
+```mermaid
+flowchart TD
+    subgraph HostPush["1. Host Push Event (workspaceClient.ts)"]
+        E_LSP["'lsp-status' / 'lsp-diagnostics'"]
+        E_CFG["'config-updated'"]
+        E_MENU["'workspace-open-global-config' / 'workspace-open-local-config'"]
+        E_QUIT["'workspace-quit-requested' / Window.onCloseRequested"]
+    end
+
+    subgraph ShellMount["2. Listener Wiring (Shell.svelte onMount)"]
+        H_LSP["registerLspHandlers"]
+        H_CFG["registerConfigHandlers"]
+        H_QUIT["registerQuitHandlers"]
+    end
+
+    subgraph Services["3. Reactive Service State ($state)"]
+        S_LSP["LspService.handleStatus / handleDiagnostics"]
+        S_SET["SettingsService.handleUpdated(snapshot)"]
+        S_WS["WorkspaceService.openGlobalConfig / openLocalConfig / flushSave"]
+    end
+
+    subgraph UI["4. Reactive DOM & Host Sync"]
+        U_EDITOR["CodeEditor squiggles, lineWrapping, & Diagnostics tab"]
+        U_MENU["LspStatusMenu & TreeView badges"]
+        U_THEME["$effect(settings.theme) -> ThemeService.setPreference"]
+        U_EXIT["workspaceClient.finishQuit() / Window.destroy()"]
+    end
+
+    E_LSP --> H_LSP --> S_LSP
+    S_LSP --> U_EDITOR
+    S_LSP --> U_MENU
+
+    E_CFG --> H_CFG --> S_SET
+    S_SET --> U_THEME
+    S_SET --> U_EDITOR
+
+    E_MENU --> H_CFG --> S_WS --> U_EDITOR
+    E_QUIT --> H_QUIT --> S_WS --> U_EXIT
+```
+
+| Listener Registration (`workspaceClient.ts`) | Subscribed Events | Payload Shape | Target Service Call (`Shell.svelte`) |
+| --- | --- | --- | --- |
+| `registerLspHandlers` | `"lsp-status"`<br/>`"lsp-diagnostics"` | `LspServerStatusEvent`<br/>`LspFileDiagnosticsEvent` | `workspace.handleLspStatus(event)`<br/>`workspace.handleLspDiagnostics(event)` |
+| `registerConfigHandlers` | `"config-updated"`<br/>`"workspace-open-global-config"`<br/>`"workspace-open-local-config"` | `ResolvedConfigSnapshot`<br/>`void`<br/>`void` | `workspace.settings.handleUpdated(snapshot)`<br/>`workspace.openGlobalConfig()`<br/>`workspace.openLocalConfig()` |
+| `registerQuitHandlers` | `"workspace-quit-requested"`<br/>`Window.onCloseRequested` | `void`<br/>`CloseRequestedEvent` | `await workspace.flushSave()` -> `finishQuit()` / `destroy()` |
+
 ### Interfaces and Contracts
 
 | Service / Method | Signature | Description |
@@ -123,43 +173,10 @@ sequenceDiagram
 | `SettingsService.handleUpdated` | `handleUpdated(next: ResolvedConfigSnapshot): void` | Apply a live `config-updated` event payload when `~/.lgtm/config.json` or `.lgtm/config.json` is saved. |
 | `SettingsService.rememberRoot` | `rememberRoot(root: string): void` | Prepend `root` to `knownRoots` and persist the MRU list to `localStorage`. |
 
-## Implementation
-
-### Package layout
-
-```text
-apps/lgtm-web/
-├── package.json
-├── svelte.config.js
-├── vite.config.ts
-└── src/
-    ├── app.css                              Theme imports and global element resets
-    ├── app.html                             Root HTML shell
-    ├── lib/
-    │   ├── clients/
-    │   │   ├── reviewServiceClient.ts       Connect RPC client for lgtm-forge
-    │   │   └── workspaceClient.ts           Typed Tauri IPC client for workspace, LSP, and config commands
-    │   ├── components/
-    │   │   ├── Shell.svelte                 Top-level IDE chrome, event wiring, theme sync, and shortcuts
-    │   │   ├── WorkspaceExplorer.svelte     Sidebar workspace switcher, file tree, and context menu
-    │   │   ├── ContentPane.svelte           TabBar and CodeEditor / Markdown / Diagnostics view host
-    │   │   └── LspStatusMenu.svelte         Header menu displaying language server status and actions
-    │   ├── gen/
-    │   │   ├── bindings.ts                  Specta-generated Rust IPC types and command wrappers
-    │   │   └── lgtm/v1/                     Buf-generated Protobuf types for lgtm-forge
-    │   └── services/
-    │       ├── workspaceService.svelte.ts   Reactive workspace tree, tabs, and debounced save service
-    │       ├── lspService.svelte.ts         Reactive LSP status, diagnostics, hover, and navigation service
-    │       ├── settingsService.svelte.ts    Reactive read-only settings snapshot and MRU workspace roots service
-    │       └── reviewService.ts             Hello-review demonstration service
-    └── routes/
-        ├── +layout.svelte
-        └── +page.svelte
-```
-
 ## References
 
 - [Desktop application (`lgtm-desktop`) architecture](../desktop/index.md).
+- [Desktop event handling & service orchestration](../desktop/events.md).
 - [Configuration library (`lgtm-config`) architecture](../config/index.md).
 - [LSP library (`lgtm-lsp`) architecture](../lsp/index.md).
 - [End-to-end testing architecture](../e2e/index.md).

@@ -44,6 +44,11 @@ impl LspService {
         let _ = self.manager.prepare_workspace(next_root);
     }
 
+    /// Reloads the merged workspace configuration and re-synchronizes `.lgtm/mise.toml` after a config save.
+    pub fn reload_workspace_config(&self, workspace_root: &Path) {
+        let _ = self.manager.prepare_workspace(workspace_root);
+    }
+
     /// Synchronizes an opened file with its workspace language server and returns its language ID and status.
     pub fn open_or_sync_file(
         &self,

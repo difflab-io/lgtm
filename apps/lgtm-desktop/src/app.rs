@@ -12,11 +12,9 @@ use lgtm_lsp::{
 };
 use tauri::{Manager, State};
 
-#[cfg(any(test, feature = "e2e-bridge"))]
-use crate::services::BridgeEventForwarder;
 use crate::{
     error::{Result, error},
-    events::AppEvents,
+    events::{AppEvent, AppEvents},
     models::{FileContent, WorkspaceListing, WorkspaceNode},
     services::{LspService, WorkspaceService},
 };
@@ -30,7 +28,7 @@ pub struct AppState {
     pub config: ConfigService,
     /// Shared desktop LSP orchestration service.
     pub lsp: Arc<LspService>,
-    /// Application event sink publishing events to the frontend webview.
+    /// In-process backend event bus and webview notification publisher.
     pub events: AppEvents,
     /// Tracks whether the frontend has registered its quit lifecycle listener.
     pub frontend_ready: Arc<AtomicBool>,
@@ -45,10 +43,10 @@ pub fn builder(workspace_home: Option<PathBuf>) -> tauri::Builder<tauri::Wry> {
                 if let Some(state) = app.try_state::<AppState>() {
                     match event.id().as_ref() {
                         "open-global-config" => {
-                            state.events.emit("workspace-open-global-config", &());
+                            state.events.dispatch(AppEvent::MenuOpenGlobalConfig);
                         }
                         "open-local-config" => {
-                            state.events.emit("workspace-open-local-config", &());
+                            state.events.dispatch(AppEvent::MenuOpenLocalConfig);
                         }
                         _ => {}
                     }
@@ -65,9 +63,6 @@ pub fn configure_builder<R: tauri::Runtime>(
 ) -> tauri::Builder<R> {
     builder
         .setup(move |app| {
-            #[cfg(any(test, feature = "e2e-bridge"))]
-            init_app_state(app.handle(), workspace_home, None)?;
-            #[cfg(not(any(test, feature = "e2e-bridge")))]
             init_app_state(app.handle(), workspace_home)?;
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
@@ -207,7 +202,6 @@ fn build_app_menu<R: tauri::Runtime>(
 pub(crate) fn init_app_state<R: tauri::Runtime>(
     app_handle: &tauri::AppHandle<R>,
     workspace_home: Option<PathBuf>,
-    #[cfg(any(test, feature = "e2e-bridge"))] event_forwarder: Option<BridgeEventForwarder>,
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
     if app_handle.try_state::<AppState>().is_some() {
         return Ok(());
@@ -217,16 +211,18 @@ pub(crate) fn init_app_state<R: tauri::Runtime>(
         None => app_handle.path().home_dir()?,
     };
     let config = ConfigService::from_home(home.clone());
-    #[cfg(any(test, feature = "e2e-bridge"))]
-    let events = AppEvents::from_app_handle(app_handle, event_forwarder);
-    #[cfg(not(any(test, feature = "e2e-bridge")))]
-    #[cfg(not(any(test, feature = "e2e-bridge")))]
     let events = AppEvents::from_app_handle(app_handle);
     let lsp_events = events.clone();
     let lsp = Arc::new(LspService::new(config.clone(), move |event| match event {
-        LspEvent::Status(payload) => lsp_events.emit("lsp-status", &payload),
-        LspEvent::Diagnostics(payload) => lsp_events.emit("lsp-diagnostics", &payload),
+        LspEvent::Status(payload) => lsp_events.dispatch(AppEvent::LspStatus(payload)),
+        LspEvent::Diagnostics(payload) => lsp_events.dispatch(AppEvent::LspDiagnostics(payload)),
     }));
+    let handler_events = events.clone();
+    let handler_lsp = lsp.clone();
+    let handler_config = config.clone();
+    events.set_handler(move |event| {
+        handle_app_event(&handler_events, &handler_lsp, &handler_config, event);
+    });
     app_handle.manage(AppState {
         workspace: Arc::new(Mutex::new(WorkspaceService::from_home(home))),
         config,
@@ -235,6 +231,47 @@ pub(crate) fn init_app_state<R: tauri::Runtime>(
         frontend_ready: Arc::new(AtomicBool::new(false)),
     });
     Ok(())
+}
+
+fn handle_app_event(events: &AppEvents, lsp: &LspService, config: &ConfigService, event: AppEvent) {
+    match event {
+        AppEvent::WorkspaceOpened {
+            previous_root,
+            next_root,
+        } => {
+            lsp.switch_workspace(previous_root.as_deref(), &next_root);
+        }
+        AppEvent::FileSaved {
+            root,
+            path,
+            content,
+            is_config,
+        } => {
+            let _ = lsp.did_save(&root, &path, &content);
+            if is_config && let Ok(snapshot) = config.get_config_snapshot(Some(&root)) {
+                lsp.reload_workspace_config(&root);
+                events.emit_to_webview("config-updated", &snapshot);
+            }
+        }
+        AppEvent::FileClosed { root, path } => {
+            let _ = lsp.did_close(&root, &path);
+        }
+        AppEvent::LspStatus(payload) => {
+            events.emit_to_webview("lsp-status", &payload);
+        }
+        AppEvent::LspDiagnostics(payload) => {
+            events.emit_to_webview("lsp-diagnostics", &payload);
+        }
+        AppEvent::MenuOpenGlobalConfig => {
+            events.emit_to_webview("workspace-open-global-config", &());
+        }
+        AppEvent::MenuOpenLocalConfig => {
+            events.emit_to_webview("workspace-open-local-config", &());
+        }
+        AppEvent::QuitRequested => {
+            events.emit_to_webview("workspace-quit-requested", &());
+        }
+    }
 }
 
 /// Shared command dispatch for the app and the native integration harness.
@@ -331,7 +368,7 @@ pub fn handle_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
                 && !app.webview_windows().is_empty()
             {
                 api.prevent_exit();
-                state.events.emit("workspace-quit-requested", &());
+                state.events.dispatch(AppEvent::QuitRequested);
             }
         }
         _ => {}
@@ -379,9 +416,9 @@ pub async fn workspace_open(
     path: Option<String>,
 ) -> Result<WorkspaceListing> {
     let config_service = state.config.clone();
-    let lsp_service = state.lsp.clone();
+    let events = state.events.clone();
     run_blocking(state, move |w| {
-        let prev_root = w.get_root().ok();
+        let previous_root = w.get_root().ok();
         let effective_path = match path {
             Some(explicit) => Some(explicit),
             None if !w.is_custom_root() => config_service
@@ -394,8 +431,11 @@ pub async fn workspace_open(
             None => None,
         };
         let listing = w.open(effective_path.as_deref())?;
-        if let Ok(new_root) = w.get_root() {
-            lsp_service.switch_workspace(prev_root.as_deref(), &new_root);
+        if let Ok(next_root) = w.get_root() {
+            events.dispatch(AppEvent::WorkspaceOpened {
+                previous_root,
+                next_root,
+            });
         }
         Ok(listing)
     })
@@ -488,7 +528,7 @@ pub async fn workspace_open_local_config(state: State<'_, AppState>) -> Result<F
     Ok(file)
 }
 
-/// Writes UTF-8 file contents to disk, notifies LSP `didSave`, and emits `config-updated` when a config file is saved.
+/// Writes UTF-8 file contents to disk and dispatches `AppEvent::FileSaved`.
 #[tauri::command]
 #[specta::specta]
 pub async fn workspace_write(
@@ -496,10 +536,8 @@ pub async fn workspace_write(
     relative_path: String,
     content: String,
 ) -> Result<FileContent> {
-    let lsp_service = state.lsp.clone();
-    let config_service = state.config.clone();
     let events = state.events.clone();
-    let content_for_lsp = content.clone();
+    let saved_content = content.clone();
     let (saved, save_context) = run_blocking(state, move |w| {
         let saved = w.write_file(&relative_path, &content)?;
         let context = w
@@ -507,17 +545,19 @@ pub async fn workspace_write(
             .ok()
             .zip(w.get_entry_path(&relative_path).ok())
             .map(|(root, path)| {
-                let is_cfg = w.is_config_path(&path);
-                (root, path, is_cfg)
+                let is_config = w.is_config_path(&path);
+                (root, path, is_config)
             });
         Ok((saved, context))
     })
     .await?;
-    if let Some((root, path, is_cfg)) = save_context {
-        let _ = lsp_service.did_save(&root, &path, &content_for_lsp);
-        if is_cfg && let Ok(snapshot) = config_service.get_config_snapshot(Some(&root)) {
-            events.emit("config-updated", &snapshot);
-        }
+    if let Some((root, path, is_config)) = save_context {
+        events.dispatch(AppEvent::FileSaved {
+            root,
+            path,
+            content: saved_content,
+            is_config,
+        });
     }
     Ok(saved)
 }
@@ -550,7 +590,7 @@ pub async fn workspace_create_folder(
     .await
 }
 
-/// Renames a workspace entry exclusively and closes its previous LSP document URI.
+/// Renames a workspace entry exclusively and dispatches `AppEvent::FileClosed` for its previous path.
 #[tauri::command]
 #[specta::specta]
 pub async fn workspace_rename(
@@ -558,28 +598,28 @@ pub async fn workspace_rename(
     relative_path: String,
     name: String,
 ) -> Result<WorkspaceNode> {
-    let lsp_service = state.lsp.clone();
+    let events = state.events.clone();
     run_blocking(state, move |w| {
         let old_target = w.get_root().ok().zip(w.get_entry_path(&relative_path).ok());
         let node = w.rename(&relative_path, &name)?;
-        if let Some((root, old_path)) = old_target {
-            let _ = lsp_service.did_close(&root, &old_path);
+        if let Some((root, path)) = old_target {
+            events.dispatch(AppEvent::FileClosed { root, path });
         }
         Ok(node)
     })
     .await
 }
 
-/// Deletes a workspace entry and closes its LSP document URI.
+/// Deletes a workspace entry and dispatches `AppEvent::FileClosed` for its path.
 #[tauri::command]
 #[specta::specta]
 pub async fn workspace_delete(state: State<'_, AppState>, relative_path: String) -> Result<()> {
-    let lsp_service = state.lsp.clone();
+    let events = state.events.clone();
     run_blocking(state, move |w| {
         let old_target = w.get_root().ok().zip(w.get_entry_path(&relative_path).ok());
         w.delete(&relative_path)?;
-        if let Some((root, old_path)) = old_target {
-            let _ = lsp_service.did_close(&root, &old_path);
+        if let Some((root, path)) = old_target {
+            events.dispatch(AppEvent::FileClosed { root, path });
         }
         Ok(())
     })

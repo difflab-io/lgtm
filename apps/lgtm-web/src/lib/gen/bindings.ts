@@ -19,15 +19,15 @@ export const commands = {
 	workspaceOpenGlobalConfig: () => __TAURI_INVOKE<FileContent>("workspace_open_global_config"),
 	/**  Ensures the global config exists, opens `.lgtm/config.json` (or an empty JSON temp buffer if absent), and synchronizes LSP. */
 	workspaceOpenLocalConfig: () => __TAURI_INVOKE<FileContent>("workspace_open_local_config"),
-	/**  Writes UTF-8 file contents to disk, notifies LSP `didSave`, and emits `config-updated` when a config file is saved. */
+	/**  Writes UTF-8 file contents to disk and dispatches `AppEvent::FileSaved`. */
 	workspaceWrite: (relativePath: string, content: string) => __TAURI_INVOKE<FileContent>("workspace_write", { relativePath, content }),
 	/**  Creates a new file inside a workspace-relative directory. */
 	workspaceCreateFile: (name: string, parentPath: string | null) => __TAURI_INVOKE<WorkspaceNode>("workspace_create_file", { name, parentPath }),
 	/**  Creates a new folder inside a workspace-relative directory. */
 	workspaceCreateFolder: (name: string, parentPath: string | null) => __TAURI_INVOKE<WorkspaceNode>("workspace_create_folder", { name, parentPath }),
-	/**  Renames a workspace entry exclusively and closes its previous LSP document URI. */
+	/**  Renames a workspace entry exclusively and dispatches `AppEvent::FileClosed` for its previous path. */
 	workspaceRename: (relativePath: string, name: string) => __TAURI_INVOKE<WorkspaceNode>("workspace_rename", { relativePath, name }),
-	/**  Deletes a workspace entry and closes its LSP document URI. */
+	/**  Deletes a workspace entry and dispatches `AppEvent::FileClosed` for its path. */
 	workspaceDelete: (relativePath: string) => __TAURI_INVOKE<null>("workspace_delete", { relativePath }),
 	/**  Marks the frontend quit lifecycle listener as ready. */
 	workspaceFrontendReady: () => __TAURI_INVOKE<void>("workspace_frontend_ready"),

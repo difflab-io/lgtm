@@ -1,47 +1,170 @@
-//! Application-wide event emitter wired in `app.rs` to publish backend events to the webview and test bridge.
+//! In-process backend event bus (`AppEvents` and `AppEvent`) wired in `app.rs` to coordinate backend services and webview notifications.
 
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 
+use lgtm_lsp::{LspFileDiagnosticsEvent, LspServerStatusEvent};
 use tauri::Emitter;
 
-#[cfg(any(test, feature = "e2e-bridge"))]
-use crate::services::BridgeEventForwarder;
+type WebviewSink = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
+type EventHandler = Arc<dyn Fn(AppEvent) + Send + Sync>;
 
-type EventSink = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
+/// Strongly typed backend domain and lifecycle event dispatched through [`AppEvents`].
+#[derive(Clone, Debug)]
+pub enum AppEvent {
+    /// A workspace directory was opened, replacing `previous_root` with `next_root`.
+    WorkspaceOpened {
+        /// Previously active workspace root, if any.
+        previous_root: Option<PathBuf>,
+        /// Newly opened workspace root.
+        next_root: PathBuf,
+    },
+    /// A file was written to disk by `WorkspaceService`.
+    FileSaved {
+        /// Active workspace root when the save occurred.
+        root: PathBuf,
+        /// Canonical path of the saved file.
+        path: PathBuf,
+        /// UTF-8 content written to disk.
+        content: String,
+        /// Whether `path` is `~/.lgtm/config.json` or `<workspace>/.lgtm/config.json`.
+        is_config: bool,
+    },
+    /// A workspace entry was renamed or deleted, closing its previous document path.
+    FileClosed {
+        /// Active workspace root.
+        root: PathBuf,
+        /// Canonical path of the closed file or directory.
+        path: PathBuf,
+    },
+    /// A language server transitioned status or updated its diagnostic counts.
+    LspStatus(LspServerStatusEvent),
+    /// A language server or config validator published diagnostics for a file.
+    LspDiagnostics(LspFileDiagnosticsEvent),
+    /// The user selected `Settings…` (`CmdOrCtrl+,`) in the native OS menu.
+    MenuOpenGlobalConfig,
+    /// The user selected `Project Settings…` (`CmdOrCtrl+Shift+,`) in the native OS menu.
+    MenuOpenLocalConfig,
+    /// The OS requested application exit (`RunEvent::ExitRequested`).
+    QuitRequested,
+}
 
-/// Application-wide event emitter publishing backend events to the frontend webview and E2E test bridge.
-#[derive(Clone)]
-pub struct AppEvents(EventSink);
+/// In-process backend event bus that routes [`AppEvent`] variants to the central handler in `app.rs` and publishes notifications to webview sinks.
+#[derive(Clone, Default)]
+pub struct AppEvents {
+    webview_sinks: Arc<RwLock<Vec<WebviewSink>>>,
+    handler: Arc<RwLock<Option<EventHandler>>>,
+}
 
 impl AppEvents {
-    #[cfg(any(test, feature = "e2e-bridge"))]
-    pub(crate) fn from_app_handle<R: tauri::Runtime>(
-        app_handle: &tauri::AppHandle<R>,
-        event_forwarder: Option<BridgeEventForwarder>,
-    ) -> Self {
-        let emit_handle = app_handle.clone();
-        Self(Arc::new(move |event, payload| {
-            if let Some(cb) = &event_forwarder {
-                cb(event, payload.clone());
-            }
-            let _ = emit_handle.emit(event, payload);
-        }))
-    }
-
-    #[cfg(not(any(test, feature = "e2e-bridge")))]
+    /// Creates an `AppEvents` bus bound to `app_handle`.
     pub(crate) fn from_app_handle<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) -> Self {
         let emit_handle = app_handle.clone();
-        Self(Arc::new(move |event, payload| {
+        let events = Self::default();
+        events.add_webview_sink(move |event, payload| {
             let _ = emit_handle.emit(event, payload);
-        }))
+        });
+        events
     }
 
     // Public ------------------------------------------------------------------
 
-    /// Emits a named desktop event to the frontend webview and any registered test bridge forwarder.
-    pub fn emit<T: serde::Serialize>(&self, event: &str, payload: &T) {
-        if let Ok(value) = serde_json::to_value(payload) {
-            (self.0)(event, value);
+    /// Registers the central backend event handler invoked on every [`AppEvents::dispatch`] call.
+    pub fn set_handler<F>(&self, handler: F)
+    where
+        F: Fn(AppEvent) + Send + Sync + 'static,
+    {
+        if let Ok(mut slot) = self.handler.write() {
+            *slot = Some(Arc::new(handler));
+        }
+    }
+
+    /// Registers an outbound sink invoked whenever [`AppEvents::emit_to_webview`] publishes a notification.
+    pub fn add_webview_sink<F>(&self, sink: F)
+    where
+        F: Fn(&str, serde_json::Value) + Send + Sync + 'static,
+    {
+        if let Ok(mut sinks) = self.webview_sinks.write() {
+            sinks.push(Arc::new(sink));
+        }
+    }
+
+    /// Dispatches a typed [`AppEvent`] to the registered backend handler in `app.rs`.
+    pub fn dispatch(&self, event: AppEvent) {
+        let handler = self.handler.read().ok().and_then(|slot| slot.clone());
+        if let Some(handler) = handler {
+            handler(event);
+        }
+    }
+
+    /// Serializes `payload` and publishes a named notification to all registered webview sinks.
+    pub fn emit_to_webview<T: serde::Serialize>(&self, event_name: &str, payload: &T) {
+        if let Ok(value) = serde_json::to_value(payload)
+            && let Ok(sinks) = self.webview_sinks.read()
+        {
+            for sink in sinks.iter() {
+                sink(event_name, value.clone());
+            }
+        }
+    }
+}
+
+// tests -----------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    // tests -------------------------------------------------------------------
+
+    mod given_an_app_events_bus {
+        use super::*;
+
+        mod when_dispatching_events_and_emitting_to_webview {
+            use super::*;
+
+            #[test]
+            fn should_invoke_registered_backend_handler_and_forward_webview_payloads() {
+                // Arrange
+                let webview_log: Arc<Mutex<Vec<(String, serde_json::Value)>>> =
+                    Arc::new(Mutex::new(Vec::new()));
+                let events = AppEvents::default();
+                let sink_log = webview_log.clone();
+                events.add_webview_sink(move |name, payload| {
+                    sink_log.lock().unwrap().push((name.to_string(), payload));
+                });
+                let forward_events = events.clone();
+                let closed_paths: Arc<Mutex<Vec<PathBuf>>> = Arc::new(Mutex::new(Vec::new()));
+                let recorded_closed = closed_paths.clone();
+                events.set_handler(move |event| match event {
+                    AppEvent::FileClosed { path, .. } => {
+                        recorded_closed.lock().unwrap().push(path);
+                    }
+                    AppEvent::MenuOpenGlobalConfig => {
+                        forward_events.emit_to_webview("workspace-open-global-config", &());
+                    }
+                    _ => {}
+                });
+
+                // Act
+                events.dispatch(AppEvent::FileClosed {
+                    root: PathBuf::from("/workspace"),
+                    path: PathBuf::from("/workspace/README.md"),
+                });
+                events.dispatch(AppEvent::MenuOpenGlobalConfig);
+
+                // Assert
+                assert_eq!(
+                    closed_paths.lock().unwrap().as_slice(),
+                    &[PathBuf::from("/workspace/README.md")]
+                );
+                assert_eq!(webview_log.lock().unwrap().len(), 1);
+                assert_eq!(
+                    webview_log.lock().unwrap()[0].0,
+                    "workspace-open-global-config"
+                );
+            }
         }
     }
 }
