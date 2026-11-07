@@ -100,6 +100,12 @@
           onConfigUpdated: (snapshot) => {
             workspace.settings.handleUpdated(snapshot)
           },
+          onOpenGlobalConfig: () => {
+            void workspace.openGlobalConfig()
+          },
+          onOpenLocalConfig: () => {
+            void workspace.openLocalConfig()
+          },
         })
         .then((stops) => {
           for (const stop of stops) {
