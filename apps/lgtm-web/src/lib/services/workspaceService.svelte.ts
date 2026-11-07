@@ -245,6 +245,14 @@ export class WorkspaceService {
   /** Ensures `~/.lgtm/config.json` exists and opens it in `CodeEditor` as a standard file tab. */
   async openGlobalConfig() {
     if (!this.client.openGlobalConfig) return
+    const existingPath = this.settings.snapshot?.globalPath || '~/.lgtm/config.json'
+    const existingTab = this.tabs.find(
+      (tab) => tab.id === `file:${existingPath}` || tab.id === 'file:~/.lgtm/config.json',
+    )
+    if (existingTab && this.activeTabId === existingTab.id && this.fileContent) {
+      this.focusRequest++
+      return
+    }
     const requestId = ++this.openRequestSeq
     await this.flushSave()
     if (requestId !== this.openRequestSeq) return
@@ -255,7 +263,7 @@ export class WorkspaceService {
       const snap = await this.settings.load()
       if (!this.active || requestId !== this.openRequestSeq) return
       const path = snap?.globalPath || '~/.lgtm/config.json'
-      const title = 'Settings (config.json)'
+      const title = 'Settings'
       this.selected = { path, name: title, kind: 'file' }
       this.fileContent = content
       this.lsp.recordFileStatus(content.lspStatus)
@@ -288,6 +296,12 @@ export class WorkspaceService {
   /** Ensures `<workspace>/.lgtm/config.json` exists and opens it in `CodeEditor` as a standard file tab. */
   async openLocalConfig() {
     if (!this.client.openLocalConfig) return
+    const path = '.lgtm/config.json'
+    const tabId = `file:${path}`
+    if (this.activeTabId === tabId && this.fileContent) {
+      this.focusRequest++
+      return
+    }
     const requestId = ++this.openRequestSeq
     await this.flushSave()
     if (requestId !== this.openRequestSeq) return
@@ -297,12 +311,10 @@ export class WorkspaceService {
       const content = await this.client.openLocalConfig()
       void this.settings.load()
       if (!this.active || requestId !== this.openRequestSeq) return
-      const path = '.lgtm/config.json'
-      const title = 'Project Settings (.lgtm/config.json)'
+      const title = 'Settings (project)'
       this.selected = { path, name: title, kind: 'file' }
       this.fileContent = content
       this.lsp.recordFileStatus(content.lspStatus)
-      const tabId = `file:${path}`
       this.upsertTab({
         id: tabId,
         kind: 'file',

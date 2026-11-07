@@ -99,7 +99,35 @@ run = "cargo publish -p lgtm-cli --locked"
 
 [tasks.dev]
 description = "Run the backend watcher and desktop development application together"
-depends = ["//apps/lgtm-forge:dev", "//apps/lgtm-desktop:dev"]
+run = '''
+set -eu
+eval "$(node -e '
+const net = require("node:net");
+function pickPort(preferred) {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.once("error", () => {
+      const fb = net.createServer();
+      fb.listen(0, "127.0.0.1", () => {
+        const port = fb.address().port;
+        fb.close(() => resolve(port));
+      });
+    });
+    srv.listen(preferred, "127.0.0.1", () => {
+      srv.close(() => resolve(preferred));
+    });
+  });
+}
+(async () => {
+  const backendPort = await pickPort(8080);
+  const webPort = await pickPort(5173);
+  console.log(`export LGTM_BACKEND_ADDR="${process.env.LGTM_BACKEND_ADDR || `127.0.0.1:${backendPort}`}"`);
+  console.log(`export LGTM_BACKEND_URL="${process.env.LGTM_BACKEND_URL || `http://127.0.0.1:${backendPort}`}"`);
+  console.log(`export LGTM_WEB_PORT="${process.env.LGTM_WEB_PORT || webPort}"`);
+})();
+')"
+mise run //apps/lgtm-forge:dev ::: //apps/lgtm-desktop:dev
+'''
 
 [tasks."e2e:forge"]
 description = "Run forge E2E tests"
