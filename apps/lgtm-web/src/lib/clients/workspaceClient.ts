@@ -90,6 +90,8 @@ export interface WorkspaceClient {
   configGet?(): Promise<ResolvedConfigSnapshot>
   registerConfigHandlers?(handlers: {
     onConfigUpdated: (snapshot: ResolvedConfigSnapshot) => void
+    onOpenGlobalConfig?: () => void
+    onOpenLocalConfig?: () => void
   }): Promise<(() => void)[]>
   registerLspHandlers(handlers: {
     onStatus: (event: LspServerStatusEvent) => void
@@ -160,6 +162,12 @@ export const workspaceClient: WorkspaceClient = {
     Promise.all([
       listen<ResolvedConfigSnapshot>('config-updated', (event) => {
         handlers.onConfigUpdated(event.payload)
+      }),
+      listen('workspace-open-global-config', () => {
+        handlers.onOpenGlobalConfig?.()
+      }),
+      listen('workspace-open-local-config', () => {
+        handlers.onOpenLocalConfig?.()
       }),
     ]),
   registerLspHandlers: (handlers) =>
