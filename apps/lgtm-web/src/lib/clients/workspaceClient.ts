@@ -6,9 +6,6 @@ import {
   commands,
   type AppearanceSettings,
   type AppearanceSettingsPatch,
-  type ConfigDocument,
-  type ConfigFormat,
-  type ConfigScope,
   type EditorSettings,
   type EditorSettingsPatch,
   type FileContent,
@@ -33,9 +30,6 @@ import {
 export type {
   AppearanceSettings,
   AppearanceSettingsPatch,
-  ConfigDocument,
-  ConfigFormat,
-  ConfigScope,
   EditorSettings,
   EditorSettingsPatch,
   FileContent,
@@ -77,6 +71,8 @@ export interface WorkspaceClient {
   pickFolder(): Promise<string | null>
   list(path: string): Promise<WorkspaceNode[]>
   read(path: string): Promise<FileContent>
+  openGlobalConfig?(): Promise<FileContent>
+  openLocalConfig?(): Promise<FileContent>
   write(path: string, content: string): Promise<FileContent>
   createFile(name: string, parentPath?: string): Promise<WorkspaceNode>
   createFolder(name: string, parentPath?: string): Promise<WorkspaceNode>
@@ -92,19 +88,6 @@ export interface WorkspaceClient {
   lspGetDiagnosticsBuffer(languageId?: string): Promise<LspDiagnosticsBuffer>
   lspRestart(languageId: string): Promise<LspServerStatusEvent>
   configGet?(): Promise<ResolvedConfigSnapshot>
-  configUpdate?(
-    patch: UserSettingsPatch,
-    scope?: ConfigScope | null,
-  ): Promise<ResolvedConfigSnapshot>
-  configOpenDocument?(
-    scope?: ConfigScope | null,
-    format?: ConfigFormat | null,
-  ): Promise<ConfigDocument>
-  configWriteDocument?(
-    scope: ConfigScope,
-    content: string,
-    format?: ConfigFormat | null,
-  ): Promise<ConfigDocument>
   registerConfigHandlers?(handlers: {
     onConfigUpdated: (snapshot: ResolvedConfigSnapshot) => void
   }): Promise<(() => void)[]>
@@ -141,6 +124,8 @@ export const workspaceClient: WorkspaceClient = {
   pickFolder: () => invoke('workspace_pick_folder'),
   list: (relativePath) => invoke('workspace_list', { relativePath }),
   read: (relativePath) => invoke('workspace_read', { relativePath }),
+  openGlobalConfig: () => commands.workspaceOpenGlobalConfig(),
+  openLocalConfig: () => commands.workspaceOpenLocalConfig(),
   write: (relativePath, content) => invoke('workspace_write', { relativePath, content }),
   createFile: (name, parentPath = '') => invoke('workspace_create_file', { name, parentPath }),
   createFolder: (name, parentPath = '') => invoke('workspace_create_folder', { name, parentPath }),
@@ -171,11 +156,6 @@ export const workspaceClient: WorkspaceClient = {
     invoke('lsp_get_diagnostics_buffer', languageId ? { languageId } : {}),
   lspRestart: (languageId: string) => invoke('lsp_restart', { languageId }),
   configGet: () => commands.configGet(),
-  configUpdate: (patch, scope = null) => commands.configUpdate(patch, scope ?? null),
-  configOpenDocument: (scope = null, format = null) =>
-    commands.configOpenDocument(scope ?? null, format ?? null),
-  configWriteDocument: (scope, content, format = null) =>
-    commands.configWriteDocument(scope, content, format ?? null),
   registerConfigHandlers: (handlers) =>
     Promise.all([
       listen<ResolvedConfigSnapshot>('config-updated', (event) => {
@@ -193,6 +173,7 @@ export const workspaceClient: WorkspaceClient = {
     ]),
 }
 
+/** Converts an unknown error value into a displayable message string. */
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   if (typeof error === 'object' && error && 'message' in error) return String(error.message)

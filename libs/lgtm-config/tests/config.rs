@@ -1,7 +1,5 @@
 use lgtm_config::{
-    AppearanceSettingsPatch, ConfigFormat, ConfigScope, ConfigService, DEFAULT_SCHEMA_URL,
-    EditorSettingsPatch, LgtmConfigError, LineWrap, ThemeMode, UserSettingsPatch,
-    WorkspaceSettingsPatch,
+    ConfigService, DEFAULT_SCHEMA_URL, LgtmConfigError, LineWrap, ThemeMode, UserSettingsPatch,
 };
 
 // tests -----------------------------------------------------------------------
@@ -75,8 +73,8 @@ mod given_malformed_global_or_project_config_files {
             )
             .unwrap();
             std::fs::write(
-                workspace_root.join(".lgtm/config.yaml"),
-                "appearance:\n  unknownNestedField: true\n",
+                workspace_root.join(".lgtm/config.json"),
+                "{\n  \"appearance\": {\n    \"unknownNestedField\": true\n  }\n}\n",
             )
             .unwrap();
             let project_err = service.get_config(&workspace_root).unwrap_err();
@@ -105,7 +103,7 @@ mod given_malformed_global_or_project_config_files {
     }
 }
 
-mod given_global_and_project_nested_json_or_yaml_configs {
+mod given_global_and_project_nested_json_configs {
     use super::*;
 
     mod when_resolving_settings {
@@ -138,8 +136,8 @@ mod given_global_and_project_nested_json_or_yaml_configs {
             )
             .unwrap();
             std::fs::write(
-                workspace_root.join(".lgtm/config.yaml"),
-                "# yaml-language-server: $schema=https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v0.1.0/schemas/config.schema.json\nappearance:\n  theme: light\n",
+                workspace_root.join(".lgtm/config.json"),
+                "{\n  \"$schema\": \"https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v0.1.0/schemas/config.schema.json\",\n  \"appearance\": {\n    \"theme\": \"light\"\n  }\n}\n",
             )
             .unwrap();
             let service = ConfigService::from_home(home);
@@ -163,132 +161,6 @@ mod given_global_and_project_nested_json_or_yaml_configs {
                 snapshot.effective.editor.line_wrapping,
                 LineWrap::Column(100)
             );
-        }
-    }
-
-    mod when_patching_nested_settings_without_explicit_scope {
-        use super::*;
-
-        #[test]
-        fn should_route_each_leaf_to_project_config_only_when_already_overridden_there() {
-            // Arrange
-            let temp = tempfile::tempdir().unwrap();
-            let home = temp.path().join("home");
-            let workspace_root = temp.path().join("workspace");
-            std::fs::create_dir_all(home.join(".lgtm")).unwrap();
-            std::fs::create_dir_all(workspace_root.join(".lgtm")).unwrap();
-            let service = ConfigService::from_home(home.clone());
-
-            // 1. No project config exists yet -> theme update goes to global config.json.
-            let first = service
-                .update_settings(
-                    Some(&workspace_root),
-                    None,
-                    UserSettingsPatch {
-                        schema: None,
-                        appearance: Some(AppearanceSettingsPatch {
-                            theme: Some(ThemeMode::Dark),
-                        }),
-                        workspace: None,
-                        editor: None,
-                    },
-                )
-                .unwrap();
-            assert_eq!(first.effective.appearance.theme, ThemeMode::Dark);
-            assert!(home.join(".lgtm/config.json").is_file());
-            assert!(!workspace_root.join(".lgtm/config.json").exists());
-
-            // 2. Seed a project override for `appearance.theme = "light"` only.
-            std::fs::write(
-                workspace_root.join(".lgtm/config.json"),
-                "{\n  \"appearance\": {\n    \"theme\": \"light\"\n  }\n}\n",
-            )
-            .unwrap();
-
-            // Act: patch both `appearance.theme` (overridden in project) and `editor.lineWrapping` + `workspace.activeRoot` (not in project).
-            let updated = service
-                .update_settings(
-                    Some(&workspace_root),
-                    None,
-                    UserSettingsPatch {
-                        schema: None,
-                        appearance: Some(AppearanceSettingsPatch {
-                            theme: Some(ThemeMode::System),
-                        }),
-                        workspace: Some(WorkspaceSettingsPatch {
-                            active_root: Some("/tmp/ws-next".to_string()),
-                            recent_roots: Some(vec!["/tmp/ws-next".to_string()]),
-                        }),
-                        editor: Some(EditorSettingsPatch {
-                            line_wrapping: Some(LineWrap::Off),
-                        }),
-                    },
-                )
-                .unwrap();
-
-            // Assert
-            assert_eq!(updated.effective.appearance.theme, ThemeMode::System);
-            assert_eq!(updated.effective.editor.line_wrapping, LineWrap::Off);
-            assert_eq!(
-                updated.global.appearance.and_then(|a| a.theme),
-                Some(ThemeMode::Dark)
-            );
-            assert_eq!(
-                updated.global.editor.and_then(|e| e.line_wrapping),
-                Some(LineWrap::Off)
-            );
-            assert_eq!(
-                updated.global.workspace.and_then(|w| w.active_root),
-                Some("/tmp/ws-next".to_string())
-            );
-            let proj = updated.project.expect("expected project patch");
-            assert_eq!(
-                proj.appearance.and_then(|a| a.theme),
-                Some(ThemeMode::System)
-            );
-            assert!(proj.editor.is_none());
-            assert!(proj.workspace.is_none());
-        }
-    }
-
-    mod when_opening_and_writing_config_documents {
-        use super::*;
-
-        #[test]
-        fn should_initialize_default_document_and_parse_updated_content_into_snapshot() {
-            // Arrange
-            let temp = tempfile::tempdir().unwrap();
-            let home = temp.path().join("home");
-            let workspace_root = temp.path().join("workspace");
-            std::fs::create_dir_all(&workspace_root).unwrap();
-            let service = ConfigService::from_home(home.clone());
-
-            // Act
-            let opened = service
-                .open_config_document(Some(&workspace_root), ConfigScope::Global, None)
-                .unwrap();
-            let (written_doc, snapshot) = service
-                .write_config_document(
-                    Some(&workspace_root),
-                    ConfigScope::Global,
-                    &format!(
-                        "{{\n  \"$schema\": \"{DEFAULT_SCHEMA_URL}\",\n  \"appearance\": {{\n    \"theme\": \"light\"\n  }},\n  \"editor\": {{\n    \"lineWrapping\": \"off\"\n  }}\n}}\n"
-                    ),
-                    Some(ConfigFormat::Json),
-                )
-                .unwrap();
-
-            // Assert
-            assert_eq!(opened.scope, ConfigScope::Global);
-            assert_eq!(opened.format, ConfigFormat::Json);
-            assert_eq!(opened.title, "Settings (config.json)");
-            assert_eq!(opened.language_id, "json");
-            assert!(opened.content.contains(DEFAULT_SCHEMA_URL));
-            assert!(home.join(".lgtm/biome.json").is_file());
-            assert_ne!(opened.revision, written_doc.revision);
-            let resolved = snapshot.expect("expected valid snapshot after write");
-            assert_eq!(resolved.effective.appearance.theme, ThemeMode::Light);
-            assert_eq!(resolved.effective.editor.line_wrapping, LineWrap::Off);
         }
     }
 }

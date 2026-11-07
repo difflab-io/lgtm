@@ -95,7 +95,7 @@ pub(crate) struct LgtmConfigFileOverlay {
 }
 
 impl LgtmConfig {
-    /// Builds the default LGTM configuration with presets for Rust, TypeScript, JavaScript, Python, Go, Markdown, JSON, and YAML.
+    /// Builds the default LGTM configuration with presets for Rust, TypeScript, JavaScript, Python, Go, Markdown, and JSON.
     pub fn default_presets() -> Self {
         let mut languages = BTreeMap::new();
 
@@ -275,24 +275,6 @@ impl LgtmConfig {
             },
         );
 
-        languages.insert(
-            "yaml".to_string(),
-            LanguageConfig {
-                enabled: true,
-                extensions: vec!["yaml".to_string(), "yml".to_string()],
-                root_markers: vec![".yamllint".to_string()],
-                mise_tools: BTreeMap::from([
-                    ("node".to_string(), "lts".to_string()),
-                    ("npm:yaml-language-server".to_string(), "latest".to_string()),
-                ]),
-                command: "yaml-language-server".to_string(),
-                args: vec!["--stdio".to_string()],
-                env: BTreeMap::new(),
-                initialization_options: None,
-                default_tasks: BTreeMap::new(),
-            },
-        );
-
         Self {
             lsp: LspSettings::default(),
             languages,
@@ -300,14 +282,6 @@ impl LgtmConfig {
     }
 
     // Public ------------------------------------------------------------------
-
-    /// Merges an overlay configuration on top of this configuration in place.
-    pub fn merge(&mut self, overlay: Self) {
-        self.lsp = overlay.lsp;
-        for (language_id, language_config) in overlay.languages {
-            self.languages.insert(language_id, language_config);
-        }
-    }
 
     /// Resolves the enabled language ID and configuration matching a file's extension.
     pub fn detect_file_language(&self, file_path: &Path) -> Option<(String, &LanguageConfig)> {
@@ -319,33 +293,6 @@ impl LgtmConfig {
                 None
             }
         })
-    }
-
-    // Private -----------------------------------------------------------------
-
-    pub(crate) fn merge_file_overlay(&mut self, overlay: LgtmConfigFileOverlay) {
-        let _ = (
-            overlay.schema,
-            overlay.appearance,
-            overlay.workspace,
-            overlay.editor,
-        );
-        if let Some(lsp) = overlay.lsp {
-            if let Some(enabled) = lsp.enabled {
-                self.lsp.enabled = enabled;
-            }
-            if let Some(auto_install) = lsp.auto_install {
-                self.lsp.auto_install = auto_install;
-            }
-            if let Some(timeout) = lsp.request_timeout_ms {
-                self.lsp.request_timeout_ms = timeout;
-            }
-        }
-        if let Some(languages) = overlay.languages {
-            for (language_id, language_config) in languages {
-                self.languages.insert(language_id, language_config);
-            }
-        }
     }
 }
 
@@ -380,14 +327,13 @@ mod tests {
             use super::*;
 
             #[test]
-            fn should_include_rust_typescript_javascript_python_go_markdown_json_and_yaml() {
+            fn should_include_rust_typescript_javascript_python_go_markdown_and_json() {
                 // Arrange
                 let config = LgtmConfig::default();
 
                 // Act
                 let keys: Vec<String> = config.languages.keys().cloned().collect();
                 let json_preset = config.languages.get("json").unwrap();
-                let yaml_preset = config.languages.get("yaml").unwrap();
 
                 // Assert
                 assert_eq!(
@@ -400,7 +346,6 @@ mod tests {
                         "python".to_string(),
                         "rust".to_string(),
                         "typescript".to_string(),
-                        "yaml".to_string(),
                     ]
                 );
                 assert_eq!(json_preset.command, "biome");
@@ -409,8 +354,6 @@ mod tests {
                     json_preset.mise_tools.get("biome"),
                     Some(&"latest".to_string())
                 );
-                assert_eq!(yaml_preset.command, "yaml-language-server");
-                assert_eq!(yaml_preset.args, vec!["--stdio".to_string()]);
             }
         }
 
@@ -429,7 +372,6 @@ mod tests {
                 let go = config.detect_file_language(Path::new("cmd/main.go"));
                 let md = config.detect_file_language(Path::new("README.md"));
                 let json = config.detect_file_language(Path::new(".lgtm/config.json"));
-                let yaml = config.detect_file_language(Path::new(".lgtm/config.yaml"));
                 let unknown = config.detect_file_language(Path::new("notes.txt"));
 
                 // Assert
@@ -439,34 +381,7 @@ mod tests {
                 assert_eq!(go.map(|(id, _)| id), Some("go".to_string()));
                 assert_eq!(md.map(|(id, _)| id), Some("markdown".to_string()));
                 assert_eq!(json.map(|(id, _)| id), Some("json".to_string()));
-                assert_eq!(yaml.map(|(id, _)| id), Some("yaml".to_string()));
                 assert!(unknown.is_none());
-            }
-        }
-    }
-
-    mod given_global_and_project_configs {
-        use super::*;
-
-        mod when_merging_configs {
-            use super::*;
-
-            #[test]
-            fn should_override_global_entries_with_project_entries() {
-                // Arrange
-                let mut base = LgtmConfig::default();
-                let mut overlay = LgtmConfig::default();
-                overlay.lsp.request_timeout_ms = 12_000;
-                if let Some(rust_cfg) = overlay.languages.get_mut("rust") {
-                    rust_cfg.enabled = false;
-                }
-
-                // Act
-                base.merge(overlay);
-
-                // Assert
-                assert_eq!(base.lsp.request_timeout_ms, 12_000);
-                assert!(!base.languages.get("rust").unwrap().enabled);
             }
         }
     }

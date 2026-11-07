@@ -1,5 +1,5 @@
 import { test, expect, entry, createFile, renameEntry, exists } from './fixtures'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 const SUPPORTED_LSP_CASES = [
@@ -250,21 +250,21 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
     )
   })
 
-  test.describe('When toggling the color theme from the titlebar', () => {
+  test.describe('When applying color theme and editor preferences from config.json', () => {
     test.use({ colorScheme: 'dark' })
 
     test(
-      'should launch in dark mode when the OS is set to dark and cycle through system, light, and dark states',
+      'should launch in system dark mode and apply layered project and global config.json overrides on reload',
       { tag: '@smoke' },
       async ({ page, workspace }) => {
         // Arrange
-        const systemButton = page.getByRole('button', { name: 'Theme: system', exact: true })
         const darkSurface = 'rgb(16, 16, 16)'
+        const globalConfigPath = join(workspace.lgtmHomeDir, 'config.json')
+        const projectConfigDir = join(workspace.root, '.lgtm')
+        const projectConfigPath = join(projectConfigDir, 'config.json')
 
         // Assert: launches directly in system dark mode without tauri.conf.json overriding OS theme
         expect(workspace.configuredWindowTheme).toBeNull()
-        await expect(systemButton).toBeVisible()
-        await expect(systemButton).toHaveAttribute('data-theme', 'system')
         await expect(page.locator('html')).toHaveClass(/theme-lgtm/)
         await expect(page.locator('html')).toHaveClass(/dark/)
         await expect(page.locator('.titlebar')).toHaveCSS('background-color', darkSurface)
@@ -273,57 +273,9 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
 
         await entry(page, 'same.md').click()
         await expect(page.locator('.cm-gutters')).toHaveCSS('background-color', darkSurface)
+        await expect(page.locator('.cm-content')).toHaveClass(/cm-lineWrapping/)
 
-        // Act: cycle system -> light
-        await systemButton.click()
-
-        // Assert: light mode active and synced to Tauri window
-        const lightButton = page.getByRole('button', { name: 'Theme: light', exact: true })
-        await expect(lightButton).toBeVisible()
-        await expect(lightButton).toHaveAttribute('data-theme', 'light')
-        await expect(page.locator('html')).not.toHaveClass(/dark/)
-        await expect(page.locator('.cm-gutters')).not.toHaveCSS('background-color', darkSurface)
-        await expect.poll(() => workspace.setThemeCalls).toEqual([null, 'light'])
-
-        // Act: cycle light -> dark
-        await lightButton.click()
-
-        // Assert: dark mode active and synced to Tauri window
-        const darkButton = page.getByRole('button', { name: 'Theme: dark', exact: true })
-        await expect(darkButton).toBeVisible()
-        await expect(darkButton).toHaveAttribute('data-theme', 'dark')
-        await expect(page.locator('html')).toHaveClass(/dark/)
-        await expect(page.locator('.cm-gutters')).toHaveCSS('background-color', darkSurface)
-        await expect.poll(() => workspace.setThemeCalls).toEqual([null, 'light', 'dark'])
-
-        // Act: cycle dark -> system (with OS set to light)
-        await page.emulateMedia({ colorScheme: 'light' })
-        await darkButton.click()
-
-        // Assert: back in system mode following OS light preference
-        await expect(systemButton).toBeVisible()
-        await expect(systemButton).toHaveAttribute('data-theme', 'system')
-        await expect(page.locator('html')).not.toHaveClass(/dark/)
-        await expect.poll(() => workspace.setThemeCalls).toEqual([null, 'light', 'dark', null])
-        await expect
-          .poll(async () => {
-            const raw = await readFile(join(workspace.lgtmHomeDir, 'config.json'), 'utf8').catch(
-              () => '',
-            )
-            return raw.includes('"theme": "system"')
-          })
-          .toBe(true)
-      },
-    )
-
-    test(
-      'should route theme updates to project config when appearance.theme is already overridden in project config without clobbering sibling sections',
-      { tag: '@smoke' },
-      async ({ page, workspace }) => {
-        // Arrange
-        const globalConfigPath = join(workspace.lgtmHomeDir, 'config.json')
-        const projectConfigDir = join(workspace.root, '.lgtm')
-        const projectConfigPath = join(projectConfigDir, 'config.json')
+        // Act: write global config (dark + lineWrapping off) and project config (light override)
         await mkdir(projectConfigDir, { recursive: true })
         await writeFile(
           globalConfigPath,
@@ -352,41 +304,29 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
           ) + '\n',
           'utf8',
         )
-
-        // Act
         await page.reload()
-        const lightButton = page.getByRole('button', { name: 'Theme: light', exact: true })
-        await expect(lightButton).toBeVisible()
         await entry(page, 'same.md').click()
-        await expect(page.locator('.cm-content')).not.toHaveClass(/cm-lineWrapping/)
-        await lightButton.click()
 
-        // Assert
-        const darkButton = page.getByRole('button', { name: 'Theme: dark', exact: true })
-        await expect(darkButton).toBeVisible()
-        await expect
-          .poll(async () => {
-            const projectRaw = await readFile(projectConfigPath, 'utf8')
-            return JSON.parse(projectRaw).appearance?.theme
-          })
-          .toBe('dark')
-        const globalSaved = JSON.parse(await readFile(globalConfigPath, 'utf8'))
-        expect(globalSaved.editor?.lineWrapping).toBe('off')
+        // Assert: project theme ('light') overrides global ('dark') while global editor.lineWrapping ('off') is preserved
+        await expect(page.locator('html')).not.toHaveClass(/dark/)
+        await expect(page.locator('.cm-gutters')).not.toHaveCSS('background-color', darkSurface)
+        await expect(page.locator('.cm-content')).not.toHaveClass(/cm-lineWrapping/)
+        await expect.poll(() => workspace.setThemeCalls).toContain('light')
       },
     )
   })
 
-  test.describe('When pressing Cmd+, to edit nested config.json or config.yaml in CodeEditor', () => {
+  test.describe('When pressing Cmd+, and Cmd+Shift+, to edit config.json in CodeEditor', () => {
     test(
-      'should open global config with Cmd+, validate nested schema diagnostics and hover documentation, and live-apply JSON and YAML edits',
+      'should open global and local config.json in CodeEditor, attach Biome JSON LSP, and live-apply edited preferences',
       { tag: '@smoke' },
       async ({ page, workspace }) => {
         // Arrange
         const lspButton = page.getByRole('button', { name: 'LSP status', exact: true })
         const tablist = page.getByRole('tablist', { name: 'Open editors' })
 
-        // Act: open Settings (config.json) via Control+,
-        await page.keyboard.press('Control+,')
+        // Act: open global config (~/.lgtm/config.json) via Cmd+, (Meta+,)
+        await page.keyboard.press('Meta+,')
 
         // Assert
         await expect(
@@ -399,7 +339,7 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
         await expect(page.locator('.cm-content')).toContainText('"appearance"')
         await expect(page.locator('.cm-content')).toHaveClass(/cm-lineWrapping/)
 
-        // Act: replace editor content with nested JSON disabling lineWrapping and setting dark theme
+        // Act: replace global config editor content with dark theme and lineWrapping off
         const editorContent = page.locator('.cm-content')
         await editorContent.click()
         await page.keyboard.press('ControlOrMeta+a')
@@ -407,36 +347,30 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
           '{\n  "$schema": "https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v0.1.0/schemas/config.schema.json",\n  "appearance": {\n    "theme": "dark"\n  },\n  "editor": {\n    "lineWrapping": "off"\n  }\n}\n',
         )
 
-        // Assert: live UI updates theme and lineWrapping
+        // Assert: saving config.json emits config-updated and live-applies dark theme + lineWrapping off
         await expect(lspButton).toContainText('LSP: json (ready)')
-        await expect(page.getByRole('button', { name: 'Theme: dark', exact: true })).toBeVisible()
         await expect(page.locator('html')).toHaveClass(/dark/)
         await expect(page.locator('.cm-content')).not.toHaveClass(/cm-lineWrapping/)
+        await expect.poll(() => workspace.setThemeCalls).toContain('dark')
 
-        // Act: switch to YAML global config and reopen with Control+,
-        await page
-          .getByRole('button', { name: 'Close Settings (config.json)', exact: true })
-          .click()
-        await rm(join(workspace.lgtmHomeDir, 'config.json'), { force: true })
-        await writeFile(
-          join(workspace.lgtmHomeDir, 'config.yaml'),
-          '# yaml-language-server: $schema=https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v0.1.0/schemas/config.schema.json\nappearance:\n  theme: light\neditor:\n  lineWrapping: 80\n',
-          'utf8',
-        )
-        await page.keyboard.press('Control+,')
-
-        // Assert: YAML config opens and live-applies edits
+        // Act: open local project config (.lgtm/config.json) via Cmd+Shift+, (Meta+Shift+,) and override theme to light
+        await page.keyboard.press('Meta+Shift+,')
         await expect(
-          tablist.getByRole('tab', { name: 'Settings (config.yaml)', exact: true }),
+          tablist.getByRole('tab', { name: 'Project Settings (.lgtm/config.json)', exact: true }),
         ).toHaveAttribute('aria-selected', 'true')
-        await expect(lspButton).toContainText('LSP: yaml (ready)')
-        await expect(page.locator('.cm-content')).toHaveClass(/cm-lineWrapping/)
         await editorContent.click()
         await page.keyboard.press('ControlOrMeta+a')
         await page.keyboard.insertText(
-          '# yaml-language-server: $schema=https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v0.1.0/schemas/config.schema.json\nappearance:\n  theme: dark\neditor:\n  lineWrapping: auto\n',
+          '{\n  "$schema": "https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v0.1.0/schemas/config.schema.json",\n  "appearance": {\n    "theme": "light"\n  }\n}\n',
         )
-        await expect(page.getByRole('button', { name: 'Theme: dark', exact: true })).toBeVisible()
+
+        // Assert: local config override live-applies light theme while preserving global lineWrapping off
+        await expect(page.locator('html')).not.toHaveClass(/dark/)
+        await expect(page.locator('.cm-content')).not.toHaveClass(/cm-lineWrapping/)
+        const globalSaved = JSON.parse(
+          await readFile(join(workspace.lgtmHomeDir, 'config.json'), 'utf8'),
+        )
+        expect(globalSaved.editor?.lineWrapping).toBe('off')
       },
     )
   })

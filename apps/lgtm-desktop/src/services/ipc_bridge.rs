@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::{Value, json};
 use tauri::Manager;
 
-use crate::app::{LspState, app_context, configure_builder, init_app_state};
+use crate::app::{AppState, app_context, configure_builder, init_app_state};
 
 /// Callback invoked whenever a backend Tauri event should be forwarded over the stdio IPC bridge.
 pub type BridgeEventForwarder = Arc<dyn Fn(&str, Value) + Send + Sync>;
@@ -55,7 +55,7 @@ impl IpcBridgeService {
             }
         }
 
-        app.state::<LspState>().0.shutdown_all();
+        app.state::<AppState>().lsp.shutdown_all();
     }
 
     // Private -----------------------------------------------------------------

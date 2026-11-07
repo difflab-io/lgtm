@@ -22,12 +22,15 @@ export class LspService {
   servers = $state<Record<string, LspServerStatusEvent>>({})
   diagnostics = $state<Record<string, LspDiagnostic[]>>({})
 
+  /** Constructs an `LspService` backed by `client`. */
   constructor(private client: WorkspaceClient) {}
 
+  /** Returns all tracked language server status events for the active workspace. */
   get allServers(): LspServerStatusEvent[] {
     return Object.values(this.servers)
   }
 
+  /** Returns flattened diagnostic entries across all workspace files. */
   get diagnosticEntries(): LspDiagnosticEntry[] {
     const items: LspDiagnosticEntry[] = []
     for (const [path, list] of Object.entries(this.diagnostics)) {
@@ -45,16 +48,19 @@ export class LspService {
     return items
   }
 
+  /** Clears all cached server statuses and file diagnostics when switching workspaces. */
   reset() {
     this.servers = {}
     this.diagnostics = {}
   }
 
+  /** Returns the diagnostics list for a workspace-relative or config file path. */
   getDiagnosticsForPath(path?: string | null): LspDiagnostic[] {
     if (!path) return []
     return this.diagnostics[path] ?? []
   }
 
+  /** Returns the language server status matching `activeLanguageId` or the first active server. */
   getActiveServer(activeLanguageId: string | null): LspServerStatusEvent | null {
     if (activeLanguageId && this.servers[activeLanguageId]) {
       return this.servers[activeLanguageId]
@@ -62,6 +68,7 @@ export class LspService {
     return this.allServers[0] ?? null
   }
 
+  /** Computes the status indicator tone and summary label for a language server menu item. */
   getServerIndicator(
     server: LspServerStatusEvent,
     activeLanguageId: string | null,
@@ -96,6 +103,7 @@ export class LspService {
     }
   }
 
+  /** Records initial language server status attached to a newly read file. */
   recordFileStatus(status?: LspServerStatusEvent | null) {
     if (status && !this.servers[status.languageId]) {
       this.servers = {
@@ -105,6 +113,7 @@ export class LspService {
     }
   }
 
+  /** Applies an incoming `lsp-status` event to reactive state. */
   handleStatus(event: LspServerStatusEvent) {
     this.servers = {
       ...this.servers,
@@ -112,6 +121,7 @@ export class LspService {
     }
   }
 
+  /** Applies an incoming `lsp-diagnostics` event to reactive state. */
   handleDiagnostics(event: LspFileDiagnosticsEvent) {
     this.diagnostics = {
       ...this.diagnostics,
@@ -119,6 +129,7 @@ export class LspService {
     }
   }
 
+  /** Pulls the current workspace LSP server and diagnostics snapshot from the backend. */
   async syncState(): Promise<void> {
     try {
       const snapshot = await this.client.lspGetState()
@@ -141,10 +152,12 @@ export class LspService {
     }
   }
 
+  /** Sends an in-memory `textDocument/didChange` notification to the language server. */
   notifyDidChange(path: string, content: string) {
     void this.client.lspDidChange(path, content).catch(() => {})
   }
 
+  /** Queries `textDocument/hover` documentation at a UTF-16 editor offset. */
   async requestHover(path: string, offset: number): Promise<CodeEditorHoverResult | null> {
     try {
       const result = await this.client.lspHover(path, offset)
@@ -159,6 +172,7 @@ export class LspService {
     }
   }
 
+  /** Queries `textDocument/definition` locations at a UTF-16 editor offset. */
   async getDefinitions(path: string, offset: number): Promise<LspLocation[]> {
     try {
       return await this.client.lspGotoDefinition(path, offset)
@@ -167,10 +181,12 @@ export class LspService {
     }
   }
 
+  /** Fetches the formatted plain-text diagnostics buffer for all servers or `languageId`. */
   async getDiagnosticsBuffer(languageId?: string): Promise<LspDiagnosticsBuffer> {
     return this.client.lspGetDiagnosticsBuffer(languageId)
   }
 
+  /** Restarts the language server for `languageId` in the active workspace. */
   async restartServer(languageId: string): Promise<void> {
     try {
       const status = await this.client.lspRestart(languageId)
