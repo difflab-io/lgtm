@@ -1,0 +1,161 @@
+{
+  "$defs": {
+    "AppearanceSettingsPatch": {
+      "additionalProperties": false,
+      "description": "Resolved appearance settings section (`appearance.*`).",
+      "properties": {
+        "theme": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ThemeMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Preferred application color theme (`system`, `light`, or `dark`)."
+        }
+      },
+      "type": "object"
+    },
+    "EditorSettingsPatch": {
+      "additionalProperties": false,
+      "description": "Resolved code editor settings section (`editor.*`).",
+      "properties": {
+        "lineWrapping": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LineWrap"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Line wrapping mode inside the code editor (`\"off\"`, `\"auto\"`, or a column width; `\"auto\"` by default)."
+        }
+      },
+      "type": "object"
+    },
+    "LineWrap": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LineWrapPreset",
+          "description": "Preset line wrapping mode (`\"off\"` or `\"auto\"`)."
+        },
+        {
+          "description": "Fixed character column width at which lines wrap.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      ],
+      "description": "Line wrapping mode persisted under `editor.lineWrapping` (`\"off\"`, `\"auto\"`, or a column width)."
+    },
+    "LineWrapPreset": {
+      "description": "Named line wrapping presets persisted under `editor.lineWrapping`.",
+      "oneOf": [
+        {
+          "const": "off",
+          "description": "Disable line wrapping (`off`).",
+          "type": "string"
+        },
+        {
+          "const": "auto",
+          "description": "Wrap lines automatically at the editor viewport width (`auto`).",
+          "type": "string"
+        }
+      ]
+    },
+    "ThemeMode": {
+      "description": "Supported color theme preferences persisted under `appearance.theme`.",
+      "oneOf": [
+        {
+          "const": "system",
+          "description": "Follow the operating system color scheme.",
+          "type": "string"
+        },
+        {
+          "const": "light",
+          "description": "Force the light color scheme.",
+          "type": "string"
+        },
+        {
+          "const": "dark",
+          "description": "Force the dark color scheme.",
+          "type": "string"
+        }
+      ]
+    },
+    "WorkspaceSettingsPatch": {
+      "additionalProperties": false,
+      "description": "Resolved workspace history settings section (`workspace.*`).",
+      "properties": {
+        "activeRoot": {
+          "description": "Last active workspace root directory path.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "recentRoots": {
+          "description": "Recently opened workspace root directory paths.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Sparse nested settings document and patch persisted in `config.json` or `config.yaml` and accepted by `config_update`.",
+  "properties": {
+    "$schema": {
+      "description": "Optional JSON Schema reference URI for editor intelligence.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "appearance": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AppearanceSettingsPatch"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Partial appearance settings overrides (`appearance.*`)."
+    },
+    "editor": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EditorSettingsPatch"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Partial code editor settings overrides (`editor.*`)."
+    },
+    "workspace": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkspaceSettingsPatch"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Partial workspace settings overrides (`workspace.*`)."
+    }
+  },
+  "title": "UserSettingsPatch",
+  "type": "object"
+}

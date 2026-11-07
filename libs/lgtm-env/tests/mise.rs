@@ -309,11 +309,11 @@ mod given_a_workspace_without_an_existing_mise_file {
 mod given_a_workspace_with_an_existing_managed_mise_file {
     use super::*;
 
-    mod when_project_config_changes {
+    mod when_synchronizing_workspace_mise {
         use super::*;
 
         #[test]
-        fn should_overwrite_stale_managed_mise_file_with_updated_tools_and_tasks() {
+        fn should_preserve_user_defined_tools_and_tasks_while_adding_detected_language_defaults() {
             // Arrange
             let temp = tempfile::tempdir().unwrap();
             let home = temp.path().join("home");
@@ -324,15 +324,10 @@ mod given_a_workspace_with_an_existing_managed_mise_file {
                 "[package]\nname = \"sample\"\n",
             )
             .unwrap();
-            let stale_mise_path = workspace_root.join(".lgtm/mise.toml");
+            let managed_mise_path = workspace_root.join(".lgtm/mise.toml");
             std::fs::write(
-                &stale_mise_path,
-                "# stale file\n[tools]\nrust-analyzer = \"0.0.1\"\n",
-            )
-            .unwrap();
-            std::fs::write(
-                workspace_root.join(".lgtm/config.json"),
-                "{\n  \"mise\": {\n    \"tools\": {\n      \"rust-analyzer\": \"2026-01-01\"\n    },\n    \"tasks\": {\n      \"check\": {\n        \"description\": \"Custom clippy check\",\n        \"run\": \"cargo clippy --all-targets\"\n      }\n    }\n  }\n}\n",
+                &managed_mise_path,
+                "[tools]\nrust-analyzer = \"2026-01-01\"\n\n[tasks.check]\ndescription = \"Custom clippy check\"\nrun = \"cargo clippy --all-targets\"\n",
             )
             .unwrap();
             let config_service = ConfigService::from_home(home);
@@ -343,10 +338,10 @@ mod given_a_workspace_with_an_existing_managed_mise_file {
             let updated = std::fs::read_to_string(&updated_path).unwrap();
 
             // Assert
-            assert_eq!(updated_path, stale_mise_path);
+            assert_eq!(updated_path, managed_mise_path);
             assert!(updated.contains("rust-analyzer = \"2026-01-01\""));
             assert!(updated.contains("cargo clippy --all-targets"));
-            assert!(!updated.contains("0.0.1"));
+            assert!(updated.contains("[tasks.\"rust:check\"]"));
         }
     }
 }
@@ -372,7 +367,12 @@ mod given_a_workspace_with_a_user_provided_root_mise_file {
             std::fs::write(workspace_root.join("tsconfig.json"), "{}\n").unwrap();
             std::fs::write(
                 workspace_root.join(".lgtm/config.yaml"),
-                "lsp:\n  enabled: true\n  auto_install: true\nmise:\n  tasks:\n    check:\n      description: Custom TS check\n      run: tsc -p tsconfig.json --noEmit\n",
+                "lsp:\n  enabled: true\n  auto_install: true\n",
+            )
+            .unwrap();
+            std::fs::write(
+                workspace_root.join(".lgtm/mise.toml"),
+                "[tasks.check]\ndescription = \"Custom TS check\"\nrun = \"tsc -p tsconfig.json --noEmit\"\n",
             )
             .unwrap();
 

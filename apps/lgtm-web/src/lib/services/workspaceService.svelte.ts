@@ -7,6 +7,7 @@ import {
   type FileContent,
   type ConfigFormat,
   type ConfigScope,
+  type LineWrap,
   type ResolvedConfigSnapshot,
   type ThemeMode,
   type LspDiagnostic,
@@ -14,6 +15,7 @@ import {
   type LspServerStatusEvent,
 } from '../clients/workspaceClient'
 import { LspService } from './lspService.svelte'
+import { SettingsService } from './settingsService.svelte'
 
 export interface FolderRefresh {
   path: string
@@ -37,11 +39,10 @@ export interface WorkspaceTab {
 /** Workspace view model. Rust retains filesystem ownership, path validation, and LSP orchestration. */
 export class WorkspaceService {
   readonly lsp: LspService
+  readonly settings: SettingsService
   defaultRoot = $state('')
   root = $state('~/.lgtm/workspace')
   recentWorkspaces = $state<string[]>([])
-  configSnapshot = $state<ResolvedConfigSnapshot | null>(null)
-  lineWrapping = $state(true)
   entries = $state<WorkspaceNode[]>([])
   loading = $state(true)
   error = $state<string | null>(null)
@@ -77,6 +78,11 @@ export class WorkspaceService {
 
   constructor(private client: WorkspaceClient) {
     this.lsp = new LspService(client)
+    this.settings = new SettingsService(client)
+  }
+
+  get lineWrapping(): LineWrap {
+    return this.settings.lineWrapping
   }
 
   setThemeHandler(handler: (theme: ThemeMode) => void) {
@@ -237,21 +243,12 @@ export class WorkspaceService {
       this.lsp.reset()
       this.clearSelected()
       this.treeVersion++
-      if (path && this.client.configUpdate) {
-        void this.client
-          .configUpdate(
-            {
-              workspace: {
-                activeRoot: result.root,
-                recentRoots: this.recentWorkspaces,
-              },
-            },
-            'global',
-          )
+      if (path) {
+        void this.settings
+          .setWorkspaceRoots(result.root, this.recentWorkspaces)
           .then((snapshot) => {
-            if (this.active) this.applyConfigSnapshot(snapshot)
+            if (this.active && snapshot) this.applyConfigSnapshot(snapshot)
           })
-          .catch(() => {})
       } else {
         void this.loadConfig()
       }
@@ -264,31 +261,23 @@ export class WorkspaceService {
   }
 
   async loadConfig() {
-    if (!this.active || !this.client.configGet) return
-    try {
-      const snapshot = await this.client.configGet()
-      if (!this.active) return
-      this.applyConfigSnapshot(snapshot)
-    } catch {
-      // Keep current in-memory defaults if config is unavailable or malformed on disk.
-    }
+    if (!this.active) return
+    const snapshot = await this.settings.load()
+    if (!this.active || !snapshot) return
+    this.applyConfigSnapshot(snapshot)
   }
 
   async setThemePreference(theme: ThemeMode) {
     this.onThemeSnapshot?.(theme)
-    if (!this.client.configUpdate) return
-    try {
-      const snapshot = await this.client.configUpdate({ appearance: { theme } }, null)
-      if (!this.active) return
-      this.applyConfigSnapshot(snapshot)
-      await this.refreshCleanConfigTabs()
-    } catch (error) {
-      if (this.active) this.openingError = errorMessage(error)
-    }
+    const snapshot = await this.settings.setTheme(theme)
+    if (!this.active || !snapshot) return
+    this.applyConfigSnapshot(snapshot)
+    await this.refreshCleanConfigTabs()
   }
 
   handleConfigUpdated(snapshot: ResolvedConfigSnapshot) {
     if (!this.active) return
+    this.settings.handleUpdated(snapshot)
     this.applyConfigSnapshot(snapshot)
     if (!this.dirtyConfig) {
       void this.refreshCleanConfigTabs()
@@ -298,13 +287,13 @@ export class WorkspaceService {
   async openSettingsTab(scope: ConfigScope = 'global', format?: ConfigFormat) {
     const requestId = ++this.openRequestSeq
     await this.flushSave()
-    if (requestId !== this.openRequestSeq || !this.client.configOpenDocument) return
+    if (requestId !== this.openRequestSeq) return
     this.selected = null
     this.fileLoading = true
     this.openingError = null
     try {
-      const doc = await this.client.configOpenDocument(scope, format ?? null)
-      if (!this.active || requestId !== this.openRequestSeq) return
+      const doc = await this.settings.openDocument(scope, format ?? null)
+      if (!doc || !this.active || requestId !== this.openRequestSeq) return
       const tabId = `config:${doc.scope}`
       this.upsertTab({
         id: tabId,
@@ -328,6 +317,7 @@ export class WorkspaceService {
       }
       this.fileVersion++
       this.focusRequest++
+      void this.loadConfig()
       void this.syncLspState()
     } catch (error) {
       if (this.active && requestId === this.openRequestSeq) {
@@ -587,14 +577,14 @@ export class WorkspaceService {
     if (this.inFlightSave) {
       await this.inFlightSave
     }
-    while (this.dirtyConfig && this.client.configWriteDocument) {
+    while (this.dirtyConfig) {
       const { scope, format, content } = this.dirtyConfig
       this.dirtyConfig = null
       this.saving = true
-      const task = this.client
-        .configWriteDocument(scope, content, format ?? null)
+      const task = this.settings
+        .writeDocument(scope, content, format ?? null)
         .then(async (savedDoc) => {
-          if (!this.active) return
+          if (!this.active || !savedDoc) return
           const tabId = `config:${scope}`
           this.tabs = this.tabs.map((tab) =>
             tab.id === tabId && tab.content === content
@@ -827,8 +817,8 @@ export class WorkspaceService {
       clearTimeout(this.saveTimer)
       this.saveTimer = null
     }
-    if (this.dirtyConfig && this.client.configWriteDocument) {
-      void this.client.configWriteDocument(
+    if (this.dirtyConfig) {
+      void this.settings.writeDocument(
         this.dirtyConfig.scope,
         this.dirtyConfig.content,
         this.dirtyConfig.format ?? null,
@@ -844,10 +834,8 @@ export class WorkspaceService {
   }
 
   private applyConfigSnapshot(snapshot: ResolvedConfigSnapshot) {
-    this.configSnapshot = snapshot
     const effectiveTheme = snapshot.effective.appearance?.theme ?? 'system'
     this.onThemeSnapshot?.(effectiveTheme)
-    this.lineWrapping = snapshot.effective.editor?.lineWrapping ?? true
     const recentRoots = snapshot.effective.workspace?.recentRoots ?? []
     if (recentRoots.length > 0) {
       this.recentWorkspaces = recentRoots.includes(this.root)
@@ -857,12 +845,12 @@ export class WorkspaceService {
   }
 
   private async refreshCleanConfigTabs() {
-    if (!this.active || !this.client.configOpenDocument) return
+    if (!this.active) return
     for (const tab of this.tabs) {
       if (tab.kind !== 'config' || !tab.configScope || tab.dirty) continue
       try {
-        const doc = await this.client.configOpenDocument(tab.configScope, tab.configFormat ?? null)
-        if (!this.active) return
+        const doc = await this.settings.openDocument(tab.configScope, tab.configFormat ?? null)
+        if (!doc || !this.active) return
         this.tabs = this.tabs.map((item) =>
           item.id === tab.id && !item.dirty
             ? {

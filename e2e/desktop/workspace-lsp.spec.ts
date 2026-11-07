@@ -329,9 +329,10 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
           globalConfigPath,
           JSON.stringify(
             {
-              $schema: './schemas/config.schema.json',
+              $schema:
+                'https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v0.1.0/schemas/config.schema.json',
               appearance: { theme: 'dark' },
-              editor: { lineWrapping: false },
+              editor: { lineWrapping: 'off' },
             },
             null,
             2,
@@ -342,7 +343,8 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
           projectConfigPath,
           JSON.stringify(
             {
-              $schema: './schemas/config.schema.json',
+              $schema:
+                'https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v0.1.0/schemas/config.schema.json',
               appearance: { theme: 'light' },
             },
             null,
@@ -369,7 +371,7 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
           })
           .toBe('dark')
         const globalSaved = JSON.parse(await readFile(globalConfigPath, 'utf8'))
-        expect(globalSaved.editor?.lineWrapping).toBe(false)
+        expect(globalSaved.editor?.lineWrapping).toBe('off')
       },
     )
   })
@@ -390,8 +392,10 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
         await expect(
           tablist.getByRole('tab', { name: 'Settings (config.json)', exact: true }),
         ).toHaveAttribute('aria-selected', 'true')
-        expect(await exists(join(workspace.lgtmHomeDir, 'schemas/config.schema.json'))).toBe(true)
         await expect(lspButton).toContainText('LSP: json (ready)')
+        await expect(page.locator('.cm-content')).toContainText(
+          'https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v0.1.0/schemas/config.schema.json',
+        )
         await expect(page.locator('.cm-content')).toContainText('"appearance"')
         await expect(page.locator('.cm-content')).toHaveClass(/cm-lineWrapping/)
 
@@ -400,7 +404,7 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
         await editorContent.click()
         await page.keyboard.press('ControlOrMeta+a')
         await page.keyboard.insertText(
-          '{\n  "$schema": "./schemas/config.schema.json",\n  "appearance": {\n    "theme": "dark"\n  },\n  "editor": {\n    "lineWrapping": false\n  }\n}\n',
+          '{\n  "$schema": "https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v0.1.0/schemas/config.schema.json",\n  "appearance": {\n    "theme": "dark"\n  },\n  "editor": {\n    "lineWrapping": "off"\n  }\n}\n',
         )
 
         // Assert: live UI updates theme and lineWrapping
@@ -416,7 +420,7 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
         await rm(join(workspace.lgtmHomeDir, 'config.json'), { force: true })
         await writeFile(
           join(workspace.lgtmHomeDir, 'config.yaml'),
-          '# yaml-language-server: $schema=./schemas/config.schema.json\nappearance:\n  theme: light\neditor:\n  lineWrapping: true\n',
+          '# yaml-language-server: $schema=https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v0.1.0/schemas/config.schema.json\nappearance:\n  theme: light\neditor:\n  lineWrapping: 80\n',
           'utf8',
         )
         await page.keyboard.press('Control+,')
@@ -426,10 +430,11 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@lsp'] }, () =
           tablist.getByRole('tab', { name: 'Settings (config.yaml)', exact: true }),
         ).toHaveAttribute('aria-selected', 'true')
         await expect(lspButton).toContainText('LSP: yaml (ready)')
+        await expect(page.locator('.cm-content')).toHaveClass(/cm-lineWrapping/)
         await editorContent.click()
         await page.keyboard.press('ControlOrMeta+a')
         await page.keyboard.insertText(
-          '# yaml-language-server: $schema=./schemas/config.schema.json\nappearance:\n  theme: dark\neditor:\n  lineWrapping: true\n',
+          '# yaml-language-server: $schema=https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v0.1.0/schemas/config.schema.json\nappearance:\n  theme: dark\neditor:\n  lineWrapping: auto\n',
         )
         await expect(page.getByRole('button', { name: 'Theme: dark', exact: true })).toBeVisible()
       },

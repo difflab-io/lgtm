@@ -130,11 +130,9 @@ impl MiseService {
     /// Ensures `<workspace>/.lgtm/` and `.git/info/exclude` are initialized and writes `<workspace>/.lgtm/mise.toml`.
     pub fn sync_workspace_mise(&self, workspace_root: &Path) -> Result<PathBuf> {
         let _ = self.config_service.ensure_workspace_dir(workspace_root)?;
-        let config = self.config_service.get_config(workspace_root)?;
-        let detected_languages = ConfigService::detect_workspace_languages(&config, workspace_root);
-        let generated = GeneratedMiseFile::from_config(&config, &detected_languages);
-        let rendered = generated.render_toml()?;
         let mise_path = ConfigService::get_managed_mise_path(workspace_root);
+        let generated = self.build_generated_mise_file(workspace_root, &mise_path)?;
+        let rendered = generated.render_toml()?;
 
         let needs_write = match std::fs::read_to_string(&mise_path) {
             Ok(existing) => existing != rendered,
@@ -153,10 +151,8 @@ impl MiseService {
 
     /// Synchronizes `.lgtm/mise.toml` and returns all synthesized task summaries for the workspace.
     pub fn get_tasks(&self, workspace_root: &Path) -> Result<Vec<MiseTaskSummary>> {
-        let _ = self.sync_workspace_mise(workspace_root)?;
-        let config = self.config_service.get_config(workspace_root)?;
-        let detected = ConfigService::detect_workspace_languages(&config, workspace_root);
-        let generated = GeneratedMiseFile::from_config(&config, &detected);
+        let mise_path = self.sync_workspace_mise(workspace_root)?;
+        let generated = self.build_generated_mise_file(workspace_root, &mise_path)?;
         Ok(generated.get_task_summaries())
     }
 
@@ -258,6 +254,22 @@ impl MiseService {
     }
 
     // Private -----------------------------------------------------------------
+
+    fn build_generated_mise_file(
+        &self,
+        workspace_root: &Path,
+        mise_path: &Path,
+    ) -> Result<GeneratedMiseFile> {
+        let config = self.config_service.get_config(workspace_root)?;
+        let detected_languages = ConfigService::detect_workspace_languages(&config, workspace_root);
+        let mut generated = GeneratedMiseFile::from_config(&config, &detected_languages);
+        if let Ok(existing_raw) = std::fs::read_to_string(mise_path)
+            && let Ok(existing) = toml::from_str::<GeneratedMiseFile>(&existing_raw)
+        {
+            generated.merge_existing(existing);
+        }
+        Ok(generated)
+    }
 
     fn binary_name() -> &'static str {
         if cfg!(windows) { "mise.exe" } else { "mise" }
@@ -382,8 +394,8 @@ mod tests {
                 .unwrap();
                 std::fs::create_dir_all(workspace_root.join(".lgtm")).unwrap();
                 std::fs::write(
-                    workspace_root.join(".lgtm/config.json"),
-                    "{\n  \"mise\": {\n    \"tasks\": {\n      \"greet\": {\n        \"description\": \"Say hello\",\n        \"run\": \"echo hello\"\n      }\n    }\n  }\n}\n",
+                    workspace_root.join(".lgtm/mise.toml"),
+                    "[tasks.greet]\ndescription = \"Say hello\"\nrun = \"echo hello\"\n",
                 )
                 .unwrap();
                 let service = MiseService::new(ConfigService::with_global_config_path(global_cfg));

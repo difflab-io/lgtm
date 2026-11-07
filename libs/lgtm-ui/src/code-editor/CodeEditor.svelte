@@ -4,14 +4,14 @@
   import { HighlightStyle, LanguageDescription, syntaxHighlighting } from '@codemirror/language'
   import { languages } from '@codemirror/language-data'
   import { lintGutter, setDiagnostics, type Diagnostic } from '@codemirror/lint'
-  import { Compartment, EditorState } from '@codemirror/state'
+  import { Compartment, EditorState, type Extension } from '@codemirror/state'
   import { EditorView, hoverTooltip, keymap, tooltips } from '@codemirror/view'
   import { tags } from '@lezer/highlight'
   import { basicSetup } from 'codemirror'
   import { cn } from '@cloudvoyant/helical-ui'
   import { renderMarkdownToDom } from './markdown'
   import { codeEditorHoverTooltipVariants, codeEditorRootVariants } from './styles'
-  import type { CodeEditorDiagnostic, CodeEditorProps } from './types'
+  import type { CodeEditorDiagnostic, CodeEditorLineWrapping, CodeEditorProps } from './types'
 
   const codeEditorHighlightStyle = HighlightStyle.define([
     {
@@ -204,7 +204,7 @@
     value,
     filename,
     readonly = false,
-    lineWrapping = true,
+    lineWrapping = 'auto',
     size = 'sm',
     label = 'Code editor',
     class: className = '',
@@ -256,6 +256,24 @@
     )
   }
 
+  function toLineWrappingExtension(mode: CodeEditorLineWrapping): Extension {
+    if (!mode || mode === 'off') {
+      return []
+    }
+    if (typeof mode === 'number' && Number.isFinite(mode) && mode > 0) {
+      const cols = Math.max(1, Math.floor(mode))
+      return [
+        EditorView.lineWrapping,
+        EditorView.theme({
+          '.cm-content, &.cm-editor .cm-content': {
+            maxWidth: `${cols}ch`,
+          },
+        }),
+      ]
+    }
+    return [EditorView.lineWrapping]
+  }
+
   // Lifecycle -----------------------------------------------------------------
   onMount(() => {
     if (!host) return
@@ -282,7 +300,7 @@
         }),
         lintGutter(),
         languageCompartment.of([]),
-        lineWrappingCompartment.of(initialLineWrapping ? [EditorView.lineWrapping] : []),
+        lineWrappingCompartment.of(toLineWrappingExtension(initialLineWrapping)),
         readOnlyCompartment.of([
           EditorState.readOnly.of(initialReadOnly),
           EditorView.editable.of(!initialReadOnly),
@@ -369,9 +387,7 @@
     const nextLineWrapping = lineWrapping
     if (view) {
       view.dispatch({
-        effects: lineWrappingCompartment.reconfigure(
-          nextLineWrapping ? [EditorView.lineWrapping] : [],
-        ),
+        effects: lineWrappingCompartment.reconfigure(toLineWrappingExtension(nextLineWrapping)),
       })
     }
   })

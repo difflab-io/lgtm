@@ -7,8 +7,8 @@ use sha2::{Digest, Sha256};
 use crate::error::{LgtmConfigError, Result};
 use crate::models::config::{LanguageConfig, LgtmConfig, LgtmConfigFileOverlay};
 use crate::models::settings::{
-    ConfigDocument, ConfigFormat, ConfigScope, DEFAULT_SCHEMA_RELATIVE_PATH,
-    ResolvedConfigSnapshot, UserSettings, UserSettingsPatch,
+    ConfigDocument, ConfigFormat, ConfigScope, DEFAULT_SCHEMA_URL, ResolvedConfigSnapshot,
+    UserSettings, UserSettingsPatch,
 };
 
 const CONFIG_CANDIDATES: [&str; 3] = ["config.json", "config.yaml", "config.yml"];
@@ -83,21 +83,6 @@ impl ConfigService {
         Self::find_existing_config_in_dir(&dot_lgtm).unwrap_or_else(|| dot_lgtm.join("config.json"))
     }
 
-    /// Returns the global JSON Schema path (`~/.lgtm/schemas/config.schema.json`).
-    pub fn get_global_schema_path(&self) -> PathBuf {
-        self.get_lgtm_home_dir()
-            .join("schemas")
-            .join("config.schema.json")
-    }
-
-    /// Returns the workspace JSON Schema path (`<workspace>/.lgtm/schemas/config.schema.json`).
-    pub fn get_project_schema_path(workspace_root: &Path) -> PathBuf {
-        workspace_root
-            .join(".lgtm")
-            .join("schemas")
-            .join("config.schema.json")
-    }
-
     /// Returns the LGTM-managed Mise file path (`<workspace>/.lgtm/mise.toml`).
     pub fn get_managed_mise_path(workspace_root: &Path) -> PathBuf {
         workspace_root.join(".lgtm").join("mise.toml")
@@ -106,56 +91,6 @@ impl ConfigService {
     /// Returns a designated cache file path inside `<workspace>/.lgtm/cache/<file_name>`.
     pub fn get_workspace_cache_path(workspace_root: &Path, file_name: &str) -> PathBuf {
         workspace_root.join(".lgtm").join("cache").join(file_name)
-    }
-
-    /// Writes `schemas/config.schema.json` (and `~/.lgtm/biome.json` if absent) for global and optional project `.lgtm` directories.
-    pub fn ensure_schema_files(&self, workspace_root: Option<&Path>) -> Result<PathBuf> {
-        let home_dir = self.get_lgtm_home_dir();
-        let global_schema_path = self.get_global_schema_path();
-        if let Some(parent) = global_schema_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|source| LgtmConfigError::GlobalConfigIo {
-                path: parent.to_path_buf(),
-                source,
-            })?;
-        }
-        let schema_text = UserSettingsPatch::json_schema_pretty();
-        std::fs::write(&global_schema_path, &schema_text).map_err(|source| {
-            LgtmConfigError::GlobalConfigIo {
-                path: global_schema_path.clone(),
-                source,
-            }
-        })?;
-
-        let biome_path = home_dir.join("biome.json");
-        if !biome_path.exists() {
-            let _ = std::fs::write(
-                &biome_path,
-                "{\n  \"$schema\": \"https://biomejs.dev/schemas/latest/schema.json\",\n  \"json\": {\n    \"parser\": {\n      \"allowComments\": false\n    }\n  }\n}\n",
-            );
-        }
-
-        if let Some(ws) = workspace_root {
-            let dot_lgtm = ws.join(".lgtm");
-            if dot_lgtm.is_dir() {
-                let project_schema_path = Self::get_project_schema_path(ws);
-                if let Some(parent) = project_schema_path.parent() {
-                    std::fs::create_dir_all(parent).map_err(|source| {
-                        LgtmConfigError::ProjectConfigIo {
-                            path: parent.to_path_buf(),
-                            source,
-                        }
-                    })?;
-                }
-                std::fs::write(&project_schema_path, &schema_text).map_err(|source| {
-                    LgtmConfigError::ProjectConfigIo {
-                        path: project_schema_path,
-                        source,
-                    }
-                })?;
-            }
-        }
-
-        Ok(global_schema_path)
     }
 
     /// Loads and merges built-in runtime presets, the global config, and the workspace project config.
@@ -237,10 +172,9 @@ impl ConfigService {
         scope: Option<ConfigScope>,
         patch: UserSettingsPatch,
     ) -> Result<ResolvedConfigSnapshot> {
-        let _ = self.ensure_schema_files(workspace_root)?;
-
         match scope {
             Some(ConfigScope::Global) => {
+                self.prepare_scoped_storage(ConfigScope::Global, workspace_root)?;
                 let global_path = self.get_global_config_path();
                 self.apply_and_write_scoped_patch(ConfigScope::Global, &global_path, patch)?;
             }
@@ -248,8 +182,7 @@ impl ConfigService {
                 let Some(ws) = workspace_root else {
                     return self.get_settings_snapshot(None);
                 };
-                let _ = self.ensure_workspace_dir(ws)?;
-                let _ = self.ensure_schema_files(Some(ws))?;
+                self.prepare_scoped_storage(ConfigScope::Project, Some(ws))?;
                 let project_path = Self::get_project_config_path(ws);
                 self.apply_and_write_scoped_patch(ConfigScope::Project, &project_path, patch)?;
             }
@@ -278,6 +211,7 @@ impl ConfigService {
                 if let (Some(proj_patch), Some((project_path, _))) =
                     (project_part, existing_project)
                 {
+                    self.prepare_scoped_storage(ConfigScope::Project, workspace_root)?;
                     self.apply_and_write_scoped_patch(
                         ConfigScope::Project,
                         &project_path,
@@ -285,6 +219,7 @@ impl ConfigService {
                     )?;
                 }
                 if let Some(glob_patch) = global_part {
+                    self.prepare_scoped_storage(ConfigScope::Global, workspace_root)?;
                     let global_path = self.get_global_config_path();
                     self.apply_and_write_scoped_patch(
                         ConfigScope::Global,
@@ -501,12 +436,24 @@ impl ConfigService {
     ) -> Result<()> {
         match scope {
             ConfigScope::Global => {
-                let _ = self.ensure_schema_files(workspace_root)?;
+                let home_dir = self.get_lgtm_home_dir();
+                std::fs::create_dir_all(&home_dir).map_err(|source| {
+                    LgtmConfigError::GlobalConfigIo {
+                        path: home_dir.clone(),
+                        source,
+                    }
+                })?;
+                let biome_path = home_dir.join("biome.json");
+                if !biome_path.exists() {
+                    let _ = std::fs::write(
+                        &biome_path,
+                        "{\n  \"$schema\": \"https://biomejs.dev/schemas/latest/schema.json\",\n  \"json\": {\n    \"parser\": {\n      \"allowComments\": false\n    }\n  }\n}\n",
+                    );
+                }
             }
             ConfigScope::Project => {
                 if let Some(ws) = workspace_root {
                     let _ = self.ensure_workspace_dir(ws)?;
-                    let _ = self.ensure_schema_files(Some(ws))?;
                 }
             }
         }
@@ -535,7 +482,7 @@ impl ConfigService {
             UserSettingsPatch::default()
         };
         if format == ConfigFormat::Json && current.schema.is_none() {
-            current.schema = Some(DEFAULT_SCHEMA_RELATIVE_PATH.to_string());
+            current.schema = Some(DEFAULT_SCHEMA_URL.to_string());
         }
         current.merge_patch(patch);
 
@@ -562,9 +509,8 @@ impl ConfigService {
                 patch_without_schema.schema = None;
                 let body =
                     serde_yaml::to_string(&patch_without_schema).map_err(|err| err.to_string())?;
-                let mut out = format!(
-                    "# yaml-language-server: $schema={DEFAULT_SCHEMA_RELATIVE_PATH}\n{body}"
-                );
+                let mut out =
+                    format!("# yaml-language-server: $schema={DEFAULT_SCHEMA_URL}\n{body}");
                 if !out.ends_with('\n') {
                     out.push('\n');
                 }
@@ -759,11 +705,6 @@ mod tests {
     "enabled": true,
     "auto_install": false,
     "request_timeout_ms": 7000
-  },
-  "mise": {
-    "tools": {
-      "fd": "latest"
-    }
   }
 }
 "#,
@@ -772,7 +713,7 @@ mod tests {
                 std::fs::create_dir_all(workspace_root.join(".lgtm")).unwrap();
                 std::fs::write(
                     workspace_root.join(".lgtm/config.yaml"),
-                    "lsp:\n  enabled: true\n  auto_install: true\n  request_timeout_ms: 9000\nmise:\n  tasks:\n    custom:\n      description: Custom\n      run: echo custom\n",
+                    "lsp:\n  enabled: true\n  auto_install: true\n  request_timeout_ms: 9000\n",
                 )
                 .unwrap();
                 let service = ConfigService::with_global_config_path(global_cfg);
@@ -783,8 +724,6 @@ mod tests {
                 // Assert
                 assert!(config.lsp.auto_install);
                 assert_eq!(config.lsp.request_timeout_ms, 9000);
-                assert_eq!(config.mise.tools.get("fd"), Some(&"latest".to_string()));
-                assert!(config.mise.tasks.contains_key("custom"));
             }
         }
 

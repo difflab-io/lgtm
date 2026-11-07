@@ -472,7 +472,9 @@ pub async fn config_write_document(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lgtm_config::{AppearanceSettingsPatch, EditorSettingsPatch, ThemeMode};
+    use lgtm_config::{
+        AppearanceSettingsPatch, EditorSettingsPatch, LineWrap, LineWrapPreset, ThemeMode,
+    };
     use tempfile::TempDir;
 
     // tests -------------------------------------------------------------------
@@ -535,7 +537,7 @@ mod tests {
                             }),
                             workspace: None,
                             editor: Some(EditorSettingsPatch {
-                                line_wrapping: Some(false),
+                                line_wrapping: Some(LineWrap::Preset(LineWrapPreset::Off)),
                             }),
                         },
                         None,
@@ -554,9 +556,15 @@ mod tests {
 
                 // Assert
                 assert_eq!(initial.effective.appearance.theme, ThemeMode::System);
-                assert!(initial.effective.editor.line_wrapping);
+                assert_eq!(
+                    initial.effective.editor.line_wrapping,
+                    LineWrap::Preset(LineWrapPreset::Auto)
+                );
                 assert_eq!(updated.effective.appearance.theme, ThemeMode::Dark);
-                assert!(!updated.effective.editor.line_wrapping);
+                assert_eq!(
+                    updated.effective.editor.line_wrapping,
+                    LineWrap::Preset(LineWrapPreset::Off)
+                );
                 assert_eq!(global_doc.scope, ConfigScope::Global);
                 assert!(global_doc.content.contains("\"dark\""));
                 assert_ne!(global_doc.revision, written_doc.revision);

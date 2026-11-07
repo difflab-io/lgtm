@@ -20,5 +20,6 @@ export type {
   CodeEditorDiagnostic,
   CodeEditorDiagnosticSeverity,
   CodeEditorHoverResult,
+  CodeEditorLineWrapping,
   CodeEditorProps,
 } from './code-editor/types'

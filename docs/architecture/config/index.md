@@ -65,7 +65,7 @@ flowchart TB
     subgraph CfgLib["lgtm-config"]
         CFG_SVC["ConfigService"]
         SETTINGS_MOD["UserSettings, UserSettingsPatch, ResolvedConfigSnapshot, ConfigDocument"]
-        CFG_MOD["LgtmConfig, LanguageConfig, LspSettings, MiseSettings"]
+        CFG_MOD["LgtmConfig, LanguageConfig, LspSettings"]
         ERR["LgtmConfigError"]
         CFG_SVC --> SETTINGS_MOD
         CFG_SVC --> CFG_MOD
@@ -74,12 +74,12 @@ flowchart TB
     ENV --> CFG_SVC
     LSP --> CFG_SVC
     DESKTOP --> CFG_SVC
-    CFG_SVC --> FS[("~/.lgtm/config.{json,yaml,yml}\n<workspace>/.lgtm/config.{json,yaml,yml}\nschemas/config.schema.json\n<git-dir>/info/exclude")]
+    CFG_SVC --> FS[("~/.lgtm/config.{json,yaml,yml}\n<workspace>/.lgtm/config.{json,yaml,yml}\n<git-dir>/info/exclude")]
 ```
 
-- `ConfigService`: Resolves `<lgtm_home>`, global and workspace configuration paths (`config.json` -> `config.yaml` -> `config.yml`), writes `schemas/config.schema.json`, deep-merges and leaf-patches `UserSettings` / `UserSettingsPatch`, merges runtime preset overlays onto `LgtmConfig::default_presets()`, discovers ancestor project roots and workspace languages, creates `<workspace>/.lgtm/`, and updates `<git-dir>/info/exclude`.
-- `UserSettings`, `UserSettingsPatch`, `AppearanceSettings*`, `WorkspaceSettings*`, `EditorSettings*`, `ResolvedConfigSnapshot`, and `ConfigDocument`: Pure domain models with `schemars::JsonSchema` and `specta::Type` derives, recursive leaf-level patch merging, project-override partitioning, and schema-backed document validation/hover documentation.
-- `LgtmConfig`, `LanguageConfig`, `LspSettings`, `MiseSettings`, and `MiseTaskConfig`: Pure domain models holding runtime `[lsp]`, `[mise]`, and `[languages.<id>]` presets (including `mise`-managed Biome `json` and `yaml`) and extension-to-language lookup.
+- `ConfigService`: Resolves `<lgtm_home>`, global and workspace configuration paths (`config.json` -> `config.yaml` -> `config.yml`), deep-merges and leaf-patches `UserSettings` / `UserSettingsPatch` via `figment`, merges runtime preset overlays onto `LgtmConfig::default_presets()`, discovers ancestor project roots and workspace languages, creates `<workspace>/.lgtm/`, and updates `<git-dir>/info/exclude`.
+- `UserSettings`, `UserSettingsPatch`, `AppearanceSettings*`, `WorkspaceSettings*`, `EditorSettings*`, `LineWrap`, `ResolvedConfigSnapshot`, and `ConfigDocument`: Pure domain models with `optfield`, `schemars::JsonSchema`, and `specta::Type` derives, `figment`-backed recursive patch merging, project-override partitioning, and versioned jsDelivr `$schema` references (`DEFAULT_SCHEMA_URL`).
+- `LgtmConfig`, `LanguageConfig`, `LspSettings`, and `MiseTaskConfig`: Pure domain models holding runtime `[lsp]` and `[languages.<id>]` presets (including `mise`-managed Biome `json` and `yaml`) and extension-to-language lookup.
 - `LgtmConfigError`: Typed error enum distinguishing global config I/O and parse errors from project config I/O and parse errors.
 
 ### Data and Control Flow
@@ -92,7 +92,6 @@ sequenceDiagram
     participant Disk as Workspace & Global Filesystem
 
     Caller->>CfgSvc: update_settings(workspace_root, None, patch)
-    CfgSvc->>Disk: ensure_schema_files (schemas/config.schema.json)
     opt <workspace>/.lgtm/config.{json,yaml,yml} exists
         CfgSvc->>Disk: read project UserSettingsPatch
     end
@@ -115,11 +114,10 @@ sequenceDiagram
 | `ConfigService::from_home` | `fn from_home(home: PathBuf) -> Self` | Construct a configuration service rooted at `<home>/.lgtm/config.{json,yaml,yml}`. |
 | `ConfigService::with_global_config_path` | `fn with_global_config_path(path: PathBuf) -> Self` | Construct a configuration service with an explicit global config path for isolated tests. |
 | `ConfigService::get_lgtm_home_dir` | `fn get_lgtm_home_dir(&self) -> PathBuf` | Return the resolved LGTM home directory (`$LGTM_HOME` or `~/.lgtm`). |
-| `ConfigService::ensure_schema_files` | `fn ensure_schema_files(&self, workspace_root: Option<&Path>) -> Result<PathBuf>` | Write `schemas/config.schema.json` under `<lgtm_home>` (and `<workspace>/.lgtm/` when present). |
 | `ConfigService::get_config` | `fn get_config(&self, workspace_root: &Path) -> Result<LgtmConfig>` | Return merged built-in presets, global config, and `<workspace>/.lgtm/config.{json,yaml,yml}`. |
 | `ConfigService::get_settings_snapshot` | `fn get_settings_snapshot(&self, workspace_root: Option<&Path>) -> Result<ResolvedConfigSnapshot>` | Return deep-merged `UserSettings` plus global and project `UserSettingsPatch` trees. |
 | `ConfigService::update_settings` | `fn update_settings(&self, workspace_root: Option<&Path>, scope: Option<ConfigScope>, patch: UserSettingsPatch) -> Result<ResolvedConfigSnapshot>` | Persist nested settings to `scope` or route each leaf by project override presence when `scope` is `None`. |
-| `ConfigService::open_config_document` | `fn open_config_document(&self, workspace_root: Option<&Path>, scope: ConfigScope, preferred_format: Option<ConfigFormat>) -> Result<ConfigDocument>` | Ensure the target config file and JSON Schema exist on disk and return raw text and LSP metadata. |
+| `ConfigService::open_config_document` | `fn open_config_document(&self, workspace_root: Option<&Path>, scope: ConfigScope, preferred_format: Option<ConfigFormat>) -> Result<ConfigDocument>` | Ensure the target config file exists on disk with `DEFAULT_SCHEMA_URL` and return raw text and LSP metadata. |
 | `ConfigService::write_config_document` | `fn write_config_document(&self, workspace_root: Option<&Path>, scope: ConfigScope, content: &str, preferred_format: Option<ConfigFormat>) -> Result<(ConfigDocument, Option<ResolvedConfigSnapshot>)>` | Write raw editor text to disk and return the updated `ConfigDocument` and parsed `ResolvedConfigSnapshot`. |
 | `ConfigService::ensure_workspace_dir` | `fn ensure_workspace_dir(&self, workspace_root: &Path) -> Result<PathBuf>` | Ensure `<workspace>/.lgtm/` and `<git-dir>/info/exclude` are initialized. |
 | `ConfigService::detect_project_root` | `fn detect_project_root(workspace_root: &Path, file_path: &Path, language: &LanguageConfig) -> (PathBuf, Option<String>)` | Walk ancestor directories up to `workspace_root` to find the nearest root marker. |
