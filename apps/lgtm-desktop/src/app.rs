@@ -80,10 +80,12 @@ pub(crate) fn init_app_state<R: tauri::Runtime>(
     ));
     #[cfg(not(any(test, feature = "e2e-bridge")))]
     let lsp_service = Arc::new(LspService::from_app_handle(app_handle, home.clone()));
-    let initial_workspace = ConfigService::resolve_initial_workspace();
-    app_handle.manage(WorkspaceState(Arc::new(Mutex::new(
-        WorkspaceService::with_initial_workspace(home, initial_workspace, lsp_service.clone()),
-    ))));
+    let workspace_path = ConfigService::resolve_desktop_workspace();
+    app_handle.manage(WorkspaceState(Arc::new(Mutex::new(WorkspaceService::new(
+        home,
+        workspace_path,
+        lsp_service.clone(),
+    )))));
     app_handle.manage(LspState(lsp_service));
     Ok(())
 }

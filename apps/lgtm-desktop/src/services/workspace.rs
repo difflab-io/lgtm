@@ -26,24 +26,18 @@ pub struct WorkspaceService {
 }
 
 impl WorkspaceService {
-    /// Selects the default workspace under the supplied home directory with a no-op LSP service.
-    pub fn from_home(home: PathBuf) -> Self {
-        let lsp_service = Arc::new(LspService::noop(home.clone()));
-        Self::with_initial_workspace(home, None, lsp_service)
-    }
-
-    /// Selects `initial_workspace` when provided and valid on disk (otherwise the default workspace under `home`) and binds `lsp_service`.
-    pub fn with_initial_workspace(
+    /// Creates a workspace service rooted at `workspace_path` when provided and valid on disk (otherwise `<home>/.lgtm/workspace`) and binds `lsp_service`.
+    pub fn new(
         home: PathBuf,
-        initial_workspace: Option<PathBuf>,
+        workspace_path: Option<PathBuf>,
         lsp_service: Arc<LspService>,
     ) -> Self {
         let default_workspace = Workspace::from_home(home);
-        if let Some(initial) = initial_workspace.filter(|path| path.is_dir())
-            && initial != default_workspace.root
+        if let Some(path) = workspace_path.filter(|path| path.is_dir())
+            && path != default_workspace.root
         {
             return Self {
-                workspace: Workspace::from_path(initial),
+                workspace: Workspace::from_path(path),
                 default_workspace,
                 custom_root: true,
                 lsp_service,
@@ -398,7 +392,12 @@ mod tests {
     impl WorkspaceFixture {
         fn new() -> Self {
             let home = TempDir::new().unwrap();
-            let service = WorkspaceService::from_home(home.path().to_path_buf());
+            let home_path = home.path().to_path_buf();
+            let service = WorkspaceService::new(
+                home_path.clone(),
+                None,
+                Arc::new(LspService::noop(home_path)),
+            );
             Self { home, service }
         }
 
@@ -433,15 +432,15 @@ mod tests {
             }
 
             #[test]
-            fn should_open_initial_workspace_when_configured_from_cli_or_env() {
+            fn should_open_configured_workspace_path_when_provided() {
                 // Arrange
                 let home = TempDir::new().unwrap();
-                let initial_dir = TempDir::new().unwrap();
-                fs::write(initial_dir.path().join("main.rs"), "fn main() {}\n").unwrap();
+                let workspace_dir = TempDir::new().unwrap();
+                fs::write(workspace_dir.path().join("main.rs"), "fn main() {}\n").unwrap();
                 let lsp_service = Arc::new(LspService::noop(home.path().to_path_buf()));
-                let mut service = WorkspaceService::with_initial_workspace(
+                let mut service = WorkspaceService::new(
                     home.path().to_path_buf(),
-                    Some(initial_dir.path().to_path_buf()),
+                    Some(workspace_dir.path().to_path_buf()),
                     lsp_service,
                 );
 
@@ -451,7 +450,7 @@ mod tests {
                 // Assert
                 assert_eq!(
                     PathBuf::from(&opened.root),
-                    initial_dir.path().canonicalize().unwrap()
+                    workspace_dir.path().canonicalize().unwrap()
                 );
                 assert_eq!(opened.entries.len(), 1);
                 assert_eq!(opened.entries[0].name, "main.rs");

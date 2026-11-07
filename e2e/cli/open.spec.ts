@@ -9,10 +9,50 @@ import { useTestHarness } from '../common/fixtures.js'
 import { binary, command } from '../common/test-harness.js'
 import { waitFor } from '../common/test-utils.js'
 
-describe('Given an existing workspace directory', { tags: ['e2e', 'cli', 'open'] }, () => {
+describe('When running lgtm open', { tags: ['e2e', 'cli', 'open'] }, () => {
   const fixture = useTestHarness('cli')
 
-  describe('When launching the desktop app from the CLI', () => {
+  describe('Given the desktop binary is missing', () => {
+    it('should fail with not_found', async () => {
+      // Arrange
+      const { runtime } = fixture()
+      const missingDesktop = join(runtime.directory, 'missing-lgtm-desktop')
+      const env = { ...runtime.env, LGTM_DESKTOP_BIN: missingDesktop }
+
+      // Act
+      const result = await command(binary('lgtm'), ['open', '.', '--json'], {
+        cwd: runtime.workspace,
+        env,
+      })
+
+      // Assert
+      expect(result.code).not.toBe(0)
+      expect(JSON.parse(result.stdout).error.code).toBe('not_found')
+    })
+  })
+
+  describe('Given the desktop binary is present and the workspace is missing', () => {
+    it('should fail with invalid_argument', async () => {
+      // Arrange
+      const { runtime } = fixture()
+      const fakeDesktop = join(runtime.directory, 'fake-lgtm-desktop')
+      await writeFile(fakeDesktop, '#!/bin/sh\nexit 0\n')
+      await chmod(fakeDesktop, 0o755)
+      const env = { ...runtime.env, LGTM_DESKTOP_BIN: fakeDesktop }
+
+      // Act
+      const missing = await command(binary('lgtm'), ['open', 'does-not-exist', '--json'], {
+        cwd: runtime.workspace,
+        env,
+      })
+
+      // Assert
+      expect(missing.code).not.toBe(0)
+      expect(JSON.parse(missing.stdout).error.code).toBe('invalid_argument')
+    })
+  })
+
+  describe('Given the desktop binary and workspace are present', () => {
     it(
       'should resolve the workspace directory and spawn lgtm-desktop via lgtm open [path] and lgtm [path]',
       { tags: ['smoke'] },
@@ -69,42 +109,5 @@ describe('Given an existing workspace directory', { tags: ['e2e', 'cli', 'open']
         ])
       },
     )
-  })
-
-  describe('When the configured desktop binary does not exist', () => {
-    it('should fail with not_found', async () => {
-      // Arrange
-      const { runtime } = fixture()
-      const missingDesktop = join(runtime.directory, 'missing-lgtm-desktop')
-      const env = { ...runtime.env, LGTM_DESKTOP_BIN: missingDesktop }
-
-      // Act
-      const result = await command(binary('lgtm'), ['open', '.', '--json'], {
-        cwd: runtime.workspace,
-        env,
-      })
-
-      // Assert
-      expect(result.code).not.toBe(0)
-      expect(JSON.parse(result.stdout).error.code).toBe('not_found')
-    })
-  })
-})
-
-describe('Given a non-existent workspace path', { tags: ['e2e', 'cli', 'open'] }, () => {
-  const fixture = useTestHarness('cli')
-
-  describe('When launching the desktop app with lgtm open', () => {
-    it('should fail with invalid_argument', async () => {
-      // Arrange
-      const { runtime } = fixture()
-
-      // Act
-      const missing = await runtime.cli(['open', 'does-not-exist', '--json'])
-
-      // Assert
-      expect(missing.code).not.toBe(0)
-      expect(JSON.parse(missing.stdout).error.code).toBe('invalid_argument')
-    })
   })
 })

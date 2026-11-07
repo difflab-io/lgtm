@@ -171,8 +171,8 @@ impl ConfigService {
         })
     }
 
-    /// Resolves the initial workspace directory for `lgtm-desktop` from `LGTM_WORKSPACE` or the first non-flag CLI argument.
-    pub fn resolve_initial_workspace() -> Option<PathBuf> {
+    /// Resolves the workspace directory passed to `lgtm-desktop` via `LGTM_WORKSPACE` or the first non-flag CLI argument.
+    pub fn resolve_desktop_workspace() -> Option<PathBuf> {
         if let Some(env_path) = std::env::var_os(LGTM_WORKSPACE_ENV)
             .map(PathBuf::from)
             .filter(|path| !path.as_os_str().is_empty())
