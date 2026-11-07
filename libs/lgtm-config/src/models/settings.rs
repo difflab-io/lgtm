@@ -13,24 +13,17 @@ pub const DEFAULT_SCHEMA_URL: &str = concat!(
     "/schemas/config.schema.json",
 );
 
-/// Named line wrapping presets persisted under `editor.lineWrapping`.
+/// Line wrapping mode persisted under `editor.lineWrapping` (`"off"`, `"auto"`, or a column width).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Type, Default)]
 #[serde(rename_all = "lowercase")]
-pub enum LineWrapPreset {
+pub enum LineWrap {
     /// Disable line wrapping (`off`).
     Off,
     /// Wrap lines automatically at the editor viewport width (`auto`).
     #[default]
     Auto,
-}
-
-/// Line wrapping mode persisted under `editor.lineWrapping` (`"off"`, `"auto"`, or a column width).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Type)]
-#[serde(untagged)]
-pub enum LineWrap {
-    /// Preset line wrapping mode (`"off"` or `"auto"`).
-    Preset(LineWrapPreset),
     /// Fixed character column width at which lines wrap.
+    #[serde(untagged)]
     Column(u32),
 }
 
@@ -353,11 +346,5 @@ impl UserSettingsPatch {
             }
         }
         (global, project)
-    }
-}
-
-impl Default for LineWrap {
-    fn default() -> Self {
-        Self::Preset(LineWrapPreset::Auto)
     }
 }

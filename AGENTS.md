@@ -7,7 +7,7 @@
 - During alpha, update branch-introduced contracts directly without compatibility shims or duplicate fields.
 - Expose database queries and mutations only through named repository methods in [`libs/lgtm-db`](libs/lgtm-db/src/lib.rs). Keep SeaORM `Entity` and `ActiveModel` types `pub(crate)`; never expose raw connections, query builders, or raw SQL to callers.
 - Models validate, map data, and implement pure domain behavior; services own persistence orchestration, transactions, and external I/O.
-- Give each file and service a single responsibility; extract distinct capabilities (such as caching or desktop lifecycle orchestration) into dedicated model and service modules with their own integration suites.
+- Give each file and service a single responsibility; extract distinct capabilities (such as caching, configuration, or LSP orchestration) into dedicated model and service modules with their own integration suites, and wire event handling and cross-service coordination in the application entry point (`app.rs` / `Shell.svelte`) rather than emitting framework events or calling sibling services inside domain services.
 - Keep CLI review and comment commands as thin RPC clients over `lgtm-forge`. Preserve daemon and health behavior; do not embed review persistence in `lgtm-cli`.
 - Establish tracing spans at CLI/RPC boundaries (`#[tracing::instrument]`). Services emit tracing events and never store request spans.
 - Preserve pinned Neovim dependencies in the plugin setup, source-switch installer, and E2E harness (including NuiComponents/NUI and optional Kak).

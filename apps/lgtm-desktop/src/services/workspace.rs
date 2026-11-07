@@ -2,23 +2,16 @@ use std::{
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::Arc,
-};
-
-use lgtm_config::{
-    ConfigDocument, ConfigFormat, ConfigScope, ConfigService, ResolvedConfigSnapshot,
-    UserSettingsPatch,
 };
 
 use crate::{
     error::{Result, error},
     models::{FileContent, Workspace, WorkspaceListing, WorkspaceNode},
-    services::LspService,
 };
 
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
 
-/// Browses and mutates entries within the active local workspace and coordinates LSP document lifecycle.
+/// Browses and mutates entries within the active local workspace directory.
 pub struct WorkspaceService {
     /// The default workspace directory under the user's home directory.
     default_workspace: Workspace,
@@ -26,31 +19,16 @@ pub struct WorkspaceService {
     workspace: Workspace,
     /// Whether the active workspace was explicitly chosen on disk.
     custom_root: bool,
-    /// Configuration service resolving global and workspace settings.
-    config_service: ConfigService,
-    /// Desktop LSP service bound to the active workspace lifecycle.
-    lsp_service: Arc<LspService>,
 }
 
 impl WorkspaceService {
-    /// Selects the default workspace under the supplied home directory with a no-op LSP service.
+    /// Selects the default workspace under the supplied home directory.
     pub fn from_home(home: PathBuf) -> Self {
-        let lsp_service = Arc::new(LspService::noop(home.clone()));
-        Self::with_lsp(home, lsp_service)
+        Self::new(home, None)
     }
 
-    /// Selects the default workspace under `home` and binds `lsp_service` to workspace lifecycle operations.
-    pub fn with_lsp(home: PathBuf, lsp_service: Arc<LspService>) -> Self {
-        Self::new(home, None, lsp_service)
-    }
-
-    /// Creates a workspace service rooted at `workspace_path` when provided and valid on disk (otherwise `<home>/.lgtm/workspace`) and binds `lsp_service`.
-    pub fn new(
-        home: PathBuf,
-        workspace_path: Option<PathBuf>,
-        lsp_service: Arc<LspService>,
-    ) -> Self {
-        let config_service = ConfigService::from_home(home.clone());
+    /// Creates a workspace service rooted at `workspace_path` when provided and valid on disk (otherwise `<home>/.lgtm/workspace`).
+    pub fn new(home: PathBuf, workspace_path: Option<PathBuf>) -> Self {
         let default_workspace = Workspace::from_home(home);
         if let Some(path) = workspace_path.filter(|path| path.is_dir())
             && path != default_workspace.root
@@ -59,24 +37,24 @@ impl WorkspaceService {
                 workspace: Workspace::from_path(path),
                 default_workspace,
                 custom_root: true,
-                config_service,
-                lsp_service,
             };
         }
         Self {
             workspace: default_workspace.clone(),
             default_workspace,
             custom_root: false,
-            config_service,
-            lsp_service,
         }
     }
 
     // Public ------------------------------------------------------------------
 
-    /// Opens the active workspace or switches to a chosen directory on disk, warming up workspace language servers.
+    /// Returns whether the active workspace was explicitly chosen rather than the default workspace.
+    pub fn is_custom_root(&self) -> bool {
+        self.custom_root
+    }
+
+    /// Opens the active workspace or switches to a chosen directory on disk.
     pub fn open(&mut self, path: Option<&str>) -> Result<WorkspaceListing> {
-        let previous_root = self.get_root().ok();
         if let Some(target) = path.map(str::trim).filter(|s| !s.is_empty()) {
             let candidate = PathBuf::from(target);
             if candidate == self.default_workspace.root {
@@ -89,109 +67,17 @@ impl WorkspaceService {
                 self.workspace = Workspace::from_path(candidate);
                 self.custom_root = true;
             }
-        } else if !self.custom_root
-            && let Ok(snapshot) = self.config_service.get_settings_snapshot(None)
-            && let Some(saved_root) = snapshot.effective.workspace.active_root
-        {
-            let candidate = PathBuf::from(saved_root.trim());
-            if candidate.is_dir() {
-                if candidate == self.default_workspace.root {
-                    self.workspace = self.default_workspace.clone();
-                    self.custom_root = false;
-                } else {
-                    self.workspace = Workspace::from_path(candidate);
-                    self.custom_root = true;
-                }
-            }
         }
         let root = self.get_root()?;
-        self.lsp_service
-            .switch_workspace(previous_root.as_deref(), &root);
         Ok(WorkspaceListing {
             root: root.to_string_lossy().into_owned(),
             entries: self.get_entries("")?,
         })
     }
 
-    /// Returns the resolved nested configuration snapshot across defaults, global config, and the active workspace config.
-    pub fn get_config_snapshot(&self) -> Result<ResolvedConfigSnapshot> {
-        let root = self.get_root().ok();
-        self.config_service
-            .get_settings_snapshot(root.as_deref())
-            .map_err(|err| error("config", err.to_string()))
-    }
-
-    /// Applies a nested `UserSettingsPatch` to `scope` (or routes each leaf by project override presence when `scope` is `None`).
-    pub fn update_config(
-        &self,
-        patch: UserSettingsPatch,
-        scope: Option<ConfigScope>,
-    ) -> Result<ResolvedConfigSnapshot> {
-        let root = self.get_root().ok();
-        let snapshot = self
-            .config_service
-            .update_settings(root.as_deref(), scope, patch)
-            .map_err(|err| error("config", err.to_string()))?;
-        if let Some(ws_root) = root.as_deref() {
-            let global_path = PathBuf::from(&snapshot.global_path);
-            if global_path.is_file()
-                && let Ok(content) = fs::read_to_string(&global_path)
-            {
-                let _ = self.lsp_service.did_save(ws_root, &global_path, &content);
-            }
-            let project_path = PathBuf::from(&snapshot.project_path);
-            if project_path.is_file()
-                && let Ok(content) = fs::read_to_string(&project_path)
-            {
-                let _ = self.lsp_service.did_save(ws_root, &project_path, &content);
-            }
-        }
-        self.lsp_service.emit_config_updated(&snapshot);
-        Ok(snapshot)
-    }
-
-    /// Ensures the global or project configuration file and schema exist on disk, synchronizes LSP, and returns the document.
-    pub fn open_config_document(
-        &self,
-        scope: ConfigScope,
-        format: Option<ConfigFormat>,
-    ) -> Result<ConfigDocument> {
-        let root = self.get_root()?;
-        let doc = self
-            .config_service
-            .open_config_document(Some(&root), scope, format)
-            .map_err(|err| error("config", err.to_string()))?;
-        let _ = self
-            .lsp_service
-            .open_or_sync_file(&root, Path::new(&doc.path), &doc.content);
-        Ok(doc)
-    }
-
-    /// Writes raw editor text to the global or project configuration file, notifies LSP `didSave`, and returns the updated document and optional snapshot.
-    pub fn write_config_document(
-        &self,
-        scope: ConfigScope,
-        content: &str,
-        format: Option<ConfigFormat>,
-    ) -> Result<(ConfigDocument, Option<ResolvedConfigSnapshot>)> {
-        let root = self.get_root()?;
-        let (doc, snapshot) = self
-            .config_service
-            .write_config_document(Some(&root), scope, content, format)
-            .map_err(|err| error("config", err.to_string()))?;
-        let _ = self
-            .lsp_service
-            .did_save(&root, Path::new(&doc.path), &doc.content);
-        if let Some(resolved) = &snapshot {
-            self.lsp_service.emit_config_updated(resolved);
-        }
-        Ok((doc, snapshot))
-    }
-
-    /// Resolves either a workspace-relative path or an active global/project config path for LSP operations.
-    pub fn get_lsp_file_path(&self, relative_or_config: &str) -> Result<PathBuf> {
+    /// Resolves either a workspace-relative path or an active global/project config path.
+    pub fn get_lsp_file_path(&self, lgtm_home: &Path, relative_or_config: &str) -> Result<PathBuf> {
         let candidate = Path::new(relative_or_config);
-        let lgtm_home = self.config_service.get_lgtm_home_dir();
         if let Ok(canon_home) = lgtm_home.canonicalize()
             && let Ok(canon_candidate) = candidate.canonicalize()
             && canon_candidate.parent() == Some(canon_home.as_path())
@@ -251,12 +137,11 @@ impl WorkspaceService {
         Ok(entries)
     }
 
-    /// Reads UTF-8 text and revision hash for a workspace-relative file and synchronizes it with its LSP server.
+    /// Reads UTF-8 text and revision hash for a workspace-relative file.
     pub fn get_file_content(&self, relative: &str) -> Result<FileContent> {
         if relative.is_empty() {
             return Err(error("unsupported", "Choose a file inside the workspace."));
         }
-        let root = self.get_root()?;
         let path = self.get_entry_path(relative)?;
         if !fs::metadata(&path)?.is_file() {
             return Err(error("unsupported", "Choose a file inside the workspace."));
@@ -275,14 +160,10 @@ impl WorkspaceService {
                 "This file is larger than the 16 MB viewing limit.",
             ));
         }
-        let content = FileContent::from_bytes(bytes)?;
-        let (language_id, lsp_status) =
-            self.lsp_service
-                .open_or_sync_file(&root, &path, &content.content);
-        Ok(content.with_lsp(language_id, lsp_status))
+        FileContent::from_bytes(bytes)
     }
 
-    /// Writes UTF-8 text to an existing workspace-relative file, notifies LSP `didSave`, and returns its new revision.
+    /// Writes UTF-8 text to an existing workspace-relative file and returns its new revision.
     pub fn write_file(&self, relative: &str, content: &str) -> Result<FileContent> {
         if relative.is_empty() {
             return Err(error("unsupported", "Choose a file inside the workspace."));
@@ -308,9 +189,7 @@ impl WorkspaceService {
             .open(&path)?;
         file.write_all(content.as_bytes())?;
         file.sync_all()?;
-        let written = FileContent::from_bytes(content.as_bytes().to_vec())?;
-        let _ = self.lsp_service.did_save(&root, &path, content);
-        Ok(written)
+        FileContent::from_bytes(content.as_bytes().to_vec())
     }
 
     /// Creates a new file inside a workspace-relative directory without overwriting existing files.
@@ -379,7 +258,7 @@ impl WorkspaceService {
         })
     }
 
-    /// Renames a file or folder exclusively without overwriting an existing entry and closes its old LSP document.
+    /// Renames a file or folder exclusively without overwriting an existing entry.
     pub fn rename(&self, relative: &str, name: &str) -> Result<WorkspaceNode> {
         let name = WorkspaceNode::validate_name(name)?;
         let source = self.get_entry_path(relative)?;
@@ -443,7 +322,6 @@ impl WorkspaceService {
                 ));
             }
         }
-        let _ = self.lsp_service.did_close(&root, &source);
         let path = target
             .strip_prefix(root)
             .unwrap()
@@ -456,7 +334,7 @@ impl WorkspaceService {
         })
     }
 
-    /// Moves a workspace entry to the system Trash (or permanently removes it in E2E harness runs) and closes its LSP document.
+    /// Moves a workspace entry to the system Trash (or permanently removes it in E2E harness runs).
     pub fn delete(&self, relative: &str) -> Result<()> {
         if relative.is_empty() {
             return Err(error(
@@ -479,11 +357,9 @@ impl WorkspaceService {
             } else {
                 fs::remove_file(&path)?;
             }
-            let _ = self.lsp_service.did_close(&root, &path);
             return Ok(());
         }
         trash::delete(&path).map_err(|e| error("io", e.to_string()))?;
-        let _ = self.lsp_service.did_close(&root, &path);
         Ok(())
     }
 
@@ -529,12 +405,7 @@ mod tests {
     impl WorkspaceFixture {
         fn new() -> Self {
             let home = TempDir::new().unwrap();
-            let home_path = home.path().to_path_buf();
-            let service = WorkspaceService::new(
-                home_path.clone(),
-                None,
-                Arc::new(LspService::noop(home_path)),
-            );
+            let service = WorkspaceService::from_home(home.path().to_path_buf());
             Self { home, service }
         }
 
@@ -574,11 +445,9 @@ mod tests {
                 let home = TempDir::new().unwrap();
                 let workspace_dir = TempDir::new().unwrap();
                 fs::write(workspace_dir.path().join("main.rs"), "fn main() {}\n").unwrap();
-                let lsp_service = Arc::new(LspService::noop(home.path().to_path_buf()));
                 let mut service = WorkspaceService::new(
                     home.path().to_path_buf(),
                     Some(workspace_dir.path().to_path_buf()),
-                    lsp_service,
                 );
 
                 // Act

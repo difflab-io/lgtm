@@ -39,8 +39,14 @@
     "LineWrap": {
       "anyOf": [
         {
-          "$ref": "#/$defs/LineWrapPreset",
-          "description": "Preset line wrapping mode (`\"off\"` or `\"auto\"`)."
+          "const": "off",
+          "description": "Disable line wrapping (`off`).",
+          "type": "string"
+        },
+        {
+          "const": "auto",
+          "description": "Wrap lines automatically at the editor viewport width (`auto`).",
+          "type": "string"
         },
         {
           "description": "Fixed character column width at which lines wrap.",
@@ -50,21 +56,6 @@
         }
       ],
       "description": "Line wrapping mode persisted under `editor.lineWrapping` (`\"off\"`, `\"auto\"`, or a column width)."
-    },
-    "LineWrapPreset": {
-      "description": "Named line wrapping presets persisted under `editor.lineWrapping`.",
-      "oneOf": [
-        {
-          "const": "off",
-          "description": "Disable line wrapping (`off`).",
-          "type": "string"
-        },
-        {
-          "const": "auto",
-          "description": "Wrap lines automatically at the editor viewport width (`auto`).",
-          "type": "string"
-        }
-      ]
     },
     "ThemeMode": {
       "description": "Supported color theme preferences persisted under `appearance.theme`.",

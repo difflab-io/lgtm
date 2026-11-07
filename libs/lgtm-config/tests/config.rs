@@ -1,6 +1,6 @@
 use lgtm_config::{
     AppearanceSettingsPatch, ConfigFormat, ConfigScope, ConfigService, DEFAULT_SCHEMA_URL,
-    EditorSettingsPatch, LgtmConfigError, LineWrap, LineWrapPreset, ThemeMode, UserSettingsPatch,
+    EditorSettingsPatch, LgtmConfigError, LineWrap, ThemeMode, UserSettingsPatch,
     WorkspaceSettingsPatch,
 };
 
@@ -220,7 +220,7 @@ mod given_global_and_project_nested_json_or_yaml_configs {
                             recent_roots: Some(vec!["/tmp/ws-next".to_string()]),
                         }),
                         editor: Some(EditorSettingsPatch {
-                            line_wrapping: Some(LineWrap::Preset(LineWrapPreset::Off)),
+                            line_wrapping: Some(LineWrap::Off),
                         }),
                     },
                 )
@@ -228,17 +228,14 @@ mod given_global_and_project_nested_json_or_yaml_configs {
 
             // Assert
             assert_eq!(updated.effective.appearance.theme, ThemeMode::System);
-            assert_eq!(
-                updated.effective.editor.line_wrapping,
-                LineWrap::Preset(LineWrapPreset::Off)
-            );
+            assert_eq!(updated.effective.editor.line_wrapping, LineWrap::Off);
             assert_eq!(
                 updated.global.appearance.and_then(|a| a.theme),
                 Some(ThemeMode::Dark)
             );
             assert_eq!(
                 updated.global.editor.and_then(|e| e.line_wrapping),
-                Some(LineWrap::Preset(LineWrapPreset::Off))
+                Some(LineWrap::Off)
             );
             assert_eq!(
                 updated.global.workspace.and_then(|w| w.active_root),
@@ -291,10 +288,7 @@ mod given_global_and_project_nested_json_or_yaml_configs {
             assert_ne!(opened.revision, written_doc.revision);
             let resolved = snapshot.expect("expected valid snapshot after write");
             assert_eq!(resolved.effective.appearance.theme, ThemeMode::Light);
-            assert_eq!(
-                resolved.effective.editor.line_wrapping,
-                LineWrap::Preset(LineWrapPreset::Off)
-            );
+            assert_eq!(resolved.effective.editor.line_wrapping, LineWrap::Off);
         }
     }
 }

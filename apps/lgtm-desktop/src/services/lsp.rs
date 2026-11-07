@@ -1,85 +1,38 @@
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::path::Path;
 
-use lgtm_config::{ConfigService, ResolvedConfigSnapshot};
+use lgtm_config::ConfigService;
 use lgtm_lsp::{
     LgtmLspManager, LspDiagnosticsBuffer, LspEvent, LspHoverResult, LspLocation,
     LspServerStatusEvent, LspWorkspaceSnapshot,
 };
-use tauri::Emitter;
 
 use crate::error::{Result, error};
-#[cfg(any(test, feature = "e2e-bridge"))]
-use crate::services::BridgeEventForwarder;
 
-/// Desktop-scoped LSP orchestration service managing Tauri event forwarding, workspace transitions, and cleanup.
+/// Desktop LSP orchestration service delegating workspace lifecycle and document operations to `LgtmLspManager`.
 #[derive(Clone)]
 pub struct LspService {
     manager: LgtmLspManager,
-    config_emitter: Arc<dyn Fn(&ResolvedConfigSnapshot) + Send + Sync>,
 }
 
 impl LspService {
-    /// Creates a desktop `LspService` wired to emit `lsp-status`, `lsp-diagnostics`, and `config-updated` events on `app_handle`.
-    pub fn from_app_handle<R: tauri::Runtime>(
-        app_handle: &tauri::AppHandle<R>,
-        home: PathBuf,
-        #[cfg(any(test, feature = "e2e-bridge"))] event_forwarder: Option<BridgeEventForwarder>,
-    ) -> Self {
-        let config_service = ConfigService::from_home(home);
-        let emit_handle = app_handle.clone();
-        #[cfg(any(test, feature = "e2e-bridge"))]
-        let config_forwarder = event_forwarder.clone();
-        let config_handle = app_handle.clone();
-        let manager = LgtmLspManager::new(config_service, move |event| match event {
-            LspEvent::Status(payload) => {
-                #[cfg(any(test, feature = "e2e-bridge"))]
-                if let Some(cb) = &event_forwarder
-                    && let Ok(val) = serde_json::to_value(&payload)
-                {
-                    cb("lsp-status", val);
-                }
-                let _ = emit_handle.emit("lsp-status", payload);
-            }
-            LspEvent::Diagnostics(payload) => {
-                #[cfg(any(test, feature = "e2e-bridge"))]
-                if let Some(cb) = &event_forwarder
-                    && let Ok(val) = serde_json::to_value(&payload)
-                {
-                    cb("lsp-diagnostics", val);
-                }
-                let _ = emit_handle.emit("lsp-diagnostics", payload);
-            }
-        });
-        let config_emitter = Arc::new(move |snapshot: &ResolvedConfigSnapshot| {
-            #[cfg(any(test, feature = "e2e-bridge"))]
-            if let Some(cb) = &config_forwarder
-                && let Ok(val) = serde_json::to_value(snapshot)
-            {
-                cb("config-updated", val);
-            }
-            let _ = config_handle.emit("config-updated", snapshot.clone());
-        });
+    /// Creates an `LspService` backed by `config_service` that forwards `LspEvent` notifications to `on_event`.
+    pub fn new<F>(config_service: ConfigService, on_event: F) -> Self
+    where
+        F: Fn(LspEvent) + Send + Sync + 'static,
+    {
         Self {
-            manager,
-            config_emitter,
+            manager: LgtmLspManager::new(config_service, on_event),
         }
     }
 
-    /// Creates a no-op `LspService` for unit tests where no language servers are registered.
-    pub fn noop(home: PathBuf) -> Self {
+    /// Creates a no-op `LspService` for unit tests where no language servers are spawned.
+    pub fn noop(config_service: ConfigService) -> Self {
         Self {
-            manager: LgtmLspManager::noop(ConfigService::from_home(home)),
-            config_emitter: Arc::new(|_| {}),
+            manager: LgtmLspManager::noop(config_service),
         }
     }
 
     // Public ------------------------------------------------------------------
-
-    /// Emits a `config-updated` event with the latest resolved configuration snapshot.
-    pub fn emit_config_updated(&self, snapshot: &ResolvedConfigSnapshot) {
-        (self.config_emitter)(snapshot);
-    }
 
     /// Shuts down language servers for `previous_root` when switching workspaces and warms up `next_root`.
     pub fn switch_workspace(&self, previous_root: Option<&Path>, next_root: &Path) {

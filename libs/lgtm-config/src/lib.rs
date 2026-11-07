@@ -20,7 +20,6 @@ pub use models::settings::DEFAULT_SCHEMA_URL;
 pub use models::settings::EditorSettings;
 pub use models::settings::EditorSettingsPatch;
 pub use models::settings::LineWrap;
-pub use models::settings::LineWrapPreset;
 pub use models::settings::ResolvedConfigSnapshot;
 pub use models::settings::ThemeMode;
 pub use models::settings::UserSettings;

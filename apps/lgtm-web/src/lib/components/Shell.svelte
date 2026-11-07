@@ -39,13 +39,17 @@
         windowBridge: client.themeWindowBridge?.(),
       }),
   )
-  workspace.setThemeHandler((nextTheme) => {
-    if (theme.preference !== nextTheme) {
-      theme.setPreference(nextTheme)
-    }
+  // Lifecycle -----------------------------------------------------------------
+  $effect(() => {
+    if (!workspace.settings.snapshot) return
+    const nextTheme = workspace.settings.theme
+    untrack(() => {
+      if (theme.preference !== nextTheme) {
+        theme.setPreference(nextTheme)
+      }
+    })
   })
 
-  // Lifecycle -----------------------------------------------------------------
   onMount(() => {
     let active = true
     const handleKeydown = (event: KeyboardEvent) => {
@@ -93,7 +97,10 @@
         .catch(() => {})
       void client
         .registerConfigHandlers?.({
-          onConfigUpdated: (snapshot) => workspace.handleConfigUpdated(snapshot),
+          onConfigUpdated: (snapshot) => {
+            workspace.settings.handleUpdated(snapshot)
+            void workspace.refreshCleanConfigTabs()
+          },
         })
         .then((stops) => {
           for (const stop of stops) {
@@ -165,7 +172,7 @@
         value={theme.preference}
         onchange={(next) => {
           theme.setPreference(next)
-          void workspace.setThemePreference(next)
+          void workspace.settings.setTheme(next).then(() => workspace.refreshCleanConfigTabs())
         }}
       />
     </div>

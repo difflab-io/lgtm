@@ -7,9 +7,6 @@ import {
   type FileContent,
   type ConfigFormat,
   type ConfigScope,
-  type LineWrap,
-  type ResolvedConfigSnapshot,
-  type ThemeMode,
   type LspDiagnostic,
   type LspFileDiagnosticsEvent,
   type LspServerStatusEvent,
@@ -42,7 +39,6 @@ export class WorkspaceService {
   readonly settings: SettingsService
   defaultRoot = $state('')
   root = $state('~/.lgtm/workspace')
-  recentWorkspaces = $state<string[]>([])
   entries = $state<WorkspaceNode[]>([])
   loading = $state(true)
   error = $state<string | null>(null)
@@ -74,19 +70,10 @@ export class WorkspaceService {
   private saveTimer: ReturnType<typeof setTimeout> | null = null
   private inFlightSave: Promise<void> | null = null
   private openRequestSeq = 0
-  private onThemeSnapshot?: (theme: ThemeMode) => void
 
   constructor(private client: WorkspaceClient) {
     this.lsp = new LspService(client)
     this.settings = new SettingsService(client)
-  }
-
-  get lineWrapping(): LineWrap {
-    return this.settings.lineWrapping
-  }
-
-  setThemeHandler(handler: (theme: ThemeMode) => void) {
-    this.onThemeSnapshot = handler
   }
 
   get blocked() {
@@ -183,7 +170,7 @@ export class WorkspaceService {
   }
 
   get items() {
-    const roots = this.recentWorkspaces.length ? this.recentWorkspaces : [this.root]
+    const roots = this.settings.recentRoots.length ? this.settings.recentRoots : [this.root]
     return [
       ...roots.map((path) => ({
         label:
@@ -233,9 +220,7 @@ export class WorkspaceService {
         this.defaultRoot = result.root
       }
       this.root = result.root
-      if (!this.recentWorkspaces.includes(result.root)) {
-        this.recentWorkspaces = [...this.recentWorkspaces, result.root]
-      }
+      this.settings.rememberRoot(result.root)
       this.entries = result.entries
       this.listed = {}
       this.tabs = []
@@ -244,43 +229,15 @@ export class WorkspaceService {
       this.clearSelected()
       this.treeVersion++
       if (path) {
-        void this.settings
-          .setWorkspaceRoots(result.root, this.recentWorkspaces)
-          .then((snapshot) => {
-            if (this.active && snapshot) this.applyConfigSnapshot(snapshot)
-          })
+        void this.settings.setWorkspaceRoots(result.root)
       } else {
-        void this.loadConfig()
+        void this.settings.load()
       }
       void this.syncLspState()
     } catch (error) {
       if (this.active) this.error = errorMessage(error)
     } finally {
       if (this.active) this.loading = false
-    }
-  }
-
-  async loadConfig() {
-    if (!this.active) return
-    const snapshot = await this.settings.load()
-    if (!this.active || !snapshot) return
-    this.applyConfigSnapshot(snapshot)
-  }
-
-  async setThemePreference(theme: ThemeMode) {
-    this.onThemeSnapshot?.(theme)
-    const snapshot = await this.settings.setTheme(theme)
-    if (!this.active || !snapshot) return
-    this.applyConfigSnapshot(snapshot)
-    await this.refreshCleanConfigTabs()
-  }
-
-  handleConfigUpdated(snapshot: ResolvedConfigSnapshot) {
-    if (!this.active) return
-    this.settings.handleUpdated(snapshot)
-    this.applyConfigSnapshot(snapshot)
-    if (!this.dirtyConfig) {
-      void this.refreshCleanConfigTabs()
     }
   }
 
@@ -317,7 +274,7 @@ export class WorkspaceService {
       }
       this.fileVersion++
       this.focusRequest++
-      void this.loadConfig()
+      void this.settings.load()
       void this.syncLspState()
     } catch (error) {
       if (this.active && requestId === this.openRequestSeq) {
@@ -598,7 +555,7 @@ export class WorkspaceService {
               languageId: savedDoc.languageId,
             }
           }
-          await this.loadConfig()
+          await this.settings.load()
         })
         .catch((error) => {
           if (this.active) this.openingError = errorMessage(error)
@@ -833,19 +790,8 @@ export class WorkspaceService {
     this.active = false
   }
 
-  private applyConfigSnapshot(snapshot: ResolvedConfigSnapshot) {
-    const effectiveTheme = snapshot.effective.appearance?.theme ?? 'system'
-    this.onThemeSnapshot?.(effectiveTheme)
-    const recentRoots = snapshot.effective.workspace?.recentRoots ?? []
-    if (recentRoots.length > 0) {
-      this.recentWorkspaces = recentRoots.includes(this.root)
-        ? recentRoots
-        : [...recentRoots, this.root]
-    }
-  }
-
-  private async refreshCleanConfigTabs() {
-    if (!this.active) return
+  async refreshCleanConfigTabs() {
+    if (!this.active || this.dirtyConfig) return
     for (const tab of this.tabs) {
       if (tab.kind !== 'config' || !tab.configScope || tab.dirty) continue
       try {

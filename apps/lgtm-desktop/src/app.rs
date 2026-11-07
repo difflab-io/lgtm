@@ -10,7 +10,8 @@ use lgtm_config::{
     UserSettingsPatch,
 };
 use lgtm_lsp::{
-    LspDiagnosticsBuffer, LspHoverResult, LspLocation, LspServerStatusEvent, LspWorkspaceSnapshot,
+    LspDiagnosticsBuffer, LspEvent, LspHoverResult, LspLocation, LspServerStatusEvent,
+    LspWorkspaceSnapshot,
 };
 use tauri::{Emitter, Manager, State};
 
@@ -28,11 +29,56 @@ pub struct WorkspaceState(
     pub Arc<Mutex<WorkspaceService>>,
 );
 
+/// Shared configuration service access for Tauri command handlers.
+pub struct ConfigState(
+    /// The shared configuration service across all Tauri settings and workspace commands.
+    pub ConfigService,
+);
+
 /// Shared desktop LSP service access for Tauri command handlers.
 pub struct LspState(
     /// The shared desktop LSP orchestration service across all Tauri workspace and editor commands.
     pub Arc<LspService>,
 );
+
+type EventSink = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
+
+/// Application-wide event emitter wired in `app.rs` to publish backend events to the webview and test bridge.
+#[derive(Clone)]
+pub struct AppEvents(EventSink);
+
+impl AppEvents {
+    #[cfg(any(test, feature = "e2e-bridge"))]
+    pub(crate) fn from_app_handle<R: tauri::Runtime>(
+        app_handle: &tauri::AppHandle<R>,
+        event_forwarder: Option<BridgeEventForwarder>,
+    ) -> Self {
+        let emit_handle = app_handle.clone();
+        Self(Arc::new(move |event, payload| {
+            if let Some(cb) = &event_forwarder {
+                cb(event, payload.clone());
+            }
+            let _ = emit_handle.emit(event, payload);
+        }))
+    }
+
+    #[cfg(not(any(test, feature = "e2e-bridge")))]
+    pub(crate) fn from_app_handle<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) -> Self {
+        let emit_handle = app_handle.clone();
+        Self(Arc::new(move |event, payload| {
+            let _ = emit_handle.emit(event, payload);
+        }))
+    }
+
+    // Public ------------------------------------------------------------------
+
+    /// Emits a named desktop event to the frontend webview and any registered test bridge forwarder.
+    pub fn emit<T: serde::Serialize>(&self, event: &str, payload: &T) {
+        if let Ok(value) = serde_json::to_value(payload) {
+            (self.0)(event, value);
+        }
+    }
+}
 
 /// Tracks whether the frontend has registered its quit lifecycle handlers.
 #[derive(Default)]
@@ -46,7 +92,7 @@ pub fn builder(workspace_home: Option<PathBuf>) -> tauri::Builder<tauri::Wry> {
     configure_builder(tauri::Builder::default(), workspace_home)
 }
 
-/// Configure any Tauri runtime builder with real workspace and LSP services and IPC handlers.
+/// Configure any Tauri runtime builder with real workspace, config, and LSP services and IPC handlers.
 pub fn configure_builder<R: tauri::Runtime>(
     builder: tauri::Builder<R>,
     workspace_home: Option<PathBuf>,
@@ -75,21 +121,26 @@ pub(crate) fn init_app_state<R: tauri::Runtime>(
         Some(home) => home,
         None => app_handle.path().home_dir()?,
     };
+    let config_service = ConfigService::from_home(home.clone());
     #[cfg(any(test, feature = "e2e-bridge"))]
-    let lsp_service = Arc::new(LspService::from_app_handle(
-        app_handle,
-        home.clone(),
-        event_forwarder,
-    ));
+    let events = AppEvents::from_app_handle(app_handle, event_forwarder);
     #[cfg(not(any(test, feature = "e2e-bridge")))]
-    let lsp_service = Arc::new(LspService::from_app_handle(app_handle, home.clone()));
-    let workspace_path = ConfigService::resolve_desktop_workspace();
-    app_handle.manage(WorkspaceState(Arc::new(Mutex::new(WorkspaceService::new(
-        home,
-        workspace_path,
-        lsp_service.clone(),
-    )))));
+    #[cfg(not(any(test, feature = "e2e-bridge")))]
+    let events = AppEvents::from_app_handle(app_handle);
+    let lsp_events = events.clone();
+    let lsp_service = Arc::new(LspService::new(
+        config_service.clone(),
+        move |event| match event {
+            LspEvent::Status(payload) => lsp_events.emit("lsp-status", &payload),
+            LspEvent::Diagnostics(payload) => lsp_events.emit("lsp-diagnostics", &payload),
+        },
+    ));
+    app_handle.manage(WorkspaceState(Arc::new(Mutex::new(
+        WorkspaceService::from_home(home),
+    ))));
+    app_handle.manage(ConfigState(config_service));
     app_handle.manage(LspState(lsp_service));
+    app_handle.manage(events);
     Ok(())
 }
 
@@ -179,7 +230,11 @@ pub fn handle_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
         && !app.webview_windows().is_empty()
     {
         api.prevent_exit();
-        let _ = app.emit("workspace-quit-requested", ());
+        if let Some(events) = app.try_state::<AppEvents>() {
+            events.emit("workspace-quit-requested", &());
+        } else {
+            let _ = app.emit("workspace-quit-requested", ());
+        }
     }
 }
 
@@ -221,9 +276,32 @@ async fn run_lsp_blocking<T: Send + 'static>(
 #[specta::specta]
 pub async fn workspace_open(
     state: State<'_, WorkspaceState>,
+    config: State<'_, ConfigState>,
+    lsp: State<'_, LspState>,
     path: Option<String>,
 ) -> Result<WorkspaceListing> {
-    run_blocking(state, move |w| w.open(path.as_deref())).await
+    let config_service = config.0.clone();
+    let lsp_service = lsp.0.clone();
+    run_blocking(state, move |w| {
+        let prev_root = w.get_root().ok();
+        let effective_path = match path {
+            Some(explicit) => Some(explicit),
+            None if !w.is_custom_root() => config_service
+                .get_settings_snapshot(None)
+                .ok()
+                .and_then(|snap| snap.effective.workspace.active_root)
+                .filter(|active| {
+                    !active.trim().is_empty() && std::path::Path::new(active).is_dir()
+                }),
+            None => None,
+        };
+        let listing = w.open(effective_path.as_deref())?;
+        if let Ok(new_root) = w.get_root() {
+            lsp_service.switch_workspace(prev_root.as_deref(), &new_root);
+        }
+        Ok(listing)
+    })
+    .await
 }
 
 /// Opens a native OS folder picker dialog.
@@ -251,9 +329,21 @@ pub async fn workspace_list(
 #[specta::specta]
 pub async fn workspace_read(
     state: State<'_, WorkspaceState>,
+    lsp: State<'_, LspState>,
     relative_path: String,
 ) -> Result<FileContent> {
-    run_blocking(state, move |w| w.get_file_content(&relative_path)).await
+    let lsp_service = lsp.0.clone();
+    run_blocking(state, move |w| {
+        let mut file = w.get_file_content(&relative_path)?;
+        if let (Ok(root), Ok(path)) = (w.get_root(), w.get_entry_path(&relative_path)) {
+            let (language_id, lsp_status) =
+                lsp_service.open_or_sync_file(&root, &path, &file.content);
+            file.language_id = language_id;
+            file.lsp_status = lsp_status;
+        }
+        Ok(file)
+    })
+    .await
 }
 
 /// Writes UTF-8 file contents to disk and notifies the language server (`textDocument/didSave`).
@@ -261,10 +351,19 @@ pub async fn workspace_read(
 #[specta::specta]
 pub async fn workspace_write(
     state: State<'_, WorkspaceState>,
+    lsp: State<'_, LspState>,
     relative_path: String,
     content: String,
 ) -> Result<FileContent> {
-    run_blocking(state, move |w| w.write_file(&relative_path, &content)).await
+    let lsp_service = lsp.0.clone();
+    run_blocking(state, move |w| {
+        let saved = w.write_file(&relative_path, &content)?;
+        if let (Ok(root), Ok(path)) = (w.get_root(), w.get_entry_path(&relative_path)) {
+            let _ = lsp_service.did_save(&root, &path, &content);
+        }
+        Ok(saved)
+    })
+    .await
 }
 
 /// Creates a new file inside a workspace-relative directory.
@@ -300,10 +399,20 @@ pub async fn workspace_create_folder(
 #[specta::specta]
 pub async fn workspace_rename(
     state: State<'_, WorkspaceState>,
+    lsp: State<'_, LspState>,
     relative_path: String,
     name: String,
 ) -> Result<WorkspaceNode> {
-    run_blocking(state, move |w| w.rename(&relative_path, &name)).await
+    let lsp_service = lsp.0.clone();
+    run_blocking(state, move |w| {
+        let old_target = w.get_root().ok().zip(w.get_entry_path(&relative_path).ok());
+        let node = w.rename(&relative_path, &name)?;
+        if let Some((root, old_path)) = old_target {
+            let _ = lsp_service.did_close(&root, &old_path);
+        }
+        Ok(node)
+    })
+    .await
 }
 
 /// Deletes a workspace entry and closes its LSP document URI.
@@ -311,9 +420,19 @@ pub async fn workspace_rename(
 #[specta::specta]
 pub async fn workspace_delete(
     state: State<'_, WorkspaceState>,
+    lsp: State<'_, LspState>,
     relative_path: String,
 ) -> Result<()> {
-    run_blocking(state, move |w| w.delete(&relative_path)).await
+    let lsp_service = lsp.0.clone();
+    run_blocking(state, move |w| {
+        let old_target = w.get_root().ok().zip(w.get_entry_path(&relative_path).ok());
+        w.delete(&relative_path)?;
+        if let Some((root, old_path)) = old_target {
+            let _ = lsp_service.did_close(&root, &old_path);
+        }
+        Ok(())
+    })
+    .await
 }
 
 /// Marks the frontend quit lifecycle listener as ready.
@@ -342,12 +461,17 @@ pub fn workspace_finish_quit<R: tauri::Runtime>(
 #[specta::specta]
 pub async fn lsp_did_change(
     state: State<'_, WorkspaceState>,
+    config: State<'_, ConfigState>,
     lsp: State<'_, LspState>,
     relative_path: String,
     content: String,
 ) -> Result<()> {
+    let lgtm_home = config.0.get_lgtm_home_dir();
     let (root, file_path) = run_blocking(state, move |w| {
-        Ok((w.get_root()?, w.get_lsp_file_path(&relative_path)?))
+        Ok((
+            w.get_root()?,
+            w.get_lsp_file_path(&lgtm_home, &relative_path)?,
+        ))
     })
     .await?;
     run_lsp_blocking(lsp, move |s| s.did_change(&root, &file_path, &content)).await
@@ -358,12 +482,17 @@ pub async fn lsp_did_change(
 #[specta::specta]
 pub async fn lsp_hover(
     state: State<'_, WorkspaceState>,
+    config: State<'_, ConfigState>,
     lsp: State<'_, LspState>,
     relative_path: String,
     offset: u32,
 ) -> Result<Option<LspHoverResult>> {
+    let lgtm_home = config.0.get_lgtm_home_dir();
     let (root, file_path) = run_blocking(state, move |w| {
-        Ok((w.get_root()?, w.get_lsp_file_path(&relative_path)?))
+        Ok((
+            w.get_root()?,
+            w.get_lsp_file_path(&lgtm_home, &relative_path)?,
+        ))
     })
     .await?;
     run_lsp_blocking(lsp, move |s| s.get_hover(&root, &file_path, offset)).await
@@ -374,12 +503,17 @@ pub async fn lsp_hover(
 #[specta::specta]
 pub async fn lsp_goto_definition(
     state: State<'_, WorkspaceState>,
+    config: State<'_, ConfigState>,
     lsp: State<'_, LspState>,
     relative_path: String,
     offset: u32,
 ) -> Result<Vec<LspLocation>> {
+    let lgtm_home = config.0.get_lgtm_home_dir();
     let (root, file_path) = run_blocking(state, move |w| {
-        Ok((w.get_root()?, w.get_lsp_file_path(&relative_path)?))
+        Ok((
+            w.get_root()?,
+            w.get_lsp_file_path(&lgtm_home, &relative_path)?,
+        ))
     })
     .await?;
     run_lsp_blocking(lsp, move |s| s.get_definition(&root, &file_path, offset)).await
@@ -426,8 +560,18 @@ pub async fn lsp_restart(
 /// Returns the resolved nested configuration snapshot across defaults, global settings, and project overrides.
 #[tauri::command]
 #[specta::specta]
-pub async fn config_get(state: State<'_, WorkspaceState>) -> Result<ResolvedConfigSnapshot> {
-    run_blocking(state, move |w| w.get_config_snapshot()).await
+pub async fn config_get(
+    state: State<'_, WorkspaceState>,
+    config: State<'_, ConfigState>,
+) -> Result<ResolvedConfigSnapshot> {
+    let config_service = config.0.clone();
+    run_blocking(state, move |w| {
+        let root = w.get_root().ok();
+        config_service
+            .get_settings_snapshot(root.as_deref())
+            .map_err(|err| error("io", err.to_string()))
+    })
+    .await
 }
 
 /// Applies a nested `UserSettingsPatch` to `scope` (or routes each leaf by project override presence when `scope` is `None`).
@@ -435,22 +579,43 @@ pub async fn config_get(state: State<'_, WorkspaceState>) -> Result<ResolvedConf
 #[specta::specta]
 pub async fn config_update(
     state: State<'_, WorkspaceState>,
+    config: State<'_, ConfigState>,
+    events: State<'_, AppEvents>,
     patch: UserSettingsPatch,
     scope: Option<ConfigScope>,
 ) -> Result<ResolvedConfigSnapshot> {
-    run_blocking(state, move |w| w.update_config(patch, scope)).await
+    let config_service = config.0.clone();
+    let app_events = events.inner().clone();
+    run_blocking(state, move |w| {
+        let root = w.get_root().ok();
+        let snapshot = config_service
+            .update_settings(root.as_deref(), scope, patch)
+            .map_err(|err| error("io", err.to_string()))?;
+        app_events.emit("config-updated", &snapshot);
+        Ok(snapshot)
+    })
+    .await
 }
 
-/// Ensures the global or project configuration file and schema exist on disk, synchronizes LSP, and returns the document.
+/// Ensures the global or project configuration file exists on disk, synchronizes LSP, and returns the document.
 #[tauri::command]
 #[specta::specta]
 pub async fn config_open_document(
     state: State<'_, WorkspaceState>,
+    config: State<'_, ConfigState>,
+    lsp: State<'_, LspState>,
     scope: Option<ConfigScope>,
     format: Option<ConfigFormat>,
 ) -> Result<ConfigDocument> {
+    let config_service = config.0.clone();
+    let lsp_service = lsp.0.clone();
     run_blocking(state, move |w| {
-        w.open_config_document(scope.unwrap_or(ConfigScope::Global), format)
+        let root = w.get_root()?;
+        let doc = config_service
+            .open_config_document(Some(&root), scope.unwrap_or(ConfigScope::Global), format)
+            .map_err(|err| error("io", err.to_string()))?;
+        let _ = lsp_service.open_or_sync_file(&root, std::path::Path::new(&doc.path), &doc.content);
+        Ok(doc)
     })
     .await
 }
@@ -460,15 +625,28 @@ pub async fn config_open_document(
 #[specta::specta]
 pub async fn config_write_document(
     state: State<'_, WorkspaceState>,
+    config: State<'_, ConfigState>,
+    lsp: State<'_, LspState>,
+    events: State<'_, AppEvents>,
     scope: ConfigScope,
     content: String,
     format: Option<ConfigFormat>,
 ) -> Result<ConfigDocument> {
-    let (doc, _) = run_blocking(state, move |w| {
-        w.write_config_document(scope, &content, format)
+    let config_service = config.0.clone();
+    let lsp_service = lsp.0.clone();
+    let app_events = events.inner().clone();
+    run_blocking(state, move |w| {
+        let root = w.get_root()?;
+        let (doc, snapshot) = config_service
+            .write_config_document(Some(&root), scope, &content, format)
+            .map_err(|err| error("io", err.to_string()))?;
+        let _ = lsp_service.did_save(&root, std::path::Path::new(&doc.path), &content);
+        if let Some(ref resolved) = snapshot {
+            app_events.emit("config-updated", resolved);
+        }
+        Ok(doc)
     })
-    .await?;
-    Ok(doc)
+    .await
 }
 
 // tests -----------------------------------------------------------------------
@@ -476,9 +654,7 @@ pub async fn config_write_document(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lgtm_config::{
-        AppearanceSettingsPatch, EditorSettingsPatch, LineWrap, LineWrapPreset, ThemeMode,
-    };
+    use lgtm_config::{AppearanceSettingsPatch, EditorSettingsPatch, LineWrap, ThemeMode};
     use tempfile::TempDir;
 
     // tests -------------------------------------------------------------------
@@ -527,13 +703,17 @@ mod tests {
             fn should_persist_nested_settings_and_open_global_and_project_config_documents() {
                 // Arrange
                 let temp = TempDir::new().unwrap();
-                let mut service = WorkspaceService::from_home(temp.path().to_path_buf());
-                service.open(None).unwrap();
+                let mut workspace = WorkspaceService::from_home(temp.path().to_path_buf());
+                workspace.open(None).unwrap();
+                let root = workspace.get_root().unwrap();
+                let config_service = ConfigService::from_home(temp.path().to_path_buf());
 
                 // Act
-                let initial = service.get_config_snapshot().unwrap();
-                let updated = service
-                    .update_config(
+                let initial = config_service.get_settings_snapshot(Some(&root)).unwrap();
+                let updated = config_service
+                    .update_settings(
+                        Some(&root),
+                        None,
                         UserSettingsPatch {
                             schema: None,
                             appearance: Some(AppearanceSettingsPatch {
@@ -541,17 +721,17 @@ mod tests {
                             }),
                             workspace: None,
                             editor: Some(EditorSettingsPatch {
-                                line_wrapping: Some(LineWrap::Preset(LineWrapPreset::Off)),
+                                line_wrapping: Some(LineWrap::Off),
                             }),
                         },
-                        None,
                     )
                     .unwrap();
-                let global_doc = service
-                    .open_config_document(ConfigScope::Global, None)
+                let global_doc = config_service
+                    .open_config_document(Some(&root), ConfigScope::Global, None)
                     .unwrap();
-                let (written_doc, written_snap) = service
+                let (written_doc, written_snap) = config_service
                     .write_config_document(
+                        Some(&root),
                         ConfigScope::Global,
                         "{\n  \"appearance\": {\n    \"theme\": \"light\"\n  }\n}\n",
                         Some(ConfigFormat::Json),
@@ -560,15 +740,9 @@ mod tests {
 
                 // Assert
                 assert_eq!(initial.effective.appearance.theme, ThemeMode::System);
-                assert_eq!(
-                    initial.effective.editor.line_wrapping,
-                    LineWrap::Preset(LineWrapPreset::Auto)
-                );
+                assert_eq!(initial.effective.editor.line_wrapping, LineWrap::Auto);
                 assert_eq!(updated.effective.appearance.theme, ThemeMode::Dark);
-                assert_eq!(
-                    updated.effective.editor.line_wrapping,
-                    LineWrap::Preset(LineWrapPreset::Off)
-                );
+                assert_eq!(updated.effective.editor.line_wrapping, LineWrap::Off);
                 assert_eq!(global_doc.scope, ConfigScope::Global);
                 assert!(global_doc.content.contains("\"dark\""));
                 assert_ne!(global_doc.revision, written_doc.revision);
