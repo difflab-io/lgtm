@@ -2,7 +2,8 @@
 
 ## Hard Rules
 
-- Run builds, formatters, linters, and tests through project [Mise tasks](mise.toml) invoked by Premise (`premise run format`, `premise run lint`, `premise run test`, `premise run e2e:smoke`). Keep task scripts tracked and generated outputs ignored.
+- Run builds, formatters, linters, and tests through project [Mise tasks](mise.toml) invoked by Premise (`premise run format`, `premise run lint`, `premise run test`, `premise run e2e:smoke`). Keep task scripts tracked and generated outputs ignored. Define Mise tasks and tools in `[.]mise.toml` files (such as `.lgtm/mise.toml`), never inside `.lgtm/config.{json,yaml}`.
+- Store generated JSON Schemas under [`schemas/`](schemas/) at the repository root and reference them via versioned jsDelivr tag URLs (`https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v<version>/schemas/...`) rather than writing local schema copies into `.lgtm/`.
 - During alpha, update branch-introduced contracts directly without compatibility shims or duplicate fields.
 - Expose database queries and mutations only through named repository methods in [`libs/lgtm-db`](libs/lgtm-db/src/lib.rs). Keep SeaORM `Entity` and `ActiveModel` types `pub(crate)`; never expose raw connections, query builders, or raw SQL to callers.
 - Models validate, map data, and implement pure domain behavior; services own persistence orchestration, transactions, and external I/O.

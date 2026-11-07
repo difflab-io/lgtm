@@ -2,6 +2,8 @@ import type { CodeEditorRootVariants } from './styles'
 
 export type CodeEditorDiagnosticSeverity = 'error' | 'warning' | 'info' | 'hint'
 
+export type CodeEditorLineWrapping = boolean | 'off' | 'auto' | number
+
 export interface CodeEditorDiagnostic {
   from: number
   to: number
@@ -21,7 +23,7 @@ export interface CodeEditorProps {
   value: string
   filename?: string
   readonly?: boolean
-  lineWrapping?: boolean
+  lineWrapping?: CodeEditorLineWrapping
   size?: CodeEditorRootVariants['size']
   label?: string
   class?: string

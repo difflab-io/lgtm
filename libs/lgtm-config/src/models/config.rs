@@ -14,8 +14,6 @@ use crate::models::settings::{
 pub struct LgtmConfig {
     /// Global LSP lifecycle and timeout settings.
     pub lsp: LspSettings,
-    /// User-defined Mise tools and tasks merged into `.lgtm/mise.toml`.
-    pub mise: MiseSettings,
     /// Per-language LSP server and Mise toolchain definitions keyed by language ID.
     pub languages: BTreeMap<String, LanguageConfig>,
 }
@@ -42,17 +40,7 @@ pub struct LspSettings {
     pub request_timeout_ms: u64,
 }
 
-/// Custom Mise tools and tasks configured in `.lgtm/config.{json,yaml,yml}`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(default)]
-pub struct MiseSettings {
-    /// Tool versions keyed by Mise tool name (for example `ripgrep = "latest"`).
-    pub tools: BTreeMap<String, String>,
-    /// Named Mise tasks synthesized into `.lgtm/mise.toml`.
-    pub tasks: BTreeMap<String, MiseTaskConfig>,
-}
-
-/// A task definition in `.lgtm/config.{json,yaml,yml}`, represented as either a shell string or a detailed record.
+/// A default Mise task definition for a language preset, represented as either a shell string or a detailed record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum MiseTaskConfig {
@@ -103,7 +91,6 @@ pub(crate) struct LgtmConfigFileOverlay {
     pub(crate) workspace: Option<WorkspaceSettingsPatch>,
     pub(crate) editor: Option<EditorSettingsPatch>,
     pub(crate) lsp: Option<LspSettingsOverlay>,
-    pub(crate) mise: Option<MiseSettings>,
     pub(crate) languages: Option<BTreeMap<String, LanguageConfig>>,
 }
 
@@ -308,7 +295,6 @@ impl LgtmConfig {
 
         Self {
             lsp: LspSettings::default(),
-            mise: MiseSettings::default(),
             languages,
         }
     }
@@ -318,12 +304,6 @@ impl LgtmConfig {
     /// Merges an overlay configuration on top of this configuration in place.
     pub fn merge(&mut self, overlay: Self) {
         self.lsp = overlay.lsp;
-        for (tool, version) in overlay.mise.tools {
-            self.mise.tools.insert(tool, version);
-        }
-        for (task, config) in overlay.mise.tasks {
-            self.mise.tasks.insert(task, config);
-        }
         for (language_id, language_config) in overlay.languages {
             self.languages.insert(language_id, language_config);
         }
@@ -359,14 +339,6 @@ impl LgtmConfig {
             }
             if let Some(timeout) = lsp.request_timeout_ms {
                 self.lsp.request_timeout_ms = timeout;
-            }
-        }
-        if let Some(mise) = overlay.mise {
-            for (tool, version) in mise.tools {
-                self.mise.tools.insert(tool, version);
-            }
-            for (task, config) in mise.tasks {
-                self.mise.tasks.insert(task, config);
             }
         }
         if let Some(languages) = overlay.languages {
@@ -485,25 +457,16 @@ mod tests {
                 let mut base = LgtmConfig::default();
                 let mut overlay = LgtmConfig::default();
                 overlay.lsp.request_timeout_ms = 12_000;
-                overlay
-                    .mise
-                    .tools
-                    .insert("ripgrep".to_string(), "latest".to_string());
-                overlay.mise.tasks.insert(
-                    "custom".to_string(),
-                    MiseTaskConfig::Command("echo hi".to_string()),
-                );
+                if let Some(rust_cfg) = overlay.languages.get_mut("rust") {
+                    rust_cfg.enabled = false;
+                }
 
                 // Act
                 base.merge(overlay);
 
                 // Assert
                 assert_eq!(base.lsp.request_timeout_ms, 12_000);
-                assert_eq!(base.mise.tools.get("ripgrep"), Some(&"latest".to_string()));
-                assert_eq!(
-                    base.mise.tasks.get("custom"),
-                    Some(&MiseTaskConfig::Command("echo hi".to_string()))
-                );
+                assert!(!base.languages.get("rust").unwrap().enabled);
             }
         }
     }

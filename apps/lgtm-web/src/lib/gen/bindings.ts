@@ -98,14 +98,14 @@ export type ConfigScope =
 
 /**  Resolved code editor settings section (`editor.*`). */
 export type EditorSettings = {
-	/**  Whether long lines wrap inside the code editor (`true` by default). */
-	lineWrapping?: boolean,
+	/**  Line wrapping mode inside the code editor (`"off"`, `"auto"`, or a column width; `"auto"` by default). */
+	lineWrapping?: LineWrap,
 };
 
 /**  Resolved code editor settings section (`editor.*`). */
 export type EditorSettingsPatch = {
-	/**  Whether long lines wrap inside the code editor (`true` by default). */
-	lineWrapping?: boolean | null,
+	/**  Line wrapping mode inside the code editor (`"off"`, `"auto"`, or a column width; `"auto"` by default). */
+	lineWrapping?: LineWrap | null,
 };
 
 /**  Tauri IPC response payload returned by `workspace_read` and `workspace_write`, bundling the decoded UTF-8 document text, its SHA-256 content revision fingerprint for change tracking, and the initial LSP language and server status synchronized when the file is opened. */
@@ -119,6 +119,20 @@ export type FileContent = {
 	/**  Optional active LSP server status for the file's language and project root. */
 	lspStatus?: LspServerStatusEvent | null,
 };
+
+/**  Line wrapping mode persisted under `editor.lineWrapping` (`"off"`, `"auto"`, or a column width). */
+export type LineWrap = 
+/**  Preset line wrapping mode (`"off"` or `"auto"`). */
+LineWrapPreset | 
+/**  Fixed character column width at which lines wrap. */
+number;
+
+/**  Named line wrapping presets persisted under `editor.lineWrapping`. */
+export type LineWrapPreset = 
+/**  Disable line wrapping (`off`). */
+"off" | 
+/**  Wrap lines automatically at the editor viewport width (`auto`). */
+"auto";
 
 /**  A single diagnostic normalized to both UTF-16 flat editor offsets and 0-based line/character coordinates. */
 export type LspDiagnostic = {

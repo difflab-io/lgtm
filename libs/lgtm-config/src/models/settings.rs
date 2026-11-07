@@ -6,8 +6,33 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-/// Relative path from `.lgtm/` to the generated JSON Schema file.
-pub const DEFAULT_SCHEMA_RELATIVE_PATH: &str = "./schemas/config.schema.json";
+/// Versioned jsDelivr URL for the repository-tracked `schemas/config.schema.json`.
+pub const DEFAULT_SCHEMA_URL: &str = concat!(
+    "https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v",
+    env!("CARGO_PKG_VERSION"),
+    "/schemas/config.schema.json",
+);
+
+/// Named line wrapping presets persisted under `editor.lineWrapping`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Type, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LineWrapPreset {
+    /// Disable line wrapping (`off`).
+    Off,
+    /// Wrap lines automatically at the editor viewport width (`auto`).
+    #[default]
+    Auto,
+}
+
+/// Line wrapping mode persisted under `editor.lineWrapping` (`"off"`, `"auto"`, or a column width).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Type)]
+#[serde(untagged)]
+pub enum LineWrap {
+    /// Preset line wrapping mode (`"off"` or `"auto"`).
+    Preset(LineWrapPreset),
+    /// Fixed character column width at which lines wrap.
+    Column(u32),
+}
 
 /// Supported color theme preferences persisted under `appearance.theme`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Type, Default)]
@@ -82,15 +107,15 @@ pub struct WorkspaceSettings {
 #[optfield(
     pub EditorSettingsPatch,
     doc,
-    attrs = add(derive(Default)),
+    attrs,
     field_doc,
     field_attrs = (serde(skip_serializing_if = "Option::is_none")),
 )]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Type, Default)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct EditorSettings {
-    /// Whether long lines wrap inside the code editor (`true` by default).
-    pub line_wrapping: bool,
+    /// Line wrapping mode inside the code editor (`"off"`, `"auto"`, or a column width; `"auto"` by default).
+    pub line_wrapping: LineWrap,
 }
 
 /// Complete resolved nested settings tree combining defaults, global settings, and project overrides.
@@ -235,13 +260,13 @@ impl UserSettingsPatch {
         match format {
             ConfigFormat::Json => {
                 let initial = Self {
-                    schema: Some(DEFAULT_SCHEMA_RELATIVE_PATH.to_string()),
+                    schema: Some(DEFAULT_SCHEMA_URL.to_string()),
                     appearance: Some(AppearanceSettingsPatch {
                         theme: Some(ThemeMode::System),
                     }),
                     workspace: None,
                     editor: Some(EditorSettingsPatch {
-                        line_wrapping: Some(true),
+                        line_wrapping: Some(LineWrap::default()),
                     }),
                 };
                 let mut text =
@@ -252,11 +277,11 @@ impl UserSettingsPatch {
                 text
             }
             ConfigFormat::Yaml => [
-                &format!("# yaml-language-server: $schema={DEFAULT_SCHEMA_RELATIVE_PATH}"),
+                &format!("# yaml-language-server: $schema={DEFAULT_SCHEMA_URL}"),
                 "appearance:",
                 "  theme: system",
                 "editor:",
-                "  lineWrapping: true",
+                "  lineWrapping: auto",
                 "",
             ]
             .join("\n"),
@@ -331,10 +356,8 @@ impl UserSettingsPatch {
     }
 }
 
-impl Default for EditorSettings {
+impl Default for LineWrap {
     fn default() -> Self {
-        Self {
-            line_wrapping: true,
-        }
+        Self::Preset(LineWrapPreset::Auto)
     }
 }

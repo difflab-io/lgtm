@@ -23,21 +23,13 @@ describe(
         const { runtime } = fixture()
         await initLocalRepo(runtime)
         await runtime.write(
-          '.lgtm/config.json',
-          JSON.stringify(
-            {
-              mise: {
-                tasks: {
-                  greet: {
-                    description: 'Print greeting marker',
-                    run: 'echo lgtm-mise-greet-ok',
-                  },
-                },
-              },
-            },
-            null,
-            2,
-          ) + '\n',
+          '.lgtm/mise.toml',
+          [
+            '[tasks.greet]',
+            'description = "Print greeting marker"',
+            'run = "echo lgtm-mise-greet-ok"',
+            '',
+          ].join('\n'),
         )
 
         // Act
@@ -82,16 +74,13 @@ describe(
       // Arrange
       const { runtime } = fixture()
       await initLocalRepo(runtime)
+      await runtime.write('.lgtm/config.yaml', ['lsp:', '  auto_install: false', ''].join('\n'))
       await runtime.write(
-        '.lgtm/config.yaml',
+        '.lgtm/mise.toml',
         [
-          'lsp:',
-          '  auto_install: false',
-          'mise:',
-          '  tasks:',
-          '    write-marker:',
-          '      description: "Write marker file"',
-          '      run: "printf \'managed-run-ok\' > .lgtm/marker.txt"',
+          '[tasks.write-marker]',
+          'description = "Write marker file"',
+          'run = "printf \'managed-run-ok\' > .lgtm/marker.txt"',
           '',
         ].join('\n'),
       )
