@@ -69,6 +69,30 @@ version="${RELEASE_VERSION#v}"
 archive_name="lgtm-${version}-${os_name}-${arch_name}.tar.gz"
 tar -C "$target_dir/release" -czf "$PREMISE_ARTIFACT_DIR/$archive_name" lgtm
 '''
+run_windows = '''#!/usr/bin/env pwsh
+$ErrorActionPreference = 'Stop'
+if ($env:PREMISE_TEMPLATE_TEST -eq '1') {
+  cargo build
+  exit $LASTEXITCODE
+}
+if (-not $env:RELEASE_VERSION) { throw 'RELEASE_VERSION is required' }
+if (-not $env:PREMISE_ARTIFACT_DIR) { throw 'PREMISE_ARTIFACT_DIR is required' }
+cargo build --release --locked
+if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
+$metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) { throw 'cargo metadata failed' }
+$releaseDir = Join-Path $metadata.target_directory 'release'
+$arch = switch ($env:PROCESSOR_ARCHITECTURE.ToLowerInvariant()) {
+  'amd64' { 'x86_64' }
+  'arm64' { 'aarch64' }
+  default { $env:PROCESSOR_ARCHITECTURE.ToLowerInvariant() }
+}
+New-Item -ItemType Directory -Force -Path $env:PREMISE_ARTIFACT_DIR | Out-Null
+$version = $env:RELEASE_VERSION -replace '^v', ''
+$archivePath = Join-Path $env:PREMISE_ARTIFACT_DIR "lgtm-${version}-windows-${arch}.tar.gz"
+tar -C $releaseDir -czf $archivePath lgtm.exe
+if ($LASTEXITCODE -ne 0) { throw 'tar archive creation failed' }
+'''
 
 [tasks."release:build"]
 description = "Build CLI binary archive for a platform release"

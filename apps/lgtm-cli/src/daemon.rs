@@ -19,7 +19,7 @@ pub fn detach(store: &Store) -> Result<()> {
 
 #[cfg(not(unix))]
 pub fn detach(_store: &Store) -> Result<()> {
-    bail!("Background mode requires macOS or Linux; use lgtm up --foreground")
+    Ok(())
 }
 
 pub async fn up(port: u16, store: &Store, json: bool) -> Result<()> {
@@ -51,7 +51,7 @@ pub async fn down(store: &Store) -> Result<()> {
         nix::sys::signal::Signal::SIGTERM,
     )?;
     #[cfg(not(unix))]
-    bail!("Use Ctrl-C to stop the foreground server on this platform");
+    std::fs::write(store.path("server.stop"), instance.pid.to_string())?;
     for _ in 0..50 {
         if !store.path("server.port").exists() {
             println!("LGTM stopped");
@@ -115,18 +115,42 @@ pub(crate) async fn ensure_running(port: u16, store: &Store) -> Result<Instance>
     if let Some(instance) = active(&client, store).await {
         return Ok(instance);
     }
-    let launch = Command::new(std::env::current_exe()?)
-        .env("LGTM_HOME", store.dir())
-        .args(["serve", "--daemonize", "--port"])
-        .arg(port.to_string())
-        .output()
-        .context("Start the bundled LGTM server")?;
-    if !launch.status.success() {
-        bail!(
-            "Could not daemonize the LGTM server: {}",
-            String::from_utf8_lossy(&launch.stderr).trim()
-        );
-    }
+    #[cfg(unix)]
+    let launch_stderr = {
+        let launch = Command::new(std::env::current_exe()?)
+            .env("LGTM_HOME", store.dir())
+            .args(["serve", "--daemonize", "--port"])
+            .arg(port.to_string())
+            .output()
+            .context("Start the bundled LGTM server")?;
+        if !launch.status.success() {
+            bail!(
+                "Could not daemonize the LGTM server: {}",
+                String::from_utf8_lossy(&launch.stderr).trim()
+            );
+        }
+        String::from_utf8_lossy(&launch.stderr).trim().to_owned()
+    };
+    #[cfg(not(unix))]
+    let launch_stderr = {
+        let log = crate::log::output(store)?;
+        let mut cmd = Command::new(std::env::current_exe()?);
+        cmd.env("LGTM_HOME", store.dir())
+            .args(["serve", "--daemonize", "--port"])
+            .arg(port.to_string())
+            .stdin(std::process::Stdio::null())
+            .stdout(log.try_clone()?)
+            .stderr(log);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+            const DETACHED_PROCESS: u32 = 0x0000_0008;
+            cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
+        }
+        cmd.spawn().context("Start the bundled LGTM server")?;
+        String::new()
+    };
     for _ in 0..50 {
         if let Some(instance) = active(&client, store).await {
             return Ok(instance);
@@ -136,7 +160,7 @@ pub(crate) async fn ensure_running(port: u16, store: &Store) -> Result<Instance>
     bail!(
         "LGTM did not become ready; check {}. {}",
         store.path("server.log").display(),
-        String::from_utf8_lossy(&launch.stderr).trim()
+        launch_stderr
     )
 }
 

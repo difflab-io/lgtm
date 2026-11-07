@@ -438,5 +438,56 @@ mod given_a_workspace_directory {
             let lines: Vec<&str> = launched.lines().collect();
             assert_eq!(lines, vec![canonical_ws.as_str(), canonical_ws.as_str()]);
         }
+
+        #[cfg(windows)]
+        #[test]
+        fn should_resolve_relative_directory_and_invoke_configured_desktop_binary() {
+            // Arrange
+            let root = tempfile::tempdir().unwrap();
+            let workspace = root.path().join("my-repo");
+            std::fs::create_dir_all(&workspace).unwrap();
+            let marker = root.path().join("launched.txt");
+            let fake_desktop = root.path().join("fake-lgtm-desktop.cmd");
+            std::fs::write(
+                &fake_desktop,
+                format!(
+                    "@echo off\r\n(\r\necho %~1\r\necho %LGTM_WORKSPACE%\r\n) > \"{}\"\r\n",
+                    marker.display()
+                ),
+            )
+            .unwrap();
+
+            // Act
+            let open_out = Command::new(env!("CARGO_BIN_EXE_lgtm"))
+                .env("LGTM_HOME", root.path())
+                .env("LGTM_DESKTOP_BIN", &fake_desktop)
+                .current_dir(root.path())
+                .args(["open", "my-repo", "--json"])
+                .output()
+                .unwrap();
+
+            // Assert
+            assert!(
+                open_out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&open_out.stderr)
+            );
+            let payload: serde_json::Value = serde_json::from_slice(&open_out.stdout).unwrap();
+            let canonical_ws = std::fs::canonicalize(&workspace)
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
+            assert_eq!(payload["workspace_path"], canonical_ws);
+
+            for _ in 0..50 {
+                if marker.exists() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            let launched = std::fs::read_to_string(&marker).unwrap();
+            let lines: Vec<&str> = launched.lines().map(str::trim).collect();
+            assert_eq!(lines, vec![canonical_ws.as_str(), canonical_ws.as_str()]);
+        }
     }
 }

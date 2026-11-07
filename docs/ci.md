@@ -17,7 +17,7 @@ Every Rust crate in the workspace (`lgtm-cli`, `lgtm-desktop`, `lgtm-forge`, `lg
 
 Instead, LGTM distributes two precompiled end-user artifacts via GitHub Releases by staging platform artifacts during `pm ci flow-matrix` (`release_platforms` in `premise.yaml`) and publishing them together in `publish-release`:
 
-1. **`lgtm-cli` (`lgtm` binary archives):** Declares `release_platforms: [linux, macos]` in `premise.yaml`. Linked directly against workspace crates (`lgtm-forge`, `lgtm-db`, `lgtm-config`, `lgtm-env`) via Cargo `path` dependencies and built via `apps/lgtm-cli/mise.toml` (`release:build`) into `lgtm-<version>-<os>-<arch>.tar.gz` archives in `$PREMISE_ARTIFACT_DIR` (`lgtm-cli-linux`, `lgtm-cli-macos`).
+1. **`lgtm-cli` (`lgtm` binary archives):** Declares `release_platforms: [linux, macos, windows]` in `premise.yaml`. Linked directly against workspace crates (`lgtm-forge`, `lgtm-db`, `lgtm-config`, `lgtm-env`) via Cargo `path` dependencies and built via `apps/lgtm-cli/mise.toml` (`release:build`) into `lgtm-<version>-<os>-<arch>.tar.gz` archives in `$PREMISE_ARTIFACT_DIR` (`lgtm-cli-linux`, `lgtm-cli-macos`, `lgtm-cli-windows`).
 2. **`lgtm-desktop` (native desktop installers):** Declares `release_platforms: [linux, macos, windows]` in `premise.yaml`. Built via `cargo tauri build` (`apps/lgtm-desktop/mise.toml` `release:build`) with the static `apps/lgtm-web/build` frontend embedded, producing platform installers (`.dmg`, `.deb`, `.AppImage`, `.msi`, `.exe`) in `$PREMISE_ARTIFACT_DIR` (`lgtm-desktop-linux`, `lgtm-desktop-macos`, `lgtm-desktop-windows`).
 
 ```mermaid
@@ -34,7 +34,7 @@ flowchart LR
     end
 
     subgraph PremiseCI["Premise CLI (pm) Release Pipeline"]
-        CLI -->|"lgtm-cli release:build"| STAGE_CLI["lgtm-cli-{linux,macos}\nlgtm-<ver>-<os>-<arch>.tar.gz"]
+        CLI -->|"lgtm-cli release:build"| STAGE_CLI["lgtm-cli-{linux,macos,windows}\nlgtm-<ver>-<os>-<arch>.tar.gz"]
         DESK -->|"lgtm-desktop release:build"| STAGE_DESK["lgtm-desktop-{linux,macos,windows}\n.dmg / .deb / .AppImage / .msi / .exe"]
         STAGE_CLI --> GH_REL[("GitHub Releases\n+ checksums.txt")]
         STAGE_DESK --> GH_REL
@@ -44,7 +44,7 @@ flowchart LR
 ### How Premise CLI (`pm`) Orchestrates Releases
 
 1. **Plan & Version Calculation (`pm ci plan`):** On `main` pushes (`release: always`) or non-`main` branch pushes containing `[publish-rc]` (`release: auto`), `cloudvoyant/premise@v0` computes the target release version (`vX.Y.Z` or `vX.Y.Z-rc.<run_number>`) and emits the platform matrix with `"native": true` for projects declaring `ci.release_platforms` (`lgtm-cli` and `lgtm-desktop`).
-2. **Matrix Build & Artifact Staging (`pm ci flow-matrix`):** Runs `install`, `build`, `lint`, `format:check`, and `test` for every project row. When a release version is active and the row is native (`lgtm-cli` on Linux/macOS and `lgtm-desktop` on Linux/macOS/Windows), runs `mise run release:build` with `RELEASE_VERSION` and `PREMISE_ARTIFACT_DIR` and uploads `<project>-<platform>` workflow artifacts.
+2. **Matrix Build & Artifact Staging (`pm ci flow-matrix`):** Runs `install`, `build`, `lint`, `format:check`, and `test` for every project row. When a release version is active and the row is native (`lgtm-cli` and `lgtm-desktop` on Linux, macOS, and Windows), runs `mise run release:build` with `RELEASE_VERSION` and `PREMISE_ARTIFACT_DIR` and uploads `<project>-<platform>` workflow artifacts.
 3. **Combined GitHub Release (`pm release` in `publish-release`):** Validates that every expected `<project>-<platform>` directory in `ExpectedReleaseGroups` contains non-empty release files, tags `HEAD` on `origin`, and invokes GoReleaser (`extra_files` + `checksums.txt`) to publish all `lgtm-cli` archives and `lgtm-desktop` installers to the GitHub Release.
 4. **Package Registry Step (`pm packages` in `publish-packages`):** Inspects each project's `Cargo.toml` / `package.json`. Because all Cargo crates declare `publish = false` and all npm packages declare `"private": true`, `PreflightPublication` skips `CRATES_TOKEN` and `NPM_TOKEN` registry requirements and `publishCargoPackages` skips `crates.io` publication (`"Private package; publication disabled"`).
 
