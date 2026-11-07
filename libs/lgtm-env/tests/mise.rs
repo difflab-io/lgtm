@@ -428,6 +428,14 @@ mod given_global_and_project_dev_tool_management {
             let global_removed = mise_service.remove_dev_tool(None, "biome").unwrap();
 
             // Assert
+            assert_eq!(
+                mise_service.get_global_mise_path(),
+                home.join(".lgtm/mise.toml")
+            );
+            assert_eq!(
+                MiseService::get_managed_mise_path(&workspace_root),
+                workspace_root.join(".lgtm/mise.toml")
+            );
             assert_eq!(global_added.tools.get("biome"), Some(&"1.9.4".to_string()));
             assert!(home.join(".lgtm/mise.toml").is_file());
             assert_eq!(project_added.tools.get("biome"), Some(&"1.9.4".to_string()));

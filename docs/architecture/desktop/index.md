@@ -174,7 +174,8 @@ apps/
 │       ├── main.rs                    Desktop binary entrypoint and --ipc-bridge E2E mode
 │       ├── lib.rs                     Public crate exports
 │       ├── app.rs                     Tauri state registration, IPC command handlers, and quit lifecycle
-│       ├── events.rs                  AppEvents and EventSink emitter abstraction
+│       ├── events.rs                  AppEvent and AppEvents backend event bus
+│       ├── menus.rs                   Native application menu bar construction and menu event routing
 │       ├── error.rs                   Serializable IPC error codes and messages
 │       ├── models/
 │       │   ├── file_content.rs        UTF-8 FileContent with SHA-256 revision and LSP metadata

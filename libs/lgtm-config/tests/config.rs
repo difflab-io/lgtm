@@ -34,17 +34,13 @@ mod given_a_git_backed_workspace_without_an_existing_dot_lgtm_directory {
             // Assert
             assert_eq!(lgtm_dir, workspace_root.join(".lgtm"));
             assert_eq!(config_service.get_lgtm_home_dir(), home.join(".lgtm"));
-            assert_eq!(
-                config_service.get_global_mise_path(),
-                home.join(".lgtm/mise.toml")
-            );
             assert!(lgtm_dir.is_dir());
             assert!(exclude_contents.lines().any(|line| line.trim() == ".lgtm/"));
         }
     }
 }
 
-mod given_malformed_global_or_project_config_files {
+mod given_global_and_project_nested_json_configs {
     use super::*;
 
     mod when_loading_merged_configuration_or_config_snapshot {
@@ -105,10 +101,6 @@ mod given_malformed_global_or_project_config_files {
             ));
         }
     }
-}
-
-mod given_global_and_project_nested_json_configs {
-    use super::*;
 
     mod when_resolving_unified_config_and_snapshot {
         use super::*;

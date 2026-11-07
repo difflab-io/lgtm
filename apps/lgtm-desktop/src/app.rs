@@ -15,6 +15,7 @@ use tauri::{Manager, State};
 use crate::{
     error::{Result, error},
     events::{AppEvent, AppEvents},
+    menus::{build_app_menu, handle_menu_event},
     models::{FileContent, WorkspaceListing, WorkspaceNode},
     services::{LspService, WorkspaceService},
 };
@@ -41,15 +42,7 @@ pub fn builder(workspace_home: Option<PathBuf>) -> tauri::Builder<tauri::Wry> {
             .menu(build_app_menu)
             .on_menu_event(|app, event| {
                 if let Some(state) = app.try_state::<AppState>() {
-                    match event.id().as_ref() {
-                        "open-global-config" => {
-                            state.events.dispatch(AppEvent::MenuOpenGlobalConfig);
-                        }
-                        "open-local-config" => {
-                            state.events.dispatch(AppEvent::MenuOpenLocalConfig);
-                        }
-                        _ => {}
-                    }
+                    handle_menu_event(&state.events, event.id().as_ref());
                 }
             }),
         workspace_home,
@@ -70,133 +63,6 @@ pub fn configure_builder<R: tauri::Runtime>(
             Ok(())
         })
         .invoke_handler(commands)
-}
-
-fn build_app_menu<R: tauri::Runtime>(
-    app_handle: &tauri::AppHandle<R>,
-) -> tauri::Result<tauri::menu::Menu<R>> {
-    use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
-
-    let pkg_info = app_handle.package_info();
-    let config = app_handle.config();
-    let about_metadata = AboutMetadata {
-        name: Some(pkg_info.name.clone()),
-        version: Some(pkg_info.version.to_string()),
-        copyright: config.bundle.copyright.clone(),
-        authors: config.bundle.publisher.clone().map(|p| vec![p]),
-        ..Default::default()
-    };
-
-    let settings_item = MenuItem::with_id(
-        app_handle,
-        "open-global-config",
-        "Settings…",
-        true,
-        Some("CmdOrCtrl+,"),
-    )?;
-    let project_settings_item = MenuItem::with_id(
-        app_handle,
-        "open-local-config",
-        "Project Settings…",
-        true,
-        Some("CmdOrCtrl+Shift+,"),
-    )?;
-
-    let window_menu = Submenu::with_id_and_items(
-        app_handle,
-        tauri::menu::WINDOW_SUBMENU_ID,
-        "Window",
-        true,
-        &[
-            &PredefinedMenuItem::minimize(app_handle, None)?,
-            &PredefinedMenuItem::maximize(app_handle, None)?,
-            #[cfg(target_os = "macos")]
-            &PredefinedMenuItem::separator(app_handle)?,
-            &PredefinedMenuItem::close_window(app_handle, None)?,
-        ],
-    )?;
-
-    let help_menu = Submenu::with_id_and_items(
-        app_handle,
-        tauri::menu::HELP_SUBMENU_ID,
-        "Help",
-        true,
-        &[
-            #[cfg(not(target_os = "macos"))]
-            &PredefinedMenuItem::about(app_handle, None, Some(about_metadata.clone()))?,
-        ],
-    )?;
-
-    Menu::with_items(
-        app_handle,
-        &[
-            #[cfg(target_os = "macos")]
-            &Submenu::with_items(
-                app_handle,
-                pkg_info.name.clone(),
-                true,
-                &[
-                    &PredefinedMenuItem::about(app_handle, None, Some(about_metadata))?,
-                    &PredefinedMenuItem::separator(app_handle)?,
-                    &settings_item,
-                    &project_settings_item,
-                    &PredefinedMenuItem::separator(app_handle)?,
-                    &PredefinedMenuItem::services(app_handle, None)?,
-                    &PredefinedMenuItem::separator(app_handle)?,
-                    &PredefinedMenuItem::hide(app_handle, None)?,
-                    &PredefinedMenuItem::hide_others(app_handle, None)?,
-                    &PredefinedMenuItem::separator(app_handle)?,
-                    &PredefinedMenuItem::quit(app_handle, None)?,
-                ],
-            )?,
-            #[cfg(not(any(
-                target_os = "linux",
-                target_os = "dragonfly",
-                target_os = "freebsd",
-                target_os = "netbsd",
-                target_os = "openbsd"
-            )))]
-            &Submenu::with_items(
-                app_handle,
-                "File",
-                true,
-                &[
-                    #[cfg(not(target_os = "macos"))]
-                    &settings_item,
-                    #[cfg(not(target_os = "macos"))]
-                    &project_settings_item,
-                    #[cfg(not(target_os = "macos"))]
-                    &PredefinedMenuItem::separator(app_handle)?,
-                    &PredefinedMenuItem::close_window(app_handle, None)?,
-                    #[cfg(not(target_os = "macos"))]
-                    &PredefinedMenuItem::quit(app_handle, None)?,
-                ],
-            )?,
-            &Submenu::with_items(
-                app_handle,
-                "Edit",
-                true,
-                &[
-                    &PredefinedMenuItem::undo(app_handle, None)?,
-                    &PredefinedMenuItem::redo(app_handle, None)?,
-                    &PredefinedMenuItem::separator(app_handle)?,
-                    &PredefinedMenuItem::cut(app_handle, None)?,
-                    &PredefinedMenuItem::copy(app_handle, None)?,
-                    &PredefinedMenuItem::paste(app_handle, None)?,
-                    &PredefinedMenuItem::select_all(app_handle, None)?,
-                ],
-            )?,
-            #[cfg(target_os = "macos")]
-            &Submenu::with_items(
-                app_handle,
-                "View",
-                true,
-                &[&PredefinedMenuItem::fullscreen(app_handle, None)?],
-            )?,
-            &window_menu,
-            &help_menu,
-        ],
-    )
 }
 
 pub(crate) fn init_app_state<R: tauri::Runtime>(

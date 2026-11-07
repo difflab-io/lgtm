@@ -107,6 +107,8 @@ sequenceDiagram
 | `MiseService::new` | `fn new(config_service: ConfigService) -> Self` | Create a `MiseService` searching `<lgtm_home>/bin/mise` and standard system paths. |
 | `MiseService::with_isolated_env` | `fn with_isolated_env(config_service: ConfigService, installer_url: Option<String>) -> Self` | Create an isolated `MiseService` that ignores system `PATH` and installs from `installer_url`. |
 | `MiseService::get_managed_mise_binary_path` | `fn get_managed_mise_binary_path(&self) -> PathBuf` | Return `<lgtm_home>/bin/mise` (`mise.exe` on Windows). |
+| `MiseService::get_global_mise_path` | `fn get_global_mise_path(&self) -> PathBuf` | Return the path to the global managed `<lgtm_home>/mise.toml` file. |
+| `MiseService::get_managed_mise_path` | `fn get_managed_mise_path(workspace_root: &Path) -> PathBuf` | Return the path to `<workspace>/.lgtm/mise.toml`. |
 | `MiseService::find_mise_binary` | `fn find_mise_binary(&self) -> Option<PathBuf>` | Locate a usable `mise` binary and verify it with `mise --version`. |
 | `MiseService::is_mise_installed` | `fn is_mise_installed(&self) -> bool` | Return `true` when `find_mise_binary` resolves a working binary. |
 | `MiseService::ensure_mise_binary` | `fn ensure_mise_binary(&self) -> Result<PathBuf>` | Return an existing `mise` binary or install it into `<lgtm_home>/bin/mise`. |

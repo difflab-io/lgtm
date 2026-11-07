@@ -72,19 +72,9 @@ impl ConfigService {
             .unwrap_or_else(|| self.get_lgtm_home_dir().join("config.json"))
     }
 
-    /// Returns the global LGTM-managed Mise file path (`<lgtm_home>/mise.toml`).
-    pub fn get_global_mise_path(&self) -> PathBuf {
-        self.get_lgtm_home_dir().join("mise.toml")
-    }
-
     /// Returns the project configuration path (`<workspace>/.lgtm/config.json`).
     pub fn get_project_config_path(workspace_root: &Path) -> PathBuf {
         workspace_root.join(".lgtm").join("config.json")
-    }
-
-    /// Returns the workspace LGTM-managed Mise file path (`<workspace>/.lgtm/mise.toml`).
-    pub fn get_managed_mise_path(workspace_root: &Path) -> PathBuf {
-        workspace_root.join(".lgtm").join("mise.toml")
     }
 
     /// Returns a designated cache file path inside `<workspace>/.lgtm/cache/<file_name>`.

@@ -274,7 +274,6 @@ impl LgtmLspManager {
             &language_id,
             content,
         );
-        self.publish_config_diagnostics(&key, &file_path, content);
 
         if let Some(handle) = handle
             && let Some(uri) = path_to_file_uri(&file_path)
@@ -320,146 +319,6 @@ impl LgtmLspManager {
         (Some(language_id), status)
     }
 
-    /// Synchronizes `file_path` in the document cache immediately and starts its language server session in the background if not yet running.
-    pub fn open_or_sync_file_async(
-        &self,
-        workspace_root: &Path,
-        file_path: &Path,
-        content: &str,
-    ) -> (Option<String>, Option<LspServerStatusEvent>) {
-        if self.disabled {
-            return (None, None);
-        }
-        let workspace_root = Self::canonical_or_owned(workspace_root);
-        let file_path = Self::canonical_or_owned(file_path);
-
-        let config = self
-            .cache_service
-            .get_or_load_workspace_config(&self.config_service, &workspace_root)
-            .unwrap_or_default();
-        let Some((language_id, lang_cfg)) = config.detect_file_language(&file_path) else {
-            return (None, None);
-        };
-        let language_config = lang_cfg.clone();
-
-        if !config.lsp.enabled {
-            return (Some(language_id), None);
-        }
-
-        let (project_root, _) =
-            ConfigService::detect_project_root(&workspace_root, &file_path, &language_config);
-        let project_root = Self::canonical_or_owned(&project_root);
-        let key = LspSessionKey::new(&workspace_root, &language_id, &project_root);
-
-        let sync_action = self.cache_service.sync_document(
-            &workspace_root,
-            &project_root,
-            &file_path,
-            &language_id,
-            content,
-        );
-
-        if let Some(handle) = self.get_server(&key) {
-            self.publish_config_diagnostics(&key, &file_path, content);
-            if let Some(uri) = path_to_file_uri(&file_path) {
-                match sync_action {
-                    LspDocumentSyncAction::Opened(doc) => {
-                        let _ = handle.notify(
-                            "textDocument/didOpen",
-                            json!({
-                                "textDocument": {
-                                    "uri": uri,
-                                    "languageId": doc.language_id,
-                                    "version": doc.version,
-                                    "text": doc.text,
-                                }
-                            }),
-                        );
-                    }
-                    LspDocumentSyncAction::Changed(doc) => {
-                        let _ = handle.notify(
-                            "textDocument/didChange",
-                            json!({
-                                "textDocument": {
-                                    "uri": uri,
-                                    "version": doc.version,
-                                },
-                                "contentChanges": [{ "text": doc.text }],
-                            }),
-                        );
-                    }
-                    LspDocumentSyncAction::Unchanged(_) => {}
-                }
-            }
-            if let Some(diag_event) = self
-                .cache_service
-                .get_file_diagnostics(&workspace_root, &file_path)
-            {
-                (self.event_sink)(LspEvent::Diagnostics(diag_event));
-            }
-            return (Some(language_id), self.cache_service.get_status(&key));
-        }
-
-        if self.cache_service.get_status(&key).is_none() {
-            let starting_event = self.cache_service.set_status(
-                key.clone(),
-                LspServerStatusEvent {
-                    workspace_root: workspace_root.to_string_lossy().to_string(),
-                    language_id: language_id.clone(),
-                    project_root: project_root.to_string_lossy().to_string(),
-                    status: LspServerStatus::Starting,
-                    command: language_config.command.clone(),
-                    message: None,
-                    error_count: 0,
-                    warning_count: 0,
-                },
-            );
-            (self.event_sink)(LspEvent::Status(starting_event));
-        }
-        self.publish_config_diagnostics(&key, &file_path, content);
-
-        if let Some(diag_event) = self
-            .cache_service
-            .get_file_diagnostics(&workspace_root, &file_path)
-        {
-            (self.event_sink)(LspEvent::Diagnostics(diag_event));
-        }
-
-        let status = self.cache_service.get_status(&key);
-        let manager = self.clone();
-        let ws_root = workspace_root.clone();
-        let proj_root = project_root.clone();
-        let lang_id = language_id.clone();
-        let auto_install = config.lsp.auto_install;
-        let timeout = Duration::from_millis(config.lsp.request_timeout_ms);
-        std::thread::spawn(move || {
-            if let Some(handle) = manager.ensure_session(
-                &ws_root,
-                &proj_root,
-                &lang_id,
-                &language_config,
-                auto_install,
-                timeout,
-            ) && let Some(doc) = manager.cache_service.get_document(&file_path)
-                && let Some(uri) = path_to_file_uri(&file_path)
-            {
-                let _ = handle.notify(
-                    "textDocument/didOpen",
-                    json!({
-                        "textDocument": {
-                            "uri": uri,
-                            "languageId": doc.language_id,
-                            "version": doc.version,
-                            "text": doc.text,
-                        }
-                    }),
-                );
-            }
-        });
-
-        (Some(language_id), status)
-    }
-
     /// Sends a `textDocument/didChange` notification with updated buffer text for `file_path`.
     pub fn did_change(&self, workspace_root: &Path, file_path: &Path, content: &str) -> Result<()> {
         if self.disabled {
@@ -469,36 +328,22 @@ impl LgtmLspManager {
         let file_path = Self::canonical_or_owned(file_path);
 
         if let Some(sync_action) = self.cache_service.update_open_document(&file_path, content) {
-            match sync_action {
-                LspDocumentSyncAction::Changed(doc) => {
-                    let key = LspSessionKey::new(
-                        &doc.workspace_root,
-                        &doc.language_id,
-                        &doc.project_root,
-                    );
-                    self.publish_config_diagnostics(&key, &file_path, content);
-                    if let (Some(handle), Some(uri)) =
-                        (self.get_server(&key), path_to_file_uri(&file_path))
-                    {
-                        handle.notify(
-                            "textDocument/didChange",
-                            json!({
-                                "textDocument": {
-                                    "uri": uri,
-                                    "version": doc.version,
-                                },
-                                "contentChanges": [{ "text": content }],
-                            }),
-                        )?;
-                    }
-                }
-                LspDocumentSyncAction::Unchanged(doc) | LspDocumentSyncAction::Opened(doc) => {
-                    let key = LspSessionKey::new(
-                        &doc.workspace_root,
-                        &doc.language_id,
-                        &doc.project_root,
-                    );
-                    self.publish_config_diagnostics(&key, &file_path, content);
+            if let LspDocumentSyncAction::Changed(doc) = sync_action {
+                let key =
+                    LspSessionKey::new(&doc.workspace_root, &doc.language_id, &doc.project_root);
+                if let (Some(handle), Some(uri)) =
+                    (self.get_server(&key), path_to_file_uri(&file_path))
+                {
+                    handle.notify(
+                        "textDocument/didChange",
+                        json!({
+                            "textDocument": {
+                                "uri": uri,
+                                "version": doc.version,
+                            },
+                            "contentChanges": [{ "text": content }],
+                        }),
+                    )?;
                 }
             }
             return Ok(());
@@ -790,10 +635,6 @@ impl LgtmLspManager {
         path.to_string_lossy().to_string()
     }
 
-    fn is_lgtm_config_file(file_path: &Path) -> bool {
-        file_path.ends_with(".lgtm/config.json")
-    }
-
     fn enrich_schema_markdown_descriptions(value: &mut Value) {
         match value {
             Value::Object(map) => {
@@ -811,72 +652,6 @@ impl LgtmLspManager {
                 }
             }
             _ => {}
-        }
-    }
-
-    fn collect_config_diagnostics(file_path: &Path, text: &str) -> Vec<LspDiagnostic> {
-        if !Self::is_lgtm_config_file(file_path) || text.trim().is_empty() {
-            return Vec::new();
-        }
-        match serde_json::from_str::<LgtmConfigPatch>(text) {
-            Ok(_) => Vec::new(),
-            Err(err) => {
-                let line = err.line().saturating_sub(1) as u32;
-                let line_text = text.lines().nth(line as usize).unwrap_or("");
-                let start_char = line_text
-                    .chars()
-                    .take_while(|c| c.is_whitespace())
-                    .map(|c| c.len_utf16() as u32)
-                    .sum::<u32>();
-                let end_char = (line_text.encode_utf16().count() as u32).max(start_char + 1);
-                let total_utf16 = text.encode_utf16().count() as u32;
-                let from = position_to_offset(text, line, start_char).min(total_utf16);
-                let to = position_to_offset(text, line, end_char)
-                    .max(from.saturating_add(1))
-                    .min(total_utf16);
-                vec![LspDiagnostic {
-                    from,
-                    to,
-                    line,
-                    character: start_char,
-                    end_line: line,
-                    end_character: end_char,
-                    severity: LspDiagnosticSeverity::Error,
-                    message: err.to_string(),
-                    source: Some("lgtm-config".to_string()),
-                    code: Some("invalidConfig".to_string()),
-                }]
-            }
-        }
-    }
-
-    fn publish_config_diagnostics(&self, key: &LspSessionKey, file_path: &Path, text: &str) {
-        if !Self::is_lgtm_config_file(file_path) {
-            return;
-        }
-        let mut combined: Vec<LspDiagnostic> = self
-            .cache_service
-            .get_file_diagnostics(&key.workspace_root, file_path)
-            .map(|evt| {
-                evt.diagnostics
-                    .into_iter()
-                    .filter(|d| d.source.as_deref() != Some("lgtm-config"))
-                    .collect()
-            })
-            .unwrap_or_default();
-        for cfg_diag in Self::collect_config_diagnostics(file_path, text) {
-            if !combined.iter().any(|existing| {
-                existing.line == cfg_diag.line && existing.message == cfg_diag.message
-            }) {
-                combined.push(cfg_diag);
-            }
-        }
-        let (file_event, updated_status) = self
-            .cache_service
-            .set_file_diagnostics(key, file_path, combined);
-        (self.event_sink)(LspEvent::Diagnostics(file_event));
-        if let Some(status_event) = updated_status {
-            (self.event_sink)(LspEvent::Status(status_event));
         }
     }
 
@@ -1372,7 +1147,7 @@ impl LgtmLspManager {
         let file_path = Self::canonical_or_owned(&raw_file_path);
         let text = cache_service.get_document_or_disk_text(&file_path);
 
-        let mut mapped: Vec<LspDiagnostic> = published
+        let mapped: Vec<LspDiagnostic> = published
             .diagnostics
             .into_iter()
             .map(|item| {
@@ -1403,14 +1178,6 @@ impl LgtmLspManager {
                 }
             })
             .collect();
-
-        for cfg_diag in Self::collect_config_diagnostics(&file_path, &text) {
-            if !mapped.iter().any(|existing| {
-                existing.line == cfg_diag.line && existing.message == cfg_diag.message
-            }) {
-                mapped.push(cfg_diag);
-            }
-        }
 
         let (file_event, updated_status) =
             cache_service.set_file_diagnostics(session_key, &file_path, mapped);

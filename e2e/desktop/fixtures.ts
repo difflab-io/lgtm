@@ -67,19 +67,28 @@ function send(msg) {
 function publishDiagnostics(uri, text) {
   const diagnostics = [];
   const lines = text.split('\\n');
+  const markers = ['BROKEN', 'invalid-theme', 'unknownLocalField'];
   for (let i = 0; i < lines.length; i++) {
-    const idx = lines[i].indexOf('BROKEN');
-    if (idx !== -1) {
-      diagnostics.push({
-        range: {
-          start: { line: i, character: idx },
-          end: { line: i, character: idx + 6 },
-        },
-        severity: 1,
-        source: 'rustc',
-        code: 'E0425',
-        message: 'cannot find value \`BROKEN\` in this scope',
-      });
+    for (const marker of markers) {
+      const idx = lines[i].indexOf(marker);
+      if (idx !== -1) {
+        const startChar =
+          marker === 'BROKEN' ? idx : lines[i].length - lines[i].trimStart().length;
+        const endChar = marker === 'BROKEN' ? idx + marker.length : lines[i].length;
+        diagnostics.push({
+          range: {
+            start: { line: i, character: startChar },
+            end: { line: i, character: endChar },
+          },
+          severity: 1,
+          source: 'rustc',
+          code: 'E0425',
+          message:
+            marker === 'BROKEN'
+              ? 'cannot find value \`BROKEN\` in this scope'
+              : \`invalid value or symbol \\\`\${marker}\\\`\`,
+        });
+      }
     }
   }
   send({

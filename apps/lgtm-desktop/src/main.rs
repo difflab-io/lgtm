@@ -3,6 +3,7 @@
 mod app;
 pub mod error;
 pub mod events;
+pub mod menus;
 pub mod models;
 pub mod services;
 

@@ -95,9 +95,7 @@ sequenceDiagram
 | `ConfigService::with_global_config_path` | `fn with_global_config_path(path: PathBuf) -> Self` | Construct a configuration service with an explicit global config path for isolated tests. |
 | `ConfigService::get_lgtm_home_dir` | `fn get_lgtm_home_dir(&self) -> PathBuf` | Return the resolved LGTM home directory (`$LGTM_HOME` or `~/.lgtm`). |
 | `ConfigService::get_global_config_path` | `fn get_global_config_path(&self) -> PathBuf` | Return the path to `~/.lgtm/config.json` (or `$LGTM_HOME/config.json`). |
-| `ConfigService::get_global_mise_path` | `fn get_global_mise_path(&self) -> PathBuf` | Return the path to the global managed `~/.lgtm/mise.toml` file. |
 | `ConfigService::get_project_config_path` | `fn get_project_config_path(workspace_root: &Path) -> PathBuf` | Return the path to `<workspace>/.lgtm/config.json`. |
-| `ConfigService::get_managed_mise_path` | `fn get_managed_mise_path(workspace_root: &Path) -> PathBuf` | Return the path to `<workspace>/.lgtm/mise.toml`. |
 | `ConfigService::get_config` | `fn get_config(&self, workspace_root: &Path) -> Result<LgtmConfig>` | Return merged built-in presets, global config, and `<workspace>/.lgtm/config.json`. |
 | `ConfigService::get_config_snapshot` | `fn get_config_snapshot(&self, workspace_root: Option<&Path>) -> Result<ResolvedConfigSnapshot>` | Return deep-merged `LgtmConfig` plus global and project `LgtmConfigPatch` trees. |
 | `ConfigService::ensure_workspace_dir` | `fn ensure_workspace_dir(&self, workspace_root: &Path) -> Result<PathBuf>` | Ensure `<workspace>/.lgtm/` and `<git-dir>/info/exclude` are initialized. |

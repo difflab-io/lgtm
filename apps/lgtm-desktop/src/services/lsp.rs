@@ -57,7 +57,7 @@ impl LspService {
         content: &str,
     ) -> (Option<String>, Option<LspServerStatusEvent>) {
         self.manager
-            .open_or_sync_file_async(workspace_root, file_path, content)
+            .open_or_sync_file(workspace_root, file_path, content)
     }
 
     /// Propagates in-memory buffer edits (`textDocument/didChange`) to the active language server.
