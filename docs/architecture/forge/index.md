@@ -8,21 +8,18 @@
 
 ### Functional
 
-- **Local and remote review workflows**: Let users and AI agents stage changes, commit, push, review diffs, and manage comments both locally and on remote pull requests.
-- **External VCS compatibility**: Interoperate cleanly with native `git` and `jj` workflows, branches, and linked worktrees (`git worktree` / `jj workspace`), restricting LGTM-managed shadow commits and snapshots strictly to `--local` reviews.
-- **Non-destructive local reviews**: Review uncommitted local work and update comment line positions across edits without changing the user's working files or branch history.
-- **Agent-assisted comment anchor relocation**: Let agents move comments to different lines and files after automated hunk, diff, and anchor placement tracking so local reviews stay accurate across rapid edits and file extractions.
-- **Concurrent overlapping sessions**: Allow agent and user review sessions to overlap simultaneously on the same review (just as on remote forges) so an agent can start a session, reply to comments, and close its session while a user has an active session open.
-- **Near real-time pull request proxy**: Sync draft review sessions, draft comments, and viewed file status immediately to and from the remote forge, refresh pull request changes and thread status on demand, and submit finished review sessions back to the remote forge.
-- **Viewed file tracking**: Record when a reviewer marks a file as viewed, sync that status with the remote forge, and clear the viewed mark whenever a new commit or snapshot modifies the file.
-- **Transparent AI participation**: Attribute commits in local and checkout workflows to the human user (reserving agent commit authorship for future remote-triggered workflows), attribute review sessions and comments to human or agent identities (`--as`), and attach an AI disclosure banner whenever an agent authors a session or comment on a remote pull request.
+- Stage changes, commit, push, review diffs, and manage comments on local snapshots (`--local`) and remote pull requests.
+- Interoperate with native `git` and `jj` commands, branches, and linked worktrees.
+- Update comment line anchors automatically across edits and let agents or users move comments across lines and files.
+- Support concurrent draft review sessions for human users and AI agents on the same review.
+- Synchronize draft sessions, comments, and viewed file status with the remote forge, and submit finished review sessions back to the remote forge.
+- Attribute sessions and comments to human or agent identities (`--as`), and attach an AI disclosure banner when an agent authors a remote session or comment.
 
 ### Non-Functional
 
-- **Native Git delegation**: Wrap standard `git` for non-`--local` checkout operations and `--local` shadow indices rather than reimplementing Git staging or copying checkout commits into `~/.lgtm/snapshots/$repoSlug` during remote pull request reviews.
-- **Low latency**: Keep local snapshot, diff, and comment operations fast so interactive CLI and agent workflows never stall.
-- **Offline availability**: Run all local review, diff, and comment workflows without network access.
-- **Reliability and recoverability on failure**: Save draft sessions and comments locally before syncing to the remote forge so work is never lost on a network error, and reconcile any unsynced draft comments on the next refresh or review close so comments never get stuck in the proxy.
+- Leave working files, `.git/index`, and `HEAD` unchanged during `--local` reviews.
+- Keep local snapshot, diff, and comment operations fast and available offline.
+- Save draft sessions and comments locally before syncing to the remote forge, and reconcile any unsynced comments on refresh or review close.
 
 ## Design
 

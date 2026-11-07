@@ -8,16 +8,16 @@ The store module owns LGTM's runtime files under `~/.lgtm`.
 
 ### Functional
 
-- FR1: Select one directory for runtime files.
-- FR2: Create the directory when the server needs it.
-- FR3: Read the recorded PID and port.
-- FR4: Write the port and lock foreground PID ownership.
+- Resolve the runtime directory from `LGTM_HOME` or `~/.lgtm`.
+- Create the runtime directory when starting a server.
+- Read and write the daemon PID and listening port.
+- Lock the PID file to enforce single-server ownership.
 
 ### Non-Functional
 
-- NFR1: Restrict directory access to its owner on Unix.
-- NFR2: Keep read-only discovery from creating directories.
-- NFR3: Support isolated stores for tests and explicit directory overrides.
+- Restrict runtime directory permissions to `0700` and PID files to `0600` on Unix.
+- Keep read-only status checks from creating directories or files.
+- Support isolated runtime directories through `LGTM_HOME`.
 
 ## Design
 

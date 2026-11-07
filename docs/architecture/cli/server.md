@@ -8,14 +8,15 @@ The server module hosts the `lgtm-forge` Connect/gRPC router and a `/health` end
 
 ### Functional
 
-- FR1: Route Connect and gRPC clients to the `lgtm-forge` RPC service at both `/rpc` and root service paths.
-- FR2: Expose a `GET /health` response containing the server PID.
-- FR3: Return HTTP `404` for non-health `GET` and `HEAD` requests.
-- FR4: Record the actual listening port and clear it after shutdown.
+- Serve Connect and gRPC review endpoints at `/rpc` and root service paths.
+- Return the server PID from `GET /health`.
+- Return HTTP `404` for other `GET` and `HEAD` requests.
+- Record the listening port on startup and clear it on shutdown.
 
 ### Non-Functional
 
-- NFR1: Limit connection draining to five seconds after a shutdown signal.
+- Prevent a foreground server from overwriting a running daemon's port file.
+- Drain active connections within five seconds after a shutdown signal.
 
 ## Design
 

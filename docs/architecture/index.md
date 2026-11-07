@@ -2,23 +2,23 @@
 
 ## Overview
 
-LGTM is a local-first and forge-backed code review, workspace editing, and developer environment platform for humans and AI agents. It combines a command-line interface and daemon (`lgtm-cli`), a Connect RPC review and snapshot server (`lgtm-forge`), a native Tauri v2 desktop IDE (`lgtm-desktop` + `lgtm-web`), and five focused workspace libraries (`lgtm-db`, `lgtm-config`, `lgtm-env`, `lgtm-lsp`, and `lgtm-ui`) so developers and agents can review uncommitted worktrees or remote GitHub pull requests, edit workspaces with live Language Server Protocol intelligence, and run project tasks without polluting user repositories or global toolchains.
+LGTM is a code review and workspace platform for humans and AI agents. Users review local uncommitted changes or remote GitHub pull requests, edit files in a desktop IDE with live language server diagnostics, and run project tasks without modifying tracked repository configuration.
 
 ## Requirement
 
 ### Functional
 
-- Unified local and remote code reviews (`lgtm-cli`, `lgtm-forge`, `lgtm-db`): Stage, commit, push, create/refresh/show/close reviews, and draft/reply/resolve/delete comments across both non-destructive local shadow snapshots (`--local`) and remote GitHub pull requests (`ForgeBacked`).
-- First-class human and AI agent attribution (`lgtm-forge`, `lgtm-db`): Track `Human` (email + optional forge login) and `Agent` (`--as <agent>`, provider + model) identities, support concurrent overlapping draft sessions on the same review, and attach AI disclosure footers when agents publish to remote pull requests.
-- Native desktop workspace and file management (`lgtm-desktop`, `lgtm-web`, `lgtm-ui`): Open, browse, create, edit with 150ms debounced auto-save, rename, and move workspace files/folders to the OS Trash inside a reactive Svelte 5 + CodeMirror 6 + Helical UI shell.
-- Zero-config language server and task orchestration (`lgtm-config`, `lgtm-env`, `lgtm-lsp`): Merge `~/.lgtm/config.toml` and `<workspace>/.lgtm/config.toml` over built-in language presets, automatically bootstrap `mise` into `~/.lgtm/bin/mise` when missing, synthesize `<workspace>/.lgtm/mise.toml`, execute project tasks via `lgtm run`, and pool stdio JSON-RPC 2.0 language servers for real-time diagnostics, hover tooltips, go-to-definition, and read-only diagnostics buffers.
-- End-to-end binary verification (`e2e/`): Verify compiled `lgtm-forge`, `lgtm`, and `lgtm-desktop` (`--ipc-bridge` with `tauri::test::MockRuntime`) binaries across Vitest and Playwright (Chromium and WebKit) with deterministic GitHub cassette replay.
+- Stage, commit, push, review diffs, and manage comments on local worktree snapshots (`--local`) and remote GitHub pull requests.
+- Attribute sessions and comments to human users or AI agents (`--as <agent>`), support concurrent draft sessions on the same review, and attach AI disclosure banners on remote pull requests.
+- Open, browse, create, edit, rename, and delete workspace files in a native desktop IDE with live diagnostics, hover documentation, and go-to-definition.
+- Discover workspace languages, install missing `mise` and language server tools automatically, and run project tasks through `lgtm run`.
 
 ### Non-Functional
 
-- Non-destructive repository and host isolation: Store local review snapshots under `~/.lgtm/snapshots/$repoSlug`, install managed `mise` under `~/.lgtm/bin/mise`, keep workspace metadata inside `<workspace>/.lgtm/` registered in `<git-dir>/info/exclude`, and never mutate the user's working tree index/HEAD during `--local` reviews or overwrite root `mise.toml` and `.gitignore` files.
-- Strict layered boundaries: Expose database access exclusively through named repositories on `lgtm-db::Database` and `Transaction`, keep pure domain validation and diff/anchor math in models, and isolate subprocess/network/filesystem orchestration inside services.
-- Offline capability and remote resilience: Execute all local review, workspace editing, and cached toolchain workflows offline, and persist remote pull request draft sessions and comments locally in `lgtm-db` before syncing to GitHub so work is never lost on network failures.
+- Keep `--local` reviews non-destructive so local staging and shadow commits never modify the working checkout's `.git/index`, `HEAD`, `.gitignore`, or root `mise.toml`.
+- Keep all local review, file editing, and cached toolchain workflows working offline.
+- Save remote pull request draft sessions and comments locally before syncing to GitHub so network failures never lose review work.
+- Restrict workspace file operations to the active workspace root and keep UI interactions responsive while language servers initialize in the background.
 
 ## Design
 
@@ -227,11 +227,11 @@ flowchart TD
 ```mermaid
 flowchart TD
     FORGE_SRC["lgtm-forge + lgtm-db + lgtm-config + lgtm-env"] --> CLI_BIN["lgtm-cli (Cargo path dependencies)"]
-    CLI_BIN --> ARCHIVE["GoReleaser macOS & Linux CLI binary archives"]
-    DESK_SRC["lgtm-desktop + lgtm-web + lgtm-lsp + lgtm-env + lgtm-config"] --> TAURI_BUNDLE["Tauri native desktop bundle (.app / .dmg / Linux / Windows packages)"]
+    CLI_BIN --> ARCHIVE["Premise Linux, macOS, and Windows CLI binary archives"]
+    DESK_SRC["lgtm-desktop + lgtm-web + lgtm-lsp + lgtm-env + lgtm-config"] --> TAURI_BUNDLE["Tauri native desktop bundles (.dmg / .deb / .AppImage / .exe)"]
 ```
 
-All workspace Cargo crates set `publish = false` and link directly via Cargo `path` dependencies. Precompiled `lgtm` CLI binary archives (built via GoReleaser from the workspace root) and native `lgtm-desktop` installers (built via `cargo tauri build` with `apps/lgtm-web/build` embedded) are distributed via GitHub Releases. See [CI, Release, and Publishing Architecture](../ci.md).
+All workspace Cargo crates set `publish = false` and link directly via Cargo `path` dependencies. GitHub Releases distribute precompiled `lgtm` CLI archives and native `lgtm-desktop` installers across Linux, macOS, and Windows. See [CI, Release, and Publishing Architecture](../ci.md).
 
 ## References
 

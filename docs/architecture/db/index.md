@@ -8,18 +8,18 @@
 
 ### Functional
 
-- Author attribution: Distinguish human reviewers from AI agents and remember who created each review session and comment.
-- Review tracking: Keep track of both local reviews and remote pull request reviews across branches.
-- Draft review sessions: Hold unpublished comments in a draft session for each reviewer without mixing local, remote, or cross-branch work, keep remote draft sessions and comments paired with their remote IDs as they sync, and publish them together with an overall review decision.
-- Comment conversations: Keep line and range comments, replies, and open or resolved status attached to their file and line positions.
-- Viewed file progress: Track which files a reviewer has marked as viewed on a review and reset a file's viewed status when newer changes modify that file.
-- Review and comment lookup: Find the latest review for a branch or look up a specific review by number or name, and return comments grouped by file or by session.
+- Store human and AI agent identities and record who authored each review session and comment.
+- Track local snapshot reviews and remote pull request reviews across branches.
+- Maintain one active draft session per reviewer and review, pair remote drafts with their remote IDs, and publish sessions with a review outcome.
+- Store inline line and range comments, replies, and thread resolution state.
+- Track viewed files per review and clear viewed state when new commits modify a file.
+- Look up reviews by selector or branch and return comments grouped by file or session.
 
 ### Non-Functional
 
-- Low latency: Return review and comment lookups quickly so CLI commands and UI views feel instantaneous.
-- Transactional consistency: Complete multi-step updates all at once so crashes or errors never leave partial review sessions or orphaned comments.
-- Data durability: Keep saved reviews, sessions, and comments intact across daemon restarts.
+- Return review and comment queries with low latency.
+- Commit multi-step review, session, and comment updates atomically inside transactions.
+- Persist all state across daemon restarts.
 
 ## Design
 

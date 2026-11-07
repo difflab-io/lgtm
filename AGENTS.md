@@ -85,6 +85,8 @@ impl CommentAnchor {
 
 - Document all environment variables that affect LGTM behavior in [`docs/environment.md`](docs/environment.md).
 - Use soft wraps for Markdown prose (one source line per paragraph). Keep diagrams as inline Mermaid fences and prefer file trees, tables, and short code snippets over long prose.
+- [Proposed] Write documentation in plain, concise English (`/simple-english`): use short sentences, active voice, simple tenses, and no bold lead-ins in lists, and rely on Mermaid diagrams and tables rather than long prose paragraphs.
+- [Proposed] In architecture `## Requirement` sections, do not prefix bullets with `FR` or `NFR` labels; state `### Functional` requirements as user-facing capabilities and `### Non-Functional` requirements as performance, security, isolation, and reliability characteristics without internal crate or implementation fluff.
 
 ## Testing
 

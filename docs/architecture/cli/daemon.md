@@ -8,16 +8,16 @@ The daemon module starts, discovers, and stops the background process that serve
 
 ### Functional
 
-- FR1: Start the background RPC server when no healthy instance exists.
-- FR2: Reuse a healthy server for repeated startup requests and prevent duplicate servers through PID-file locking.
-- FR3: Report the PID, `server_url`, and `rpc_url`.
-- FR4: Stop the identified server with SIGTERM.
+- Start the background RPC server when no healthy instance exists.
+- Reuse a healthy server on repeated startup requests.
+- Report the server PID, `server_url`, and `rpc_url`.
+- Stop the running server on demand.
 
 ### Non-Functional
 
-- NFR1: Use the embedded `daemonize` library without a separate daemon tool.
-- NFR2: Match the stored PID to the server's health response before signaling it.
-- NFR3: Return launch errors with captured output and readiness/shutdown failures with a log file location.
+- Prevent duplicate server processes through PID-file locking.
+- Verify that the stored PID matches the `/health` response before sending `SIGTERM`.
+- Include captured stderr and the log file path when startup, readiness, or shutdown fails.
 
 ## Design
 

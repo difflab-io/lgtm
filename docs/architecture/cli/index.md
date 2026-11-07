@@ -8,17 +8,17 @@
 
 ### Functional
 
-- Unified local and remote commands: Use the same command surface for local snapshot reviews (`--local`) and remote pull request reviews.
-- Branch-aware defaults: Default `review list`, `review refresh`, `review show`, `review close`, and `comment new` to the latest review on the current branch when the review number or name is omitted.
-- Agent identity support: Allow AI assistants to pass `--as <agent-name>` on commits and comments without switching the user's active Git or GitHub account.
-- Human and machine output: Render inline unified diffs and threaded comments in the terminal by default, and emit structured JSON on stdout when `--json` is passed.
-- Daemon and desktop launcher: Start, discover, inspect, and stop the background `lgtm-forge` RPC server (`up`, `down`, `status`) and launch `lgtm-desktop` rooted at any workspace folder (`open [<path>]` or `lgtm [<path>]`).
+- Stage, commit, push, review diffs, and manage comments on local snapshots (`--local`) and remote pull requests using one command surface.
+- Default `review list`, `review refresh`, `review show`, `review close`, and `comment new` to the latest review on the current branch when the review selector is omitted.
+- Let AI agents pass `--as <agent-name>` on review and comment commands without changing the user's Git or GitHub credentials.
+- Render inline unified diffs and threaded comments in the terminal by default, or emit structured JSON with `--json`.
+- Start, inspect, and stop the background RPC daemon (`up`, `status`, `down`), run workspace tasks (`run`), and open workspaces in the desktop app (`open [<path>]` or `lgtm [<path>]`).
 
 ### Non-Functional
 
-- Fast command execution: Reuse the running background daemon so CLI invocations return quickly.
-- Clean process isolation: Detach the background daemon process before starting asynchronous worker threads.
-- Predictable exit codes: Report all command and RPC errors on stderr (or as structured JSON with `--json`) with a nonzero exit code.
+- Reuse the running background daemon so CLI commands complete with low latency.
+- Detach the daemon process cleanly before starting asynchronous worker threads.
+- Report command and RPC failures on stderr (or as JSON with `--json`) and exit with a nonzero status code.
 
 ## Design
 
