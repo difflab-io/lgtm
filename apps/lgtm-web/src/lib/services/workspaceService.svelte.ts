@@ -9,7 +9,9 @@ import {
   type LspFileDiagnosticsEvent,
   type LspServerStatusEvent,
 } from '../clients/workspaceClient'
+import { DiffService } from './diffService.svelte'
 import { LspService } from './lspService.svelte'
+import { ReviewService } from './reviewService.svelte'
 import { SettingsService } from './settingsService.svelte'
 
 export interface FolderRefresh {
@@ -28,10 +30,13 @@ export interface WorkspaceTab {
   dirty?: boolean
 }
 
-/** Workspace view model coordinating file tree browsing, open tabs, debounced saves, LSP state, and settings. */
+/** Workspace view model coordinating file tree browsing, open tabs, debounced saves, LSP state, settings, and diff viewing. */
 export class WorkspaceService {
   readonly lsp: LspService
   readonly settings: SettingsService
+  readonly review: ReviewService
+  readonly diff: DiffService
+  sidebarMode = $state<'files' | 'diffs'>('files')
   defaultRoot = $state('')
   root = $state('~/.lgtm/workspace')
   entries = $state<WorkspaceNode[]>([])
@@ -61,10 +66,49 @@ export class WorkspaceService {
   private inFlightSave: Promise<void> | null = null
   private openRequestSeq = 0
 
-  /** Constructs a `WorkspaceService` with its own `LspService` and `SettingsService` instances. */
+  /** Constructs a `WorkspaceService` with its own `LspService`, `SettingsService`, `ReviewService`, and `DiffService` instances. */
   constructor(private client: WorkspaceClient) {
     this.lsp = new LspService(client)
     this.settings = new SettingsService(client)
+    this.diff = new DiffService(client, (snapshot) => {
+      this.review.syncMode(snapshot.reviewMode)
+    })
+    this.review = new ReviewService(client, (snapshot) => {
+      void this.diff.applySnapshot(snapshot)
+    })
+  }
+
+  /** Switches the active sidebar pane between `'files'` (`WorkspaceExplorer`) and `'diffs'` (`DiffExplorer` + `CommitSelector`). */
+  setSidebarMode(mode: 'files' | 'diffs'): void {
+    this.sidebarMode = mode
+    if (mode === 'diffs') {
+      void this.diff.refresh()
+    }
+  }
+
+  /** Toggles the active sidebar pane between `'files'` and `'diffs'`. */
+  toggleSidebarMode(): void {
+    this.setSidebarMode(this.sidebarMode === 'files' ? 'diffs' : 'files')
+  }
+
+  /** Writes updated working-tree file content from `DiffEditor` and refreshes the diff snapshot. */
+  async saveDiffFile(path: string, content: string): Promise<void> {
+    this.saving = true
+    this.openingError = null
+    try {
+      await this.client.write(path, content)
+      await this.diff.refresh()
+    } catch (error) {
+      if (this.active) this.openingError = errorMessage(error)
+    } finally {
+      if (this.active) this.saving = false
+    }
+  }
+
+  /** Refreshes the diff snapshot when a backend `diff-updated` notification arrives. */
+  handleDiffUpdated(): void {
+    if (!this.active) return
+    void this.diff.refresh()
   }
 
   /** Returns whether a file or tree operation is currently in progress. */
@@ -103,6 +147,9 @@ export class WorkspaceService {
 
   /** Returns the path or title shown in the footer breadcrumb tooltip. */
   get selectedPath() {
+    if (this.sidebarMode === 'diffs' && this.diff.activeFilePath) {
+      return this.diff.activeFilePath
+    }
     if (this.activeTab?.kind === 'diagnostics') return this.activeTab.title
     return this.selected?.path
   }
@@ -116,6 +163,9 @@ export class WorkspaceService {
 
   /** Returns path segments rendered in the footer breadcrumb bar. */
   get breadcrumbs(): string[] {
+    if (this.sidebarMode === 'diffs' && this.diff.activeFilePath) {
+      return this.diff.activeFilePath.split(/[\\/]/).filter(Boolean)
+    }
     if (this.activeTab?.kind === 'diagnostics') return [this.activeTab.title]
     if (!this.selected) return []
     if (this.isConfigFilePath(this.selected.path)) {
@@ -155,8 +205,9 @@ export class WorkspaceService {
   /** Returns the human-readable editor status label for the footer. */
   get status() {
     if (this.openingError) return this.openingError
-    if (this.fileLoading) return 'Opening file…'
+    if (this.fileLoading || this.diff.isLoading) return 'Opening file…'
     if (this.saving) return 'Saving…'
+    if (this.sidebarMode === 'diffs' && this.diff.activeDiff) return 'Ready'
     if (this.selected || this.activeTab) return 'Ready'
     return 'Idle'
   }
@@ -231,10 +282,12 @@ export class WorkspaceService {
       this.tabs = []
       this.activeTabId = null
       this.lsp.reset()
+      this.diff.reset()
       this.clearSelected()
       this.treeVersion++
       void this.settings.load()
       void this.syncLspState()
+      void this.diff.refresh()
     } catch (error) {
       if (this.active) this.error = errorMessage(error)
     } finally {

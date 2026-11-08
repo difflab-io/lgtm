@@ -21,6 +21,7 @@
     errors,
     renameErrors,
     icon,
+    trailing,
     onedit,
     oncancel,
     contextItems,
@@ -70,6 +71,7 @@
                 <ArkTreeView.BranchText class={treeViewLabelBase} hidden={state().renaming}
                   >{node.displayLabel ?? node.label}</ArkTreeView.BranchText
                 >
+                {#if trailing && !state().renaming}{@render trailing(node, state().expanded)}{/if}
                 <ArkTreeView.NodeRenameInput
                   aria-label="Name"
                   class={treeViewRenameInputBase}
@@ -96,6 +98,7 @@
                 {errors}
                 {renameErrors}
                 {icon}
+                {trailing}
                 {onedit}
                 {oncancel}
                 {contextItems}
@@ -119,6 +122,7 @@
               <ArkTreeView.ItemText class={treeViewLabelBase} hidden={state().renaming}
                 >{node.displayLabel ?? node.label}</ArkTreeView.ItemText
               >
+              {#if trailing && !state().renaming}{@render trailing(node, false)}{/if}
               <ArkTreeView.NodeRenameInput
                 aria-label="Name"
                 class={treeViewRenameInputBase}

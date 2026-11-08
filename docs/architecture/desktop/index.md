@@ -25,21 +25,26 @@
 ```mermaid
 flowchart TB
     subgraph Frontend["lgtm-web (Svelte 5) & lgtm-ui"]
-        SHELL["Shell.svelte / ContentPane.svelte / LspStatusMenu.svelte"]
+        SHELL["Shell.svelte / ContentPane.svelte / DiffExplorer.svelte / LspStatusMenu.svelte"]
         WS_VM["WorkspaceService (workspaceService.svelte.ts)"]
+        REV_VM["ReviewService & DiffService (reviewService.svelte.ts / diffService.svelte.ts)"]
         LSP_VM["LspService (lspService.svelte.ts)"]
         CLIENT["TauriWorkspaceClient (workspaceClient.ts)"]
         SHELL --> WS_VM
+        SHELL --> REV_VM
         WS_VM --> LSP_VM
         WS_VM --> CLIENT
+        REV_VM --> CLIENT
         LSP_VM --> CLIENT
     end
 
     subgraph Desktop["lgtm-desktop (Tauri v2 Rust Host)"]
         IPC["app.rs (Tauri Commands & RunEvent Lifecycle)"]
         WS_SVC["services/workspace.rs (WorkspaceService)"]
+        REV_SVC["services/review.rs & services/diff.rs (ReviewService & DiffService)"]
         DESK_LSP["services/lsp.rs (Desktop LspService)"]
         IPC --> WS_SVC
+        IPC --> REV_SVC
         IPC --> DESK_LSP
         WS_SVC --> DESK_LSP
     end
@@ -59,11 +64,12 @@ flowchart TB
     LSP_MGR --> SERVERS["Language Server Processes (stdio JSON-RPC 2.0)"]
 ```
 
-- `app.rs` (`lgtm-desktop`): Registers a unified `AppState` (`workspace`, `config`, `lsp`, `frontend_ready`, `events`) in Tauri managed state, dispatches `workspace_*`, `lsp_*`, and `config_get` IPC commands onto `spawn_blocking`, emits `config-updated` when `workspace_write` saves a configuration file, and coordinates the `RunEvent::ExitRequested` quit handshake.
+- `app.rs` (`lgtm-desktop`): Registers a unified `AppState` (`workspace`, `review`, `diff`, `config`, `lsp`, `frontend_ready`, `events`) in Tauri managed state, dispatches `workspace_*`, `review_*`, `diff_*`, `lsp_*`, and `config_get` IPC commands onto `spawn_blocking`, emits `config-updated` and `diff-updated` when `workspace_write` saves a file, and coordinates the `RunEvent::ExitRequested` quit handshake.
 - `services::workspace::WorkspaceService` (`lgtm-desktop`): Owns the active `Workspace` root, validates workspace-relative paths (plus `~/.lgtm/config.json` and `.lgtm/config.json`), reads global and local configuration files via `get_file_content`, and performs atomic file/folder CRUD.
+- `services::review::ReviewService` & `services::diff::DiffService` (`lgtm-desktop`): Manage the active review diff mode (`Local` or `ForgeBacked`), enumerate `.git` and `~/.lgtm/snapshots/$repoSlug` shadow commits for the `CommitSelector` checklist, list changed files for `DiffExplorer`, and read `(base_content, head_content)` pairs for `DiffEditor`. See [Desktop diff viewer and commit inspection](diffs.md).
 - `services::lsp::LspService` (`lgtm-desktop`): Bridges `lgtm-lsp`'s `LgtmLspManager` to the Tauri `AppHandle` (and optional E2E stdio bridge forwarder), translating `LspEvent::Status` and `LspEvent::Diagnostics` callbacks into `app_handle.emit("lsp-status", ...)` and `app_handle.emit("lsp-diagnostics", ...)`.
 - `LgtmLspManager` & `LspCacheService` (`lgtm-lsp`): Manage per-`(workspace_root, language_id, project_root)` stdio JSON-RPC 2.0 sessions, cache open UTF-8 document snapshots and diagnostics, and coordinate with `MiseService` (`lgtm-env`) and `ConfigService` (`lgtm-config`) to launch language servers.
-- `WorkspaceService`, `LspService`, & `SettingsService` (`lgtm-web`): Reactive Svelte 5 `$state` services that manage open editor tabs, 150ms debounced auto-save (`flushSave`), live `lsp_did_change` notifications, active language server indicators, read-only diagnostics buffer tabs, and live `config-updated` preference synchronization. See [Web frontend architecture](../web/index.md).
+- `WorkspaceService`, `ReviewService`, `DiffService`, `LspService`, & `SettingsService` (`lgtm-web`): Reactive Svelte 5 `$state` services that manage open editor and diff tabs, 150ms debounced auto-save (`flushSave`), `Local` and `ForgeBacked` diff inspection, live `lsp_did_change` notifications, active language server indicators, read-only diagnostics buffer tabs, and live `config-updated` preference synchronization. See [Web frontend architecture](../web/index.md).
 
 ### Data and Control Flow
 
@@ -201,7 +207,10 @@ When compiled with the `e2e-bridge` feature and launched with `--ipc-bridge <hom
 
 ## References
 
+- [Desktop diff viewer and commit inspection](diffs.md).
 - [Desktop event handling & service orchestration](events.md).
+- [DiffEditor UI component (`libs/lgtm-ui`)](../ui/diff-editor.md).
+- [DiffExplorer & CommitSelector UI components (`lgtm-web`)](../web/diff-explorer.md).
 - [LSP library (`lgtm-lsp`) architecture](../lsp/index.md).
 - [Environment library (`lgtm-env`) architecture](../env/index.md).
 - [Configuration library (`lgtm-config`) architecture](../config/index.md).

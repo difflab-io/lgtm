@@ -23,3 +23,18 @@ export type {
   CodeEditorLineWrapping,
   CodeEditorProps,
 } from './code-editor/types'
+export { default as DiffEditor } from './diff-editor/DiffEditor.svelte'
+export {
+  DIFF_EDITOR_KEYBINDINGS,
+  diffHunkKeymap,
+  diffEditorRootVariants,
+  diffEditorStyles,
+  goToNextHunk,
+  goToPrevHunk,
+} from './diff-editor/index'
+export type {
+  DiffEditorMode,
+  DiffEditorProps,
+  DiffEditorRootVariants,
+  DiffEditorVariantProps,
+} from './diff-editor/index'

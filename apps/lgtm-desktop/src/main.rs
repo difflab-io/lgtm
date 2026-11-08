@@ -1,12 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod app;
-pub mod error;
-pub mod events;
-pub mod menus;
-pub mod models;
-pub mod services;
-
 fn main() {
     let mut args = std::env::args().skip(1);
     match args.next().as_deref() {
@@ -18,20 +11,20 @@ fn main() {
                     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                         .join("../lgtm-web/src/lib/gen/bindings.ts")
                 });
-            app::export_typescript_bindings_to(&path)
+            lgtm_desktop::export_typescript_bindings_to(&path)
                 .expect("failed to export TypeScript bindings");
             return;
         }
-        #[cfg(any(test, feature = "e2e-bridge"))]
+        #[cfg(feature = "e2e-bridge")]
         Some("--ipc-bridge") => {
             let home = args
                 .next()
                 .map(std::path::PathBuf::from)
                 .expect("missing home directory for --ipc-bridge");
-            services::IpcBridgeService::new(home).run();
+            lgtm_desktop::IpcBridgeService::new(home).run();
             return;
         }
         _ => {}
     }
-    app::run();
+    lgtm_desktop::run();
 }

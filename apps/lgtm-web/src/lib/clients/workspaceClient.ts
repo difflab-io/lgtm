@@ -6,9 +6,15 @@ import {
   commands,
   type AppearanceSettings,
   type AppearanceSettingsPatch,
+  type DiffCommitItem,
+  type DiffCommitSource,
+  type DiffFileEntry,
+  type DiffFileStatus,
+  type DiffWorkspaceSnapshot,
   type EditorSettings,
   type EditorSettingsPatch,
   type FileContent,
+  type FileDiffContent,
   type FileOpenedEvent,
   type LanguageConfig,
   type LgtmConfig,
@@ -25,6 +31,7 @@ import {
   type LspWorkspaceSnapshot,
   type MiseTaskConfig,
   type ResolvedConfigSnapshot,
+  type ReviewMode,
   type ThemeMode,
   type WorkspaceError,
   type WorkspaceListing,
@@ -35,9 +42,15 @@ import {
 export type {
   AppearanceSettings,
   AppearanceSettingsPatch,
+  DiffCommitItem,
+  DiffCommitSource,
+  DiffFileEntry,
+  DiffFileStatus,
+  DiffWorkspaceSnapshot,
   EditorSettings,
   EditorSettingsPatch,
   FileContent,
+  FileDiffContent,
   FileOpenedEvent,
   LanguageConfig,
   LgtmConfig,
@@ -54,6 +67,7 @@ export type {
   LspWorkspaceSnapshot,
   MiseTaskConfig,
   ResolvedConfigSnapshot,
+  ReviewMode,
   ThemeMode,
   WorkspaceError,
   WorkspaceListing,
@@ -104,6 +118,11 @@ export interface WorkspaceClient {
     onStatus: (event: LspServerStatusEvent) => void
     onDiagnostics: (event: LspFileDiagnosticsEvent) => void
   }): Promise<(() => void)[]>
+  reviewSetMode?(mode: ReviewMode): Promise<DiffWorkspaceSnapshot>
+  diffGetState?(): Promise<DiffWorkspaceSnapshot>
+  diffListFiles?(commitIds: string[]): Promise<DiffFileEntry[]>
+  diffReadFile?(path: string, commitIds: string[]): Promise<FileDiffContent>
+  registerDiffHandlers?(handlers: { onDiffUpdated: () => void }): Promise<(() => void)[]>
 }
 
 export const workspaceClient: WorkspaceClient = {
@@ -179,6 +198,16 @@ export const workspaceClient: WorkspaceClient = {
       }),
       listen<LspFileDiagnosticsEvent>('lsp-diagnostics', (event) => {
         handlers.onDiagnostics(event.payload)
+      }),
+    ]),
+  reviewSetMode: (mode) => commands.reviewSetMode(mode),
+  diffGetState: () => commands.diffGetState(),
+  diffListFiles: (commitIds) => commands.diffListFiles(commitIds),
+  diffReadFile: (path, commitIds) => commands.diffReadFile(path, commitIds),
+  registerDiffHandlers: (handlers) =>
+    Promise.all([
+      listen('diff-updated', () => {
+        handlers.onDiffUpdated()
       }),
     ]),
 }

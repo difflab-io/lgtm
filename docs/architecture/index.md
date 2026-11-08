@@ -243,8 +243,11 @@ All workspace Cargo crates set `publish = false` and link directly via Cargo `pa
 - [Database library architecture (`lgtm-db`)](db/index.md).
 - [CLI architecture (`lgtm-cli`)](cli/index.md).
 - [Desktop application architecture (`lgtm-desktop` & `lgtm-web`)](desktop/index.md).
+- [Desktop diff viewer and commit inspection](desktop/diffs.md).
 - [Desktop event handling & service orchestration](desktop/events.md).
 - [Web frontend architecture](web/index.md).
+- [DiffExplorer & CommitSelector UI components (`lgtm-web`)](web/diff-explorer.md).
+- [DiffEditor UI component (`libs/lgtm-ui`)](ui/diff-editor.md).
 - [Configuration library architecture (`lgtm-config`)](config/index.md).
 - [Environment library architecture (`lgtm-env`)](env/index.md).
 - [LSP library architecture (`lgtm-lsp`)](lsp/index.md).

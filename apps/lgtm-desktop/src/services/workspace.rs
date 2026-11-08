@@ -382,6 +382,11 @@ impl WorkspaceService {
         Ok(())
     }
 
+    /// Returns the global `.lgtm` home directory (`<home>/.lgtm`).
+    pub fn get_lgtm_home(&self) -> &Path {
+        &self.lgtm_home
+    }
+
     /// Returns the canonical root directory of the active workspace.
     pub fn get_root(&self) -> Result<PathBuf> {
         if !self.custom_root {

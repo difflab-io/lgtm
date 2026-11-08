@@ -16,12 +16,15 @@
     SelectItem,
     SelectItemText,
   } from '@cloudvoyant/helical-svelte'
-  import { FilePlus2, FolderPlus, PanelLeft, ChevronDown } from 'lucide-svelte'
+  import { FilePlus2, FolderPlus, GitCompare, PanelLeft, ChevronDown } from 'lucide-svelte'
   import { ThemeService } from 'lgtm-ui'
   import { errorMessage, workspaceClient, type WorkspaceClient } from '../clients/workspaceClient'
+  import { createKeybindingDispatcher } from '../keybindings'
   import { WorkspaceService } from '../services/workspaceService.svelte'
-  import WorkspaceExplorer from './WorkspaceExplorer.svelte'
+  import CommitSelector from './CommitSelector.svelte'
   import ContentPane from './ContentPane.svelte'
+  import DiffExplorer from './DiffExplorer.svelte'
+  import WorkspaceExplorer from './WorkspaceExplorer.svelte'
 
   // Props ---------------------------------------------------------------------
   interface ShellProps {
@@ -31,6 +34,10 @@
 
   // State ---------------------------------------------------------------------
   const workspace = untrack(() => new WorkspaceService(client))
+  let contentPaneRef = $state<{
+    goToNextHunk: () => boolean
+    goToPrevHunk: () => boolean
+  }>()
   const theme = untrack(
     () =>
       new ThemeService({
@@ -52,16 +59,48 @@
 
   onMount(() => {
     let active = true
+    // TODO(keybinds): Remove temporary keybindings and window dispatcher in favor of @cloudvoyant/helical-ui HotkeyService / WhichKey integration before merge.
+    const dispatchDiffKeybinding = createKeybindingDispatcher({
+      'diff.nextFile': () => {
+        workspace.setSidebarMode('diffs')
+        void workspace.diff.selectNextFile()
+      },
+      'diff.prevFile': () => {
+        workspace.setSidebarMode('diffs')
+        void workspace.diff.selectPrevFile()
+      },
+      'diff.nextHunk': () => {
+        contentPaneRef?.goToNextHunk()
+      },
+      'diff.prevHunk': () => {
+        contentPaneRef?.goToPrevHunk()
+      },
+      'diff.toggleViewMode': () => {
+        workspace.setSidebarMode('diffs')
+        workspace.diff.toggleViewMode()
+      },
+      'diff.toggleFullFile': () => {
+        workspace.setSidebarMode('diffs')
+        workspace.diff.toggleFullFile()
+      },
+      'review.toggleMode': () => {
+        workspace.setSidebarMode('diffs')
+        void workspace.review.toggleMode()
+      },
+    })
     const handleKeydown = (event: KeyboardEvent) => {
       const isComma = event.key === ',' || event.key === '<' || event.code === 'Comma'
       if ((event.metaKey || event.ctrlKey) && !event.altKey && isComma) {
         event.preventDefault()
+        workspace.setSidebarMode('files')
         if (event.shiftKey || event.key === '<') {
           void workspace.openPath('.lgtm/config.json', { title: 'Settings (project)', focus: true })
         } else {
           void workspace.openPath('~/.lgtm/config.json', { title: 'Settings', focus: true })
         }
+        return
       }
+      dispatchDiffKeybinding(event)
     }
     window.addEventListener('keydown', handleKeydown, true)
     const unlisteners: (() => void)[] = [
@@ -101,11 +140,25 @@
             workspace.settings.handleUpdated(snapshot)
           },
           onOpenFile: (event) => {
+            workspace.setSidebarMode('files')
             void workspace.openPath(event.path, {
               title: event.title ?? undefined,
               offset: event.offset ?? undefined,
               focus: true,
             })
+          },
+        })
+        .then((stops) => {
+          for (const stop of stops) {
+            if (active) unlisteners.push(stop)
+            else stop()
+          }
+        })
+        .catch(() => {})
+      void client
+        .registerDiffHandlers?.({
+          onDiffUpdated: () => {
+            workspace.handleDiffUpdated()
           },
         })
         .then((stops) => {
@@ -178,56 +231,81 @@
     <Sidebar
       id="workspace-sidebar"
       collapsible="offcanvas"
-      class="workspace-sidebar bg-sidebar top-9 h-[calc(100dvh-36px)] overflow-y-auto"
+      class="workspace-sidebar bg-sidebar top-9 flex h-[calc(100dvh-36px)] flex-col overflow-y-auto"
       aria-label="Workspace"
     >
       <SidebarHeader
         class="sticky top-0 z-1 shrink-0 items-stretch gap-1 bg-sidebar px-3.5 pt-3.5 pb-2.5 text-[11px] font-semibold text-muted-foreground"
       >
         <Row class="items-center justify-between gap-2">
-          <span>Workspace</span>
+          <span>{workspace.sidebarMode === 'diffs' ? 'Diffs' : 'Workspace'}</span>
           <Row class="items-center gap-1">
+            {#if workspace.sidebarMode === 'files'}
+              <Button
+                variant="text"
+                size="sm"
+                class="size-6 p-1 text-[10px] font-medium"
+                aria-label="New file"
+                title="New file"
+                disabled={workspace.cannotCreate}
+                onclick={() => workspace.startCreate('file')}
+                ><FilePlus2 size={14} strokeWidth={1.5} /></Button
+              >
+              <Button
+                variant="text"
+                size="sm"
+                class="size-6 p-1 text-[10px] font-medium"
+                aria-label="New folder"
+                title="New folder"
+                disabled={workspace.cannotCreate}
+                onclick={() => workspace.startCreate('directory')}
+                ><FolderPlus size={14} strokeWidth={1.5} /></Button
+              >
+            {/if}
             <Button
               variant="text"
               size="sm"
-              class="size-6 p-1 text-[10px] font-medium"
-              aria-label="New file"
-              title="New file"
-              disabled={workspace.cannotCreate}
-              onclick={() => workspace.startCreate('file')}
-              ><FilePlus2 size={14} strokeWidth={1.5} /></Button
-            >
-            <Button
-              variant="text"
-              size="sm"
-              class="size-6 p-1 text-[10px] font-medium"
-              aria-label="New folder"
-              title="New folder"
-              disabled={workspace.cannotCreate}
-              onclick={() => workspace.startCreate('directory')}
-              ><FolderPlus size={14} strokeWidth={1.5} /></Button
+              class={workspace.sidebarMode === 'diffs'
+                ? 'size-6 bg-accent p-1 text-[10px] font-medium text-accent-foreground'
+                : 'size-6 p-1 text-[10px] font-medium'}
+              aria-label="Toggle diffs"
+              aria-pressed={workspace.sidebarMode === 'diffs'}
+              title="Toggle diffs"
+              onclick={() => workspace.toggleSidebarMode()}
+              ><GitCompare size={14} strokeWidth={1.5} /></Button
             >
           </Row>
         </Row>
       </SidebarHeader>
-      <SidebarContent>
-        {#if workspace.creationError}
-          {@render sidebarNotice(workspace.creationError, 'alert')}
-        {/if}
-        {#if workspace.loading}
-          {@render sidebarNotice('Opening workspace…', 'status')}
-        {:else if workspace.error}
-          {@render sidebarNotice(workspace.error, 'alert')}
-          {#if client.isDesktop()}<Button variant="text" size="sm" onclick={() => workspace.open()}
-              >Retry</Button
-            >{/if}
-        {:else if !workspace.entries.length && !workspace.pendingEntry}
-          {@render sidebarNotice('Your workspace is empty. Create your first file with New file.')}
-        {:else}
-          {#key workspace.treeVersion}<WorkspaceExplorer {workspace} />{/key}
-        {/if}
-      </SidebarContent>
+      {#if workspace.sidebarMode === 'diffs'}
+        <SidebarContent class="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
+          <DiffExplorer diff={workspace.diff} />
+          <CommitSelector diff={workspace.diff} />
+        </SidebarContent>
+      {:else}
+        <SidebarContent>
+          {#if workspace.creationError}
+            {@render sidebarNotice(workspace.creationError, 'alert')}
+          {/if}
+          {#if workspace.loading}
+            {@render sidebarNotice('Opening workspace…', 'status')}
+          {:else if workspace.error}
+            {@render sidebarNotice(workspace.error, 'alert')}
+            {#if client.isDesktop()}<Button
+                variant="text"
+                size="sm"
+                onclick={() => workspace.open()}>Retry</Button
+              >{/if}
+          {:else if !workspace.entries.length && !workspace.pendingEntry}
+            {@render sidebarNotice(
+              'Your workspace is empty. Create your first file with New file.',
+            )}
+          {:else}
+            {#key workspace.treeVersion}<WorkspaceExplorer {workspace} />{/key}
+          {/if}
+        </SidebarContent>
+      {/if}
     </Sidebar>
-    <ContentPane {workspace} />
+    <ContentPane bind:this={contentPaneRef} {workspace} />
   </Row>
 </SidebarProvider>
