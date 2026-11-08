@@ -33,6 +33,10 @@ export const commands = {
 	lspHover: (relativePath: string, offset: number) => __TAURI_INVOKE<LspHoverResult | null>("lsp_hover", { relativePath, offset }),
 	/**  Requests symbol definition locations (`textDocument/definition`) at a UTF-16 editor offset. */
 	lspGotoDefinition: (relativePath: string, offset: number) => __TAURI_INVOKE<LspLocation[]>("lsp_goto_definition", { relativePath, offset }),
+	/**  Requests code completion candidates (`textDocument/completion`) at a UTF-16 editor offset. */
+	lspCompletion: (relativePath: string, offset: number) => __TAURI_INVOKE<LspCompletionItem[]>("lsp_completion", { relativePath, offset }),
+	/**  Requests callable signature help (`textDocument/signatureHelp`) at a UTF-16 editor offset. */
+	lspSignatureHelp: (relativePath: string, offset: number) => __TAURI_INVOKE<LspSignatureHelp | null>("lsp_signature_help", { relativePath, offset }),
 	/**  Returns the current workspace LSP server statuses and diagnostics snapshot. */
 	lspGetState: () => __TAURI_INVOKE<LspWorkspaceSnapshot>("lsp_get_state"),
 	/**  Renders a read-only diagnostics buffer for the active workspace, optionally filtered by `language_id`. */
@@ -41,6 +45,16 @@ export const commands = {
 	lspRestart: (languageId: string) => __TAURI_INVOKE<LspServerStatusEvent>("lsp_restart", { languageId }),
 	/**  Returns the resolved nested configuration snapshot across defaults, global settings, and project overrides. */
 	configGet: () => __TAURI_INVOKE<ResolvedConfigSnapshot>("config_get"),
+	/**  Applies a partial configuration patch to global or project `config.json` and emits `config-updated`. */
+	configUpdate: (patch: LgtmConfigPatch, scope: ConfigScope | null) => __TAURI_INVOKE<ResolvedConfigSnapshot>("config_update", { patch, scope }),
+	/**  Switches the active [`ReviewMode`] (`Local` vs. `ForgeBacked`) and returns the refreshed workspace diff snapshot. */
+	reviewSetMode: (mode: ReviewMode) => __TAURI_INVOKE<DiffWorkspaceSnapshot>("review_set_mode", { mode }),
+	/**  Returns the active [`ReviewMode`], branch name, commit checklist, default selection, and changed file list. */
+	diffGetState: () => __TAURI_INVOKE<DiffWorkspaceSnapshot>("diff_get_state"),
+	/**  Computes changed files and line deltas across `commit_ids` (`oldest.base_sha .. newest.head_sha`). */
+	diffListFiles: (commitIds: string[]) => __TAURI_INVOKE<DiffFileEntry[]>("diff_list_files", { commitIds }),
+	/**  Reads `base_content` and `head_content` for `path` across `commit_ids`. */
+	diffReadFile: (path: string, commitIds: string[]) => __TAURI_INVOKE<FileDiffContent>("diff_read_file", { path, commitIds }),
 };
 
 /* Types */
@@ -54,6 +68,86 @@ export type AppearanceSettings = {
 export type AppearanceSettingsPatch = {
 	/**  Preferred application color theme (`system`, `light`, or `dark`). */
 	theme?: ThemeMode | null,
+};
+
+/**  Active command surface style for `Mod+k` and leader command invocation (`keybindings.commandStyle`). */
+export type CommandStyle = 
+/**  Bottom-docked modal command bar (`CommandMenu`, `:` style). */
+"menu" | 
+/**  Centered modal command palette (`CommandPalette`, `Mod+k` style). */
+"palette";
+
+/**  Configuration storage scope (`global` or `project`). */
+export type ConfigScope = 
+/**  User-wide configuration stored in `~/.lgtm/config.json`. */
+"global" | 
+/**  Workspace-specific configuration stored in `<workspace>/.lgtm/config.json`. */
+"project";
+
+/**  Selectable commit or working-tree entry displayed in the bottom diff sidebar checklist. */
+export type DiffCommitItem = {
+	/**  Commit identifier (`"working_tree"` or a 40-character hex commit SHA). */
+	id: string,
+	/**  Abbreviated commit label (`"WORKTREE"` or a 7-character short SHA). */
+	shortSha: string,
+	/**  Single-line commit subject or `"Working Tree"`. */
+	title: string,
+	/**  Commit author name. */
+	author: string,
+	/**  Commit author Unix timestamp in seconds. */
+	timestamp: number,
+	/**  First-parent commit SHA (`None` for an initial root commit). */
+	parentSha: string | null,
+	/**  Origin of this commit entry. */
+	source: DiffCommitSource,
+};
+
+/**  Source repository or checkout layer from which a commit checklist item originates. */
+export type DiffCommitSource = 
+/**  Live working-tree files on disk compared against the latest snapshot or branch `HEAD`. */
+"working_tree" | 
+/**  Shadow commit recorded on `refs/lgtm/snapshots/<branch>` inside `~/.lgtm/snapshots/$repoSlug`. */
+"local_snapshot" | 
+/**  Standard Git commit recorded in `<workspace>/.git`. */
+"git_commit";
+
+/**  Summary of a changed file and its line delta counts for the diff explorer tree. */
+export type DiffFileEntry = {
+	/**  Workspace-relative file path in the head tree (or base tree when deleted). */
+	path: string,
+	/**  Previous workspace-relative path when `status` is [`DiffFileStatus::Renamed`]. */
+	oldPath: string | null,
+	/**  File change classification (`added`, `modified`, `deleted`, or `renamed`). */
+	status: DiffFileStatus,
+	/**  Number of added lines in the file diff. */
+	additions: number,
+	/**  Number of deleted lines in the file diff. */
+	deletions: number,
+};
+
+/**  Change classification for a file in a diff range. */
+export type DiffFileStatus = 
+/**  File was created in the head tree. */
+"added" | 
+/**  File exists in both trees with modified content. */
+"modified" | 
+/**  File existed in the base tree and was removed in the head tree. */
+"deleted" | 
+/**  File was moved or renamed from `old_path` to `path`. */
+"renamed";
+
+/**  Snapshot of the active workspace diff state returned on initial load, mode toggle, or workspace refresh. */
+export type DiffWorkspaceSnapshot = {
+	/**  Active review mode (`local` or `forge_backed`). */
+	reviewMode: ReviewMode,
+	/**  Short name of the checked-out Git branch (or `"HEAD"` when detached). */
+	branch: string,
+	/**  Ordered newest-first list of commits available in the bottom checklist. */
+	commits: DiffCommitItem[],
+	/**  Currently checked commit IDs in the checklist. */
+	selectedCommitIds: string[],
+	/**  Changed files across `selected_commit_ids`. */
+	files: DiffFileEntry[],
 };
 
 /**  Resolved code editor settings section (`editor.*`). */
@@ -80,6 +174,28 @@ export type FileContent = {
 	lspStatus?: LspServerStatusEvent | null,
 };
 
+/**  Complete base and head UTF-8 text payload for a single file across a selected commit range. */
+export type FileDiffContent = {
+	/**  Workspace-relative file path. */
+	path: string,
+	/**  Previous workspace-relative file path when renamed. */
+	oldPath: string | null,
+	/**  File change classification. */
+	status: DiffFileStatus,
+	/**  Resolved base commit SHA (or `""` when comparing against an empty root tree). */
+	baseSha: string,
+	/**  Resolved head commit ID (`"working_tree"` or a commit SHA). */
+	headSha: string,
+	/**  UTF-8 content of the file at `base_sha` (empty when added or binary). */
+	baseContent: string,
+	/**  UTF-8 content of the file at `head_sha` (empty when deleted or binary). */
+	headContent: string,
+	/**  Whether either the base or head blob contains non-UTF-8 binary bytes. */
+	isBinary: boolean,
+	/**  Whether the head buffer is read-only (`false` only when `head_sha == "working_tree"`). */
+	readonly: boolean,
+};
+
 /**  Payload emitted on `workspace-open-file` instructing the webview to open a file tab with an optional custom title and cursor offset. */
 export type FileOpenedEvent = {
 	/**  Workspace-relative or config file path to open (`~/.lgtm/config.json`, `.lgtm/config.json`, or relative path). */
@@ -88,6 +204,43 @@ export type FileOpenedEvent = {
 	title: string | null,
 	/**  Optional UTF-16 character offset to position the cursor at after opening. */
 	offset: number | null,
+};
+
+/**  Modal keybinding preset for `WhichKey` and `CodeEditor` (`keybindings.preset`). */
+export type KeybindPreset = 
+/**  Selection-first Helix keybindings (`normal`, `select`, `insert`, `jump`). */
+"helix" | 
+/**  Operator-pending Vim keybindings. */
+"vim" | 
+/**  Selection-first Kakoune keybindings. */
+"kakoune";
+
+/**  Resolved modal keybinding and command surface settings (`keybindings.*`). */
+export type KeybindingSettings = {
+	/**  Primary command surface (`"menu"` by default, or `"palette"`). */
+	commandStyle?: CommandStyle,
+	/**  Modal editing preset (`"helix"` by default, `"vim"`, or `"kakoune"`). */
+	preset?: KeybindPreset,
+	/**  Restrict modal handling to the `Space` leader key and keep the editor in insert mode (`false` by default). */
+	leaderOnly?: boolean,
+	/**  Render active pane focus outline when switching panes with the keyboard (`true` by default). */
+	paneOutline?: boolean,
+	/**  Enter `insert` mode when clicking inside the code editor (`true` by default). */
+	clickToInsert?: boolean,
+};
+
+/**  Resolved modal keybinding and command surface settings (`keybindings.*`). */
+export type KeybindingSettingsPatch = {
+	/**  Primary command surface (`"menu"` by default, or `"palette"`). */
+	commandStyle?: CommandStyle | null,
+	/**  Modal editing preset (`"helix"` by default, `"vim"`, or `"kakoune"`). */
+	preset?: KeybindPreset | null,
+	/**  Restrict modal handling to the `Space` leader key and keep the editor in insert mode (`false` by default). */
+	leaderOnly?: boolean | null,
+	/**  Render active pane focus outline when switching panes with the keyboard (`true` by default). */
+	paneOutline?: boolean | null,
+	/**  Enter `insert` mode when clicking inside the code editor (`true` by default). */
+	clickToInsert?: boolean | null,
 };
 
 /**  Language server and Mise tool preset for a single programming language. */
@@ -120,6 +273,8 @@ export type LgtmConfig = {
 	workspace?: WorkspaceSettings,
 	/**  Code editor display settings (`editor.*`). */
 	editor?: EditorSettings,
+	/**  Modal keybinding and command surface settings (`keybindings.*`). */
+	keybindings?: KeybindingSettings,
 	/**  Global LSP lifecycle and timeout settings (`lsp.*`). */
 	lsp?: LspSettings,
 	/**  Per-language LSP server and Mise toolchain definitions keyed by language ID (`languages.*`). */
@@ -136,6 +291,8 @@ export type LgtmConfigPatch = {
 	workspace?: WorkspaceSettingsPatch | null,
 	/**  Partial code editor settings overrides (`editor.*`). */
 	editor?: EditorSettingsPatch | null,
+	/**  Partial modal keybinding and command surface overrides (`keybindings.*`). */
+	keybindings?: KeybindingSettingsPatch | null,
 	/**  Partial LSP lifecycle and timeout overrides (`lsp.*`). */
 	lsp?: LspSettingsPatch | null,
 	/**  Per-language LSP server and Mise toolchain overrides keyed by language ID (`languages.*`). */
@@ -150,6 +307,24 @@ export type LineWrap =
 "auto" | 
 /**  Fixed character column width at which lines wrap. */
 number;
+
+/**  A single code completion candidate returned by `textDocument/completion`. */
+export type LspCompletionItem = {
+	/**  Display label for the completion candidate. */
+	label: string,
+	/**  Normalized CodeMirror completion category (`function`, `method`, `variable`, `type`, `class`, `interface`, `property`, `keyword`, `constant`, `enum`, `namespace`, `text`). */
+	kind: string | null,
+	/**  Short type signature or symbol detail string. */
+	detail: string | null,
+	/**  Markdown or plain-text documentation string. */
+	documentation: string | null,
+	/**  Text to insert when the candidate is accepted, if different from `label`. */
+	insertText: string | null,
+	/**  Optional UTF-16 replacement start offset when a `textEdit` range is provided. */
+	from: number | null,
+	/**  Optional UTF-16 replacement end offset when a `textEdit` range is provided. */
+	to: number | null,
+};
 
 /**  A single diagnostic normalized to both UTF-16 flat editor offsets and 0-based line/character coordinates. */
 export type LspDiagnostic = {
@@ -287,6 +462,26 @@ export type LspSettingsPatch = {
 	request_timeout_ms?: number | null,
 });
 
+/**  Active function or method signature help returned by `textDocument/signatureHelp`. */
+export type LspSignatureHelp = {
+	/**  Candidate signatures for the active call site. */
+	signatures: LspSignatureInformation[],
+	/**  Zero-based index of the active signature in `signatures`. */
+	activeSignature: number,
+	/**  Zero-based index of the active parameter in the active signature. */
+	activeParameter: number,
+};
+
+/**  A single callable signature returned inside [`LspSignatureHelp`]. */
+export type LspSignatureInformation = {
+	/**  Full signature label (for example `fn helper(count: usize) -> usize`). */
+	label: string,
+	/**  Optional Markdown or plain-text documentation for the callable. */
+	documentation: string | null,
+	/**  Parameter labels declared on the signature. */
+	parameters: string[],
+};
+
 /**  Complete snapshot of all active language servers and file diagnostics for a workspace. */
 export type LspWorkspaceSnapshot = {
 	/**  Canonical root directory of the workspace. */
@@ -321,6 +516,13 @@ export type ResolvedConfigSnapshot = {
 	/**  Absolute path to the active project config file. */
 	projectPath: string,
 };
+
+/**  Active review mode controlling whether the desktop diff viewer inspects local LGTM snapshots and the working tree or standard Git branch commits. */
+export type ReviewMode = 
+/**  Local review mode including uncommitted working-tree changes and `~/.lgtm/snapshots/$repoSlug` shadow commits. */
+"local" | 
+/**  Forge-backed review mode listing standard Git commits on the active branch in `<workspace>/.git`. */
+"forge_backed";
 
 /**  Supported color theme preferences persisted under `appearance.theme`. */
 export type ThemeMode = 

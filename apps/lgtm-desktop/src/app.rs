@@ -1,23 +1,27 @@
 //! Tauri application state, lifecycle, Specta TypeScript binding generation, and IPC command handlers.
+#![allow(unreachable_pub)]
+
 use std::path::PathBuf;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
 
-use lgtm_config::{ConfigService, ResolvedConfigSnapshot};
+use lgtm_config::{ConfigScope, ConfigService, LgtmConfigPatch, ResolvedConfigSnapshot};
 use lgtm_lsp::{
-    LspDiagnosticsBuffer, LspEvent, LspHoverResult, LspLocation, LspServerStatusEvent,
-    LspWorkspaceSnapshot,
+    LspCompletionItem, LspDiagnosticsBuffer, LspEvent, LspHoverResult, LspLocation,
+    LspServerStatusEvent, LspSignatureHelp, LspWorkspaceSnapshot,
 };
 use tauri::{Manager, State};
 
+use lgtm_desktop::{
+    DiffFileEntry, DiffService, DiffWorkspaceSnapshot, FileContent, FileDiffContent, LspService,
+    Result, ReviewMode, ReviewService, WorkspaceListing, WorkspaceNode, WorkspaceService, error,
+};
+
 use crate::{
-    error::{Result, error},
     events::{AppEvent, AppEvents, FileOpenedEvent},
     menus::{build_app_menu, handle_menu_event},
-    models::{FileContent, WorkspaceListing, WorkspaceNode},
-    services::{LspService, WorkspaceService},
 };
 
 /// Combined desktop host state managed by Tauri across all IPC command handlers.
@@ -29,6 +33,10 @@ pub struct AppState {
     pub config: ConfigService,
     /// Shared desktop LSP orchestration service.
     pub lsp: Arc<LspService>,
+    /// Shared review mode service tracking `Local` vs. `ForgeBacked` mode.
+    pub review: Arc<ReviewService>,
+    /// Shared diff service resolving `.git` and `~/.lgtm/snapshots/$repoSlug` diffs.
+    pub diff: Arc<DiffService>,
     /// In-process backend event bus and webview notification publisher.
     pub events: AppEvents,
     /// Tracks whether the frontend has registered its quit lifecycle listener.
@@ -91,6 +99,8 @@ pub(crate) fn init_app_state<R: tauri::Runtime>(
         workspace: Arc::new(Mutex::new(WorkspaceService::new(home, workspace_path))),
         config,
         lsp,
+        review: Arc::new(ReviewService::new(None)),
+        diff: Arc::new(DiffService::new()),
         events,
         frontend_ready: Arc::new(AtomicBool::new(false)),
     });
@@ -104,6 +114,7 @@ fn handle_app_event(events: &AppEvents, lsp: &LspService, config: &ConfigService
             next_root,
         } => {
             lsp.switch_workspace(previous_root.as_deref(), &next_root);
+            events.emit_to_webview("diff-updated", &());
         }
         AppEvent::FileOpened(payload) => {
             events.emit_to_webview("workspace-open-file", &payload);
@@ -119,9 +130,11 @@ fn handle_app_event(events: &AppEvents, lsp: &LspService, config: &ConfigService
                 lsp.reload_workspace_config(&root);
                 events.emit_to_webview("config-updated", &snapshot);
             }
+            events.emit_to_webview("diff-updated", &());
         }
         AppEvent::FileClosed { root, path } => {
             let _ = lsp.did_close(&root, &path);
+            events.emit_to_webview("diff-updated", &());
         }
         AppEvent::LspStatus(payload) => {
             events.emit_to_webview("lsp-status", &payload);
@@ -152,10 +165,17 @@ pub fn commands<R: tauri::Runtime>(invoke: tauri::ipc::Invoke<R>) -> bool {
         lsp_did_change,
         lsp_hover,
         lsp_goto_definition,
+        lsp_completion,
+        lsp_signature_help,
         lsp_get_state,
         lsp_get_diagnostics_buffer,
         lsp_restart,
         config_get,
+        config_update,
+        review_set_mode,
+        diff_get_state,
+        diff_list_files,
+        diff_read_file,
     ];
     handler(invoke)
 }
@@ -181,10 +201,17 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             lsp_did_change,
             lsp_hover,
             lsp_goto_definition,
+            lsp_completion,
+            lsp_signature_help,
             lsp_get_state,
             lsp_get_diagnostics_buffer,
             lsp_restart,
             config_get,
+            config_update,
+            review_set_mode,
+            diff_get_state,
+            diff_list_files,
+            diff_read_file,
         ])
 }
 
@@ -494,6 +521,39 @@ pub async fn lsp_goto_definition(
     run_lsp_blocking(state, move |s| s.get_definition(&root, &file_path, offset)).await
 }
 
+/// Requests code completion candidates (`textDocument/completion`) at a UTF-16 editor offset.
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_completion(
+    state: State<'_, AppState>,
+    relative_path: String,
+    offset: u32,
+) -> Result<Vec<LspCompletionItem>> {
+    let (root, file_path) = run_blocking(state.clone(), move |w| {
+        Ok((w.get_root()?, w.get_entry_path(&relative_path)?))
+    })
+    .await?;
+    run_lsp_blocking(state, move |s| s.get_completions(&root, &file_path, offset)).await
+}
+
+/// Requests callable signature help (`textDocument/signatureHelp`) at a UTF-16 editor offset.
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_signature_help(
+    state: State<'_, AppState>,
+    relative_path: String,
+    offset: u32,
+) -> Result<Option<LspSignatureHelp>> {
+    let (root, file_path) = run_blocking(state.clone(), move |w| {
+        Ok((w.get_root()?, w.get_entry_path(&relative_path)?))
+    })
+    .await?;
+    run_lsp_blocking(state, move |s| {
+        s.get_signature_help(&root, &file_path, offset)
+    })
+    .await
+}
+
 /// Returns the current workspace LSP server statuses and diagnostics snapshot.
 #[tauri::command]
 #[specta::specta]
@@ -544,6 +604,93 @@ pub async fn config_get(state: State<'_, AppState>) -> Result<ResolvedConfigSnap
     .await
 }
 
+/// Applies a partial configuration patch to global or project `config.json` and emits `config-updated`.
+#[tauri::command]
+#[specta::specta]
+pub async fn config_update(
+    state: State<'_, AppState>,
+    patch: LgtmConfigPatch,
+    scope: Option<ConfigScope>,
+) -> Result<ResolvedConfigSnapshot> {
+    let config_service = state.config.clone();
+    let lsp_service = state.lsp.clone();
+    let events = state.events.clone();
+    let (snapshot, maybe_root) = run_blocking(state, move |w| {
+        let root = w.get_root().ok();
+        let snapshot = config_service
+            .update_config(root.as_deref(), patch, scope)
+            .map_err(|err| error("io", err.to_string()))?;
+        Ok((snapshot, root))
+    })
+    .await?;
+    if let Some(root) = maybe_root {
+        lsp_service.reload_workspace_config(&root);
+    }
+    events.emit_to_webview("config-updated", &snapshot);
+    Ok(snapshot)
+}
+
+/// Switches the active [`ReviewMode`] (`Local` vs. `ForgeBacked`) and returns the refreshed workspace diff snapshot.
+#[tauri::command]
+#[specta::specta]
+pub async fn review_set_mode(
+    state: State<'_, AppState>,
+    mode: ReviewMode,
+) -> Result<DiffWorkspaceSnapshot> {
+    let review_service = state.review.clone();
+    let diff_service = state.diff.clone();
+    run_blocking(state, move |w| {
+        let updated_mode = review_service.set_mode(mode);
+        let root = w.get_root()?;
+        diff_service.get_state(&root, w.get_lgtm_home(), updated_mode)
+    })
+    .await
+}
+
+/// Returns the active [`ReviewMode`], branch name, commit checklist, default selection, and changed file list.
+#[tauri::command]
+#[specta::specta]
+pub async fn diff_get_state(state: State<'_, AppState>) -> Result<DiffWorkspaceSnapshot> {
+    let review_service = state.review.clone();
+    let diff_service = state.diff.clone();
+    run_blocking(state, move |w| {
+        let root = w.get_root()?;
+        diff_service.get_state(&root, w.get_lgtm_home(), review_service.get_mode())
+    })
+    .await
+}
+
+/// Computes changed files and line deltas across `commit_ids` (`oldest.base_sha .. newest.head_sha`).
+#[tauri::command]
+#[specta::specta]
+pub async fn diff_list_files(
+    state: State<'_, AppState>,
+    commit_ids: Vec<String>,
+) -> Result<Vec<DiffFileEntry>> {
+    let diff_service = state.diff.clone();
+    run_blocking(state, move |w| {
+        let root = w.get_root()?;
+        diff_service.get_files(&root, w.get_lgtm_home(), &commit_ids)
+    })
+    .await
+}
+
+/// Reads `base_content` and `head_content` for `path` across `commit_ids`.
+#[tauri::command]
+#[specta::specta]
+pub async fn diff_read_file(
+    state: State<'_, AppState>,
+    path: String,
+    commit_ids: Vec<String>,
+) -> Result<FileDiffContent> {
+    let diff_service = state.diff.clone();
+    run_blocking(state, move |w| {
+        let root = w.get_root()?;
+        diff_service.get_file_diff(&root, w.get_lgtm_home(), &path, &commit_ids)
+    })
+    .await
+}
+
 // tests -----------------------------------------------------------------------
 
 #[cfg(test)]
@@ -569,6 +716,10 @@ mod tests {
 
                 // Assert
                 assert!(generated.contains("export type ThemeMode"));
+                assert!(generated.contains("export type CommandStyle"));
+                assert!(generated.contains("export type KeybindPreset"));
+                assert!(generated.contains("export type KeybindingSettings"));
+                assert!(generated.contains("export type KeybindingSettingsPatch"));
                 assert!(generated.contains("export type AppearanceSettings"));
                 assert!(generated.contains("export type WorkspaceSettings"));
                 assert!(generated.contains("export type EditorSettings"));
@@ -577,7 +728,20 @@ mod tests {
                 assert!(generated.contains("export type LgtmConfigPatch"));
                 assert!(generated.contains("export type ResolvedConfigSnapshot"));
                 assert!(generated.contains("export type FileOpenedEvent"));
+                assert!(generated.contains("export type LspCompletionItem"));
+                assert!(generated.contains("export type LspSignatureHelp"));
+                assert!(generated.contains("export type ReviewMode"));
+                assert!(generated.contains("export type DiffWorkspaceSnapshot"));
+                assert!(generated.contains("export type DiffFileEntry"));
+                assert!(generated.contains("export type FileDiffContent"));
+                assert!(generated.contains("lspCompletion"));
+                assert!(generated.contains("lspSignatureHelp"));
                 assert!(generated.contains("configGet"));
+                assert!(generated.contains("configUpdate"));
+                assert!(generated.contains("reviewSetMode"));
+                assert!(generated.contains("diffGetState"));
+                assert!(generated.contains("diffListFiles"));
+                assert!(generated.contains("diffReadFile"));
             }
         }
     }

@@ -1,4 +1,9 @@
-import type { CodeEditorHoverResult, MenuItemIndicatorTone } from 'lgtm-ui'
+import type {
+  CodeEditorCompletionItem,
+  CodeEditorHoverResult,
+  CodeEditorSignatureHelp,
+  MenuItemIndicatorTone,
+} from 'lgtm-ui'
 import type {
   LspDiagnostic,
   LspDiagnosticsBuffer,
@@ -189,6 +194,48 @@ export class LspService {
       return await this.client.lspGotoDefinition(path, offset)
     } catch {
       return []
+    }
+  }
+
+  /** Queries `textDocument/completion` items at a UTF-16 editor offset. */
+  async requestCompletions(path: string, offset: number): Promise<CodeEditorCompletionItem[]> {
+    try {
+      if (!this.client.lspCompletion) return []
+      const items = await this.client.lspCompletion(path, offset)
+      return items.map((item) => ({
+        label: item.label,
+        ...(item.kind ? { kind: item.kind } : {}),
+        ...(item.detail ? { detail: item.detail } : {}),
+        ...(item.documentation ? { documentation: item.documentation } : {}),
+        ...(item.insertText ? { insertText: item.insertText } : {}),
+        ...(item.from !== undefined && item.from !== null ? { from: item.from } : {}),
+        ...(item.to !== undefined && item.to !== null ? { to: item.to } : {}),
+      }))
+    } catch {
+      return []
+    }
+  }
+
+  /** Queries `textDocument/signatureHelp` at a UTF-16 editor offset. */
+  async requestSignatureHelp(
+    path: string,
+    offset: number,
+  ): Promise<CodeEditorSignatureHelp | null> {
+    try {
+      if (!this.client.lspSignatureHelp) return null
+      const help = await this.client.lspSignatureHelp(path, offset)
+      if (!help || help.signatures.length === 0) return null
+      return {
+        signatures: help.signatures.map((sig) => ({
+          label: sig.label,
+          ...(sig.documentation ? { documentation: sig.documentation } : {}),
+          parameters: sig.parameters,
+        })),
+        activeSignature: help.activeSignature,
+        activeParameter: help.activeParameter,
+      }
+    } catch {
+      return null
     }
   }
 

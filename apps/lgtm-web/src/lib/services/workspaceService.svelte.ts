@@ -1,4 +1,11 @@
-import type { TreeNode, ContextMenuItem, CodeEditorHoverResult, TabItem } from 'lgtm-ui'
+import type {
+  TreeNode,
+  ContextMenuItem,
+  CodeEditorCompletionItem,
+  CodeEditorHoverResult,
+  CodeEditorSignatureHelp,
+  TabItem,
+} from 'lgtm-ui'
 import { WorkspaceNodeViewModel } from '../models/workspaceNodeViewModel'
 import {
   errorMessage,
@@ -9,7 +16,9 @@ import {
   type LspFileDiagnosticsEvent,
   type LspServerStatusEvent,
 } from '../clients/workspaceClient'
+import { DiffService } from './diffService.svelte'
 import { LspService } from './lspService.svelte'
+import { ReviewService } from './reviewService.svelte'
 import { SettingsService } from './settingsService.svelte'
 
 export interface FolderRefresh {
@@ -28,10 +37,13 @@ export interface WorkspaceTab {
   dirty?: boolean
 }
 
-/** Workspace view model coordinating file tree browsing, open tabs, debounced saves, LSP state, and settings. */
+/** Workspace view model coordinating file tree browsing, open tabs, debounced saves, LSP state, settings, and diff viewing. */
 export class WorkspaceService {
   readonly lsp: LspService
   readonly settings: SettingsService
+  readonly review: ReviewService
+  readonly diff: DiffService
+  sidebarMode = $state<'files' | 'diffs'>('files')
   defaultRoot = $state('')
   root = $state('~/.lgtm/workspace')
   entries = $state<WorkspaceNode[]>([])
@@ -61,10 +73,49 @@ export class WorkspaceService {
   private inFlightSave: Promise<void> | null = null
   private openRequestSeq = 0
 
-  /** Constructs a `WorkspaceService` with its own `LspService` and `SettingsService` instances. */
+  /** Constructs a `WorkspaceService` with its own `LspService`, `SettingsService`, `ReviewService`, and `DiffService` instances. */
   constructor(private client: WorkspaceClient) {
     this.lsp = new LspService(client)
     this.settings = new SettingsService(client)
+    this.diff = new DiffService(client, (snapshot) => {
+      this.review.syncMode(snapshot.reviewMode)
+    })
+    this.review = new ReviewService(client, (snapshot) => {
+      void this.diff.applySnapshot(snapshot)
+    })
+  }
+
+  /** Switches the active sidebar pane between `'files'` (`WorkspaceExplorer`) and `'diffs'` (`DiffExplorer` + `CommitSelector`). */
+  setSidebarMode(mode: 'files' | 'diffs'): void {
+    this.sidebarMode = mode
+    if (mode === 'diffs') {
+      void this.diff.refresh()
+    }
+  }
+
+  /** Toggles the active sidebar pane between `'files'` and `'diffs'`. */
+  toggleSidebarMode(): void {
+    this.setSidebarMode(this.sidebarMode === 'files' ? 'diffs' : 'files')
+  }
+
+  /** Writes updated working-tree file content from `DiffEditor` and refreshes the diff snapshot. */
+  async saveDiffFile(path: string, content: string): Promise<void> {
+    this.saving = true
+    this.openingError = null
+    try {
+      await this.client.write(path, content)
+      await this.diff.refresh()
+    } catch (error) {
+      if (this.active) this.openingError = errorMessage(error)
+    } finally {
+      if (this.active) this.saving = false
+    }
+  }
+
+  /** Refreshes the diff snapshot when a backend `diff-updated` notification arrives. */
+  handleDiffUpdated(): void {
+    if (!this.active) return
+    void this.diff.refresh()
   }
 
   /** Returns whether a file or tree operation is currently in progress. */
@@ -103,6 +154,9 @@ export class WorkspaceService {
 
   /** Returns the path or title shown in the footer breadcrumb tooltip. */
   get selectedPath() {
+    if (this.sidebarMode === 'diffs' && this.diff.activeFilePath) {
+      return this.diff.activeFilePath
+    }
     if (this.activeTab?.kind === 'diagnostics') return this.activeTab.title
     return this.selected?.path
   }
@@ -116,6 +170,9 @@ export class WorkspaceService {
 
   /** Returns path segments rendered in the footer breadcrumb bar. */
   get breadcrumbs(): string[] {
+    if (this.sidebarMode === 'diffs' && this.diff.activeFilePath) {
+      return this.diff.activeFilePath.split(/[\\/]/).filter(Boolean)
+    }
     if (this.activeTab?.kind === 'diagnostics') return [this.activeTab.title]
     if (!this.selected) return []
     if (this.isConfigFilePath(this.selected.path)) {
@@ -155,8 +212,9 @@ export class WorkspaceService {
   /** Returns the human-readable editor status label for the footer. */
   get status() {
     if (this.openingError) return this.openingError
-    if (this.fileLoading) return 'Opening file…'
+    if (this.fileLoading || this.diff.isLoading) return 'Opening file…'
     if (this.saving) return 'Saving…'
+    if (this.sidebarMode === 'diffs' && this.diff.activeDiff) return 'Ready'
     if (this.selected || this.activeTab) return 'Ready'
     return 'Idle'
   }
@@ -231,10 +289,12 @@ export class WorkspaceService {
       this.tabs = []
       this.activeTabId = null
       this.lsp.reset()
+      this.diff.reset()
       this.clearSelected()
       this.treeVersion++
       void this.settings.load()
       void this.syncLspState()
+      void this.diff.refresh()
     } catch (error) {
       if (this.active) this.error = errorMessage(error)
     } finally {
@@ -392,6 +452,63 @@ export class WorkspaceService {
     await this.activateTab(fallback.id)
   }
 
+  /** Closes the currently active editor tab, if any. */
+  async closeActiveTab() {
+    if (!this.activeTabId) return
+    await this.closeTab(this.activeTabId)
+  }
+
+  /** Cycles forward through open tabs by `count`. */
+  async selectNextTab(count = 1) {
+    if (this.blocked || this.tabs.length <= 1) return
+    const currentIdx = this.tabs.findIndex((tab) => tab.id === this.activeTabId)
+    const startIdx = currentIdx === -1 ? 0 : currentIdx
+    const step = Math.max(1, count)
+    const target = this.tabs[(startIdx + step) % this.tabs.length]
+    if (target) {
+      await this.activateTab(target.id)
+    }
+  }
+
+  /** Cycles backward through open tabs by `count`. */
+  async selectPrevTab(count = 1) {
+    if (this.blocked || this.tabs.length <= 1) return
+    const currentIdx = this.tabs.findIndex((tab) => tab.id === this.activeTabId)
+    const startIdx = currentIdx === -1 ? 0 : currentIdx
+    const step = Math.max(1, count)
+    const nextIdx = (((startIdx - step) % this.tabs.length) + this.tabs.length) % this.tabs.length
+    const target = this.tabs[nextIdx]
+    if (target) {
+      await this.activateTab(target.id)
+    }
+  }
+
+  /** Reloads any open, clean `config.json` editor tabs from disk after a programmatic settings update. */
+  async reloadCleanConfigTabs() {
+    for (const tab of this.tabs) {
+      if (tab.kind !== 'file' || !tab.path || tab.dirty || !this.isConfigFilePath(tab.path)) {
+        continue
+      }
+      if (this.dirtyPath === tab.path) continue
+      try {
+        const refreshed = await this.client.read(tab.path)
+        if (!this.active) return
+        this.tabs = this.tabs.map((item) =>
+          item.id === tab.id && !item.dirty ? { ...item, content: refreshed.content } : item,
+        )
+        if (
+          this.activeTabId === tab.id &&
+          this.selected?.path === tab.path &&
+          this.dirtyPath !== tab.path
+        ) {
+          this.fileContent = refreshed
+        }
+      } catch {
+        // Ignore read errors if the config file does not exist yet.
+      }
+    }
+  }
+
   /** Opens a read-only diagnostics buffer tab for all active servers or `languageId`. */
   async openDiagnosticsBuffer(languageId?: string) {
     await this.flushSave()
@@ -446,6 +563,18 @@ export class WorkspaceService {
     const first = locations[0]
     if (!first) return
     await this.jumpToLocation(first.path, first.offset)
+  }
+
+  /** Requests LSP completion items at `offset` in the currently selected file. */
+  async requestCompletions(offset: number): Promise<CodeEditorCompletionItem[]> {
+    if (!this.selected) return []
+    return this.lsp.requestCompletions(this.selected.path, offset)
+  }
+
+  /** Requests LSP signature help at `offset` in the currently selected file. */
+  async requestSignatureHelp(offset: number): Promise<CodeEditorSignatureHelp | null> {
+    if (!this.selected) return null
+    return this.lsp.requestSignatureHelp(this.selected.path, offset)
   }
 
   /** Handles an incoming `lsp-status` event from the desktop backend. */

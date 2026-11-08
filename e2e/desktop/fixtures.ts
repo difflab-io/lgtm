@@ -1,12 +1,21 @@
-import { test as base, expect, type Page } from '@playwright/test'
-import { spawn } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, writeFile, rm, stat } from 'node:fs/promises'
+import { test as base, expect, type Page, type TestInfo } from '@playwright/test'
+import { execFileSync, spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { mkdtemp, mkdir, readFile, realpath, writeFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 
 export { expect }
+export interface SeededDiffCommits {
+  repoSlug: string
+  c1Sha: string
+  c2Sha: string
+  s1Sha: string
+  s2Sha: string
+}
+
 export interface Workspace {
   root: string
   lgtmHomeDir: string
@@ -18,6 +27,7 @@ export interface Workspace {
   configuredWindowTheme: 'light' | 'dark' | null
   windowTheme: 'light' | 'dark' | null
   setThemeCalls: Array<'light' | 'dark' | null>
+  diffCommits?: SeededDiffCommits
   emit: (event: string, payload?: unknown) => Promise<void>
   createExternalDir: () => Promise<string>
 }
@@ -108,6 +118,12 @@ function handleMessage(msg) {
           textDocumentSync: 1,
           hoverProvider: true,
           definitionProvider: true,
+          completionProvider: {
+            triggerCharacters: ['.', ':'],
+          },
+          signatureHelpProvider: {
+            triggerCharacters: ['(', ','],
+          },
         },
       },
     });
@@ -190,6 +206,49 @@ function handleMessage(msg) {
     });
     return;
   }
+  if (msg.method === 'textDocument/completion') {
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        isIncomplete: false,
+        items: [
+          {
+            label: 'helper_value',
+            kind: 3,
+            detail: 'fn helper_value() -> i32',
+            documentation: {
+              kind: 'markdown',
+              value: 'Returns the **helper** value.',
+            },
+            insertText: 'helper_value()',
+          },
+        ],
+      },
+    });
+    return;
+  }
+  if (msg.method === 'textDocument/signatureHelp') {
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        signatures: [
+          {
+            label: 'fn helper(x: i32, y: i32) -> i32',
+            documentation: {
+              kind: 'markdown',
+              value: 'Computes the sum of \`x\` and \`y\`.',
+            },
+            parameters: [{ label: 'x: i32' }, { label: 'y: i32' }],
+          },
+        ],
+        activeSignature: 0,
+        activeParameter: 0,
+      },
+    });
+    return;
+  }
   if (msg.method === 'shutdown') {
     send({ jsonrpc: '2.0', id: msg.id, result: null });
     return;
@@ -234,12 +293,223 @@ async function emit(page: Page, event: string, payload?: unknown) {
 }
 
 // Fixtures --------------------------------------------------------------------
+//
+// 5-Stage Visual Diff Storyboard (`C1` -> `C2` -> `S1` -> `S2` -> `WT`):
+// ┌───────────────────────────┬───────────────────────────┬───────────────────────────┬───────────────────────────┐
+// │ Stage 1 (C1: Base)        │ Stage 2 (C2: Git HEAD)    │ Stage 4 (S2: Local Snap)  │ Stage 5 (WT: WorkingTree) │
+// ├───────────────────────────┼───────────────────────────┼───────────────────────────┼───────────────────────────┤
+// │ pub fn alpha() -> i32 {   │ pub fn alpha() -> i32 {   │ pub fn alpha() -> i32 {   │ pub fn alpha() -> i32 {   │
+// │     1                     │     10 // modified in C2  │     10 // modified in C2  │     10 // modified in C2  │
+// │ }                         │ }                         │ }                         │ }                         │
+// │                           │                           │                           │                           │
+// │ pub fn beta() -> i32 {    │ pub fn beta() -> i32 {    │ pub fn beta() -> i32 {    │ pub fn beta() -> i32 {    │
+// │     2                     │     2                     │     20 // modified in S2  │     20 // modified in S2  │
+// │ }                         │ }                         │ }                         │ }                         │
+// │                           │                           │                           │                           │
+// │ pub fn gamma() -> i32 {   │ pub fn gamma() -> i32 {   │ pub fn gamma() -> i32 {   │ pub fn gamma() -> i32 {   │
+// │     3                     │     3                     │     3                     │     30 // modified in WT  │
+// │ }                         │ }                         │ }                         │ }                         │
+// └───────────────────────────┴───────────────────────────┴───────────────────────────┴───────────────────────────┘
+
+export interface DiffStageSpec {
+  code: 'C1' | 'C2' | 'S1' | 'S2' | 'WT'
+  title: string
+  files: Record<string, string>
+}
+
+export const DIFF_FIXTURE_STAGES: readonly DiffStageSpec[] = [
+  {
+    code: 'C1',
+    title: 'feat: initial workspace',
+    files: {
+      'docs/architecture/index.md': '# Architecture\nOverview of LGTM.\n',
+      'src/lib.rs':
+        'pub fn alpha() -> i32 {\n    1\n}\n\npub fn beta() -> i32 {\n    2\n}\n\npub fn gamma() -> i32 {\n    3\n}\n',
+      'src/old.rs': 'pub const LEGACY_FLAG: bool = true;\npub fn old_helper() {}\n',
+    },
+  },
+  {
+    code: 'C2',
+    title: 'feat: update alpha and docs',
+    files: {
+      'docs/architecture/index.md': '# Architecture\nOverview of LGTM.\nUpdated in C2.\n',
+      'src/lib.rs':
+        'pub fn alpha() -> i32 {\n    10 // modified in C2\n}\n\npub fn beta() -> i32 {\n    2\n}\n\npub fn gamma() -> i32 {\n    3\n}\n',
+      'src/old.rs': 'pub const LEGACY_FLAG: bool = true;\npub fn old_helper() {}\n',
+    },
+  },
+  {
+    code: 'S1',
+    title: 'lgtm: add diff service',
+    files: {
+      'docs/architecture/index.md': '# Architecture\nOverview of LGTM.\nUpdated in C2.\n',
+      'src/lib.rs':
+        'pub fn alpha() -> i32 {\n    10 // modified in C2\n}\n\npub fn beta() -> i32 {\n    2\n}\n\npub fn gamma() -> i32 {\n    3\n}\n',
+      'src/services/diff.rs':
+        'pub struct DiffService;\npub fn compute_diff() -> usize {\n    1\n}\n',
+    },
+  },
+  {
+    code: 'S2',
+    title: 'lgtm: refine beta calculation',
+    files: {
+      'docs/architecture/index.md': '# Architecture\nOverview of LGTM.\nUpdated in C2.\n',
+      'src/lib.rs':
+        'pub fn alpha() -> i32 {\n    10 // modified in C2\n}\n\npub fn beta() -> i32 {\n    20 // modified in S2\n}\n\npub fn gamma() -> i32 {\n    3\n}\n',
+      'src/services/diff.rs':
+        'pub struct DiffService;\npub fn compute_diff() -> usize {\n    2 // refined in S2\n}\npub fn is_ready() -> bool { true }\n',
+    },
+  },
+  {
+    code: 'WT',
+    title: 'Working Tree',
+    files: {
+      'docs/architecture/diffs.md':
+        '# Diffs\nVisual diff architecture.\nStage 5 working tree note.\n',
+      'docs/architecture/index.md': '# Architecture\nOverview of LGTM.\nUpdated in C2.\n',
+      'src/lib.rs':
+        'pub fn alpha() -> i32 {\n    10 // modified in C2\n}\n\npub fn beta() -> i32 {\n    20 // modified in S2\n}\n\npub fn gamma() -> i32 {\n    30 // modified in WT\n}\n',
+      'src/services/diff.rs':
+        'pub struct DiffService;\npub fn compute_diff() -> usize {\n    2 // refined in S2\n}\npub fn is_ready() -> bool { true }\n',
+    },
+  },
+] as const
+
+async function materializeStageFiles(rootDir: string, files: Record<string, string>) {
+  for (const relPath of [
+    'docs/architecture/diffs.md',
+    'docs/architecture/index.md',
+    'src/lib.rs',
+    'src/old.rs',
+    'src/services/diff.rs',
+  ]) {
+    if (!(relPath in files)) {
+      await rm(join(rootDir, relPath), { force: true })
+    }
+  }
+  for (const [relPath, content] of Object.entries(files)) {
+    const fullPath = join(rootDir, relPath)
+    await mkdir(dirname(fullPath), { recursive: true })
+    await writeFile(fullPath, content, 'utf8')
+  }
+}
+
+function runGit(cwd: string, args: string[], timestamp?: number): string {
+  const env = timestamp
+    ? {
+        ...process.env,
+        GIT_AUTHOR_DATE: `@${timestamp} +0000`,
+        GIT_COMMITTER_DATE: `@${timestamp} +0000`,
+      }
+    : process.env
+  return execFileSync('git', ['-C', cwd, ...args], { env, encoding: 'utf8' }).trim()
+}
+
+export async function seedDiffWorkspace(
+  initialRoot: string,
+  lgtmHomeDir: string,
+): Promise<SeededDiffCommits> {
+  await mkdir(initialRoot, { recursive: true })
+  execFileSync('git', ['init', '-b', 'feature/diffs', initialRoot], { stdio: 'ignore' })
+  runGit(initialRoot, ['config', 'user.name', 'LGTM Reviewer'])
+  runGit(initialRoot, ['config', 'user.email', 'reviewer@lgtm.local'])
+
+  await materializeStageFiles(initialRoot, DIFF_FIXTURE_STAGES[0]!.files)
+  runGit(initialRoot, ['add', '-A'])
+  runGit(initialRoot, ['commit', '-m', DIFF_FIXTURE_STAGES[0]!.title], 1_700_000_010)
+  const c1Sha = runGit(initialRoot, ['rev-parse', 'HEAD'])
+
+  await materializeStageFiles(initialRoot, DIFF_FIXTURE_STAGES[1]!.files)
+  runGit(initialRoot, ['add', '-A'])
+  runGit(initialRoot, ['commit', '-m', DIFF_FIXTURE_STAGES[1]!.title], 1_700_000_020)
+  const c2Sha = runGit(initialRoot, ['rev-parse', 'HEAD'])
+
+  await materializeStageFiles(initialRoot, DIFF_FIXTURE_STAGES[2]!.files)
+  runGit(initialRoot, ['add', '-A'])
+  runGit(initialRoot, ['commit', '-m', DIFF_FIXTURE_STAGES[2]!.title], 1_700_000_030)
+  const s1Sha = runGit(initialRoot, ['rev-parse', 'HEAD'])
+
+  await materializeStageFiles(initialRoot, DIFF_FIXTURE_STAGES[3]!.files)
+  runGit(initialRoot, ['add', '-A'])
+  runGit(initialRoot, ['commit', '-m', DIFF_FIXTURE_STAGES[3]!.title], 1_700_000_040)
+  const s2Sha = runGit(initialRoot, ['rev-parse', 'HEAD'])
+
+  const canonicalRoot = await realpath(initialRoot)
+  const canonicalGitDir = await realpath(join(initialRoot, '.git'))
+  const repoName = basename(canonicalRoot).replace(/[^a-zA-Z0-9_-]/g, '-')
+  const shortHash = createHash('sha256').update(canonicalGitDir, 'utf8').digest('hex').slice(0, 12)
+  const repoSlug = `${repoName}-${shortHash}`
+
+  const snapshotDir = join(lgtmHomeDir, 'snapshots', repoSlug)
+  await mkdir(snapshotDir, { recursive: true })
+  execFileSync('git', ['init', '--bare', snapshotDir], { stdio: 'ignore' })
+  runGit(initialRoot, [
+    'push',
+    snapshotDir,
+    `${c2Sha}:refs/lgtm/heads/feature/diffs`,
+    `${s2Sha}:refs/lgtm/snapshots/feature/diffs`,
+  ])
+
+  runGit(initialRoot, ['reset', '--hard', c2Sha])
+  await materializeStageFiles(initialRoot, DIFF_FIXTURE_STAGES[4]!.files)
+
+  return {
+    repoSlug,
+    c1Sha,
+    c2Sha,
+    s1Sha,
+    s2Sha,
+  }
+}
+
+function resolveVisualSnapshotRoot(): string | null {
+  const raw = process.env.LGTM_E2E_VISUAL_SNAPSHOTS?.trim()
+  if (!raw || raw === '0' || raw.toLowerCase() === 'false') {
+    return null
+  }
+  if (raw === '1' || raw.toLowerCase() === 'true') {
+    return join(repoRoot, 'e2e/desktop/test-results/visual-snapshots')
+  }
+  return isAbsolute(raw) ? raw : join(repoRoot, raw)
+}
+
+function sanitizeFileSegment(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 96)
+}
+
+export async function captureVisualSnapshot(
+  page: Page,
+  testInfo: TestInfo,
+  stepName: string,
+): Promise<string | null> {
+  const snapshotRoot = resolveVisualSnapshotRoot()
+  if (!snapshotRoot || page.isClosed()) {
+    return null
+  }
+  const specFile = basename(testInfo.file).replace(/\.spec\.ts$|\.ts$/, '')
+  const specDir = join(snapshotRoot, sanitizeFileSegment(specFile))
+  await mkdir(specDir, { recursive: true })
+  const testSlug = sanitizeFileSegment(testInfo.title)
+  const stepSlug = sanitizeFileSegment(stepName)
+  const filePath = join(specDir, `${testSlug}--${stepSlug}.png`)
+  const buffer = await page.screenshot({ path: filePath, timeout: 5000 })
+  await testInfo.attach(`visual-${stepSlug}`, {
+    body: buffer,
+    contentType: 'image/png',
+  })
+  return filePath
+}
+
 // The browser runs the production UI and routes every Tauri command through the
 // real `lgtm-desktop --ipc-bridge` Rust binary (`app::commands`, `WorkspaceService`,
-// `ConfigService`, and `LspService`).
+// `ConfigService`, `ReviewService`, `DiffService`, and `LspService`).
 export const test = base.extend<{
   workspace: Workspace
-  initialWorkspace: 'empty' | 'existing' | 'default-seeded'
+  initialWorkspace: 'empty' | 'existing' | 'default-seeded' | 'diff-seeded'
 }>({
   initialWorkspace: ['existing', { option: true }],
   workspace: [
@@ -298,6 +568,8 @@ export const test = base.extend<{
           'export function helloWorld() {\n  console.log("hello world!");\n}\n',
           'utf8',
         )
+      } else if (initialWorkspace === 'diff-seeded') {
+        workspace.diffCommits = await seedDiffWorkspace(initialRoot, lgtmHomeDir)
       }
 
       const bridge = spawn(desktopBinary, ['--ipc-bridge', homeRoot], {
@@ -427,6 +699,7 @@ export const test = base.extend<{
         await use(workspace)
       } finally {
         try {
+          await captureVisualSnapshot(page, testInfo, 'final').catch(() => null)
           if (testInfo.status !== testInfo.expectedStatus && !page.isClosed()) {
             await testInfo.attach('failure', {
               body: await page.screenshot({ timeout: 2000 }),
@@ -514,4 +787,32 @@ export async function exists(path: string) {
       throw error
     },
   )
+}
+
+export function modeBadge(page: Page) {
+  return page.getByTestId('which-key-mode-badge')
+}
+
+export function whichKeyPanel(page: Page) {
+  return page.getByTestId('which-key-panel')
+}
+
+export function whichKeyExplorer(page: Page) {
+  return page.getByTestId('which-key-explorer')
+}
+
+export function commandMenu(page: Page) {
+  return page.getByTestId('command-menu')
+}
+
+export function commandMenuInput(page: Page) {
+  return page.getByTestId('command-menu-input')
+}
+
+export function commandPalette(page: Page) {
+  return page.getByTestId('command-palette')
+}
+
+export function commandPaletteInput(page: Page) {
+  return page.getByTestId('command-palette-input')
 }

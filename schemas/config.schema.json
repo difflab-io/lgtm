@@ -12,6 +12,21 @@
       },
       "type": "object"
     },
+    "CommandStyle": {
+      "description": "Active command surface style for `Mod+k` and leader command invocation (`keybindings.commandStyle`).",
+      "oneOf": [
+        {
+          "const": "menu",
+          "description": "Bottom-docked modal command bar (`CommandMenu`, `:` style).",
+          "type": "string"
+        },
+        {
+          "const": "palette",
+          "description": "Centered modal command palette (`CommandPalette`, `Mod+k` style).",
+          "type": "string"
+        }
+      ]
+    },
     "EditorSettings": {
       "additionalProperties": false,
       "description": "Resolved code editor settings section (`editor.*`).",
@@ -20,6 +35,58 @@
           "$ref": "#/$defs/LineWrap",
           "default": "auto",
           "description": "Line wrapping mode inside the code editor (`\"off\"`, `\"auto\"`, or a column width; `\"auto\"` by default)."
+        }
+      },
+      "type": "object"
+    },
+    "KeybindPreset": {
+      "description": "Modal keybinding preset for `WhichKey` and `CodeEditor` (`keybindings.preset`).",
+      "oneOf": [
+        {
+          "const": "helix",
+          "description": "Selection-first Helix keybindings (`normal`, `select`, `insert`, `jump`).",
+          "type": "string"
+        },
+        {
+          "const": "vim",
+          "description": "Operator-pending Vim keybindings.",
+          "type": "string"
+        },
+        {
+          "const": "kakoune",
+          "description": "Selection-first Kakoune keybindings.",
+          "type": "string"
+        }
+      ]
+    },
+    "KeybindingSettings": {
+      "additionalProperties": false,
+      "description": "Resolved modal keybinding and command surface settings (`keybindings.*`).",
+      "properties": {
+        "clickToInsert": {
+          "default": true,
+          "description": "Enter `insert` mode when clicking inside the code editor (`true` by default).",
+          "type": "boolean"
+        },
+        "commandStyle": {
+          "$ref": "#/$defs/CommandStyle",
+          "default": "menu",
+          "description": "Primary command surface (`\"menu\"` by default, or `\"palette\"`)."
+        },
+        "leaderOnly": {
+          "default": false,
+          "description": "Restrict modal handling to the `Space` leader key and keep the editor in insert mode (`false` by default).",
+          "type": "boolean"
+        },
+        "paneOutline": {
+          "default": true,
+          "description": "Render active pane focus outline when switching panes with the keyboard (`true` by default).",
+          "type": "boolean"
+        },
+        "preset": {
+          "$ref": "#/$defs/KeybindPreset",
+          "default": "helix",
+          "description": "Modal editing preset (`\"helix\"` by default, `\"vim\"`, or `\"kakoune\"`)."
         }
       },
       "type": "object"
@@ -233,6 +300,17 @@
         "lineWrapping": "auto"
       },
       "description": "Code editor display settings (`editor.*`)."
+    },
+    "keybindings": {
+      "$ref": "#/$defs/KeybindingSettings",
+      "default": {
+        "clickToInsert": true,
+        "commandStyle": "menu",
+        "leaderOnly": false,
+        "paneOutline": true,
+        "preset": "helix"
+      },
+      "description": "Modal keybinding and command surface settings (`keybindings.*`)."
     },
     "languages": {
       "additionalProperties": {
