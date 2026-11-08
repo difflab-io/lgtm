@@ -9,7 +9,18 @@ import {
   type KeymapMode,
   type WhichKeyNode,
 } from '@cloudvoyant/helical-ui'
-import { scrollEditorAlign, scrollEditorHalfPage, type EditorView } from 'lgtm-ui'
+import {
+  gotoFirstEditorDiagnostic,
+  gotoLastEditorDiagnostic,
+  gotoNextEditorDiagnostic,
+  gotoPrevEditorDiagnostic,
+  scrollEditorAlign,
+  scrollEditorHalfPage,
+  showEditorHoverTooltip,
+  showEditorSignatureHelpTooltip,
+  triggerEditorCompletion,
+  type EditorView,
+} from 'lgtm-ui'
 import type {
   CommandStyle,
   ConfigScope,
@@ -211,6 +222,100 @@ export class HotkeyService {
       'Scroll the active editor or pane up by half a page',
       ['normal', 'select'],
     ),
+    F12: leaf(
+      'F12',
+      'Go to Definition',
+      'LSP',
+      'lsp.gotoDefinition',
+      'Jump to symbol definition at cursor (F12)',
+      ['normal', 'select', 'insert'],
+    ),
+    K: leaf(
+      'K',
+      'Hover Documentation',
+      'LSP',
+      'lsp.hover',
+      'Show LSP hover documentation at cursor (K)',
+      ['normal', 'select'],
+    ),
+    'Control+Space': leaf(
+      'Control+Space',
+      'Trigger Autocomplete',
+      'LSP',
+      'lsp.triggerCompletion',
+      'Trigger autocomplete suggestions at cursor (Ctrl+Space)',
+      ['normal', 'select', 'insert'],
+    ),
+    'Control+x': leaf(
+      'Control+x',
+      'Trigger Autocomplete',
+      'LSP',
+      'lsp.triggerCompletion',
+      'Trigger autocomplete suggestions at cursor (Ctrl+x)',
+      ['insert'],
+    ),
+    'Control+Shift+Space': leaf(
+      'Control+Shift+Space',
+      'Signature Help',
+      'LSP',
+      'lsp.signatureHelp',
+      'Show LSP function signature help at cursor (Ctrl+Shift+Space)',
+      ['normal', 'select', 'insert'],
+    ),
+    'Alt+s': leaf(
+      'Alt+s',
+      'Signature Help',
+      'LSP',
+      'lsp.signatureHelp',
+      'Show LSP function signature help at cursor (Alt+s)',
+      ['normal', 'select', 'insert'],
+    ),
+    '[': {
+      key: '[',
+      label: 'Previous',
+      group: 'Previous (Unimpaired)',
+      category: 'Unimpaired',
+      mode: ['normal', 'select'],
+      children: {
+        d: leaf(
+          'd',
+          'Previous Diagnostic',
+          'LSP',
+          'lsp.prevDiagnostic',
+          'Jump to previous diagnostic in file ([d)',
+        ),
+        D: leaf(
+          'D',
+          'First Diagnostic',
+          'LSP',
+          'lsp.firstDiagnostic',
+          'Jump to first diagnostic in file ([D)',
+        ),
+      },
+    },
+    ']': {
+      key: ']',
+      label: 'Next',
+      group: 'Next (Unimpaired)',
+      category: 'Unimpaired',
+      mode: ['normal', 'select'],
+      children: {
+        d: leaf(
+          'd',
+          'Next Diagnostic',
+          'LSP',
+          'lsp.nextDiagnostic',
+          'Jump to next diagnostic in file (]d)',
+        ),
+        D: leaf(
+          'D',
+          'Last Diagnostic',
+          'LSP',
+          'lsp.lastDiagnostic',
+          'Jump to last diagnostic in file (]D)',
+        ),
+      },
+    },
     g: {
       key: 'g',
       label: 'Go to',
@@ -224,6 +329,13 @@ export class HotkeyService {
           'LSP',
           'lsp.gotoDefinition',
           'Jump to symbol definition at cursor (gd)',
+        ),
+        K: leaf(
+          'K',
+          'Signature Help',
+          'LSP',
+          'lsp.signatureHelp',
+          'Show LSP function signature help at cursor (gK)',
         ),
       },
     },
@@ -321,7 +433,7 @@ export class HotkeyService {
             key: 'l',
             label: '+lsp',
             group: 'LSP',
-            description: 'Language server navigation and diagnostics',
+            description: 'Language server navigation, IntelliSense, and diagnostics',
             category: 'LSP',
             children: {
               g: leaf(
@@ -330,6 +442,48 @@ export class HotkeyService {
                 'LSP',
                 'lsp.gotoDefinition',
                 'Jump to symbol definition at cursor',
+              ),
+              k: leaf(
+                'k',
+                'Hover Documentation',
+                'LSP',
+                'lsp.hover',
+                'Show LSP hover documentation at cursor',
+              ),
+              h: leaf(
+                'h',
+                'Hover Documentation',
+                'LSP',
+                'lsp.hover',
+                'Show LSP hover documentation at cursor',
+              ),
+              s: leaf(
+                's',
+                'Signature Help',
+                'LSP',
+                'lsp.signatureHelp',
+                'Show LSP function signature help at cursor',
+              ),
+              c: leaf(
+                'c',
+                'Trigger Autocomplete',
+                'LSP',
+                'lsp.triggerCompletion',
+                'Trigger autocomplete suggestions at cursor',
+              ),
+              n: leaf(
+                'n',
+                'Next Diagnostic',
+                'LSP',
+                'lsp.nextDiagnostic',
+                'Jump to next diagnostic in file',
+              ),
+              p: leaf(
+                'p',
+                'Previous Diagnostic',
+                'LSP',
+                'lsp.prevDiagnostic',
+                'Jump to previous diagnostic in file',
               ),
               d: leaf(
                 'd',
@@ -530,36 +684,34 @@ export class HotkeyService {
             'jump.start',
             'Show 2D home-row jump labels over visible controls',
           ),
-          k: {
-            key: 'k',
-            label: '+preset',
-            group: 'Keybinding Preset',
-            description: 'Switch modal grammar (Helix / Vim / Kakoune)',
-            category: 'Leader',
-            children: {
-              h: leaf(
-                'h',
-                'Helix Preset',
-                'Preset',
-                'preset.helix',
-                'Switch to Helix selection-first grammar (default)',
-              ),
-              v: leaf(
-                'v',
-                'Vim Preset',
-                'Preset',
-                'preset.vim',
-                'Switch to Vim operator-motion grammar',
-              ),
-              k: leaf(
-                'k',
-                'Kakoune Preset',
-                'Preset',
-                'preset.kakoune',
-                'Switch to Kakoune object-verb grammar',
-              ),
-            },
-          },
+          k: leaf(
+            'k',
+            'Hover Documentation',
+            'LSP',
+            'lsp.hover',
+            'Show LSP hover documentation at cursor (Space k)',
+          ),
+          s: leaf(
+            's',
+            'Signature Help',
+            'LSP',
+            'lsp.signatureHelp',
+            'Show LSP function signature help at cursor (Space s)',
+          ),
+          d: leaf(
+            'd',
+            'Open Diagnostics',
+            'LSP',
+            'lsp.diagnostics',
+            'Open workspace diagnostics buffer (Space d)',
+          ),
+          D: leaf(
+            'D',
+            'Open Workspace Diagnostics',
+            'LSP',
+            'lsp.diagnostics',
+            'Open workspace diagnostics buffer (Space D)',
+          ),
         }
       },
     },
@@ -617,6 +769,13 @@ export class HotkeyService {
       return true
     },
     'lsp.gotoDefinition': () => this.gotoDefinitionAtCursor(),
+    'lsp.hover': () => this.hoverAtCursor(),
+    'lsp.signatureHelp': () => this.signatureHelpAtCursor(),
+    'lsp.triggerCompletion': () => this.triggerCompletionAtCursor(),
+    'lsp.nextDiagnostic': (ctx: KeymapCommandContext) => this.nextDiagnostic(ctx.count),
+    'lsp.prevDiagnostic': (ctx: KeymapCommandContext) => this.prevDiagnostic(ctx.count),
+    'lsp.firstDiagnostic': () => this.firstDiagnostic(),
+    'lsp.lastDiagnostic': () => this.lastDiagnostic(),
     'lsp.diagnostics': () => {
       void this.workspace.openDiagnosticsBuffer()
       return true
@@ -826,9 +985,69 @@ export class HotkeyService {
         label: 'Go to Definition',
         description: 'Jump to the LSP definition at the current cursor position',
         group: 'LSP',
-        shortcut: 'g d',
+        shortcut: 'F12',
         onSelect: () => {
           this.gotoDefinitionAtCursor()
+        },
+      },
+      {
+        value: 'lsp-hover',
+        command: 'hover',
+        aliases: ['doc', 'K'],
+        label: 'Hover Documentation',
+        description: 'Show LSP hover documentation at the current cursor position',
+        group: 'LSP',
+        shortcut: 'K',
+        onSelect: () => {
+          this.hoverAtCursor()
+        },
+      },
+      {
+        value: 'lsp-signature-help',
+        command: 'signature',
+        aliases: ['sig', 'signature-help'],
+        label: 'Signature Help',
+        description: 'Show LSP function signature help at the current cursor position',
+        group: 'LSP',
+        shortcut: 'Space l s',
+        onSelect: () => {
+          this.signatureHelpAtCursor()
+        },
+      },
+      {
+        value: 'lsp-complete',
+        command: 'complete',
+        aliases: ['completion', 'intellisense'],
+        label: 'Trigger Autocomplete',
+        description: 'Open autocomplete suggestions at the current cursor position',
+        group: 'LSP',
+        shortcut: 'Control+Space',
+        onSelect: () => {
+          this.triggerCompletionAtCursor()
+        },
+      },
+      {
+        value: 'diagnostic-next',
+        command: 'dn',
+        aliases: ['diagnostic-next', 'lnext'],
+        label: 'Next Diagnostic',
+        description: 'Jump to the next inline diagnostic in the active file',
+        group: 'LSP',
+        shortcut: [']', 'd'],
+        onSelect: () => {
+          this.nextDiagnostic(1)
+        },
+      },
+      {
+        value: 'diagnostic-prev',
+        command: 'dp',
+        aliases: ['diagnostic-prev', 'lprev'],
+        label: 'Previous Diagnostic',
+        description: 'Jump to the previous inline diagnostic in the active file',
+        group: 'LSP',
+        shortcut: ['[', 'd'],
+        onSelect: () => {
+          this.prevDiagnostic(1)
         },
       },
       {
@@ -1184,6 +1403,75 @@ export class HotkeyService {
     const pos = this.activeEditorView.state.selection.main.head
     void this.workspace.gotoDefinition(pos)
     return true
+  }
+
+  private hoverAtCursor(): boolean {
+    const view = this.activeEditorView
+    if (!view || !this.workspace.selected) return false
+    const pos = view.state.selection.main.head
+    void this.workspace.requestHover(pos).then((hover) => {
+      if (hover && this.activeEditorView === view) {
+        showEditorHoverTooltip(view, hover)
+      }
+    })
+    return true
+  }
+
+  private signatureHelpAtCursor(): boolean {
+    const view = this.activeEditorView
+    if (!view || !this.workspace.selected) return false
+    const pos = view.state.selection.main.head
+    void this.workspace.requestSignatureHelp(pos).then((help) => {
+      if (help && this.activeEditorView === view) {
+        showEditorSignatureHelpTooltip(view, help)
+      }
+    })
+    return true
+  }
+
+  private triggerCompletionAtCursor(): boolean {
+    const view = this.activeEditorView
+    if (!view || view.state.readOnly) return false
+    const run = () => {
+      if (this.activeEditorView !== view) return
+      if (this.controller && this.controller.getState().mode !== 'insert') {
+        this.controller.setMode('insert')
+      }
+      view.focus()
+      triggerEditorCompletion(view)
+    }
+    if (this.commandOpen) {
+      void tick().then(() => {
+        requestAnimationFrame(run)
+      })
+      return true
+    }
+    run()
+    return true
+  }
+
+  private nextDiagnostic(count = 1): boolean {
+    const view = this.activeEditorView
+    if (!view) return false
+    return gotoNextEditorDiagnostic(view, count)
+  }
+
+  private prevDiagnostic(count = 1): boolean {
+    const view = this.activeEditorView
+    if (!view) return false
+    return gotoPrevEditorDiagnostic(view, count)
+  }
+
+  private firstDiagnostic(): boolean {
+    const view = this.activeEditorView
+    if (!view) return false
+    return gotoFirstEditorDiagnostic(view)
+  }
+
+  private lastDiagnostic(): boolean {
+    const view = this.activeEditorView
+    if (!view) return false
+    return gotoLastEditorDiagnostic(view)
   }
 
   private restartLanguageServers(): boolean {

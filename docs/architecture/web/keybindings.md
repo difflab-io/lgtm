@@ -83,9 +83,12 @@ sequenceDiagram
 
 | Symbol | Location | Description |
 | --- | --- | --- |
-| `createCodeMirrorModalTarget` | `libs/lgtm-ui/src/code-editor/modalKeymap.ts` | Adapt a CodeMirror 6 `EditorView` to Helical UI's `ModalEditorTarget` contract. |
+| `createCodeMirrorModalTarget` | `libs/lgtm-ui/src/code-editor/modalKeymap.ts` | Adapt a CodeMirror 6 `EditorView` to Helical UI's `ModalEditorTarget` contract, including `hasActiveSuggestion()` so `Escape` dismisses active completion and hover popups before exiting `insert` mode. |
 | `scrollEditorAlign` / `scrollEditorHalfPage` | `libs/lgtm-ui/src/code-editor/modalKeymap.ts` | Scroll the active CodeMirror cursor line (`center`, `top`, `bottom`) or move by a half page (`down`, `up`). |
-| `HotkeyService` | `apps/lgtm-web/src/lib/services/hotkeyService.svelte.ts` | Expose the `Record<string, WhichKeyNode>` keymap, `Record<string, KeymapHandler>` command map, and reactive `CommandNode[]` catalog for workspace, LSP, and settings commands. |
+| `showEditorHoverTooltip` / `showEditorSignatureHelpTooltip` | `libs/lgtm-ui/src/code-editor/modalKeymap.ts` | Render keyboard-triggered LSP Markdown hover (`K`, `Space k`, `Space l k`, `:hover`) and signature help (`Alt+s`, `gK`, `Ctrl+Shift+Space`, `Space s`, `Space l s`, `:signature`) tooltips at the cursor. |
+| `gotoNextEditorDiagnostic` / `gotoPrevEditorDiagnostic` / `gotoFirstEditorDiagnostic` / `gotoLastEditorDiagnostic` | `libs/lgtm-ui/src/code-editor/modalKeymap.ts` | Jump to the next, previous, first, or last inline diagnostic (`]d`, `[d`, `[D`, `]D`, `Space l n`, `Space l p`, `:dn`, `:dp`) and display its diagnostic tooltip. |
+| `triggerEditorCompletion` / `dismissEditorIntellisense` | `libs/lgtm-ui/src/code-editor/modalKeymap.ts` | Start CodeMirror autocompletion (`Ctrl+Space`, `Ctrl+x`, `Space l c`, `:complete`) or dismiss open completion and tooltip overlays (`Escape`, `Ctrl+e`, `Ctrl+o`). |
+| `HotkeyService` | `apps/lgtm-web/src/lib/services/hotkeyService.svelte.ts` | Expose the `Record<string, WhichKeyNode>` keymap, `Record<string, KeymapHandler>` command map, and reactive `CommandNode[]` catalog for workspace, LSP, IntelliSense, and settings commands. |
 | `SettingsService.update` | `apps/lgtm-web/src/lib/services/settingsService.svelte.ts` | Persist a scoped `LgtmConfigPatch` via `config_update` and refresh reactive settings state. |
 
 ## References

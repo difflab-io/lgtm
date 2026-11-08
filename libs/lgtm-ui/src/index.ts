@@ -17,15 +17,29 @@ export type {
 } from './theme-toggle/types'
 export { default as CodeEditor } from './code-editor/CodeEditor.svelte'
 export {
+  clearEditorCursorTooltip,
   createCodeMirrorModalTarget,
+  dismissEditorIntellisense,
+  editorCursorTooltipField,
+  gotoFirstEditorDiagnostic,
+  gotoLastEditorDiagnostic,
+  gotoNextEditorDiagnostic,
+  gotoPrevEditorDiagnostic,
+  hasEditorIntellisenseActive,
   scrollEditorAlign,
   scrollEditorHalfPage,
+  showEditorHoverTooltip,
+  showEditorSignatureHelpTooltip,
+  triggerEditorCompletion,
 } from './code-editor/modalKeymap'
 export type {
+  CodeEditorCompletionItem,
   CodeEditorDiagnostic,
   CodeEditorDiagnosticSeverity,
   CodeEditorHoverResult,
   CodeEditorLineWrapping,
   CodeEditorProps,
+  CodeEditorSignatureHelp,
+  CodeEditorSignatureInformation,
   EditorView,
 } from './code-editor/types'

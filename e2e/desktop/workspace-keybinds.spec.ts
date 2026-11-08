@@ -2,6 +2,8 @@ import {
   test,
   expect,
   entry,
+  createFile,
+  renameEntry,
   exists,
   modeBadge,
   whichKeyPanel,
@@ -11,7 +13,7 @@ import {
   commandPalette,
   commandPaletteInput,
 } from './fixtures'
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 // Tests -----------------------------------------------------------------------
@@ -234,6 +236,98 @@ test.describe('Given an open file in the code editor', { tag: ['@desktop', '@key
         await expect
           .poll(() => readFile(join(workspace.root, 'same.md'), 'utf8'))
           .toContain('Modal line.')
+      },
+    )
+
+    test(
+      'should trigger LSP hover with K, navigate diagnostics with ]d and [d, show signature help, and complete with Ctrl+Space',
+      { tag: '@smoke' },
+      async ({ page, workspace }) => {
+        // Arrange
+        await createFile(page)
+        await renameEntry(page, 'Untitled.md', 'intellisense.rs')
+        await entry(page, 'same.md').click()
+        await writeFile(
+          join(workspace.root, 'intellisense.rs'),
+          'pub fn helper(x: i32, y: i32) -> i32 {\n    BROKEN();\n    42\n}\n',
+          'utf8',
+        )
+        await entry(page, 'intellisense.rs').click()
+        const editorContent = page.locator('.cm-content')
+        await expect(page.locator('.cm-lintRange-error')).toBeVisible()
+        await editorContent.focus()
+        await page.keyboard.press('Escape')
+        await expect(modeBadge(page)).toHaveAttribute('data-mode', 'normal')
+
+        // Act: press K in normal mode to open LSP hover tooltip at cursor, then also verify Helix Space k
+        await page.keyboard.press('g')
+        await page.keyboard.press('g')
+        await page.keyboard.press('Shift+K')
+
+        // Assert: hover tooltip is visible and Escape dismisses it in normal mode
+        const hoverTooltip = page.locator('[data-slot="code-editor-hover"]')
+        await expect(hoverTooltip).toBeVisible()
+        await expect(hoverTooltip).toContainText('pub fn helper() -> i32')
+        await page.keyboard.press('Escape')
+        await expect(hoverTooltip).toBeHidden()
+
+        // Act: press Space k (Helix hover) to open LSP hover tooltip again
+        await page.keyboard.press('Space')
+        await page.keyboard.press('k')
+        await expect(hoverTooltip).toBeVisible()
+        await page.keyboard.press('Escape')
+        await expect(hoverTooltip).toBeHidden()
+
+        // Act: press ]d to jump to next diagnostic and show diagnostic tooltip
+        await page.keyboard.press(']')
+        await page.keyboard.press('d')
+
+        // Assert
+        const diagTooltip = page.locator('[data-slot="code-editor-diagnostic-tooltip"]')
+        await expect(diagTooltip).toBeVisible()
+        await expect(diagTooltip).toContainText('cannot find value BROKEN in this scope')
+        await page.keyboard.press('Escape')
+        await expect(diagTooltip).toBeHidden()
+
+        // Act: press Space l s to open signature help at cursor
+        await page.keyboard.press('Space')
+        await page.keyboard.press('l')
+        await page.keyboard.press('s')
+
+        // Assert
+        const sigTooltip = page.locator('[data-slot="code-editor-signature-help"]')
+        await expect(sigTooltip).toBeVisible()
+        await expect(sigTooltip).toContainText('fn helper(x: i32, y: i32) -> i32')
+        await page.keyboard.press('Escape')
+        await expect(sigTooltip).toBeHidden()
+
+        // Act: open line below (o) into insert mode, trigger completion with Control+Space, dismiss with Control+e while staying in insert mode, then accept with Control+y and return to normal mode on Escape
+        await page.keyboard.press('o')
+        await expect(modeBadge(page)).toHaveAttribute('data-mode', 'insert')
+        await page.keyboard.type('hel')
+        await page.keyboard.press('Control+Space')
+        const completionListbox = page.locator('.cm-tooltip-autocomplete [role="listbox"]')
+        await expect(completionListbox).toBeVisible()
+        await expect(completionListbox).toContainText('helper_value')
+
+        // Pressing Escape or Control+e dismisses autocomplete while keeping insert mode active
+        await page.keyboard.press('Escape')
+        await expect(completionListbox).toBeHidden()
+        await expect(modeBadge(page)).toHaveAttribute('data-mode', 'insert')
+
+        // Re-open autocomplete, dismiss with Control+e (Vim Compl-cancel), then re-open and accept with Control+y
+        await page.keyboard.press('Control+Space')
+        await expect(completionListbox).toBeVisible()
+        await page.keyboard.press('Control+e')
+        await expect(completionListbox).toBeHidden()
+        await expect(modeBadge(page)).toHaveAttribute('data-mode', 'insert')
+
+        await page.keyboard.press('Control+Space')
+        await expect(completionListbox).toBeVisible()
+        await page.keyboard.press('Control+y')
+        await expect(editorContent).toContainText('helper_value()')
+        await page.keyboard.press('Escape')
+        await expect(modeBadge(page)).toHaveAttribute('data-mode', 'normal')
       },
     )
   })

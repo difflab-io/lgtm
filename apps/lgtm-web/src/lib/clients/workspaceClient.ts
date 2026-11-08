@@ -19,6 +19,7 @@ import {
   type LgtmConfig,
   type LgtmConfigPatch,
   type LineWrap,
+  type LspCompletionItem,
   type LspDiagnostic,
   type LspDiagnosticsBuffer,
   type LspHoverResult,
@@ -27,6 +28,8 @@ import {
   type LspServerStatusEvent,
   type LspSettings,
   type LspSettingsPatch,
+  type LspSignatureHelp,
+  type LspSignatureInformation,
   type LspWorkspaceSnapshot,
   type MiseTaskConfig,
   type ResolvedConfigSnapshot,
@@ -53,6 +56,7 @@ export type {
   LgtmConfig,
   LgtmConfigPatch,
   LineWrap,
+  LspCompletionItem,
   LspDiagnostic,
   LspDiagnosticsBuffer,
   LspHoverResult,
@@ -61,6 +65,8 @@ export type {
   LspServerStatusEvent,
   LspSettings,
   LspSettingsPatch,
+  LspSignatureHelp,
+  LspSignatureInformation,
   LspWorkspaceSnapshot,
   MiseTaskConfig,
   ResolvedConfigSnapshot,
@@ -102,6 +108,8 @@ export interface WorkspaceClient {
   lspDidChange(path: string, content: string): Promise<void>
   lspHover(path: string, offset: number): Promise<LspHoverResult | null>
   lspGotoDefinition(path: string, offset: number): Promise<LspLocation[]>
+  lspCompletion?(path: string, offset: number): Promise<LspCompletionItem[]>
+  lspSignatureHelp?(path: string, offset: number): Promise<LspSignatureHelp | null>
   lspGetState(): Promise<LspWorkspaceSnapshot>
   lspGetDiagnosticsBuffer(languageId?: string): Promise<LspDiagnosticsBuffer>
   lspRestart(languageId: string): Promise<LspServerStatusEvent>
@@ -169,6 +177,9 @@ export const workspaceClient: WorkspaceClient = {
   lspHover: (relativePath, offset) => invoke('lsp_hover', { relativePath, offset }),
   lspGotoDefinition: (relativePath, offset) =>
     invoke('lsp_goto_definition', { relativePath, offset }),
+  lspCompletion: (relativePath, offset) => invoke('lsp_completion', { relativePath, offset }),
+  lspSignatureHelp: (relativePath, offset) =>
+    invoke('lsp_signature_help', { relativePath, offset }),
   lspGetState: () => invoke('lsp_get_state'),
   lspGetDiagnosticsBuffer: (languageId?: string) =>
     invoke('lsp_get_diagnostics_buffer', languageId ? { languageId } : {}),

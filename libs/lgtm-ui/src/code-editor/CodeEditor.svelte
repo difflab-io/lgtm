@@ -1,16 +1,33 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte'
+  import {
+    acceptCompletion,
+    autocompletion,
+    completeAnyWord,
+    completionStatus,
+    moveCompletionSelection,
+    startCompletion,
+    type Completion,
+    type CompletionContext,
+    type CompletionResult,
+  } from '@codemirror/autocomplete'
   import { markdown } from '@codemirror/lang-markdown'
   import { HighlightStyle, LanguageDescription, syntaxHighlighting } from '@codemirror/language'
   import { languages } from '@codemirror/language-data'
   import { lintGutter, setDiagnostics, type Diagnostic } from '@codemirror/lint'
-  import { Compartment, EditorState, type Extension } from '@codemirror/state'
+  import { Compartment, EditorState, Prec, type Extension } from '@codemirror/state'
   import { EditorView, hoverTooltip, keymap, tooltips } from '@codemirror/view'
   import { tags } from '@lezer/highlight'
   import { basicSetup } from 'codemirror'
   import { cn, getDocumentWhichKeyController, registerModalEditor } from '@cloudvoyant/helical-ui'
   import { renderMarkdownToDom } from './markdown'
-  import { createCodeMirrorModalTarget } from './modalKeymap'
+  import {
+    createCodeMirrorModalTarget,
+    dismissEditorIntellisense,
+    editorCursorTooltipField,
+    hasEditorIntellisenseActive,
+    showEditorSignatureHelpTooltip,
+  } from './modalKeymap'
   import { codeEditorHoverTooltipVariants, codeEditorRootVariants } from './styles'
   import type { CodeEditorDiagnostic, CodeEditorLineWrapping, CodeEditorProps } from './types'
 
@@ -221,6 +238,8 @@
     onchange,
     onhover,
     ongotodefinition,
+    oncompletion,
+    onsignaturehelp,
     onViewReady,
   }: CodeEditorProps = $props()
 
@@ -283,6 +302,58 @@
     return [EditorView.lineWrapping]
   }
 
+  async function resolveCompletions(context: CompletionContext): Promise<CompletionResult | null> {
+    const modalMode = view?.dom.dataset.modalMode
+    if (!context.explicit && modalMode && modalMode !== 'insert') {
+      return null
+    }
+    const word = context.matchBefore(/[\w$]+/)
+    const triggerBefore = context.matchBefore(/[.:<"/]/)
+    if (!context.explicit && !word && !triggerBefore) {
+      return null
+    }
+    if (oncompletion) {
+      const items = await oncompletion(context.pos)
+      if (items && items.length > 0) {
+        const defaultFrom = word ? word.from : context.pos
+        const docLen = context.state.doc.length
+        let resultFrom = defaultFrom
+        const options: Completion[] = items.map((item) => {
+          if (item.from !== undefined) {
+            resultFrom = Math.max(0, Math.min(docLen, item.from))
+          }
+          return {
+            label: item.label,
+            ...(item.kind ? { type: item.kind } : {}),
+            ...(item.detail ? { detail: item.detail } : {}),
+            ...(item.insertText && item.insertText !== item.label
+              ? { apply: item.insertText }
+              : {}),
+            ...(item.documentation
+              ? {
+                  info: () => {
+                    const dom = document.createElement('div')
+                    dom.className = codeEditorHoverTooltipVariants()
+                    dom.setAttribute('data-slot', 'code-editor-completion-info')
+                    dom.appendChild(renderMarkdownToDom(item.documentation!))
+                    return dom
+                  },
+                }
+              : {}),
+          }
+        })
+        return {
+          from: resultFrom,
+          options,
+        }
+      }
+    }
+    if (context.explicit) {
+      return completeAnyWord(context)
+    }
+    return null
+  }
+
   // Lifecycle -----------------------------------------------------------------
   onMount(() => {
     if (!host) return
@@ -296,6 +367,12 @@
         EditorState.allowMultipleSelections.of(true),
         syntaxHighlighting(codeEditorHighlightStyle),
         codeEditorTooltipTheme,
+        editorCursorTooltipField,
+        autocompletion({
+          override: [resolveCompletions],
+          interactionDelay: 0,
+          activateOnTyping: true,
+        }),
         tooltips({
           tooltipSpace(currentView) {
             const rect = currentView.scrollDOM.getBoundingClientRect()
@@ -348,6 +425,95 @@
             },
           }
         }),
+        Prec.highest(
+          keymap.of([
+            {
+              key: 'Escape',
+              run(currentView) {
+                return dismissEditorIntellisense(currentView)
+              },
+            },
+            {
+              key: 'Ctrl-e',
+              run(currentView) {
+                if (!hasEditorIntellisenseActive(currentView)) return false
+                return dismissEditorIntellisense(currentView)
+              },
+            },
+            {
+              key: 'Ctrl-o',
+              run(currentView) {
+                if (!hasEditorIntellisenseActive(currentView)) return false
+                return dismissEditorIntellisense(currentView)
+              },
+            },
+            {
+              key: 'Ctrl-Space',
+              run(currentView) {
+                if (currentView.state.readOnly) return false
+                return startCompletion(currentView)
+              },
+            },
+            {
+              key: 'Ctrl-x',
+              run(currentView) {
+                if (currentView.state.readOnly) return false
+                return startCompletion(currentView)
+              },
+            },
+            {
+              key: 'Ctrl-Shift-Space',
+              run(currentView) {
+                if (!onsignaturehelp) return false
+                const pos = currentView.state.selection.main.head
+                void onsignaturehelp(pos).then((help) => {
+                  if (help) showEditorSignatureHelpTooltip(currentView, help)
+                })
+                return true
+              },
+            },
+            {
+              key: 'Alt-s',
+              run(currentView) {
+                if (!onsignaturehelp) return false
+                const pos = currentView.state.selection.main.head
+                void onsignaturehelp(pos).then((help) => {
+                  if (help) showEditorSignatureHelpTooltip(currentView, help)
+                })
+                return true
+              },
+            },
+            {
+              key: 'Ctrl-n',
+              run(currentView) {
+                if (completionStatus(currentView.state) === 'active') {
+                  return moveCompletionSelection(true)(currentView)
+                }
+                if (currentView.state.readOnly) return false
+                return startCompletion(currentView)
+              },
+            },
+            {
+              key: 'Ctrl-p',
+              run(currentView) {
+                if (completionStatus(currentView.state) === 'active') {
+                  return moveCompletionSelection(false)(currentView)
+                }
+                if (currentView.state.readOnly) return false
+                return startCompletion(currentView)
+              },
+            },
+            {
+              key: 'Ctrl-y',
+              run(currentView) {
+                if (completionStatus(currentView.state) === 'active') {
+                  return acceptCompletion(currentView)
+                }
+                return false
+              },
+            },
+          ]),
+        ),
         keymap.of([
           {
             key: 'Tab',

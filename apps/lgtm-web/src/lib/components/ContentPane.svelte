@@ -103,6 +103,8 @@
           onchange={(content) => workspace.updateContent(content)}
           onhover={(offset) => workspace.requestHover(offset)}
           ongotodefinition={(offset) => workspace.gotoDefinition(offset)}
+          oncompletion={(offset) => workspace.requestCompletions(offset)}
+          onsignaturehelp={(offset) => workspace.requestSignatureHelp(offset)}
           onViewReady={(v) => hotkeys.setEditorView(v)}
         />
       {/key}

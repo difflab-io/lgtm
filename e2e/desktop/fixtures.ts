@@ -108,6 +108,12 @@ function handleMessage(msg) {
           textDocumentSync: 1,
           hoverProvider: true,
           definitionProvider: true,
+          completionProvider: {
+            triggerCharacters: ['.', ':'],
+          },
+          signatureHelpProvider: {
+            triggerCharacters: ['(', ','],
+          },
         },
       },
     });
@@ -187,6 +193,49 @@ function handleMessage(msg) {
           },
         },
       ],
+    });
+    return;
+  }
+  if (msg.method === 'textDocument/completion') {
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        isIncomplete: false,
+        items: [
+          {
+            label: 'helper_value',
+            kind: 3,
+            detail: 'fn helper_value() -> i32',
+            documentation: {
+              kind: 'markdown',
+              value: 'Returns the **helper** value.',
+            },
+            insertText: 'helper_value()',
+          },
+        ],
+      },
+    });
+    return;
+  }
+  if (msg.method === 'textDocument/signatureHelp') {
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        signatures: [
+          {
+            label: 'fn helper(x: i32, y: i32) -> i32',
+            documentation: {
+              kind: 'markdown',
+              value: 'Computes the sum of \`x\` and \`y\`.',
+            },
+            parameters: [{ label: 'x: i32' }, { label: 'y: i32' }],
+          },
+        ],
+        activeSignature: 0,
+        activeParameter: 0,
+      },
     });
     return;
   }

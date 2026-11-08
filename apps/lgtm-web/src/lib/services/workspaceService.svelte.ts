@@ -1,4 +1,11 @@
-import type { TreeNode, ContextMenuItem, CodeEditorHoverResult, TabItem } from 'lgtm-ui'
+import type {
+  TreeNode,
+  ContextMenuItem,
+  CodeEditorCompletionItem,
+  CodeEditorHoverResult,
+  CodeEditorSignatureHelp,
+  TabItem,
+} from 'lgtm-ui'
 import { WorkspaceNodeViewModel } from '../models/workspaceNodeViewModel'
 import {
   errorMessage,
@@ -503,6 +510,18 @@ export class WorkspaceService {
     const first = locations[0]
     if (!first) return
     await this.jumpToLocation(first.path, first.offset)
+  }
+
+  /** Requests LSP completion items at `offset` in the currently selected file. */
+  async requestCompletions(offset: number): Promise<CodeEditorCompletionItem[]> {
+    if (!this.selected) return []
+    return this.lsp.requestCompletions(this.selected.path, offset)
+  }
+
+  /** Requests LSP signature help at `offset` in the currently selected file. */
+  async requestSignatureHelp(offset: number): Promise<CodeEditorSignatureHelp | null> {
+    if (!this.selected) return null
+    return this.lsp.requestSignatureHelp(this.selected.path, offset)
   }
 
   /** Handles an incoming `lsp-status` event from the desktop backend. */

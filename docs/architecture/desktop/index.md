@@ -150,6 +150,8 @@ sequenceDiagram
 | `lsp_did_change` | UI -> Host | `(relativePath: string, content: string) -> void` | Update cached buffer text and send `textDocument/didChange`. |
 | `lsp_hover` | UI -> Host | `(relativePath: string, offset: number) -> LspHoverResult \| null` | Query `textDocument/hover` at a CodeMirror UTF-16 offset. |
 | `lsp_goto_definition` | UI -> Host | `(relativePath: string, offset: number) -> LspLocation[]` | Query `textDocument/definition` at a CodeMirror UTF-16 offset and return workspace-relative locations. |
+| `lsp_completion` | UI -> Host | `(relativePath: string, offset: number) -> LspCompletionItem[]` | Query `textDocument/completion` at a CodeMirror UTF-16 offset and return completion candidates. |
+| `lsp_signature_help` | UI -> Host | `(relativePath: string, offset: number) -> LspSignatureHelp \| null` | Query `textDocument/signatureHelp` at a CodeMirror UTF-16 offset and return active function signatures. |
 | `lsp_get_state` | UI -> Host | `() -> LspWorkspaceSnapshot` | Return all tracked language server statuses and file diagnostics for the active workspace. |
 | `lsp_get_diagnostics_buffer` | UI -> Host | `(languageId?: string) -> LspDiagnosticsBuffer` | Render a read-only plain-text diagnostics report for all active servers or a single language. |
 | `lsp_restart` | UI -> Host | `(languageId: string) -> LspServerStatusEvent` | Restart all sessions for `languageId` in the active workspace and re-open tracked documents. |

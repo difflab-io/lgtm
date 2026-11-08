@@ -33,6 +33,10 @@ export const commands = {
 	lspHover: (relativePath: string, offset: number) => __TAURI_INVOKE<LspHoverResult | null>("lsp_hover", { relativePath, offset }),
 	/**  Requests symbol definition locations (`textDocument/definition`) at a UTF-16 editor offset. */
 	lspGotoDefinition: (relativePath: string, offset: number) => __TAURI_INVOKE<LspLocation[]>("lsp_goto_definition", { relativePath, offset }),
+	/**  Requests code completion candidates (`textDocument/completion`) at a UTF-16 editor offset. */
+	lspCompletion: (relativePath: string, offset: number) => __TAURI_INVOKE<LspCompletionItem[]>("lsp_completion", { relativePath, offset }),
+	/**  Requests callable signature help (`textDocument/signatureHelp`) at a UTF-16 editor offset. */
+	lspSignatureHelp: (relativePath: string, offset: number) => __TAURI_INVOKE<LspSignatureHelp | null>("lsp_signature_help", { relativePath, offset }),
 	/**  Returns the current workspace LSP server statuses and diagnostics snapshot. */
 	lspGetState: () => __TAURI_INVOKE<LspWorkspaceSnapshot>("lsp_get_state"),
 	/**  Renders a read-only diagnostics buffer for the active workspace, optionally filtered by `language_id`. */
@@ -208,6 +212,24 @@ export type LineWrap =
 /**  Fixed character column width at which lines wrap. */
 number;
 
+/**  A single code completion candidate returned by `textDocument/completion`. */
+export type LspCompletionItem = {
+	/**  Display label for the completion candidate. */
+	label: string,
+	/**  Normalized CodeMirror completion category (`function`, `method`, `variable`, `type`, `class`, `interface`, `property`, `keyword`, `constant`, `enum`, `namespace`, `text`). */
+	kind: string | null,
+	/**  Short type signature or symbol detail string. */
+	detail: string | null,
+	/**  Markdown or plain-text documentation string. */
+	documentation: string | null,
+	/**  Text to insert when the candidate is accepted, if different from `label`. */
+	insertText: string | null,
+	/**  Optional UTF-16 replacement start offset when a `textEdit` range is provided. */
+	from: number | null,
+	/**  Optional UTF-16 replacement end offset when a `textEdit` range is provided. */
+	to: number | null,
+};
+
 /**  A single diagnostic normalized to both UTF-16 flat editor offsets and 0-based line/character coordinates. */
 export type LspDiagnostic = {
 	/**  Start offset in UTF-16 code units from the beginning of the document. */
@@ -343,6 +365,26 @@ export type LspSettingsPatch = {
 	/**  Maximum duration in milliseconds to wait for an LSP JSON-RPC response. */
 	request_timeout_ms?: number | null,
 });
+
+/**  Active function or method signature help returned by `textDocument/signatureHelp`. */
+export type LspSignatureHelp = {
+	/**  Candidate signatures for the active call site. */
+	signatures: LspSignatureInformation[],
+	/**  Zero-based index of the active signature in `signatures`. */
+	activeSignature: number,
+	/**  Zero-based index of the active parameter in the active signature. */
+	activeParameter: number,
+};
+
+/**  A single callable signature returned inside [`LspSignatureHelp`]. */
+export type LspSignatureInformation = {
+	/**  Full signature label (for example `fn helper(count: usize) -> usize`). */
+	label: string,
+	/**  Optional Markdown or plain-text documentation for the callable. */
+	documentation: string | null,
+	/**  Parameter labels declared on the signature. */
+	parameters: string[],
+};
 
 /**  Complete snapshot of all active language servers and file diagnostics for a workspace. */
 export type LspWorkspaceSnapshot = {

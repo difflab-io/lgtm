@@ -31,6 +31,13 @@ Switch between three modal presets in `config.json` or from the command menu:
 | `m i <obj>`, `m a <obj>` | Select inner or around text object (`w`, `p`, `(`, `[`, `{`, `"`, `'`, `` ` ``) |
 | `d`, `c`, `y`, `p`, `P` | Delete, change, yank, or paste selection |
 | `C` / `Alt+j`, `Alt+k`, `,` | Add secondary cursor below/above or collapse to primary cursor |
+| `K` / `Space k` | Show LSP hover documentation at cursor (Vim/Kakoune `K`, Helix `Space k`) |
+| `gd` / `F12` | Jump to LSP definition at cursor |
+| `]d` / `[d`, `]D` / `[D` | Jump to next, previous, last, or first inline diagnostic |
+| `Control+Space` / `Control+x` | Trigger autocomplete suggestions (`Ctrl+x` in `insert` mode matches Helix/Vim) |
+| `Control+n` / `Control+p` / `Control+y` | Select next, select previous, or accept autocomplete candidate |
+| `Escape` / `Control+e` / `Control+o` | Dismiss autocomplete or tooltip popup (`Ctrl+e` in Vim, `Ctrl+o` in Kakoune) |
+| `Alt+s` / `gK` / `Control+Shift+Space` | Show LSP function signature help at cursor (Helix `Alt+s`, Neovim `gK`) |
 | `Control+c` / `gc` | Toggle line comments |
 | `Space j` | Activate two-character Flash jump labels across visible elements |
 
@@ -48,17 +55,19 @@ Press `Space` in `normal` or `select` mode to open the WhichKey popup:
 | `Space b n` / `Space b p` / `Space b d` | Next tab, previous tab, close active tab |
 | `Space w h` / `Space w l` / `Space w w` | Focus pane left/right or cycle panes |
 | `Space w e` / `Space w c` | Focus explorer pane or editor pane directly |
-| `Space l g` / `Space l d` / `Space l r` | Go to definition, open diagnostics, or restart language servers |
+| `Space k` / `Space s` / `Space d` / `Space D` | Show hover documentation, signature help, or open workspace diagnostics (Helix leader bindings) |
+| `Space l g` / `Space l k` / `Space l h` / `Space l s` / `Space l c` | Go to definition, hover documentation, signature help, or autocomplete (Kakoune `kak-lsp` user mode) |
+| `Space l n` / `Space l p` / `Space l d` / `Space l r` | Next/previous diagnostic, open diagnostics buffer, or restart language servers |
 | `Space u t` / `Space u c` / `Space u k` | Switch theme, command surface style, or keybinding preset |
 | `Space u m` / `Space u o` / `Space u i` | Toggle leader-only mode, active pane outline, or click-to-insert |
 | `Space u w` / `Space u l` | Set line wrapping (`auto`, `off`, `80`, `100`, `120`) or toggle LSP |
 | `Space g` | Go to start/end, definition, tab, or jumplist location |
-| `Space z` / `Space v` | Toggle `select` mode |
-| `Space j` / `Space k` | Start two-character jump mode or switch jump action (`activate` / `focus`) |
+| `Space z` / `Space v` | Align or scroll viewport |
+| `Space j` | Start two-character jump mode over visible elements |
 | `Space ?` / `Space :` | Open WhichKey hotkey explorer or colon CommandMenu |
 
 ### Command Menu and Command Palette
 
-- Press `:` in `normal` mode to open the bottom `CommandMenu` bar (`:w`, `:wa`, `:q`, `:wq`, `:bn`, `:bp`, `:bd`, `:new`, `:mkdir`, `:workspace`, `:settings`, `:project-settings`, `:diagnostics`, `:lsp-restart`, `:theme`, `:command-style`, `:preset`, `:leader-only`, `:pane-outline`, `:click-to-insert`, `:wrap`, `:lsp-mode`, `:keybindings`).
+- Press `:` in `normal` mode to open the bottom `CommandMenu` bar (`:w`, `:wa`, `:q`, `:wq`, `:bn`, `:bp`, `:bd`, `:new`, `:mkdir`, `:workspace`, `:settings`, `:project-settings`, `:gd`, `:hover`, `:signature`, `:complete`, `:dn`, `:dp`, `:diagnostics`, `:lsp-restart`, `:theme`, `:command-style`, `:preset`, `:leader-only`, `:pane-outline`, `:click-to-insert`, `:wrap`, `:lsp-mode`, `:keybindings`).
 - Press `Mod+k` (`Cmd+k` on macOS, `Ctrl+k` on Linux/Windows) to open the configured command surface (`keybindings.commandStyle`: `"menu"` by default, or `"palette"` for the centered fuzzy `CommandPalette` modal).
 - Toggle or switch any preference directly from `CommandMenu` or `CommandPalette` without editing JSON by hand.

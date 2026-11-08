@@ -1,6 +1,14 @@
+import { closeCompletion, completionStatus, startCompletion } from '@codemirror/autocomplete'
 import { redo, undo } from '@codemirror/commands'
-import { EditorSelection, type SelectionRange, type Text } from '@codemirror/state'
-import { EditorView } from '@codemirror/view'
+import { forEachDiagnostic, type Diagnostic } from '@codemirror/lint'
+import {
+  EditorSelection,
+  StateEffect,
+  StateField,
+  type SelectionRange,
+  type Text,
+} from '@codemirror/state'
+import { EditorView, showTooltip, type Tooltip } from '@codemirror/view'
 import type {
   KeybindingPreset,
   KeymapMode,
@@ -10,6 +18,32 @@ import type {
   ModalSelectionTransform,
   ModalTextObjectSpec,
 } from '@cloudvoyant/helical-ui'
+import { renderMarkdownToDom } from './markdown'
+import { codeEditorHoverTooltipVariants } from './styles'
+import type { CodeEditorHoverResult, CodeEditorSignatureHelp } from './types'
+
+const setEditorCursorTooltipEffect = StateEffect.define<Tooltip | null>()
+
+/**
+ * CodeMirror state field hosting keyboard-triggered hover, signature-help, and diagnostic tooltips.
+ */
+export const editorCursorTooltipField = StateField.define<Tooltip | null>({
+  create() {
+    return null
+  },
+  update(value, tr) {
+    for (const effect of tr.effects) {
+      if (effect.is(setEditorCursorTooltipEffect)) {
+        return effect.value
+      }
+    }
+    if (tr.docChanged || tr.selection) {
+      return null
+    }
+    return value
+  },
+  provide: (field) => showTooltip.from(field),
+})
 
 let lastYankedText = ''
 
@@ -265,6 +299,227 @@ export function scrollEditorHalfPage(
   const delta = Math.max(120, Math.round(scroller.clientHeight * 0.5)) * Math.max(1, count)
   scroller.scrollTop = Math.max(0, scroller.scrollTop + dir * delta)
   return true
+}
+
+/**
+ * Returns whether an autocomplete menu or keyboard-triggered tooltip is currently active in `view`.
+ */
+export function hasEditorIntellisenseActive(view: EditorView | null | undefined): boolean {
+  if (!view) return false
+  return (
+    completionStatus(view.state) === 'active' ||
+    Boolean(view.state.field(editorCursorTooltipField, false))
+  )
+}
+
+/**
+ * Clears any active keyboard-triggered cursor tooltip in `view`.
+ */
+export function clearEditorCursorTooltip(view: EditorView | null | undefined): boolean {
+  if (!view) return false
+  const active = view.state.field(editorCursorTooltipField, false)
+  if (!active) return false
+  view.dispatch({ effects: setEditorCursorTooltipEffect.of(null) })
+  return true
+}
+
+/**
+ * Dismisses any active autocomplete menu or keyboard-triggered cursor tooltip in `view`.
+ */
+export function dismissEditorIntellisense(view: EditorView | null | undefined): boolean {
+  if (!view) return false
+  if (completionStatus(view.state) !== null) {
+    closeCompletion(view)
+    return true
+  }
+  return clearEditorCursorTooltip(view)
+}
+
+/**
+ * Explicitly starts CodeMirror autocompletion at the current cursor position in `view`.
+ */
+export function triggerEditorCompletion(view: EditorView | null | undefined): boolean {
+  if (!view || view.state.readOnly) return false
+  return startCompletion(view)
+}
+
+function buildCursorTooltip(
+  view: EditorView,
+  createDom: () => HTMLElement,
+  options?: { pos?: number; end?: number },
+): Tooltip {
+  const docLen = view.state.doc.length
+  const rawPos = options?.pos ?? view.state.selection.main.head
+  const pos = Math.max(0, Math.min(docLen, rawPos))
+  const rawEnd =
+    options?.end !== undefined ? Math.max(pos, Math.min(docLen, options.end)) : undefined
+  const sameLine =
+    rawEnd === undefined ||
+    view.state.doc.lineAt(pos).number === view.state.doc.lineAt(rawEnd).number
+  const end = sameLine ? rawEnd : undefined
+  return {
+    pos,
+    ...(end !== undefined ? { end } : {}),
+    above: true,
+    create() {
+      return { dom: createDom() }
+    },
+  }
+}
+
+/**
+ * Displays a keyboard-triggered hover documentation tooltip at the cursor in `view`.
+ */
+export function showEditorHoverTooltip(
+  view: EditorView | null | undefined,
+  hover: CodeEditorHoverResult,
+): boolean {
+  if (!view || !hover.contents.trim()) return false
+  const tooltip = buildCursorTooltip(
+    view,
+    () => {
+      const dom = document.createElement('div')
+      dom.className = codeEditorHoverTooltipVariants()
+      dom.setAttribute('data-slot', 'code-editor-hover')
+      dom.appendChild(renderMarkdownToDom(hover.contents))
+      return dom
+    },
+    { pos: hover.from ?? view.state.selection.main.head, end: hover.to },
+  )
+  view.dispatch({ effects: setEditorCursorTooltipEffect.of(tooltip) })
+  return true
+}
+
+/**
+ * Displays a keyboard-triggered signature help tooltip at the cursor in `view`.
+ */
+export function showEditorSignatureHelpTooltip(
+  view: EditorView | null | undefined,
+  help: CodeEditorSignatureHelp,
+): boolean {
+  if (!view || help.signatures.length === 0) return false
+  const sig = help.signatures[help.activeSignature] ?? help.signatures[0]
+  if (!sig) return false
+  const markdownParts = [`\`\`\`\n${sig.label}\n\`\`\``]
+  if (sig.documentation?.trim()) {
+    markdownParts.push(sig.documentation.trim())
+  }
+  const markdown = markdownParts.join('\n\n---\n\n')
+  const tooltip = buildCursorTooltip(view, () => {
+    const dom = document.createElement('div')
+    dom.className = codeEditorHoverTooltipVariants()
+    dom.setAttribute('data-slot', 'code-editor-signature-help')
+    dom.appendChild(renderMarkdownToDom(markdown))
+    return dom
+  })
+  view.dispatch({ effects: setEditorCursorTooltipEffect.of(tooltip) })
+  return true
+}
+
+interface IndexedDiagnostic {
+  diagnostic: Diagnostic
+  from: number
+  to: number
+}
+
+function collectEditorDiagnostics(view: EditorView): IndexedDiagnostic[] {
+  const items: IndexedDiagnostic[] = []
+  forEachDiagnostic(view.state, (diagnostic, from, to) => {
+    items.push({ diagnostic, from, to })
+  })
+  items.sort((a, b) => a.from - b.from || a.to - b.to)
+  return items
+}
+
+function dispatchDiagnosticJump(view: EditorView, target: IndexedDiagnostic): boolean {
+  const tooltip = buildCursorTooltip(
+    view,
+    () => {
+      const dom = document.createElement('div')
+      dom.className = codeEditorHoverTooltipVariants()
+      dom.setAttribute('data-slot', 'code-editor-diagnostic-tooltip')
+      const messageEl = document.createElement('div')
+      messageEl.setAttribute('data-slot', 'code-editor-diagnostic-message')
+      messageEl.appendChild(renderMarkdownToDom(target.diagnostic.message))
+      dom.appendChild(messageEl)
+      return dom
+    },
+    { pos: target.from, end: target.to },
+  )
+  view.dispatch({
+    selection: { anchor: target.from, head: target.to },
+    scrollIntoView: true,
+    effects: setEditorCursorTooltipEffect.of(tooltip),
+  })
+  return true
+}
+
+/**
+ * Jumps to the next inline diagnostic in `view` (`count` steps forward, wrapping around).
+ */
+export function gotoNextEditorDiagnostic(view: EditorView | null | undefined, count = 1): boolean {
+  if (!view) return false
+  const items = collectEditorDiagnostics(view)
+  if (items.length === 0) return false
+  const sel = view.state.selection.main
+  let firstIdx = items.findIndex(
+    (item) => item.from > sel.from || (item.from === sel.from && item.to > sel.to),
+  )
+  if (firstIdx === -1) {
+    firstIdx = 0
+  }
+  const steps = Math.max(1, count) - 1
+  const target = items[(firstIdx + steps) % items.length]
+  if (!target) return false
+  return dispatchDiagnosticJump(view, target)
+}
+
+/**
+ * Jumps to the previous inline diagnostic in `view` (`count` steps backward, wrapping around).
+ */
+export function gotoPrevEditorDiagnostic(view: EditorView | null | undefined, count = 1): boolean {
+  if (!view) return false
+  const items = collectEditorDiagnostics(view)
+  if (items.length === 0) return false
+  const sel = view.state.selection.main
+  let firstIdx = -1
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const item = items[i]!
+    if (item.from < sel.from || (item.from === sel.from && item.to < sel.to)) {
+      firstIdx = i
+      break
+    }
+  }
+  if (firstIdx === -1) {
+    firstIdx = items.length - 1
+  }
+  const steps = Math.max(1, count) - 1
+  const targetIdx = (((firstIdx - steps) % items.length) + items.length) % items.length
+  const target = items[targetIdx]
+  if (!target) return false
+  return dispatchDiagnosticJump(view, target)
+}
+
+/**
+ * Jumps to the first inline diagnostic in `view`.
+ */
+export function gotoFirstEditorDiagnostic(view: EditorView | null | undefined): boolean {
+  if (!view) return false
+  const items = collectEditorDiagnostics(view)
+  const target = items[0]
+  if (!target) return false
+  return dispatchDiagnosticJump(view, target)
+}
+
+/**
+ * Jumps to the last inline diagnostic in `view`.
+ */
+export function gotoLastEditorDiagnostic(view: EditorView | null | undefined): boolean {
+  if (!view) return false
+  const items = collectEditorDiagnostics(view)
+  const target = items[items.length - 1]
+  if (!target) return false
+  return dispatchDiagnosticJump(view, target)
 }
 
 /**
@@ -611,8 +866,21 @@ export function createCodeMirrorModalTarget(
     setModalState(modalState: { mode: KeymapMode; preset: KeybindingPreset }): void {
       const view = getView()
       if (!view) return
+      const prevMode = view.dom.dataset.modalMode
       view.dom.dataset.modalMode = modalState.mode
       view.dom.dataset.modalPreset = modalState.preset
+      if (modalState.mode !== 'insert') {
+        if (completionStatus(view.state) !== null) {
+          closeCompletion(view)
+        }
+        if (prevMode === 'insert') {
+          clearEditorCursorTooltip(view)
+        }
+      }
+    },
+
+    hasActiveSuggestion(): boolean {
+      return hasEditorIntellisenseActive(getView())
     },
   }
 }
