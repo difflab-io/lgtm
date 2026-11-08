@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
-use lgtm_config::{ConfigService, LanguageConfig, LgtmConfigPatch};
+use lgtm_config::{ConfigService, LanguageConfig, LgtmConfig};
 use lgtm_env::MiseService;
 use lsp_types::{
     DiagnosticSeverity, GotoDefinitionResponse, Hover, HoverContents, MarkedString, NumberOrString,
@@ -436,6 +436,9 @@ impl LgtmLspManager {
 
         let (from, to) = match hover.range {
             Some(range) => {
+                if range.start.line != range.end.line {
+                    return Ok(None);
+                }
                 let (_, _, _, _, start_offset, end_offset) = Self::map_lsp_range(&text, &range);
                 (Some(start_offset), Some(end_offset))
             }
@@ -1012,7 +1015,7 @@ impl LgtmLspManager {
 
         session.notify("initialized", json!({}))?;
         if language_id == "json" {
-            let mut schema = LgtmConfigPatch::json_schema();
+            let mut schema = LgtmConfig::json_schema();
             Self::enrich_schema_markdown_descriptions(&mut schema);
             let _ = session.notify(
                 "workspace/didChangeConfiguration",

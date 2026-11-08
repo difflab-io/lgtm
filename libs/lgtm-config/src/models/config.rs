@@ -222,6 +222,22 @@ pub struct ResolvedConfigSnapshot {
 }
 
 impl LgtmConfig {
+    /// Generates the JSON Schema value for `LgtmConfig` (`schemas/config.schema.json`).
+    pub fn json_schema() -> serde_json::Value {
+        let schema = schemars::schema_for!(LgtmConfig);
+        serde_json::to_value(&schema).unwrap_or_else(|_| serde_json::json!({}))
+    }
+
+    /// Generates the pretty-printed JSON Schema string for `schemas/config.schema.json`.
+    pub fn json_schema_pretty() -> String {
+        let mut s = serde_json::to_string_pretty(&Self::json_schema())
+            .unwrap_or_else(|_| "{\n}\n".to_string());
+        if !s.ends_with('\n') {
+            s.push('\n');
+        }
+        s
+    }
+
     /// Builds the default LGTM configuration with presets for Rust, TypeScript, JavaScript, Python, Go, Markdown, and JSON.
     pub fn default_presets() -> Self {
         let mut languages = BTreeMap::new();
@@ -506,22 +522,6 @@ impl Default for LspSettings {
 
 impl LgtmConfigPatch {
     // Public ------------------------------------------------------------------
-
-    /// Generates the JSON Schema value for `LgtmConfigPatch`.
-    pub fn json_schema() -> serde_json::Value {
-        let schema = schemars::schema_for!(LgtmConfigPatch);
-        serde_json::to_value(&schema).unwrap_or_else(|_| serde_json::json!({}))
-    }
-
-    /// Generates the pretty-printed JSON Schema string for `schemas/config.schema.json`.
-    pub fn json_schema_pretty() -> String {
-        let mut s = serde_json::to_string_pretty(&Self::json_schema())
-            .unwrap_or_else(|_| "{\n}\n".to_string());
-        if !s.ends_with('\n') {
-            s.push('\n');
-        }
-        s
-    }
 
     /// Builds the default initial `config.json` document text for a newly created global config file.
     pub fn default_document() -> String {

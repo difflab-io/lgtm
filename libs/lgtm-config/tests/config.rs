@@ -1,5 +1,5 @@
 use lgtm_config::{
-    ConfigService, DEFAULT_SCHEMA_URL, LgtmConfigError, LgtmConfigPatch, LineWrap, ThemeMode,
+    ConfigService, DEFAULT_SCHEMA_URL, LgtmConfig, LgtmConfigError, LineWrap, ThemeMode,
 };
 
 // tests -----------------------------------------------------------------------
@@ -183,7 +183,7 @@ mod given_schema_generation {
                 .join("schemas/config.schema.json");
 
             // Act
-            let generated = LgtmConfigPatch::json_schema_pretty();
+            let generated = LgtmConfig::json_schema_pretty();
             if std::env::var_os("LGTM_WRITE_SCHEMA").is_some() {
                 if let Some(parent) = repo_schema_path.parent() {
                     std::fs::create_dir_all(parent).unwrap();
