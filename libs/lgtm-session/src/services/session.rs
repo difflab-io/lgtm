@@ -6,15 +6,12 @@ use std::{
 };
 
 use lgtm_project::{LgtmProjectError, ProjectService, WorktreeSource};
-use lgtm_rsutils::atomic_write;
+use lgtm_rsutils::{atomic_write, default_lgtm_home};
 use uuid::Uuid;
 
 use crate::{
     error::{LgtmSessionError, Result},
-    models::session::{
-        PersistedTab, Session, SidebarWidget, TabCandidate, WorkspaceSessionState,
-        WorkspaceStatePatch,
-    },
+    models::session::{PersistedTab, Session, WorkspaceSessionState, WorkspaceStatePatch},
 };
 
 /// Coordinates `~/.lgtm/sessions/<id>.json` persistence and [`ProjectService`] worktree lifecycle.
@@ -122,26 +119,6 @@ impl SessionService {
         }
         self.write_session(&session)?;
         Ok(session)
-    }
-
-    /// Convenience helper for updating a workspace's tab candidates and optional `sidebar_widget`.
-    pub fn save_workspace_tabs(
-        &self,
-        session_id: &str,
-        workspace_root: &Path,
-        tabs: Vec<TabCandidate>,
-        expanded_dirs: Vec<String>,
-        sidebar_widget: Option<SidebarWidget>,
-    ) -> Result<Session> {
-        self.save_workspace_state(
-            session_id,
-            WorkspaceStatePatch {
-                workspace_root: workspace_root.to_string_lossy().into_owned(),
-                tabs,
-                expanded_dirs,
-                sidebar_widget,
-            },
-        )
     }
 
     /// Collapses or expands child worktrees for `project_id` in `session_id`.
@@ -302,15 +279,4 @@ fn normalize_session_id(raw: &str) -> String {
     } else {
         trimmed.to_owned()
     }
-}
-
-fn default_lgtm_home() -> PathBuf {
-    if let Ok(home) = std::env::var("LGTM_HOME")
-        && !home.trim().is_empty()
-    {
-        return PathBuf::from(home.trim());
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".lgtm")
 }

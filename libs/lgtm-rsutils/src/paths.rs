@@ -3,7 +3,7 @@
 use std::{
     fs,
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -11,12 +11,17 @@ use sha2::{Digest, Sha256};
 
 use crate::{error::Result, git::resolve_git_paths};
 
-const ADJECTIVES: [&str; 8] = [
-    "amber", "brisk", "calm", "crisp", "lunar", "nimble", "quiet", "swift",
-];
-const NOUNS: [&str; 8] = [
-    "beacon", "canyon", "comet", "harbor", "meadow", "orbit", "ridge", "spruce",
-];
+/// Resolves the default LGTM home directory (`$LGTM_HOME` if set and non-empty, otherwise `~/.lgtm`).
+pub fn default_lgtm_home() -> PathBuf {
+    if let Ok(home) = std::env::var("LGTM_HOME")
+        && !home.trim().is_empty()
+    {
+        return PathBuf::from(home.trim());
+    }
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".lgtm")
+}
 
 /// Computes a deterministic, filesystem-safe `<repo-name>-<12-hex-chars>` slug for a repository's shared `common_git_dir`.
 pub fn compute_repo_slug(git_dir_or_worktree: &Path) -> Result<String> {
@@ -69,14 +74,6 @@ pub fn branch_to_path_slug(branch: &str) -> String {
     } else {
         slug
     }
-}
-
-/// Generates a default `worktree/<adjective>-<noun>-<4-hex>` branch name from `seed`.
-pub fn generated_branch_slug(seed: u64) -> String {
-    let adj = ADJECTIVES[(seed as usize) % ADJECTIVES.len()];
-    let noun = NOUNS[((seed >> 4) as usize) % NOUNS.len()];
-    let suffix = (seed & 0xffff) as u16;
-    format!("worktree/{adj}-{noun}-{suffix:04x}")
 }
 
 /// Writes `bytes` to a sibling temporary file in the same directory and atomically renames it onto `path`.

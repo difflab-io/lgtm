@@ -24,7 +24,6 @@
     icon,
     selectableBranches = false,
     onselect,
-    onToggleBranch,
     onedit,
     oncancel,
     contextItems,
@@ -92,17 +91,7 @@
                   onselect?.(node.value)
                 }}
               >
-                <!-- svelte-ignore a11y_click_events_have_key_events -->
-                <!-- svelte-ignore a11y_no_static_element_interactions -->
-                <div
-                  class="flex min-w-0 flex-1 items-center gap-1.5"
-                  onclick={(event) => {
-                    if (!selectableBranches) return
-                    event.preventDefault()
-                    event.stopPropagation()
-                    onselect?.(node.value)
-                  }}
-                >
+                <div class="flex min-w-0 flex-1 items-center gap-1.5">
                   {@render nodeIcon(true, state().expanded)}
                   <ArkTreeView.BranchText class={treeViewLabelBase} hidden={state().renaming}
                     >{node.displayLabel ?? node.label}</ArkTreeView.BranchText
@@ -162,7 +151,6 @@
                 {icon}
                 {selectableBranches}
                 {onselect}
-                {onToggleBranch}
                 {onedit}
                 {oncancel}
                 {contextItems}

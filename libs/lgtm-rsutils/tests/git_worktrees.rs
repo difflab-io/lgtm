@@ -96,12 +96,12 @@ mod given_a_git_repository {
             let main_repo = init_git_repo(tmp.path());
             let wt_target = tmp.path().join("worktrees").join("feature-dirty");
             let created = add_worktree(&main_repo, &wt_target, "feature/dirty", None).unwrap();
+            atomic_write(&created.path.join("untracked.txt"), b"dirty").unwrap();
             let duplicate_target = tmp.path().join("worktrees").join("feature-dirty-2");
 
             // Act
             let dup_err = add_worktree(&main_repo, &duplicate_target, "feature/dirty", None)
                 .expect_err("duplicate branch checkout should fail");
-            atomic_write(&created.path.join("untracked.txt"), b"dirty").unwrap();
             let dirty_err = remove_worktree(&main_repo, &created.path, false)
                 .expect_err("dirty worktree removal without force should fail");
             remove_worktree(&main_repo, &created.path, true).unwrap();

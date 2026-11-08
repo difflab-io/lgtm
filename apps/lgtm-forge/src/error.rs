@@ -46,6 +46,12 @@ impl From<DbError> for Error {
     }
 }
 
+impl From<lgtm_rsutils::RsUtilsError> for Error {
+    fn from(error: lgtm_rsutils::RsUtilsError) -> Self {
+        Self::Invalid(error.to_string())
+    }
+}
+
 impl From<Error> for connectrpc::ConnectError {
     fn from(error: Error) -> Self {
         match error {

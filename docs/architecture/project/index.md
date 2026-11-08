@@ -39,7 +39,7 @@ flowchart TB
     end
 
     subgraph RsUtils["libs/lgtm-rsutils"]
-        GIT["git, gitoxide & paths\n(resolve_git_paths, list_worktrees, add_worktree, remove_worktree, branch_to_path_slug)"]
+        GIT["git & paths\n(resolve_git_paths, add_worktree, remove_worktree, branch_to_path_slug, default_lgtm_home)"]
     end
 
     SESSION --> SVC
@@ -83,9 +83,10 @@ classDiagram
     class ProjectService {
         +new(lgtm_home: Option~PathBuf~) ProjectService
         +resolve_project(path: Path) Result~(Project, Option~Worktree~)~
-        +get_available_worktrees(project: Project) Result~Vec~Worktree~~
+        +refresh_project(project: Project) Result~()~
+        +get_worktree_path(project: Project, branch: str) PathBuf
         +create_worktree(project: Project, branch: str, base_ref: Option~str~) Result~Worktree~
-        +remove_worktree(project: Project, worktree_path: Path) Result~()~
+        +remove_worktree(project: Project, worktree_path: Path, force: bool) Result~()~
     }
 
     Project *-- "0..*" Worktree : worktrees
@@ -124,8 +125,7 @@ sequenceDiagram
 | `ProjectService::new` | `fn new(lgtm_home: Option<PathBuf>) -> Self` | Create a project service managing worktrees under `$LGTM_HOME/worktrees` or `~/.lgtm/worktrees`. |
 | `ProjectService::resolve_project` | `fn resolve_project(&self, path: &Path) -> Result<(Project, Option<Worktree>)>` | Resolve a directory into its parent `Project` and an optional linked `Worktree` (`Managed` or `External`). |
 | `ProjectService::refresh_project` | `fn refresh_project(&self, project: &mut Project) -> Result<()>` | Refresh checked-out branch names, reclassify `WorktreeSource`, and prune missing worktree directories on disk. |
-| `ProjectService::get_available_worktrees` | `fn get_available_worktrees(&self, project: &Project) -> Result<Vec<Worktree>>` | List all linked Git worktrees (`Managed` and `External`, including Herdr worktrees) for `project`. |
-| `ProjectService::preview_worktree_path` | `fn preview_worktree_path(&self, project: &Project, branch: &str) -> PathBuf` | Compute the target `~/.lgtm/worktrees/<project>/<branch-slug>` checkout path for a branch name. |
+| `ProjectService::get_worktree_path` | `fn get_worktree_path(&self, project: &Project, branch: &str) -> PathBuf` | Compute the target `~/.lgtm/worktrees/<project>/<branch-slug>` checkout path for a branch name. |
 | `ProjectService::create_worktree` | `fn create_worktree(&self, project: &Project, branch: &str, base_ref: Option<&str>) -> Result<Worktree>` | Create a `Managed` Git worktree at `~/.lgtm/worktrees/<project>/<branch-slug>`, reusing `branch` if it exists locally or creating `-b <branch>` from `base_ref`. |
 | `ProjectService::remove_worktree` | `fn remove_worktree(&self, project: &Project, worktree_path: &Path, force: bool) -> Result<()>` | Delete checkout storage on disk when `worktree_path` is `Managed` (returning `LgtmProjectError::DirtyWorktree` unless `force` is `true`); reject disk deletion when `External`. |
 

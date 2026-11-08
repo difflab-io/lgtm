@@ -18,6 +18,6 @@ pub use git::resolve_git_paths;
 pub use paths::atomic_write;
 pub use paths::branch_to_path_slug;
 pub use paths::compute_repo_slug;
-pub use paths::generated_branch_slug;
+pub use paths::default_lgtm_home;
 pub use url::normalize_repository_url;
 pub use url::parse_github_owner_repo;

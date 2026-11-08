@@ -45,17 +45,21 @@ flowchart TB
     subgraph Components["Svelte 5 Components (src/lib/components)"]
         SHELL["Shell.svelte"]
         EXPLORER["WorkspaceExplorer.svelte"]
+        PROJECTS["ProjectsPane.svelte"]
         CONTENT["ContentPane.svelte"]
         LSP_MENU["LspStatusMenu.svelte"]
         SHELL --> EXPLORER
+        SHELL --> PROJECTS
         SHELL --> CONTENT
         SHELL --> LSP_MENU
     end
 
     subgraph Services["Reactive Services (src/lib/services)"]
+        HOTKEY_SVC["HotkeyService (hotkeyService.svelte.ts)"]
         WS_SVC["WorkspaceService (workspaceService.svelte.ts)"]
         LSP_SVC["LspService (lspService.svelte.ts)"]
         SET_SVC["SettingsService (settingsService.svelte.ts)"]
+        HOTKEY_SVC --> WS_SVC
         WS_SVC --> LSP_SVC
         WS_SVC --> SET_SVC
     end
@@ -66,6 +70,7 @@ flowchart TB
         WS_CLIENT --> BINDINGS
     end
 
+    SHELL --> HOTKEY_SVC
     SHELL --> WS_SVC
     SHELL --> LSP_SVC
     SHELL --> SET_SVC

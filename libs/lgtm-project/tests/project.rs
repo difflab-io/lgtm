@@ -108,6 +108,11 @@ mod given_a_git_project_and_worktrees {
             let ext_entry = add_worktree(&main_repo, &ext_dir, "feature/external", None).unwrap();
             let service = ProjectService::new(Some(lgtm_home));
             let (mut project, _) = service.resolve_project(&main_repo).unwrap();
+            let managed = service
+                .create_worktree(&project, "worktree/feature-clean", None)
+                .unwrap();
+            project.upsert_worktree(managed.clone());
+            fs::write(Path::new(&managed.path).join("dirty.txt"), "uncommitted").unwrap();
 
             // Act
             let invalid_err = service
@@ -116,11 +121,6 @@ mod given_a_git_project_and_worktrees {
             let dup_err = service
                 .create_worktree(&project, "main", None)
                 .expect_err("checked-out branch should fail");
-            let managed = service
-                .create_worktree(&project, "worktree/feature-clean", None)
-                .unwrap();
-            project.upsert_worktree(managed.clone());
-            fs::write(Path::new(&managed.path).join("dirty.txt"), "uncommitted").unwrap();
             let dirty_err = service
                 .remove_worktree(&project, Path::new(&managed.path), false)
                 .expect_err("dirty managed worktree without force should fail");

@@ -132,6 +132,31 @@
     }
   })
   $effect(() => {
+    const dirs = expandedValue
+    const loader = loadChildren
+    if (!dirs?.length || !loader) return
+    const missing = [...dirs]
+      .filter((dir) => !(dir in untrack(() => loaded)))
+      .sort((a, b) => a.split('/').length - b.split('/').length)
+    if (missing.length === 0) return
+    void (async () => {
+      for (const dir of missing) {
+        if (dir in loaded) continue
+        try {
+          const node = collection.findNode(dir) ?? {
+            value: dir,
+            label: dir.split('/').at(-1) ?? dir,
+            branch: true,
+          }
+          const children = await loader(node)
+          loaded = { ...loaded, [dir]: children }
+        } catch (error) {
+          errors[dir] = error instanceof Error ? error.message : String(error)
+        }
+      }
+    })()
+  })
+  $effect(() => {
     const value = renameValue
     const parent = parentValue
     if (value)
@@ -347,15 +372,12 @@
         action: ({ event }) => {
           const item = event ? resolveTreeItemTarget(event) : null
           if (!item || !onaction) return false
-          if (selectableBranches) {
-            onaction(item.nodeValue, 'new-worktree')
-            return true
-          }
-          const parentFolder = item.isBranch
-            ? item.nodeValue
-            : item.nodeValue.includes('/')
-              ? item.nodeValue.slice(0, item.nodeValue.lastIndexOf('/'))
-              : ''
+          const parentFolder =
+            selectableBranches || item.isBranch
+              ? item.nodeValue
+              : item.nodeValue.includes('/')
+                ? item.nodeValue.slice(0, item.nodeValue.lastIndexOf('/'))
+                : ''
           onaction(parentFolder, 'new-file')
           return true
         },
@@ -369,11 +391,12 @@
         action: ({ event }) => {
           const item = event ? resolveTreeItemTarget(event) : null
           if (!item || !onaction) return false
-          const parentFolder = item.isBranch
-            ? item.nodeValue
-            : item.nodeValue.includes('/')
-              ? item.nodeValue.slice(0, item.nodeValue.lastIndexOf('/'))
-              : ''
+          const parentFolder =
+            selectableBranches || item.isBranch
+              ? item.nodeValue
+              : item.nodeValue.includes('/')
+                ? item.nodeValue.slice(0, item.nodeValue.lastIndexOf('/'))
+                : ''
           onaction(parentFolder, 'new-folder')
           return true
         },

@@ -57,23 +57,13 @@ pub fn get_cwd_git_dir() -> Result<String> {
 
 /// Normalize a working tree or `.git` path to the repository's canonical shared `common_dir` (for `$repoSlug` and DB scoping) and the active worktree's root directory.
 pub fn resolve_git_paths(git_dir_or_worktree: &str) -> Result<(PathBuf, PathBuf, String)> {
-    let resolved = lgtm_rsutils::resolve_git_paths(Path::new(git_dir_or_worktree.trim()))
-        .map_err(|err| Error::Invalid(err.to_string()))?;
+    let resolved = lgtm_rsutils::resolve_git_paths(Path::new(git_dir_or_worktree.trim()))?;
     let normalized_git_dir = resolved.common_git_dir.to_string_lossy().into_owned();
     Ok((
         resolved.worktree_git_dir,
         resolved.worktree_root,
         normalized_git_dir,
     ))
-}
-
-/// Compute a deterministic, filesystem-safe `$repoSlug` for a repository's shared `common_dir`.
-pub fn compute_repo_slug(git_dir: &str) -> Result<String> {
-    if git_dir.trim().is_empty() {
-        return Err(Error::Invalid("git_dir must not be empty".to_owned()));
-    }
-    lgtm_rsutils::compute_repo_slug(Path::new(git_dir.trim()))
-        .map_err(|err| Error::Invalid(err.to_string()))
 }
 
 /// Stage worktree paths into the working checkout's native `.git/index` via `git add --`.

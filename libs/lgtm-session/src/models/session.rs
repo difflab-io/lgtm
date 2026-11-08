@@ -45,6 +45,8 @@ pub struct PersistedTab {
 }
 
 impl PersistedTab {
+    // Public ------------------------------------------------------------------
+
     /// Filters `candidates` so only tabs with `edited == true` or `last_opened == true` are retained.
     pub fn retain_from_candidates(candidates: Vec<TabCandidate>) -> Vec<Self> {
         candidates

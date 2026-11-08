@@ -73,11 +73,13 @@ sequenceDiagram
 | `git::list_worktrees` | `fn list_worktrees(repo_root: &Path) -> Result<Vec<GitWorktreeEntry>>` | Parse `git worktree list --porcelain` into main and linked worktree entries. |
 | `git::add_worktree` | `fn add_worktree(repo_root: &Path, target_dir: &Path, branch: &str, base_ref: Option<&str>) -> Result<GitWorktreeEntry>` | Create a linked Git worktree at `target_dir` (checking out `branch` if it exists locally or creating `-b <branch>` from `base_ref`). |
 | `git::remove_worktree` | `fn remove_worktree(repo_root: &Path, worktree_dir: &Path, force: bool) -> Result<()>` | Remove a linked Git worktree (`git worktree remove [--force]`), classify dirty-checkout errors, and clean up leftover directories when forced. |
-| `paths::compute_repo_slug` | `fn compute_repo_slug(common_git_dir: &Path) -> Result<String>` | Compute `<repo-name>-<6-byte-sha256>` from the canonical `common_git_dir`. |
+| `git::get_current_branch` | `fn get_current_branch(path: &Path) -> Option<String>` | Return the checked-out short branch name for `path`, or `None` when detached or unavailable. |
+| `paths::default_lgtm_home` | `fn default_lgtm_home() -> PathBuf` | Resolve `$LGTM_HOME` if set and non-empty, otherwise `~/.lgtm`. |
+| `paths::compute_repo_slug` | `fn compute_repo_slug(git_dir_or_worktree: &Path) -> Result<String>` | Compute `<repo-name>-<6-byte-sha256>` from the canonical `common_git_dir`. |
 | `paths::branch_to_path_slug` | `fn branch_to_path_slug(branch: &str) -> String` | Convert a branch name into a lowercase hyphenated directory slug matching Herdr (`~/.lgtm/worktrees/<project>/<branch-slug>`). |
-| `paths::generated_branch_slug` | `fn generated_branch_slug(seed: u64) -> String` | Generate a default `worktree/<adjective>-<noun>-<hex>` branch name when opening the new-worktree dialog. |
 | `paths::atomic_write` | `fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()>` | Write bytes to a sibling temporary file and rename it onto `path`. |
 | `url::normalize_repository_url` | `fn normalize_repository_url(raw: &str) -> Result<String>` | Normalize SSH or HTTPS Git remote URLs to `https://<host>/<owner>/<repo>`. |
+| `url::parse_github_owner_repo` | `fn parse_github_owner_repo(repository_url: &str) -> Result<(String, String)>` | Extract `(owner, repo)` from a normalized GitHub repository URL. |
 
 ## Implementation
 

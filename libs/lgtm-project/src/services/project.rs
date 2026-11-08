@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use lgtm_rsutils::{
-    RsUtilsError, add_worktree, branch_to_path_slug, get_current_branch, list_worktrees,
+    RsUtilsError, add_worktree, branch_to_path_slug, default_lgtm_home, get_current_branch,
     remove_worktree, resolve_git_paths,
 };
 
@@ -91,30 +91,8 @@ impl ProjectService {
         Ok(())
     }
 
-    /// Lists all linked Git worktrees (`Managed` and `External`, including Herdr worktrees) registered in Git for `project`.
-    pub fn get_available_worktrees(&self, project: &Project) -> Result<Vec<Worktree>> {
-        if project.git_common_dir.is_none() {
-            return Ok(Vec::new());
-        }
-        let entries = list_worktrees(Path::new(&project.root_path))
-            .map_err(|err| LgtmProjectError::Git(err.to_string()))?;
-        let mut worktrees = Vec::new();
-        for entry in entries {
-            if entry.is_main || entry.path == Path::new(&project.root_path) {
-                continue;
-            }
-            if !entry.path.is_dir() {
-                continue;
-            }
-            let source = self.classify_worktree(&project.name, &entry.path);
-            let path_str = entry.path.to_string_lossy().into_owned();
-            worktrees.push(Worktree::new(path_str, entry.branch, source));
-        }
-        Ok(worktrees)
-    }
-
     /// Computes the managed checkout path (`~/.lgtm/worktrees/<project>/<branch-slug>`) for `branch`.
-    pub fn preview_worktree_path(&self, project: &Project, branch: &str) -> PathBuf {
+    pub fn get_worktree_path(&self, project: &Project, branch: &str) -> PathBuf {
         let slug = branch_to_path_slug(branch);
         self.worktrees_root.join(&project.name).join(slug)
     }
@@ -133,7 +111,7 @@ impl ProjectService {
                 project.name
             )));
         }
-        let target_dir = self.preview_worktree_path(project, branch);
+        let target_dir = self.get_worktree_path(project, branch);
         if target_dir.exists() {
             return Err(LgtmProjectError::CheckoutPathExists(format!(
                 "Worktree path '{}' already exists.",
@@ -199,15 +177,4 @@ impl ProjectService {
             WorktreeSource::External
         }
     }
-}
-
-fn default_lgtm_home() -> PathBuf {
-    if let Ok(home) = std::env::var("LGTM_HOME")
-        && !home.trim().is_empty()
-    {
-        return PathBuf::from(home.trim());
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".lgtm")
 }

@@ -144,8 +144,6 @@ mod given_a_default_session {
                 .join("feature-ext");
             let ext_entry = add_worktree(&repo, &ext_dir, "worktree/feature-ext", None).unwrap();
             let service = SessionService::new(Some(lgtm_home));
-
-            // Act
             let s1 = service.open_workspace("default", &ext_entry.path).unwrap();
             let project_id = s1.projects[0].id;
             let s2 = service
@@ -153,6 +151,8 @@ mod given_a_default_session {
                 .unwrap();
             let mgd_path = PathBuf::from(&s2.active_workspace_root);
             fs::write(mgd_path.join("untracked.txt"), "dirty").unwrap();
+
+            // Act
             let dirty_err = service
                 .remove_project_worktree("default", project_id, &mgd_path, false)
                 .expect_err("dirty managed worktree should require force");
@@ -162,6 +162,7 @@ mod given_a_default_session {
             let s4 = service
                 .remove_project_worktree("default", project_id, &ext_entry.path, false)
                 .unwrap();
+            let s5 = service.remove_project("default", project_id).unwrap();
 
             // Assert
             assert!(matches!(
@@ -172,6 +173,9 @@ mod given_a_default_session {
             assert_eq!(s3.active_workspace_root, repo.to_string_lossy().as_ref());
             assert!(s4.projects[0].worktrees.is_empty());
             assert!(ext_entry.path.exists());
+            assert!(s5.projects.is_empty());
+            assert!(s5.workspaces.is_empty());
+            assert!(s5.active_workspace_root.is_empty());
         }
     }
 }

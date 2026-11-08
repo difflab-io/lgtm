@@ -2043,7 +2043,6 @@ dependencies = [
 name = "lgtm-project"
 version = "0.1.0"
 dependencies = [
- "dirs",
  "lgtm-rsutils",
  "serde",
  "specta",
@@ -2056,6 +2055,7 @@ dependencies = [
 name = "lgtm-rsutils"
 version = "0.1.0"
 dependencies = [
+ "dirs",
  "sha2",
  "thiserror 2.0.21",
  "url",
@@ -2065,7 +2065,6 @@ dependencies = [
 name = "lgtm-session"
 version = "0.1.0"
 dependencies = [
- "dirs",
  "lgtm-project",
  "lgtm-rsutils",
  "serde",

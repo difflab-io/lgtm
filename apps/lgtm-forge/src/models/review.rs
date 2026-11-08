@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use lgtm_rsutils::normalize_repository_url;
 use uuid::Uuid;
 
 use crate::{
@@ -11,7 +12,6 @@ use crate::{
         ReviewGroupBy as ProtoReviewGroupBy, ReviewOutcome as ProtoReviewOutcome,
         ReviewStatus as ProtoReviewStatus, ReviewSummary,
     },
-    utils::normalize_repository_url,
 };
 
 /// Discriminated review context enforcing `Local` vs. `ForgeBacked` invariants.

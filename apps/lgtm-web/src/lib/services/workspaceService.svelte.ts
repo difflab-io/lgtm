@@ -40,6 +40,7 @@ export interface WorkspaceTab {
   edited?: boolean
 }
 
+/** Form and submission state for the `New Worktree` dialog in `ProjectsPane`. */
 export interface WorktreeDialogState {
   projectId: string
   projectName: string
@@ -49,6 +50,7 @@ export interface WorktreeDialogState {
   error: string | null
 }
 
+/** Confirmation and force-retry state for the `Remove Worktree` dialog in `ProjectsPane`. */
 export interface RemoveWorktreeConfirmState {
   projectId: string
   projectName: string
@@ -110,25 +112,20 @@ function generateDefaultBranchName(): string {
 export function branchToPathSlug(branch: string): string {
   const trimmed = branch.trim()
   if (!trimmed) return ''
+  const stripped = trimmed.startsWith('worktree/') ? trimmed.slice('worktree/'.length) : trimmed
   let out = ''
-  let lastDash = false
-  for (const ch of trimmed) {
-    if (/^[a-zA-Z0-9._-]$/.test(ch)) {
-      if (ch === '-') {
-        if (!lastDash && out.length > 0) {
-          out += '-'
-          lastDash = true
-        }
-      } else {
-        out += ch
-        lastDash = false
-      }
-    } else if (!lastDash && out.length > 0) {
+  let lastWasDash = false
+  for (const ch of stripped) {
+    if (/^[a-zA-Z0-9_.]$/.test(ch)) {
+      out += ch.toLowerCase()
+      lastWasDash = false
+    } else if (!lastWasDash && out.length > 0) {
       out += '-'
-      lastDash = true
+      lastWasDash = true
     }
   }
-  return out.replace(/^[-.]+|[-.]+$/g, '')
+  const clean = out.replace(/-+$/g, '')
+  return clean || 'worktree'
 }
 
 /** Workspace view model coordinating file tree browsing, projects/worktrees, open tabs, debounced saves, LSP state, and settings. */
@@ -355,23 +352,6 @@ export class WorkspaceService {
     if (!this.worktreeDialog) return ''
     const slug = branchToPathSlug(this.worktreeDialog.branch)
     return `~/.lgtm/worktrees/${this.worktreeDialog.projectName}/${slug || '<branch-slug>'}`
-  }
-
-  private isDefaultWorkspaceRoot(path: string): boolean {
-    return (
-      path === '~/.lgtm/workspace' ||
-      path.endsWith('/.lgtm/workspace') ||
-      path.endsWith('\\.lgtm\\workspace')
-    )
-  }
-
-  private isConfigFilePath(path: string): boolean {
-    return (
-      path === '~/.lgtm/config.json' ||
-      path === '.lgtm/config.json' ||
-      path === this.settings.snapshot?.globalPath ||
-      path === this.settings.snapshot?.projectPath
-    )
   }
 
   /** Returns top-level tree nodes for the sidebar `TreeView`. */
@@ -1319,8 +1299,27 @@ export class WorkspaceService {
     this.active = false
   }
 
+  // Private -------------------------------------------------------------------
+
   private isDefaultPlaceholderRoot(path: string): boolean {
     return path === '~/.lgtm/workspace'
+  }
+
+  private isDefaultWorkspaceRoot(path: string): boolean {
+    return (
+      path === '~/.lgtm/workspace' ||
+      path.endsWith('/.lgtm/workspace') ||
+      path.endsWith('\\.lgtm\\workspace')
+    )
+  }
+
+  private isConfigFilePath(path: string): boolean {
+    return (
+      path === '~/.lgtm/config.json' ||
+      path === '.lgtm/config.json' ||
+      path === this.settings.snapshot?.globalPath ||
+      path === this.settings.snapshot?.projectPath
+    )
   }
 
   private buildSnapshotForCurrentRoot(): CachedWorkspaceSnapshot {

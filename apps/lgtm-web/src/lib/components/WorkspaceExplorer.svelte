@@ -25,6 +25,7 @@
   }}
   selected={workspace.selected?.path ?? null}
   onselect={(path) => void workspace.select(path)}
+  expandedValue={workspace.expandedDirs}
   onExpandedChange={(dirs) => workspace.setExpandedDirs(dirs)}
   loadChildren={(node) => workspace.loadChildren(node)}
 >

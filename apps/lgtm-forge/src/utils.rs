@@ -1,6 +1,8 @@
-//! General filesystem path, LGTM home, remote URL, and agent descriptor utilities.
+//! General filesystem path, LGTM home, and agent descriptor utilities.
 
 use std::path::PathBuf;
+
+use lgtm_rsutils::default_lgtm_home;
 
 use crate::error::{Error, Result};
 
@@ -27,29 +29,6 @@ pub fn default_database_url() -> Result<String> {
     })?;
     let db_path = lgtm_home.join("lgtm.db");
     Ok(format!("sqlite://{}?mode=rwc", db_path.display()))
-}
-
-fn default_lgtm_home() -> PathBuf {
-    if let Ok(home) = std::env::var("LGTM_HOME")
-        && !home.trim().is_empty()
-    {
-        return PathBuf::from(home.trim());
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".lgtm")
-}
-
-/// Normalize a Git remote URL (SSH or HTTPS) into a canonical `https://<host>/<owner>/<repo>` URL.
-pub fn normalize_repository_url(raw_remote: &str) -> Result<String> {
-    lgtm_rsutils::normalize_repository_url(raw_remote)
-        .map_err(|err| Error::Invalid(err.to_string()))
-}
-
-/// Extract `(owner, repo)` from a normalized `repository_url`.
-pub fn parse_github_owner_repo(repository_url: &str) -> Result<(String, String)> {
-    lgtm_rsutils::parse_github_owner_repo(repository_url)
-        .map_err(|err| Error::Invalid(err.to_string()))
 }
 
 /// Parse an `--as` agent descriptor (`provider/model` or `model`) into `(name, provider, model)`.
@@ -91,31 +70,6 @@ mod tests {
     use super::*;
 
     // tests -------------------------------------------------------------------
-
-    mod given_remote_git_urls {
-        use super::*;
-
-        mod when_normalizing_and_extracting_owner_repo {
-            use super::*;
-
-            #[test]
-            fn should_normalize_ssh_and_https_repository_urls() {
-                // Arrange
-                let ssh_url = "git@github.com:difflab-io/lgtm.git";
-                let https_url = "https://github.com/difflab-io/lgtm.git/";
-
-                // Act
-                let normalized_ssh = normalize_repository_url(ssh_url).unwrap();
-                let normalized_https = normalize_repository_url(https_url).unwrap();
-                let owner_repo = parse_github_owner_repo(ssh_url).unwrap();
-
-                // Assert
-                assert_eq!(normalized_ssh, "https://github.com/difflab-io/lgtm");
-                assert_eq!(normalized_https, "https://github.com/difflab-io/lgtm");
-                assert_eq!(owner_repo, ("difflab-io".to_owned(), "lgtm".to_owned()));
-            }
-        }
-    }
 
     mod given_agent_descriptors {
         use super::*;

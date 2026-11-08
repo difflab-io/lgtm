@@ -9,6 +9,7 @@ publish = false
 license = "Apache-2.0"
 
 [dependencies]
+dirs = "6"
 sha2 = "0.10"
 thiserror = "2"
 url = "2"

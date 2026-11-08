@@ -29,15 +29,14 @@
 flowchart TB
     subgraph Web["lgtm-web (Svelte 5 Frontend)"]
         SHELL["Shell.svelte"]
-        PANE["ProjectsPane.svelte & SidebarModeSwitch.svelte"]
-        SESS_UI["SessionService (sessionService.svelte.ts)"]
+        PANE["ProjectsPane.svelte & ContentPane.svelte"]
+        HOTKEY["HotkeyService (hotkeyService.svelte.ts)"]
         WS_UI["WorkspaceService (workspaceService.svelte.ts)"]
         CLIENT["TauriWorkspaceClient (workspaceClient.ts)"]
         SHELL --> PANE
-        SHELL --> SESS_UI
+        SHELL --> HOTKEY
         SHELL --> WS_UI
-        SESS_UI --> WS_UI
-        SESS_UI --> CLIENT
+        HOTKEY --> WS_UI
         WS_UI --> CLIENT
     end
 
@@ -52,15 +51,14 @@ flowchart TB
     end
 
     subgraph Libraries["Shared Rust Libraries (libs/)"]
-        SESS_LIB["lgtm-session (SessionService & SessionStore)"]
+        SESS_LIB["lgtm-session (SessionService)"]
         PROJ_LIB["lgtm-project (ProjectService)"]
-        RSUTILS["lgtm-rsutils (git, gitoxide, paths)"]
+        RSUTILS["lgtm-rsutils (git, paths, url)"]
         LSP_LIB["lgtm-lsp (LgtmLspManager)"]
         CFG_LIB["lgtm-config (ConfigService)"]
         SESS_LIB --> PROJ_LIB
         PROJ_LIB --> RSUTILS
         SESS_LIB --> RSUTILS
-        WS_HOST --> RSUTILS
         WS_HOST --> CFG_LIB
         LSP_HOST --> LSP_LIB
     end
@@ -75,7 +73,7 @@ flowchart TB
 - `SessionService` (`libs/lgtm-session`): Owns `~/.lgtm/sessions/default.json`, tracks the ordered `projects`, `sidebar_widget`, and `active_workspace_root`, and stores per-workspace `PersistedTab` lists (`edited || last_opened`).
 - `ProjectService` (`libs/lgtm-project`): Resolves repository root checkouts (`Project`) and linked Git worktrees (`Worktree`) using `lgtm-rsutils`.
 - `WorkspaceService` (`apps/lgtm-desktop/src/services/workspace.rs`): Operates on the single active checkout directory (`active_workspace_root`), which is either a project `root_path` or a linked `Worktree.path`. It reads files, writes files, and lists directory entries.
-- `SessionService` & `WorkspaceService` (`apps/lgtm-web`): Reactive Svelte 5 services. `SessionService` manages the projects tree and sidebar mode, and `WorkspaceService` manages the file tree and open editor tabs of the active checkout.
+- `WorkspaceService` & `HotkeyService` (`apps/lgtm-web`): Reactive Svelte 5 services. `WorkspaceService` manages the active checkout file tree, open editor tabs, in-memory workspace cache, and session/project state, while `HotkeyService` registers `WhichKey` leader bindings and `CommandPalette` commands.
 
 ### Data and Control Flow
 
@@ -83,31 +81,33 @@ flowchart TB
 
 ```mermaid
 sequenceDiagram
-    participant UI as lgtm-web (Shell / SessionService)
+    participant UI as lgtm-web (Shell / WorkspaceService)
     participant Host as lgtm-desktop (app.rs)
     participant Sess as lgtm-session (SessionService)
     participant Ws as lgtm-desktop (WorkspaceService)
     participant Lsp as lgtm-desktop (LspService)
 
-    UI->>Host: invoke("session_restore", { sessionId: "default" })
+    UI->>Host: invoke("workspace_open", {})
     Host->>Sess: get_session("default")
     Sess-->>Host: Session { sidebar_widget, active_workspace_root, projects, workspaces }
     Host->>Ws: open(active_workspace_root)
     Ws-->>Host: WorkspaceListing { root, entries }
     Host->>Lsp: switch_workspace(None, root)
+    Host-->>UI: WorkspaceListing { root, entries }
+    UI->>Host: invoke("session_get", { sessionId: "default" })
+    Host->>Sess: get_session("default")
+    Sess-->>UI: Session { sidebar_widget, active_workspace_root, projects, workspaces }
+    UI->>UI: Set sidebarWidget ("explorer" | "projects") and expandedDirs
     loop Each PersistedTab in workspaces[root].tabs
-        Host->>Ws: get_file_content(tab.path)
+        UI->>Host: invoke("workspace_read", { relativePath: tab.path })
     end
-    Host-->>UI: SessionRestoreSnapshot { session, listing, restoredTabs }
-    UI->>UI: Set sidebarWidget ("explorer" | "projects")
-    UI->>UI: Restore edited + lastOpened tabs in WorkspaceService
 ```
 
 #### 2. Immediate Switching Between Project Primary Checkout and Linked Worktrees
 
 ```mermaid
 sequenceDiagram
-    participant UI as lgtm-web (SessionService & WorkspaceService)
+    participant UI as lgtm-web (WorkspaceService)
     participant Host as lgtm-desktop (app.rs)
     participant Sess as lgtm-session (SessionService)
     participant Ws as lgtm-desktop (WorkspaceService)
@@ -115,15 +115,16 @@ sequenceDiagram
     participant Lsp as lgtm-desktop (LspService)
 
     Note over UI: User clicks a project or worktree in ProjectsPane
-    UI->>UI: Filter outgoing tabs (edited || last_opened) & update in-memory WorkspaceCache
-    alt Target workspace is warm in WorkspaceCache
+    UI->>UI: Filter outgoing tabs (edited || lastOpened) & update in-memory workspaceCache
+    alt Target workspace is warm in workspaceCache
         UI->>UI: Immediately swap single mounted Editor & Explorer to cached snapshot (0ms)
     end
-    UI--)Host: Async invoke("session_switch_workspace", { targetPath, outgoingState })
-    Host->>Ws: open(targetPath) + load remembered tabs
-    Host-->>UI: Reconcile fresh SessionRestoreSnapshot { session, listing, restoredTabs }
-    Host--)Sess: Background debounced save to ~/.lgtm/sessions/default.json
-    Host--)Bus: Async dispatch(AppEvent::WorkspaceOpened { previous_root, next_root: targetPath })
+    UI--)Host: Async invoke("session_save", { patch: outgoingState })
+    UI--)Host: Async invoke("workspace_open", { path: targetPath })
+    Host->>Ws: open(targetPath)
+    Host->>Sess: open_workspace("default", targetPath)
+    Host-->>UI: Reconcile fresh WorkspaceListing & Session
+    Host--)Bus: Async dispatch(AppEvent::WorkspaceOpened & AppEvent::SessionUpdated)
     Bus--)Lsp: Stop previous_root LSP processes & lazily start next_root on active file
 ```
 
@@ -133,15 +134,15 @@ sequenceDiagram
 sequenceDiagram
     participant OS as Window Close (RunEvent::ExitRequested)
     participant Host as lgtm-desktop (app.rs)
-    participant UI as lgtm-web (SessionService & WorkspaceService)
+    participant UI as lgtm-web (WorkspaceService)
     participant Sess as lgtm-session (SessionService)
     participant Lsp as lgtm-desktop (LspService)
 
     OS->>Host: ExitRequested
     Host-->>UI: emit("workspace-quit-requested")
     UI->>UI: await workspace.flushSave()
-    UI->>Host: invoke("session_save_state", { sidebarWidget, workspaceRoot, tabs })
-    Host->>Sess: save_workspace_state("default", workspaceRoot, tabs, Some(sidebarWidget))
+    UI->>Host: invoke("session_save", { patch })
+    Host->>Sess: save_workspace_state("default", patch)
     Note over Sess: Write ~/.lgtm/sessions/default.json with edited and last_opened tabs
     UI->>Host: invoke("workspace_finish_quit")
     Host->>Lsp: shutdown_all()

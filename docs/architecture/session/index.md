@@ -31,10 +31,8 @@ flowchart TB
 
     subgraph SessionLib["libs/lgtm-session"]
         SVC["SessionService"]
-        STORE["SessionStore (~/.lgtm/sessions/<id>.json)"]
-        MODELS["Session, SidebarWidget, WorkspaceSessionState, PersistedTab, TabCandidate"]
+        MODELS["Session, SidebarWidget, WorkspaceSessionState, WorkspaceStatePatch, PersistedTab, TabCandidate"]
         ERR["LgtmSessionError"]
-        SVC --> STORE
         SVC --> MODELS
         SVC --> ERR
     end
@@ -44,17 +42,17 @@ flowchart TB
     end
 
     subgraph RsUtils["libs/lgtm-rsutils"]
-        ATOMIC["paths::atomic_write"]
+        ATOMIC["paths::atomic_write & default_lgtm_home"]
     end
 
     DESKTOP --> SVC
     CLI -.-> SVC
     SVC --> PROJ
-    STORE --> ATOMIC
+    SVC --> ATOMIC
     ATOMIC --> DISK[("~/.lgtm/sessions/default.json\n~/.lgtm/sessions/<name>.json")]
 ```
 
-- `SessionService`: Coordinates `SessionStore` and `lgtm_project::ProjectService` to load the `default` session, register projects and worktrees, toggle collapsed project groups, switch the active workspace, and save filtered workspace tabs.
+- `SessionService`: Coordinates `lgtm_project::ProjectService` and atomic JSON writes (`~/.lgtm/sessions/<id>.json`) to load the `default` session, register projects and worktrees, toggle collapsed project groups, switch the active workspace, and save filtered workspace tabs.
 - `Session`: Top-level persisted root owning `id`, `sidebar_widget`, `active_workspace_root`, `projects`, and `workspaces`.
 - `WorkspaceSessionState`: Per-workspace UI snapshot storing the retained `tabs` (`Vec<PersistedTab>`), `last_opened_tab_path`, and `expanded_dirs` for a single checkout path (either `Project.root_path` or a `Worktree.path`).
 - `PersistedTab` and `TabCandidate`: Tab descriptors that enforce the retention rule (`edited || last_opened`).
@@ -149,11 +147,11 @@ flowchart LR
 
 | Type / Method | Signature | Description |
 | --- | --- | --- |
-| `SessionService::new` | `fn new(lgtm_home: Option<PathBuf>) -> Result<Self>` | Create a session service rooted at `$LGTM_HOME/sessions` or `~/.lgtm/sessions`. |
+| `SessionService::new` | `fn new(lgtm_home: Option<PathBuf>) -> Self` | Create a session service rooted at `$LGTM_HOME/sessions` or `~/.lgtm/sessions`. |
 | `SessionService::get_session` | `fn get_session(&self, session_id: &str) -> Result<Session>` | Load `~/.lgtm/sessions/<session_id>.json` or initialize the `default` session. |
 | `SessionService::open_workspace` | `fn open_workspace(&self, session_id: &str, path: &Path) -> Result<Session>` | Resolve `path` via `lgtm-project`, upsert its parent `Project` and `Worktree`, and set `active_workspace_root`. |
-| `SessionService::save_workspace_state` | `fn save_workspace_state(&self, session_id: &str, workspace_root: &Path, tabs: Vec<TabCandidate>, sidebar_widget: Option<SidebarWidget>) -> Result<Session>` | Filter `tabs` to `edited \|\| last_opened`, update `workspaces[workspace_root]`, and write `default.json`. |
-| `SessionService::create_project_worktree` | `fn create_project_worktree(&self, session_id: &str, project_id: Uuid, branch: &str, base_ref: Option<&str>) -> Result<(Worktree, Session)>` | Create a `Managed` worktree at `~/.lgtm/worktrees/<project>/<branch-slug>`, attach it to `Session`, and activate it. |
+| `SessionService::save_workspace_state` | `fn save_workspace_state(&self, session_id: &str, patch: WorkspaceStatePatch) -> Result<Session>` | Filter `patch.tabs` to `edited \|\| last_opened`, update `workspaces[patch.workspace_root]` and optional `sidebar_widget`, and write `default.json`. |
+| `SessionService::create_project_worktree` | `fn create_project_worktree(&self, session_id: &str, project_id: Uuid, branch: &str, base_ref: Option<&str>) -> Result<Session>` | Create a `Managed` worktree at `~/.lgtm/worktrees/<project>/<branch-slug>`, attach it to `Session`, and activate it. |
 | `SessionService::set_project_collapsed` | `fn set_project_collapsed(&self, session_id: &str, project_id: Uuid, collapsed: bool) -> Result<Session>` | Persist the collapsed or expanded worktree state for a project in `Session`. |
 | `SessionService::remove_project_worktree` | `fn remove_project_worktree(&self, session_id: &str, project_id: Uuid, worktree_path: &Path, force: bool) -> Result<Session>` | Remove the worktree from `Session` and delete disk storage only when `WorktreeSource::Managed`. |
 | `SessionService::remove_project` | `fn remove_project(&self, session_id: &str, project_id: Uuid) -> Result<Session>` | Remove a project and its workspace states from `Session` without deleting `External` worktrees. |

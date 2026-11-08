@@ -25,8 +25,11 @@ export interface TreeViewProps {
   showHidden?: boolean
   selected?: string | null
   onselect?: (value: string) => void
+  /** Whether branch rows can be selected directly while their chevron button toggles expansion. */
   selectableBranches?: boolean
+  /** Controlled list of expanded branch node values. */
   expandedValue?: string[]
+  /** Callback invoked when expanded branch node values change. */
   onExpandedChange?: (expandedValue: string[]) => void
   loadChildren?: (node: TreeNode) => Promise<TreeNode[]>
   label?: string
@@ -41,7 +44,6 @@ export interface TreeNodeViewProps {
   icon?: Snippet<[TreeNode, boolean]>
   selectableBranches?: boolean
   onselect?: (value: string) => void
-  onToggleBranch?: (value: string, expanded: boolean) => void
   onedit?: (value: string) => void
   contextItems?: (node: TreeNode) => ContextMenuItem[]
   onaction?: (value: string, action: string) => void
