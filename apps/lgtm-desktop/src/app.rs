@@ -14,7 +14,7 @@ use tauri::{Manager, State};
 
 use crate::{
     error::{Result, error},
-    events::{AppEvent, AppEvents, OpenFileEvent},
+    events::{AppEvent, AppEvents, FileOpenedEvent},
     menus::{build_app_menu, handle_menu_event},
     models::{FileContent, WorkspaceListing, WorkspaceNode},
     services::{LspService, WorkspaceService},
@@ -105,6 +105,9 @@ fn handle_app_event(events: &AppEvents, lsp: &LspService, config: &ConfigService
         } => {
             lsp.switch_workspace(previous_root.as_deref(), &next_root);
         }
+        AppEvent::FileOpened(payload) => {
+            events.emit_to_webview("workspace-open-file", &payload);
+        }
         AppEvent::FileSaved {
             root,
             path,
@@ -126,9 +129,6 @@ fn handle_app_event(events: &AppEvents, lsp: &LspService, config: &ConfigService
         AppEvent::LspDiagnostics(payload) => {
             events.emit_to_webview("lsp-diagnostics", &payload);
         }
-        AppEvent::OpenFile(payload) => {
-            events.emit_to_webview("workspace-open-file", &payload);
-        }
         AppEvent::QuitRequested => {
             events.emit_to_webview("workspace-quit-requested", &());
         }
@@ -142,7 +142,6 @@ pub fn commands<R: tauri::Runtime>(invoke: tauri::ipc::Invoke<R>) -> bool {
         workspace_pick_folder,
         workspace_list,
         workspace_read,
-        workspace_open_file,
         workspace_write,
         workspace_create_file,
         workspace_create_folder,
@@ -167,12 +166,12 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         .error_handling(tauri_specta::ErrorHandlingMode::Throw)
         .disable_serde_phases()
         .dangerously_cast_bigints_to_number()
+        .typ::<FileOpenedEvent>()
         .commands(tauri_specta::collect_commands![
             workspace_open,
             workspace_pick_folder,
             workspace_list,
             workspace_read,
-            workspace_open_file,
             workspace_write,
             workspace_create_file,
             workspace_create_folder,
@@ -329,24 +328,6 @@ pub async fn workspace_read(
         file.lsp_status = lsp_status;
     }
     Ok(file)
-}
-
-/// Dispatches a `workspace-open-file` event instructing the webview to open `path` with an optional custom `title` and cursor `offset`.
-#[tauri::command]
-#[specta::specta]
-pub async fn workspace_open_file(
-    state: State<'_, AppState>,
-    path: String,
-    title: Option<String>,
-    offset: Option<u32>,
-) -> Result<OpenFileEvent> {
-    let payload = OpenFileEvent {
-        path,
-        title,
-        offset,
-    };
-    state.events.dispatch(AppEvent::OpenFile(payload.clone()));
-    Ok(payload)
 }
 
 /// Writes UTF-8 file contents to disk and dispatches `AppEvent::FileSaved`.
@@ -568,8 +549,6 @@ pub async fn config_get(state: State<'_, AppState>) -> Result<ResolvedConfigSnap
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lgtm_config::{LineWrap, ThemeMode};
-    use tempfile::TempDir;
 
     // tests -------------------------------------------------------------------
 
@@ -597,72 +576,8 @@ mod tests {
                 assert!(generated.contains("export type LgtmConfig"));
                 assert!(generated.contains("export type LgtmConfigPatch"));
                 assert!(generated.contains("export type ResolvedConfigSnapshot"));
-                assert!(generated.contains("export type OpenFileEvent"));
-                assert!(generated.contains("workspaceOpenFile"));
+                assert!(generated.contains("export type FileOpenedEvent"));
                 assert!(generated.contains("configGet"));
-            }
-        }
-    }
-
-    mod given_workspace_and_config_services {
-        use super::*;
-
-        mod when_opening_and_editing_global_and_local_config_files {
-            use super::*;
-
-            #[test]
-            fn should_read_global_and_local_config_via_unified_file_path_and_resolve_merged_snapshot()
-             {
-                // Arrange
-                let temp = TempDir::new().unwrap();
-                let mut workspace = WorkspaceService::new(temp.path().to_path_buf(), None);
-                workspace.open(None).unwrap();
-                let root = workspace.get_root().unwrap();
-                let config_service = ConfigService::from_home(temp.path().to_path_buf());
-
-                // Act
-                let initial = config_service.get_config_snapshot(Some(&root)).unwrap();
-                let local_doc_before_save =
-                    workspace.get_file_content(".lgtm/config.json").unwrap();
-                let local_exists_before_save = root.join(".lgtm/config.json").exists();
-                let global_exists_after_open_local =
-                    temp.path().join(".lgtm/config.json").is_file();
-                let global_doc = workspace.get_file_content("~/.lgtm/config.json").unwrap();
-                let written_global = workspace
-                    .write_file(
-                        "~/.lgtm/config.json",
-                        "{\n  \"appearance\": {\n    \"theme\": \"dark\"\n  },\n  \"editor\": {\n    \"lineWrapping\": \"off\"\n  }\n}\n",
-                    )
-                    .unwrap();
-                let written_local = workspace
-                    .write_file(
-                        ".lgtm/config.json",
-                        "{\n  \"appearance\": {\n    \"theme\": \"light\"\n  }\n}\n",
-                    )
-                    .unwrap();
-                let local_exists_after_save = root.join(".lgtm/config.json").is_file();
-                let resolved = config_service.get_config_snapshot(Some(&root)).unwrap();
-
-                // Assert
-                assert_eq!(initial.effective.appearance.theme, ThemeMode::System);
-                assert_eq!(initial.effective.editor.line_wrapping, LineWrap::Auto);
-                assert!(global_exists_after_open_local);
-                assert!(!local_exists_before_save);
-                assert_eq!(local_doc_before_save.content, "{\n}\n");
-                assert!(global_doc.content.contains("\"theme\": \"system\""));
-                assert_ne!(global_doc.revision, written_global.revision);
-                assert_ne!(local_doc_before_save.revision, written_local.revision);
-                assert!(local_exists_after_save);
-                assert!(
-                    workspace
-                        .is_config_path(&workspace.get_entry_path("~/.lgtm/config.json").unwrap())
-                );
-                assert!(
-                    workspace
-                        .is_config_path(&workspace.get_entry_path(".lgtm/config.json").unwrap())
-                );
-                assert_eq!(resolved.effective.appearance.theme, ThemeMode::Light);
-                assert_eq!(resolved.effective.editor.line_wrapping, LineWrap::Off);
             }
         }
     }

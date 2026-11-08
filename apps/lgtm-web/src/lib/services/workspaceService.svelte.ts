@@ -242,15 +242,6 @@ export class WorkspaceService {
     }
   }
 
-  /** Requests the desktop host to open `path` with an optional custom tab `title` and cursor `offset`. */
-  async requestOpenFile(path: string, options?: { title?: string; offset?: number }) {
-    if (this.client.openFile) {
-      await this.client.openFile(path, options?.title, options?.offset)
-      return
-    }
-    await this.openPath(path, { ...options, focus: true })
-  }
-
   /** Opens `path` in an editor tab with an optional custom tab `title`, cursor `offset`, and editor `focus`. */
   async openPath(path: string, options?: { title?: string; offset?: number; focus?: boolean }) {
     const entry = this.resolveFileEntry(path, options?.title)

@@ -38,6 +38,7 @@ match event {
     AppEvent::WorkspaceOpened { previous_root, next_root } => {
         lsp.switch_workspace(previous_root.as_deref(), &next_root);
     }
+    AppEvent::FileOpened(payload) => events.emit_to_webview("workspace-open-file", &payload),
     AppEvent::FileSaved { root, path, content, is_config } => {
         let _ = lsp.did_save(&root, &path, &content);
         if is_config && let Ok(snapshot) = config.get_config_snapshot(Some(&root)) {
@@ -45,10 +46,11 @@ match event {
             events.emit_to_webview("config-updated", &snapshot);
         }
     }
+    AppEvent::FileClosed { root, path } => {
+        let _ = lsp.did_close(&root, &path);
+    }
     AppEvent::LspStatus(payload) => events.emit_to_webview("lsp-status", &payload),
     AppEvent::LspDiagnostics(payload) => events.emit_to_webview("lsp-diagnostics", &payload),
-    AppEvent::MenuOpenGlobalConfig => events.emit_to_webview("workspace-open-global-config", &()),
-    AppEvent::MenuOpenLocalConfig => events.emit_to_webview("workspace-open-local-config", &()),
     AppEvent::QuitRequested => events.emit_to_webview("workspace-quit-requested", &()),
 }
 ```
@@ -78,20 +80,17 @@ classDiagram
     class AppEvent {
         <<enumeration>>
         WorkspaceOpened
+        FileOpened(FileOpenedEvent)
         FileSaved
         FileClosed
         LspStatus(LspServerStatusEvent)
         LspDiagnostics(LspFileDiagnosticsEvent)
-        MenuOpenGlobalConfig
-        MenuOpenLocalConfig
         QuitRequested
     }
 
     class WorkspaceService {
         +open(path) Result~WorkspaceListing~
         +get_file_content(path) Result~FileContent~
-        +open_global_config() Result~FileContent~
-        +open_local_config() Result~FileContent~
         +write_file(path, content) Result~FileContent~
         +rename(path, name) Result~WorkspaceNode~
         +delete(path) Result~()~
@@ -131,7 +130,7 @@ flowchart TD
         E_SAVE["AppEvent::FileSaved"]
         E_CLOSE["AppEvent::FileClosed"]
         E_LSP["AppEvent::LspStatus / LspDiagnostics"]
-        E_OS["AppEvent::MenuOpen*Config / QuitRequested"]
+        E_OS["AppEvent::FileOpened / QuitRequested"]
     end
 
     subgraph Backend["3. Backend Reaction (app.rs)"]
@@ -145,7 +144,7 @@ flowchart TD
         F_RET["IPC Command Return<br/>(WorkspaceListing / FileContent)"]
         F_CFG["emit 'config-updated'<br/>-> SettingsService -> ThemeService"]
         F_LSP["emit 'lsp-status' / 'lsp-diagnostics'<br/>-> LspService"]
-        F_OS["emit 'workspace-open-*-config' / 'workspace-quit-requested'<br/>-> WorkspaceService"]
+        F_OS["emit 'workspace-open-file' / 'workspace-quit-requested'<br/>-> WorkspaceService"]
     end
 
     O_OPEN --> E_OPEN --> B_OPEN --> F_RET
@@ -209,6 +208,7 @@ pub enum AppEvent {
         previous_root: Option<PathBuf>,
         next_root: PathBuf,
     },
+    FileOpened(FileOpenedEvent),
     FileSaved {
         root: PathBuf,
         path: PathBuf,
@@ -221,8 +221,6 @@ pub enum AppEvent {
     },
     LspStatus(LspServerStatusEvent),
     LspDiagnostics(LspFileDiagnosticsEvent),
-    MenuOpenGlobalConfig,
-    MenuOpenLocalConfig,
     QuitRequested,
 }
 ```
@@ -234,8 +232,7 @@ pub enum AppEvent {
 | `"lsp-status"` | `LspServerStatusEvent` | `AppEvent::LspStatus` |
 | `"lsp-diagnostics"` | `LspFileDiagnosticsEvent` | `AppEvent::LspDiagnostics` |
 | `"config-updated"` | `ResolvedConfigSnapshot` | `AppEvent::FileSaved { is_config: true, .. }` |
-| `"workspace-open-global-config"` | `()` | `AppEvent::MenuOpenGlobalConfig` |
-| `"workspace-open-local-config"` | `()` | `AppEvent::MenuOpenLocalConfig` |
+| `"workspace-open-file"` | `FileOpenedEvent` | `AppEvent::FileOpened` |
 | `"workspace-quit-requested"` | `()` | `AppEvent::QuitRequested` |
 
 ## References

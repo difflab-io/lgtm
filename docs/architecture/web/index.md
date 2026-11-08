@@ -33,8 +33,8 @@ const settings = new SettingsService(client)
 const workspace = new WorkspaceService(client, lsp, settings)
 
 await workspace.init()
-await workspace.openGlobalConfig()
-await workspace.openLocalConfig()
+await workspace.openPath('~/.lgtm/config.json', { title: 'Settings', focus: true })
+await workspace.openPath('.lgtm/config.json', { title: 'Settings (project)', focus: true })
 ```
 
 ### Components and Responsibilities
@@ -89,9 +89,9 @@ sequenceDiagram
     participant Client as TauriWorkspaceClient
     participant Host as lgtm-desktop (app.rs)
 
-    User->>WsSvc: Press Cmd+, (openGlobalConfig)
-    WsSvc->>Client: openGlobalConfig()
-    Client->>Host: invoke("workspace_open_global_config")
+    User->>WsSvc: Press Cmd+, (openPath)
+    WsSvc->>Client: read("~/.lgtm/config.json")
+    Client->>Host: invoke("workspace_read", { relativePath: "~/.lgtm/config.json" })
     Host-->>Client: FileContent (~/.lgtm/config.json)
     WsSvc->>SetSvc: void load()
     SetSvc->>Client: configGet()
@@ -116,7 +116,7 @@ flowchart TD
     subgraph HostPush["1. Host Push Event (workspaceClient.ts)"]
         E_LSP["'lsp-status' / 'lsp-diagnostics'"]
         E_CFG["'config-updated'"]
-        E_MENU["'workspace-open-global-config' / 'workspace-open-local-config'"]
+        E_MENU["'workspace-open-file'"]
         E_QUIT["'workspace-quit-requested' / Window.onCloseRequested"]
     end
 
@@ -129,7 +129,7 @@ flowchart TD
     subgraph Services["3. Reactive Service State ($state)"]
         S_LSP["LspService.handleStatus / handleDiagnostics"]
         S_SET["SettingsService.handleUpdated(snapshot)"]
-        S_WS["WorkspaceService.openGlobalConfig / openLocalConfig / flushSave"]
+        S_WS["WorkspaceService.openPath / flushSave"]
     end
 
     subgraph UI["4. Reactive DOM & Host Sync"]
@@ -154,7 +154,7 @@ flowchart TD
 | Listener Registration (`workspaceClient.ts`) | Subscribed Events | Payload Shape | Target Service Call (`Shell.svelte`) |
 | --- | --- | --- | --- |
 | `registerLspHandlers` | `"lsp-status"`<br/>`"lsp-diagnostics"` | `LspServerStatusEvent`<br/>`LspFileDiagnosticsEvent` | `workspace.handleLspStatus(event)`<br/>`workspace.handleLspDiagnostics(event)` |
-| `registerConfigHandlers` | `"config-updated"`<br/>`"workspace-open-global-config"`<br/>`"workspace-open-local-config"` | `ResolvedConfigSnapshot`<br/>`void`<br/>`void` | `workspace.settings.handleUpdated(snapshot)`<br/>`workspace.openGlobalConfig()`<br/>`workspace.openLocalConfig()` |
+| `registerConfigHandlers` | `"config-updated"`<br/>`"workspace-open-file"` | `ResolvedConfigSnapshot`<br/>`FileOpenedEvent` | `workspace.settings.handleUpdated(snapshot)`<br/>`workspace.openPath(event.path, { title: event.title, focus: event.focus })` |
 | `registerQuitHandlers` | `"workspace-quit-requested"`<br/>`Window.onCloseRequested` | `void`<br/>`CloseRequestedEvent` | `await workspace.flushSave()` -> `finishQuit()` / `destroy()` |
 
 ### Interfaces and Contracts
@@ -164,8 +164,7 @@ flowchart TD
 | `WorkspaceService.init` | `init(): Promise<void>` | Load initial settings snapshot, open the remembered or default workspace root, and mark the frontend ready for quit handshakes. |
 | `WorkspaceService.openWorkspace` | `openWorkspace(path?: string): Promise<void>` | Flush pending saves, open the target workspace directory, refresh `LspService`, and record the root in `SettingsService`. |
 | `WorkspaceService.selectFile` | `selectFile(relativePath: string): Promise<void>` | Read a workspace file, open or focus its editor tab, and synchronize LSP status. |
-| `WorkspaceService.openGlobalConfig` | `openGlobalConfig(): Promise<void>` | Focus the existing `Settings` tab if already open, or ensure `~/.lgtm/config.json` exists with `$schema`, attach `vscode-json-language-server` asynchronously, and open it as a `Settings` tab (`Cmd+,`). |
-| `WorkspaceService.openLocalConfig` | `openLocalConfig(): Promise<void>` | Focus the existing `Settings (project)` tab if already open, or ensure `~/.lgtm/config.json` exists, open an empty JSON temp buffer (`{\n}\n`) when `<workspace>/.lgtm/config.json` is absent, attach `vscode-json-language-server` asynchronously, and open it as a `Settings (project)` tab (`Cmd+Shift+,`). |
+| `WorkspaceService.openPath` | `openPath(path: string, options?: OpenPathOptions): Promise<void>` | Open or focus any workspace file or configuration file (`~/.lgtm/config.json` or `.lgtm/config.json`) via `workspace_read`, attach `vscode-json-language-server` asynchronously, and refresh settings when opening config files. |
 | `WorkspaceService.scheduleSave` / `flushSave` | `scheduleSave(content: string): void` / `flushSave(): Promise<void>` | Forward live `didChange` updates to `LspService` and persist dirty buffers after `150ms` or before navigation/quit. |
 | `LspService.refresh` | `refresh(): Promise<void>` | Fetch the current `LspWorkspaceSnapshot` (`servers` and `diagnostics`) for the active workspace. |
 | `LspService.hover` / `gotoDefinition` | `hover(path: string, offset: number)` / `gotoDefinition(path: string, offset: number)` | Query LSP hover Markdown or definition locations at a UTF-16 code-unit offset. |

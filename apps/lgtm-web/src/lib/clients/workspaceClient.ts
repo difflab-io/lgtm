@@ -9,6 +9,7 @@ import {
   type EditorSettings,
   type EditorSettingsPatch,
   type FileContent,
+  type FileOpenedEvent,
   type LanguageConfig,
   type LgtmConfig,
   type LgtmConfigPatch,
@@ -23,7 +24,6 @@ import {
   type LspSettingsPatch,
   type LspWorkspaceSnapshot,
   type MiseTaskConfig,
-  type OpenFileEvent,
   type ResolvedConfigSnapshot,
   type ThemeMode,
   type WorkspaceError,
@@ -38,6 +38,7 @@ export type {
   EditorSettings,
   EditorSettingsPatch,
   FileContent,
+  FileOpenedEvent,
   LanguageConfig,
   LgtmConfig,
   LgtmConfigPatch,
@@ -52,7 +53,6 @@ export type {
   LspSettingsPatch,
   LspWorkspaceSnapshot,
   MiseTaskConfig,
-  OpenFileEvent,
   ResolvedConfigSnapshot,
   ThemeMode,
   WorkspaceError,
@@ -81,7 +81,6 @@ export interface WorkspaceClient {
   pickFolder(): Promise<string | null>
   list(path: string): Promise<WorkspaceNode[]>
   read(path: string): Promise<FileContent>
-  openFile?(path: string, title?: string, offset?: number): Promise<OpenFileEvent>
   write(path: string, content: string): Promise<FileContent>
   createFile(name: string, parentPath?: string): Promise<WorkspaceNode>
   createFolder(name: string, parentPath?: string): Promise<WorkspaceNode>
@@ -99,7 +98,7 @@ export interface WorkspaceClient {
   configGet?(): Promise<ResolvedConfigSnapshot>
   registerConfigHandlers?(handlers: {
     onConfigUpdated: (snapshot: ResolvedConfigSnapshot) => void
-    onOpenFile?: (event: OpenFileEvent) => void
+    onOpenFile?: (event: FileOpenedEvent) => void
   }): Promise<(() => void)[]>
   registerLspHandlers(handlers: {
     onStatus: (event: LspServerStatusEvent) => void
@@ -134,8 +133,6 @@ export const workspaceClient: WorkspaceClient = {
   pickFolder: () => invoke('workspace_pick_folder'),
   list: (relativePath) => invoke('workspace_list', { relativePath }),
   read: (relativePath) => invoke('workspace_read', { relativePath }),
-  openFile: (path, title, offset) =>
-    commands.workspaceOpenFile(path, title ?? null, offset ?? null),
   write: (relativePath, content) => invoke('workspace_write', { relativePath, content }),
   createFile: (name, parentPath = '') => invoke('workspace_create_file', { name, parentPath }),
   createFolder: (name, parentPath = '') => invoke('workspace_create_folder', { name, parentPath }),
@@ -171,7 +168,7 @@ export const workspaceClient: WorkspaceClient = {
       listen<ResolvedConfigSnapshot>('config-updated', (event) => {
         handlers.onConfigUpdated(event.payload)
       }),
-      listen<OpenFileEvent>('workspace-open-file', (event) => {
+      listen<FileOpenedEvent>('workspace-open-file', (event) => {
         handlers.onOpenFile?.(event.payload)
       }),
     ]),

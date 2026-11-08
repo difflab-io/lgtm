@@ -1,6 +1,6 @@
 //! Native application menu bar construction and menu event routing for `lgtm-desktop`.
 
-use crate::events::{AppEvent, AppEvents, OpenFileEvent};
+use crate::events::{AppEvent, AppEvents, FileOpenedEvent};
 
 /// Builds the native Tauri application menu bar with global (`CmdOrCtrl+,`) and project (`CmdOrCtrl+Shift+,`) settings actions.
 pub fn build_app_menu<R: tauri::Runtime>(
@@ -134,14 +134,14 @@ pub fn build_app_menu<R: tauri::Runtime>(
 pub fn handle_menu_event(events: &AppEvents, menu_id: &str) {
     match menu_id {
         "open-global-config" => {
-            events.dispatch(AppEvent::OpenFile(OpenFileEvent {
+            events.dispatch(AppEvent::FileOpened(FileOpenedEvent {
                 path: "~/.lgtm/config.json".to_string(),
                 title: Some("Settings".to_string()),
                 offset: None,
             }));
         }
         "open-local-config" => {
-            events.dispatch(AppEvent::OpenFile(OpenFileEvent {
+            events.dispatch(AppEvent::FileOpened(FileOpenedEvent {
                 path: ".lgtm/config.json".to_string(),
                 title: Some("Settings (project)".to_string()),
                 offset: None,
@@ -169,11 +169,11 @@ mod tests {
             #[test]
             fn should_dispatch_global_and_local_config_events_and_ignore_unknown_ids() {
                 // Arrange
-                let recorded: Arc<Mutex<Vec<OpenFileEvent>>> = Arc::new(Mutex::new(Vec::new()));
+                let recorded: Arc<Mutex<Vec<FileOpenedEvent>>> = Arc::new(Mutex::new(Vec::new()));
                 let recorded_clone = recorded.clone();
                 let events = AppEvents::default();
                 events.set_handler(move |event| {
-                    if let AppEvent::OpenFile(payload) = event {
+                    if let AppEvent::FileOpened(payload) = event {
                         recorded_clone.lock().unwrap().push(payload);
                     }
                 });
@@ -187,12 +187,12 @@ mod tests {
                 assert_eq!(
                     *recorded.lock().unwrap(),
                     vec![
-                        OpenFileEvent {
+                        FileOpenedEvent {
                             path: "~/.lgtm/config.json".to_string(),
                             title: Some("Settings".to_string()),
                             offset: None,
                         },
-                        OpenFileEvent {
+                        FileOpenedEvent {
                             path: ".lgtm/config.json".to_string(),
                             title: Some("Settings (project)".to_string()),
                             offset: None,

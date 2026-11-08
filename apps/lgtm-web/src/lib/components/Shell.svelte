@@ -57,9 +57,9 @@
       if ((event.metaKey || event.ctrlKey) && !event.altKey && isComma) {
         event.preventDefault()
         if (event.shiftKey || event.key === '<') {
-          void workspace.requestOpenFile('.lgtm/config.json', { title: 'Settings (project)' })
+          void workspace.openPath('.lgtm/config.json', { title: 'Settings (project)', focus: true })
         } else {
-          void workspace.requestOpenFile('~/.lgtm/config.json', { title: 'Settings' })
+          void workspace.openPath('~/.lgtm/config.json', { title: 'Settings', focus: true })
         }
       }
     }

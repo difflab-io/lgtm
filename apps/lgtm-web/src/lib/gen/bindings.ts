@@ -15,8 +15,6 @@ export const commands = {
 	workspaceList: (relativePath: string) => __TAURI_INVOKE<WorkspaceNode[]>("workspace_list", { relativePath }),
 	/**  Reads UTF-8 file contents and synchronizes the document with its language server. */
 	workspaceRead: (relativePath: string) => __TAURI_INVOKE<FileContent>("workspace_read", { relativePath }),
-	/**  Dispatches a `workspace-open-file` event instructing the webview to open `path` with an optional custom `title` and cursor `offset`. */
-	workspaceOpenFile: (path: string, title: string | null, offset: number | null) => __TAURI_INVOKE<OpenFileEvent>("workspace_open_file", { path, title, offset }),
 	/**  Writes UTF-8 file contents to disk and dispatches `AppEvent::FileSaved`. */
 	workspaceWrite: (relativePath: string, content: string) => __TAURI_INVOKE<FileContent>("workspace_write", { relativePath, content }),
 	/**  Creates a new file inside a workspace-relative directory. */
@@ -80,6 +78,16 @@ export type FileContent = {
 	languageId?: string | null,
 	/**  Optional active LSP server status for the file's language and project root. */
 	lspStatus?: LspServerStatusEvent | null,
+};
+
+/**  Payload emitted on `workspace-open-file` instructing the webview to open a file tab with an optional custom title and cursor offset. */
+export type FileOpenedEvent = {
+	/**  Workspace-relative or config file path to open (`~/.lgtm/config.json`, `.lgtm/config.json`, or relative path). */
+	path: string,
+	/**  Optional custom tab title (such as `"Settings"` or `"Settings (project)"`). */
+	title: string | null,
+	/**  Optional UTF-16 character offset to position the cursor at after opening. */
+	offset: number | null,
 };
 
 /**  Language server and Mise tool preset for a single programming language. */
@@ -299,16 +307,6 @@ string |
 description?: string | null; 
 /**  Shell command executed by `mise run`. */
 run: string };
-
-/**  Payload emitted on `workspace-open-file` instructing the webview to open a file tab with an optional custom title and cursor offset. */
-export type OpenFileEvent = {
-	/**  Workspace-relative or config file path to open (`~/.lgtm/config.json`, `.lgtm/config.json`, or relative path). */
-	path: string,
-	/**  Optional custom tab title (such as `"Settings"` or `"Settings (project)"`). */
-	title: string | null,
-	/**  Optional UTF-16 character offset to position the cursor at after opening. */
-	offset: number | null,
-};
 
 /**  Merged configuration snapshot together with per-scope patch trees returned to the frontend. */
 export type ResolvedConfigSnapshot = {

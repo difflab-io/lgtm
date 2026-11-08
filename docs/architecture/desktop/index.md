@@ -153,12 +153,11 @@ sequenceDiagram
 | `lsp_get_state` | UI -> Host | `() -> LspWorkspaceSnapshot` | Return all tracked language server statuses and file diagnostics for the active workspace. |
 | `lsp_get_diagnostics_buffer` | UI -> Host | `(languageId?: string) -> LspDiagnosticsBuffer` | Render a read-only plain-text diagnostics report for all active servers or a single language. |
 | `lsp_restart` | UI -> Host | `(languageId: string) -> LspServerStatusEvent` | Restart all sessions for `languageId` in the active workspace and re-open tracked documents. |
-| `workspace_open_file` | UI -> Host | `(path: string) -> FileContent` | Open any workspace file or configuration file (`"~/.lgtm/config.json"`, `".lgtm/config.json"`, or a workspace-relative path), synchronize LSP asynchronously, and return `FileContent`. |
 | `config_get` | UI -> Host | `() -> ResolvedConfigSnapshot` | Return effective deep-merged `LgtmConfig` plus global and project `LgtmConfigPatch` trees. |
 | `lsp-status` | Host -> UI | `LspServerStatusEvent` | Real-time language server lifecycle status and error/warning counts. |
 | `lsp-diagnostics` | Host -> UI | `LspFileDiagnosticsEvent` | Real-time workspace-relative or global config file diagnostics with UTF-16 offsets. |
 | `config-updated` | Host -> UI | `ResolvedConfigSnapshot` | Live resolved nested settings snapshot emitted when `workspace_write` saves `~/.lgtm/config.json` or `<workspace>/.lgtm/config.json`. |
-| `workspace-open-file` | Host -> UI | `OpenFileEvent` | Requests the frontend to open a target file path (`~/.lgtm/config.json` or `.lgtm/config.json`) in an editor tab when triggered from native menus. |
+| `workspace-open-file` | Host -> UI | `FileOpenedEvent` | Requests the frontend to open a target file path (`~/.lgtm/config.json` or `.lgtm/config.json`) in an editor tab when triggered from native menus. |
 | `workspace-quit-requested` | Host -> UI | `()` | Signals the frontend to flush pending saves before calling `workspace_finish_quit`. |
 
 ## Implementation

@@ -14,7 +14,7 @@ type EventHandler = Arc<dyn Fn(AppEvent) + Send + Sync>;
 /// Payload emitted on `workspace-open-file` instructing the webview to open a file tab with an optional custom title and cursor offset.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
-pub struct OpenFileEvent {
+pub struct FileOpenedEvent {
     /// Workspace-relative or config file path to open (`~/.lgtm/config.json`, `.lgtm/config.json`, or relative path).
     pub path: String,
     /// Optional custom tab title (such as `"Settings"` or `"Settings (project)"`).
@@ -33,6 +33,8 @@ pub enum AppEvent {
         /// Newly opened workspace root.
         next_root: PathBuf,
     },
+    /// A file was requested to open in the webview editor with an optional custom tab title and offset.
+    FileOpened(FileOpenedEvent),
     /// A file was written to disk by `WorkspaceService`.
     FileSaved {
         /// Active workspace root when the save occurred.
@@ -55,8 +57,6 @@ pub enum AppEvent {
     LspStatus(LspServerStatusEvent),
     /// A language server or config validator published diagnostics for a file.
     LspDiagnostics(LspFileDiagnosticsEvent),
-    /// A request to open a file in the webview editor with an optional custom tab title and offset.
-    OpenFile(OpenFileEvent),
     /// The OS requested application exit (`RunEvent::ExitRequested`).
     QuitRequested,
 }
@@ -150,11 +150,11 @@ mod tests {
                 let closed_paths: Arc<Mutex<Vec<PathBuf>>> = Arc::new(Mutex::new(Vec::new()));
                 let recorded_closed = closed_paths.clone();
                 events.set_handler(move |event| match event {
+                    AppEvent::FileOpened(payload) => {
+                        forward_events.emit_to_webview("workspace-open-file", &payload);
+                    }
                     AppEvent::FileClosed { path, .. } => {
                         recorded_closed.lock().unwrap().push(path);
-                    }
-                    AppEvent::OpenFile(payload) => {
-                        forward_events.emit_to_webview("workspace-open-file", &payload);
                     }
                     _ => {}
                 });
@@ -164,7 +164,7 @@ mod tests {
                     root: PathBuf::from("/workspace"),
                     path: PathBuf::from("/workspace/README.md"),
                 });
-                events.dispatch(AppEvent::OpenFile(OpenFileEvent {
+                events.dispatch(AppEvent::FileOpened(FileOpenedEvent {
                     path: "~/.lgtm/config.json".to_string(),
                     title: Some("Settings".to_string()),
                     offset: None,
