@@ -80,13 +80,6 @@ pub fn build_app_menu<R: tauri::Runtime>(
                     &PredefinedMenuItem::quit(app_handle, None)?,
                 ],
             )?,
-            #[cfg(not(any(
-                target_os = "linux",
-                target_os = "dragonfly",
-                target_os = "freebsd",
-                target_os = "netbsd",
-                target_os = "openbsd"
-            )))]
             &Submenu::with_items(
                 app_handle,
                 "File",
