@@ -2,8 +2,6 @@
 
 use std::path::PathBuf;
 
-use url::Url;
-
 use crate::error::{Error, Result};
 
 /// Resolve the default root directory (`~/.lgtm/snapshots` or `$LGTM_HOME/snapshots`) for local snapshot repositories.
@@ -44,76 +42,14 @@ fn default_lgtm_home() -> PathBuf {
 
 /// Normalize a Git remote URL (SSH or HTTPS) into a canonical `https://<host>/<owner>/<repo>` URL.
 pub fn normalize_repository_url(raw_remote: &str) -> Result<String> {
-    let trimmed = raw_remote.trim();
-    if trimmed.is_empty() {
-        return Err(Error::Invalid(
-            "repository_url must not be empty".to_owned(),
-        ));
-    }
-
-    if let Some(rest) = trimmed.strip_prefix("git@") {
-        let (host, path) = rest
-            .split_once(':')
-            .ok_or_else(|| Error::Invalid(format!("invalid SSH remote address '{trimmed}'")))?;
-        let clean_path = path.trim_start_matches('/').trim_end_matches(".git");
-        if clean_path.split('/').count() < 2 {
-            return Err(Error::Invalid(format!(
-                "repository_url '{trimmed}' must include owner and repository name"
-            )));
-        }
-        return Ok(format!("https://{host}/{clean_path}"));
-    }
-
-    let parsed = Url::parse(trimmed)
-        .map_err(|err| Error::Invalid(format!("invalid repository_url '{trimmed}': {err}")))?;
-    let scheme = match parsed.scheme() {
-        "http" | "https" => parsed.scheme(),
-        "ssh" => "https",
-        other => {
-            return Err(Error::Invalid(format!(
-                "unsupported repository_url scheme '{other}'"
-            )));
-        }
-    };
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| Error::Invalid(format!("repository_url '{trimmed}' is missing a host")))?;
-    let clean_path = parsed
-        .path()
-        .trim_start_matches('/')
-        .trim_end_matches('/')
-        .trim_end_matches(".git");
-    if clean_path
-        .split('/')
-        .filter(|part| !part.is_empty())
-        .count()
-        < 2
-    {
-        return Err(Error::Invalid(format!(
-            "repository_url '{trimmed}' must include owner and repository name"
-        )));
-    }
-    Ok(format!("{scheme}://{host}/{clean_path}"))
+    lgtm_rsutils::normalize_repository_url(raw_remote)
+        .map_err(|err| Error::Invalid(err.to_string()))
 }
 
 /// Extract `(owner, repo)` from a normalized `repository_url`.
 pub fn parse_github_owner_repo(repository_url: &str) -> Result<(String, String)> {
-    let normalized = normalize_repository_url(repository_url)?;
-    let parsed = Url::parse(&normalized)
-        .map_err(|err| Error::Invalid(format!("invalid repository_url '{normalized}': {err}")))?;
-    let mut segments = parsed
-        .path_segments()
-        .ok_or_else(|| Error::Invalid(format!("invalid repository_url '{normalized}'")))?
-        .filter(|segment| !segment.is_empty());
-    let owner = segments
-        .next()
-        .ok_or_else(|| Error::Invalid(format!("missing owner in '{normalized}'")))?
-        .to_owned();
-    let repo = segments
-        .next()
-        .ok_or_else(|| Error::Invalid(format!("missing repository name in '{normalized}'")))?
-        .to_owned();
-    Ok((owner, repo))
+    lgtm_rsutils::parse_github_owner_repo(repository_url)
+        .map_err(|err| Error::Invalid(err.to_string()))
 }
 
 /// Parse an `--as` agent descriptor (`provider/model` or `model`) into `(name, provider, model)`.

@@ -1,0 +1,21 @@
+[package]
+name = "lgtm-project"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "LGTM project root resolution and managed/external Git worktree lifecycle."
+repository = "https://github.com/difflab-io/lgtm"
+publish = false
+license = "Apache-2.0"
+
+[dependencies]
+dirs = "6"
+lgtm-rsutils = { path = "../lgtm-rsutils" }
+serde = { version = "1", features = ["derive"] }
+specta = { version = "=2.0.0-rc.26", features = ["derive"] }
+thiserror = "2"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
+
+[dev-dependencies]
+tempfile = "3"

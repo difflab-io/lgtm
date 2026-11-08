@@ -10,7 +10,9 @@ use lgtm_lsp::{
     LspCompletionItem, LspDiagnosticsBuffer, LspEvent, LspHoverResult, LspLocation,
     LspServerStatusEvent, LspSignatureHelp, LspWorkspaceSnapshot,
 };
+use lgtm_session::{Session, SessionService, WorkspaceStatePatch};
 use tauri::{Manager, State};
+use uuid::Uuid;
 
 use crate::{
     error::{Result, error},
@@ -25,6 +27,8 @@ use crate::{
 pub struct AppState {
     /// Shared workspace filesystem service guarded across file and config operations.
     pub workspace: Arc<Mutex<WorkspaceService>>,
+    /// Shared session and project persistence service.
+    pub session: SessionService,
     /// Shared configuration service resolving global and workspace settings.
     pub config: ConfigService,
     /// Shared desktop LSP orchestration service.
@@ -74,6 +78,7 @@ pub(crate) fn init_app_state<R: tauri::Runtime>(
         None => app_handle.path().home_dir()?,
     };
     let config = ConfigService::from_home(home.clone());
+    let session = SessionService::new(Some(home.join(".lgtm")));
     let events = AppEvents::from_app_handle(app_handle);
     let lsp_events = events.clone();
     let lsp = Arc::new(LspService::new(config.clone(), move |event| match event {
@@ -89,6 +94,7 @@ pub(crate) fn init_app_state<R: tauri::Runtime>(
     let workspace_path = ConfigService::resolve_desktop_workspace();
     app_handle.manage(AppState {
         workspace: Arc::new(Mutex::new(WorkspaceService::new(home, workspace_path))),
+        session,
         config,
         lsp,
         events,
@@ -129,6 +135,9 @@ fn handle_app_event(events: &AppEvents, lsp: &LspService, config: &ConfigService
         AppEvent::LspDiagnostics(payload) => {
             events.emit_to_webview("lsp-diagnostics", &payload);
         }
+        AppEvent::SessionUpdated(payload) => {
+            events.emit_to_webview("session-updated", &payload);
+        }
         AppEvent::QuitRequested => {
             events.emit_to_webview("workspace-quit-requested", &());
         }
@@ -158,7 +167,12 @@ pub fn commands<R: tauri::Runtime>(invoke: tauri::ipc::Invoke<R>) -> bool {
         lsp_get_diagnostics_buffer,
         lsp_restart,
         config_get,
-        config_update,
+        session_get,
+        session_save,
+        project_set_collapsed,
+        project_create_worktree,
+        project_remove_worktree,
+        project_remove,
     ];
     handler(invoke)
 }
@@ -190,7 +204,12 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             lsp_get_diagnostics_buffer,
             lsp_restart,
             config_get,
-            config_update,
+            session_get,
+            session_save,
+            project_set_collapsed,
+            project_create_worktree,
+            project_remove_worktree,
+            project_remove,
         ])
 }
 
@@ -260,7 +279,7 @@ async fn run_lsp_blocking<T: Send + 'static>(
         .map_err(|e| error("io", e.to_string()))?
 }
 
-/// Opens the active or specified workspace directory and prepares workspace language servers.
+/// Opens the active or specified workspace directory, updates the `default` session, and prepares workspace language servers.
 #[tauri::command]
 #[specta::specta]
 pub async fn workspace_open(
@@ -268,22 +287,33 @@ pub async fn workspace_open(
     path: Option<String>,
 ) -> Result<WorkspaceListing> {
     let config_service = state.config.clone();
+    let session_service = state.session.clone();
     let events = state.events.clone();
     run_blocking(state, move |w| {
         let previous_root = w.get_root().ok();
         let effective_path = match path {
             Some(explicit) => Some(explicit),
-            None if !w.is_custom_root() => config_service
-                .get_config_snapshot(None)
+            None if !w.is_custom_root() => session_service
+                .get_session("default")
                 .ok()
-                .and_then(|snap| snap.effective.workspace.active_root)
-                .filter(|active| {
-                    !active.trim().is_empty() && std::path::Path::new(active).is_dir()
+                .map(|s| s.active_workspace_root)
+                .filter(|active| !active.trim().is_empty() && std::path::Path::new(active).is_dir())
+                .or_else(|| {
+                    config_service
+                        .get_config_snapshot(None)
+                        .ok()
+                        .and_then(|snap| snap.effective.workspace.active_root)
+                        .filter(|active| {
+                            !active.trim().is_empty() && std::path::Path::new(active).is_dir()
+                        })
                 }),
             None => None,
         };
         let listing = w.open(effective_path.as_deref())?;
         if let Ok(next_root) = w.get_root() {
+            if let Ok(session) = session_service.open_workspace("default", &next_root) {
+                events.dispatch(AppEvent::SessionUpdated(session));
+            }
             events.dispatch(AppEvent::WorkspaceOpened {
                 previous_root,
                 next_root,
@@ -583,30 +613,125 @@ pub async fn config_get(state: State<'_, AppState>) -> Result<ResolvedConfigSnap
     .await
 }
 
-/// Applies a partial configuration patch to global or project `config.json` and emits `config-updated`.
+/// Loads the persisted session state (`~/.lgtm/sessions/<id>.json`).
 #[tauri::command]
 #[specta::specta]
-pub async fn config_update(
+pub async fn session_get(
     state: State<'_, AppState>,
-    patch: LgtmConfigPatch,
-    scope: Option<ConfigScope>,
-) -> Result<ResolvedConfigSnapshot> {
-    let config_service = state.config.clone();
-    let lsp_service = state.lsp.clone();
-    let events = state.events.clone();
-    let (snapshot, maybe_root) = run_blocking(state, move |w| {
-        let root = w.get_root().ok();
-        let snapshot = config_service
-            .update_config(root.as_deref(), patch, scope)
-            .map_err(|err| error("io", err.to_string()))?;
-        Ok((snapshot, root))
+    session_id: Option<String>,
+) -> Result<Session> {
+    let session_service = state.session.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(session_service.get_session(session_id.as_deref().unwrap_or("default"))?)
     })
-    .await?;
-    if let Some(root) = maybe_root {
-        lsp_service.reload_workspace_config(&root);
-    }
-    events.emit_to_webview("config-updated", &snapshot);
-    Ok(snapshot)
+    .await
+    .map_err(|e| error("io", e.to_string()))?
+}
+
+/// Saves the active sidebar widget, expanded explorer folders, and filtered tabs (`edited || last_opened`) for a workspace.
+#[tauri::command]
+#[specta::specta]
+pub async fn session_save(
+    state: State<'_, AppState>,
+    patch: WorkspaceStatePatch,
+) -> Result<Session> {
+    let session_service = state.session.clone();
+    let events = state.events.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let session = session_service.save_workspace_state("default", patch)?;
+        events.dispatch(AppEvent::SessionUpdated(session.clone()));
+        Ok(session)
+    })
+    .await
+    .map_err(|e| error("io", e.to_string()))?
+}
+
+/// Collapses or expands child worktrees for `project_id` in the `default` session.
+#[tauri::command]
+#[specta::specta]
+pub async fn project_set_collapsed(
+    state: State<'_, AppState>,
+    project_id: String,
+    collapsed: bool,
+) -> Result<Session> {
+    let session_service = state.session.clone();
+    let events = state.events.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let id = Uuid::parse_str(project_id.trim())
+            .map_err(|err| error("invalidProject", err.to_string()))?;
+        let session = session_service.set_project_collapsed("default", id, collapsed)?;
+        events.dispatch(AppEvent::SessionUpdated(session.clone()));
+        Ok(session)
+    })
+    .await
+    .map_err(|e| error("io", e.to_string()))?
+}
+
+/// Creates a `Managed` Git worktree under `~/.lgtm/worktrees/<project>/<branch-slug>` and attaches it to the `default` session.
+#[tauri::command]
+#[specta::specta]
+pub async fn project_create_worktree(
+    state: State<'_, AppState>,
+    project_id: String,
+    branch: String,
+    base_ref: Option<String>,
+) -> Result<Session> {
+    let session_service = state.session.clone();
+    let events = state.events.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let id = Uuid::parse_str(project_id.trim())
+            .map_err(|err| error("invalidProject", err.to_string()))?;
+        let session =
+            session_service.create_project_worktree("default", id, &branch, base_ref.as_deref())?;
+        events.dispatch(AppEvent::SessionUpdated(session.clone()));
+        Ok(session)
+    })
+    .await
+    .map_err(|e| error("io", e.to_string()))?
+}
+
+/// Removes a worktree from `project_id` (deleting disk storage when `Managed` and only detaching when `External`).
+#[tauri::command]
+#[specta::specta]
+pub async fn project_remove_worktree(
+    state: State<'_, AppState>,
+    project_id: String,
+    worktree_path: String,
+    force: Option<bool>,
+) -> Result<Session> {
+    let session_service = state.session.clone();
+    let events = state.events.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let id = Uuid::parse_str(project_id.trim())
+            .map_err(|err| error("invalidProject", err.to_string()))?;
+        let session = session_service.remove_project_worktree(
+            "default",
+            id,
+            std::path::Path::new(worktree_path.trim()),
+            force.unwrap_or(false),
+        )?;
+        events.dispatch(AppEvent::SessionUpdated(session.clone()));
+        Ok(session)
+    })
+    .await
+    .map_err(|e| error("io", e.to_string()))?
+}
+
+/// Removes `project_id` and its remembered workspace states from the `default` session.
+#[tauri::command]
+#[specta::specta]
+pub async fn project_remove(state: State<'_, AppState>, project_id: String) -> Result<Session> {
+    let session_service = state.session.clone();
+    let events = state.events.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let id = Uuid::parse_str(project_id.trim())
+            .map_err(|err| error("invalidProject", err.to_string()))?;
+        let session = session_service.remove_project("default", id)?;
+        events.dispatch(AppEvent::SessionUpdated(session.clone()));
+        Ok(session)
+    })
+    .await
+    .map_err(|e| error("io", e.to_string()))?
 }
 
 // tests -----------------------------------------------------------------------

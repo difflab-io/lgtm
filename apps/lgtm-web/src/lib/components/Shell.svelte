@@ -22,12 +22,13 @@
     WhichKey,
     WhichKeyProvider,
   } from '@cloudvoyant/helical-svelte'
-  import { FilePlus2, FolderPlus, PanelLeft, ChevronDown } from 'lucide-svelte'
+  import { FilePlus2, FolderPlus, GitBranch, PanelLeft, ChevronDown } from 'lucide-svelte'
   import { ThemeService } from 'lgtm-ui'
   import { errorMessage, workspaceClient, type WorkspaceClient } from '../clients/workspaceClient'
   import { HotkeyService } from '../services/hotkeyService.svelte'
   import { WorkspaceService } from '../services/workspaceService.svelte'
   import WorkspaceExplorer from './WorkspaceExplorer.svelte'
+  import ProjectsPane from './ProjectsPane.svelte'
   import ContentPane from './ContentPane.svelte'
 
   // Props ---------------------------------------------------------------------
@@ -60,24 +61,7 @@
 
   onMount(() => {
     let active = true
-    const handleKeydown = (event: KeyboardEvent) => {
-      if (
-        hotkeys.commandOpen &&
-        (event.metaKey || event.ctrlKey) &&
-        !event.altKey &&
-        !event.shiftKey &&
-        event.key.toLowerCase() === 'k'
-      ) {
-        event.preventDefault()
-        event.stopPropagation()
-        hotkeys.setCommandOpen(false)
-      }
-    }
-    window.addEventListener('keydown', handleKeydown, true)
-    const unlisteners: (() => void)[] = [
-      theme.init(),
-      () => window.removeEventListener('keydown', handleKeydown, true),
-    ]
+    const unlisteners: (() => void)[] = [theme.init()]
     void workspace.open().then(async () => {
       if (!active || workspace.selected) return
       await tick()
@@ -93,7 +77,10 @@
     })
     if (client.isDesktop()) {
       void client
-        .registerQuitHandlers(() => workspace.flushSave())
+        .registerQuitHandlers(async () => {
+          await workspace.flushSave()
+          await workspace.saveCurrentWorkspaceSession()
+        })
         .then(async (stops) => {
           for (const stop of stops) {
             if (active) unlisteners.push(stop)
@@ -138,6 +125,19 @@
           }
         })
         .catch(() => {})
+      void client
+        .registerSessionHandlers?.({
+          onSessionUpdated: (session) => {
+            workspace.applySession(session)
+          },
+        })
+        .then((stops) => {
+          for (const stop of stops) {
+            if (active) unlisteners.push(stop)
+            else stop()
+          }
+        })
+        .catch(() => {})
     }
     return () => {
       active = false
@@ -162,22 +162,11 @@
 {/snippet}
 
 <WhichKeyProvider
-  preset={workspace.settings.keybindPreset}
-  leaderOnly={workspace.settings.leaderOnly}
+  preset="helix"
   storageKey="lgtm"
   scoped={false}
   keymap={hotkeys.keymap}
   commands={hotkeys.commands}
-  onPresetChange={(next) => {
-    if (workspace.settings.keybindPreset !== next) {
-      hotkeys.setPreset(next)
-    }
-  }}
-  onLeaderOnlyChange={(next) => {
-    if (workspace.settings.leaderOnly !== next) {
-      hotkeys.setLeaderOnly(next)
-    }
-  }}
 >
   <CommandProvider
     items={hotkeys.commandItems}
@@ -188,7 +177,6 @@
     <SidebarProvider
       open={hotkeys.sidebarOpen}
       onOpenChange={(open) => (hotkeys.sidebarOpen = open)}
-      data-pane-outline={workspace.settings.paneOutline ? 'true' : 'false'}
       class="workspace-shell h-dvh min-h-0 flex-col gap-0 overflow-hidden"
       style="--sidebar-width: 236px"
     >
@@ -230,49 +218,71 @@
           paneId="workspace"
           paneTitle="Workspace"
           collapsible="offcanvas"
-          class={[
-            'workspace-sidebar bg-sidebar top-9 h-[calc(100dvh-36px)] overflow-y-auto outline-none',
-            workspace.settings.paneOutline &&
-              'data-[pane-active=true]:ring-1 data-[pane-active=true]:ring-ring/40 data-[pane-active=true]:ring-inset',
-          ]
-            .filter(Boolean)
-            .join(' ')}
+          class="workspace-sidebar bg-sidebar top-9 h-[calc(100dvh-36px)] overflow-y-auto outline-none"
           aria-label="Workspace"
         >
           <SidebarHeader
             class="sticky top-0 z-1 shrink-0 items-stretch gap-1 bg-sidebar px-3.5 pt-3.5 pb-2.5 text-[11px] font-semibold text-muted-foreground"
           >
             <Row class="items-center justify-between gap-2">
-              <span>Workspace</span>
-              <Row class="items-center gap-1">
-                <Button
-                  variant="text"
-                  size="sm"
-                  class="size-6 p-1 text-[10px] font-medium"
-                  aria-label="New file"
-                  title="New file"
-                  disabled={workspace.cannotCreate}
-                  onclick={() => workspace.startCreate('file')}
-                  ><FilePlus2 size={14} strokeWidth={1.5} /></Button
-                >
-                <Button
-                  variant="text"
-                  size="sm"
-                  class="size-6 p-1 text-[10px] font-medium"
-                  aria-label="New folder"
-                  title="New folder"
-                  disabled={workspace.cannotCreate}
-                  onclick={() => workspace.startCreate('directory')}
-                  ><FolderPlus size={14} strokeWidth={1.5} /></Button
-                >
-              </Row>
+              {#if workspace.sidebarWidget === 'projects'}
+                <span>Projects</span>
+                <Row class="items-center gap-1">
+                  <Button
+                    variant="text"
+                    size="sm"
+                    class="size-6 p-1 text-[10px] font-medium"
+                    aria-label="Add project"
+                    title="Add project"
+                    disabled={workspace.blocked}
+                    onclick={() => void workspace.selectWorkspace('__open_folder__')}
+                    ><FolderPlus size={14} strokeWidth={1.5} /></Button
+                  >
+                  <Button
+                    variant="text"
+                    size="sm"
+                    class="size-6 p-1 text-[10px] font-medium"
+                    aria-label="New worktree"
+                    title="New worktree"
+                    disabled={!workspace.activeProject || workspace.blocked}
+                    onclick={() => workspace.openNewWorktreeDialog()}
+                    ><GitBranch size={14} strokeWidth={1.5} /></Button
+                  >
+                </Row>
+              {:else}
+                <span>Workspace</span>
+                <Row class="items-center gap-1">
+                  <Button
+                    variant="text"
+                    size="sm"
+                    class="size-6 p-1 text-[10px] font-medium"
+                    aria-label="New file"
+                    title="New file"
+                    disabled={workspace.cannotCreate}
+                    onclick={() => workspace.startCreate('file')}
+                    ><FilePlus2 size={14} strokeWidth={1.5} /></Button
+                  >
+                  <Button
+                    variant="text"
+                    size="sm"
+                    class="size-6 p-1 text-[10px] font-medium"
+                    aria-label="New folder"
+                    title="New folder"
+                    disabled={workspace.cannotCreate}
+                    onclick={() => workspace.startCreate('directory')}
+                    ><FolderPlus size={14} strokeWidth={1.5} /></Button
+                  >
+                </Row>
+              {/if}
             </Row>
           </SidebarHeader>
           <SidebarContent>
             {#if workspace.creationError}
               {@render sidebarNotice(workspace.creationError, 'alert')}
             {/if}
-            {#if workspace.loading}
+            {#if workspace.sidebarWidget === 'projects'}
+              <ProjectsPane {workspace} />
+            {:else if workspace.loading}
               {@render sidebarNotice('Opening workspace…', 'status')}
             {:else if workspace.error}
               {@render sidebarNotice(workspace.error, 'alert')}
@@ -290,11 +300,11 @@
             {/if}
           </SidebarContent>
         </Sidebar>
-        <ContentPane {workspace} {hotkeys} />
+        <ContentPane {workspace} />
       </Row>
     </SidebarProvider>
-    <CommandMenu size="sm" showAliases hotkey={false} />
-    <CommandPalette size="sm" hotkey={false} />
+    <CommandMenu hotkey={false} showShortcuts />
+    <CommandPalette hotkey={false} />
   </CommandProvider>
   <WhichKey />
 </WhichKeyProvider>

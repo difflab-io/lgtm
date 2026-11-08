@@ -2811,6 +2811,7 @@ dependencies = [
  "dirs",
  "gix",
  "lgtm-db",
+ "lgtm-rsutils",
  "octocrab",
  "serde",
  "serde_json",
@@ -2839,6 +2840,46 @@ dependencies = [
  "thiserror",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "lgtm-project"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "lgtm-rsutils",
+ "serde",
+ "specta",
+ "tempfile",
+ "thiserror",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "lgtm-rsutils"
+version = "0.1.0"
+dependencies = [
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror",
+ "url",
+]
+
+[[package]]
+name = "lgtm-session"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "lgtm-project",
+ "lgtm-rsutils",
+ "serde",
+ "serde_json",
+ "specta",
+ "tempfile",
+ "thiserror",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -4968,6 +5009,7 @@ dependencies = [
  "getrandom 0.4.3",
  "js-sys",
  "serde_core",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 

@@ -1,8 +1,9 @@
 <script lang="ts">
   import type { TreeNodeViewProps } from './types'
-  import { Folder, FolderOpen, FileText } from 'lucide-svelte'
+  import { ChevronDown, ChevronRight, Folder, FolderOpen, FileText } from 'lucide-svelte'
   import ContextMenu from '../context-menu/ContextMenu.svelte'
   import { TreeView as ArkTreeView, useTreeViewContext } from '@ark-ui/svelte/tree-view'
+  import { getDocumentWhichKeyController } from '@cloudvoyant/helical-ui'
   import {
     treeViewListBase,
     treeViewBranchContentBase,
@@ -21,6 +22,9 @@
     errors,
     renameErrors,
     icon,
+    selectableBranches = false,
+    onselect,
+    onToggleBranch,
     onedit,
     oncancel,
     contextItems,
@@ -31,7 +35,6 @@
   const id = $props.id()
   const renameErrorId = `${id}-rename-error`
   const rowClass = treeViewRowVariants()
-  // Derived -------------------------------------------------------------------
   const isDefaultFocusTarget = $derived(
     indexPath.length === 1 && indexPath[0] === 0 && (tree().selectedValue?.length ?? 0) === 0,
   )
@@ -42,6 +45,7 @@
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         if (value === 'rename') {
+          getDocumentWhichKeyController()?.setMode('insert')
           tree().startRenaming(node.value)
         } else onaction?.(node.value, value)
       }),
@@ -71,14 +75,61 @@
                 class={rowClass}
                 title={node.description ?? node.value}
                 data-which-key-target=""
-                data-pane-focus-target={state().focused || state().selected || isDefaultFocusTarget
-                  ? ''
-                  : undefined}
+                data-pane-focus-target={state().selected || isDefaultFocusTarget ? '' : undefined}
+                data-tree-node-value={node.value}
+                data-tree-node-branch="true"
+                onclickcapture={(event) => {
+                  if (!selectableBranches) return
+                  if (
+                    event.target instanceof Element &&
+                    (event.target.closest('[data-branch-toggle]') ||
+                      event.target.closest('[data-part="node-rename-input"]'))
+                  ) {
+                    return
+                  }
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onselect?.(node.value)
+                }}
               >
-                {@render nodeIcon(true, state().expanded)}
-                <ArkTreeView.BranchText class={treeViewLabelBase} hidden={state().renaming}
-                  >{node.displayLabel ?? node.label}</ArkTreeView.BranchText
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div
+                  class="flex min-w-0 flex-1 items-center gap-1.5"
+                  onclick={(event) => {
+                    if (!selectableBranches) return
+                    event.preventDefault()
+                    event.stopPropagation()
+                    onselect?.(node.value)
+                  }}
                 >
+                  {@render nodeIcon(true, state().expanded)}
+                  <ArkTreeView.BranchText class={treeViewLabelBase} hidden={state().renaming}
+                    >{node.displayLabel ?? node.label}</ArkTreeView.BranchText
+                  >
+                </div>
+                {#if selectableBranches}
+                  <button
+                    type="button"
+                    data-branch-toggle
+                    class="ms-auto inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
+                    aria-label={state().expanded
+                      ? `Collapse ${node.label}`
+                      : `Expand ${node.label}`}
+                    onclick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      if (state().expanded) tree().collapse([node.value])
+                      else tree().expand([node.value])
+                    }}
+                  >
+                    {#if state().expanded}
+                      <ChevronDown size={12} strokeWidth={1.5} />
+                    {:else}
+                      <ChevronRight size={12} strokeWidth={1.5} />
+                    {/if}
+                  </button>
+                {/if}
                 <ArkTreeView.NodeRenameInput
                   aria-label="Name"
                   data-colon-command=""
@@ -97,7 +148,10 @@
           {#if errors[node.value]}<p class={treeViewMessageVariants()} role="alert">
               {errors[node.value]} Expand to retry.
             </p>{/if}
-          <ArkTreeView.BranchContent class={treeViewBranchContentBase}>
+          <ArkTreeView.BranchContent
+            class={treeViewBranchContentBase}
+            hidden={selectableBranches ? (node.children?.length ?? 0) === 0 : undefined}
+          >
             <ArkTreeView.BranchIndentGuide class={treeViewIndentGuideBase} />
             {#each node.children ?? [] as child, index (child.value)}
               <TreeNodeView
@@ -106,6 +160,9 @@
                 {errors}
                 {renameErrors}
                 {icon}
+                {selectableBranches}
+                {onselect}
+                {onToggleBranch}
                 {onedit}
                 {oncancel}
                 {contextItems}
@@ -125,9 +182,9 @@
                 : (node.displayLabel ?? node.label)}
               title={node.value}
               data-which-key-target=""
-              data-pane-focus-target={state().focused || state().selected || isDefaultFocusTarget
-                ? ''
-                : undefined}
+              data-pane-focus-target={state().selected || isDefaultFocusTarget ? '' : undefined}
+              data-tree-node-value={node.value}
+              data-tree-node-branch="false"
             >
               {@render nodeIcon(false)}
               <ArkTreeView.ItemText class={treeViewLabelBase} hidden={state().renaming}

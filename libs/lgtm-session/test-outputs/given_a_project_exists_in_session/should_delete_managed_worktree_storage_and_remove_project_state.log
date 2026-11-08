@@ -1,0 +1,65 @@
+=== INITIAL STATE ===
+{
+  "id": "default",
+  "sidebarWidget": "explorer",
+  "activeWorkspaceRoot": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5RRG9c/.lgtm/worktrees/lgtm/feature-mgd",
+  "projects": [
+    {
+      "id": "abf3f5d9-cc63-5d27-ba21-26bc7121843e",
+      "name": "lgtm",
+      "rootPath": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5RRG9c/lgtm",
+      "branch": "main",
+      "gitCommonDir": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5RRG9c/lgtm/.git",
+      "icon": null,
+      "color": null,
+      "collapsed": false,
+      "worktrees": [
+        {
+          "path": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5RRG9c/.lgtm/worktrees/lgtm/feature-mgd",
+          "name": "feature-mgd",
+          "branch": "worktree/feature-mgd"
+        }
+      ],
+      "branches": [
+        "main",
+        "worktree/feature-mgd"
+      ]
+    }
+  ],
+  "workspaces": {
+    "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5RRG9c/.lgtm/worktrees/lgtm/feature-mgd": {
+      "workspaceRoot": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5RRG9c/.lgtm/worktrees/lgtm/feature-mgd",
+      "lastOpenedTabPath": null,
+      "expandedDirs": [],
+      "tabs": []
+    },
+    "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5RRG9c/lgtm": {
+      "workspaceRoot": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5RRG9c/lgtm",
+      "lastOpenedTabPath": null,
+      "expandedDirs": [],
+      "tabs": []
+    }
+  }
+}
+
+=== FINAL STATE ===
+{
+  "id": "default",
+  "sidebarWidget": "explorer",
+  "activeWorkspaceRoot": "",
+  "projects": [],
+  "workspaces": {}
+}
+
+=== LOGS & ERRORS ===
+DEBUG lgtm_project::services::project: refreshed project branch and worktree metadata project=lgtm worktree_count=1
+DEBUG lgtm_session::services::session: loaded session state session_id=default projects=1 active_workspace=/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5RRG9c/.lgtm/worktrees/lgtm/feature-mgd
+ WARN lgtm_project::services::project: failed to remove managed git worktree project=lgtm worktree=/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5RRG9c/.lgtm/worktrees/lgtm/feature-mgd force=false error=fatal: '/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5RRG9c/.lgtm/worktrees/lgtm/feature-mgd' contains modified or untracked files, use --force to delete it
+DEBUG lgtm_project::services::project: refreshed project branch and worktree metadata project=lgtm worktree_count=1
+DEBUG lgtm_session::services::session: loaded session state session_id=default projects=1 active_workspace=/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5RRG9c/.lgtm/worktrees/lgtm/feature-mgd
+ INFO lgtm_project::services::project: removed managed git worktree from disk project=lgtm worktree=/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5RRG9c/.lgtm/worktrees/lgtm/feature-mgd force=true
+DEBUG lgtm_project::services::project: refreshed project branch and worktree metadata project=lgtm worktree_count=0
+ INFO lgtm_session::services::session: removed project worktree from session session_id=default project_id=abf3f5d9-cc63-5d27-ba21-26bc7121843e
+DEBUG lgtm_project::services::project: refreshed project branch and worktree metadata project=lgtm worktree_count=0
+DEBUG lgtm_session::services::session: loaded session state session_id=default projects=1 active_workspace=/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5RRG9c/lgtm
+ INFO lgtm_session::services::session: removed project from session session_id=default project_id=abf3f5d9-cc63-5d27-ba21-26bc7121843e

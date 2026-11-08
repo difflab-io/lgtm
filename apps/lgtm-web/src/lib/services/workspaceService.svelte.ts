@@ -15,6 +15,10 @@ import {
   type LspDiagnostic,
   type LspFileDiagnosticsEvent,
   type LspServerStatusEvent,
+  type Project,
+  type Session,
+  type SidebarWidget,
+  type TabCandidate,
 } from '../clients/workspaceClient'
 import { LspService } from './lspService.svelte'
 import { SettingsService } from './settingsService.svelte'
@@ -33,9 +37,101 @@ export interface WorkspaceTab {
   content: string
   readonly: boolean
   dirty?: boolean
+  edited?: boolean
 }
 
-/** Workspace view model coordinating file tree browsing, open tabs, debounced saves, LSP state, and settings. */
+export interface WorktreeDialogState {
+  projectId: string
+  projectName: string
+  branch: string
+  baseRef: string
+  submitting: boolean
+  error: string | null
+}
+
+export interface RemoveWorktreeConfirmState {
+  projectId: string
+  projectName: string
+  worktreePath: string
+  worktreeName: string
+  source: 'managed' | 'external'
+  requiresForce: boolean
+  submitting: boolean
+  error: string | null
+}
+
+interface CachedWorkspaceSnapshot {
+  root: string
+  entries: WorkspaceNode[]
+  listed: Record<string, WorkspaceNode>
+  tabs: WorkspaceTab[]
+  activeTabId: string | null
+  selected: WorkspaceNode | null
+  fileContent: FileContent | null
+  selectionOffset: number | null
+  expandedDirs: string[]
+}
+
+const ADJECTIVES = [
+  'amber',
+  'brisk',
+  'calm',
+  'clear',
+  'crisp',
+  'focal',
+  'lunar',
+  'quiet',
+  'rapid',
+  'solar',
+]
+const NOUNS = [
+  'arch',
+  'brook',
+  'cedar',
+  'crest',
+  'delta',
+  'field',
+  'grove',
+  'haven',
+  'path',
+  'ridge',
+]
+
+function generateDefaultBranchName(): string {
+  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)] ?? 'brisk'
+  const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)] ?? 'grove'
+  const hex = Math.floor(Math.random() * 0xffff)
+    .toString(16)
+    .padStart(4, '0')
+  return `worktree/${adj}-${noun}-${hex}`
+}
+
+/** Converts a Git branch name into a filesystem-safe directory slug matching `lgtm_rsutils::paths::branch_to_path_slug`. */
+export function branchToPathSlug(branch: string): string {
+  const trimmed = branch.trim()
+  if (!trimmed) return ''
+  let out = ''
+  let lastDash = false
+  for (const ch of trimmed) {
+    if (/^[a-zA-Z0-9._-]$/.test(ch)) {
+      if (ch === '-') {
+        if (!lastDash && out.length > 0) {
+          out += '-'
+          lastDash = true
+        }
+      } else {
+        out += ch
+        lastDash = false
+      }
+    } else if (!lastDash && out.length > 0) {
+      out += '-'
+      lastDash = true
+    }
+  }
+  return out.replace(/^[-.]+|[-.]+$/g, '')
+}
+
+/** Workspace view model coordinating file tree browsing, projects/worktrees, open tabs, debounced saves, LSP state, and settings. */
 export class WorkspaceService {
   readonly lsp: LspService
   readonly settings: SettingsService
@@ -60,7 +156,14 @@ export class WorkspaceService {
   tabs = $state<WorkspaceTab[]>([])
   activeTabId = $state<string | null>(null)
   selectionOffset = $state<number | null>(null)
+  sidebarWidget = $state<SidebarWidget>('explorer')
+  projects = $state<Project[]>([])
+  expandedDirs = $state<string[]>([])
+  worktreeDialog = $state<WorktreeDialogState | null>(null)
+  removeWorktreeConfirm = $state<RemoveWorktreeConfirmState | null>(null)
   private listed = $state<Record<string, WorkspaceNode>>({})
+  private workspaceCache = new Map<string, CachedWorkspaceSnapshot>()
+  private sessionHydratedRoots = new Set<string>()
   private active = true
   private dirtyPath: string | null = null
   private dirtyContent: string | null = null
@@ -170,17 +273,88 @@ export class WorkspaceService {
 
   /** Returns selectable workspace items for the titlebar workspace switcher. */
   get items() {
+    const projectItems: { label: string; value: string }[] = []
+    const seen = new Set<string>()
+    for (const project of this.projects) {
+      if (!seen.has(project.rootPath)) {
+        seen.add(project.rootPath)
+        projectItems.push({
+          label:
+            project.rootPath === this.defaultRoot || this.isDefaultWorkspaceRoot(project.rootPath)
+              ? 'Local workspace'
+              : project.name,
+          value: project.rootPath,
+        })
+      }
+      for (const wt of project.worktrees ?? []) {
+        if (!seen.has(wt.path)) {
+          seen.add(wt.path)
+          projectItems.push({
+            label: `${project.name} / ${wt.name}`,
+            value: wt.path,
+          })
+        }
+      }
+    }
     const roots = this.settings.recentRoots.length ? this.settings.recentRoots : [this.root]
-    return [
-      ...roots.map((path) => ({
-        label:
-          path === this.defaultRoot || this.isDefaultWorkspaceRoot(path)
-            ? 'Local workspace'
-            : (path.split(/[\\/]/).filter(Boolean).at(-1) ?? path),
-        value: path,
-      })),
-      { label: 'Open folder…', value: '__open_folder__' },
-    ]
+    for (const path of roots) {
+      if (!seen.has(path)) {
+        seen.add(path)
+        projectItems.push({
+          label:
+            path === this.defaultRoot || this.isDefaultWorkspaceRoot(path)
+              ? 'Local workspace'
+              : (path.split(/[\\/]/).filter(Boolean).at(-1) ?? path),
+          value: path,
+        })
+      }
+    }
+    return [...projectItems, { label: 'Open folder…', value: '__open_folder__' }]
+  }
+
+  /** Returns the project that owns the currently active workspace root, if any. */
+  get activeProject(): Project | null {
+    return (
+      this.projects.find(
+        (p) => p.rootPath === this.root || (p.worktrees ?? []).some((wt) => wt.path === this.root),
+      ) ??
+      this.projects[0] ??
+      null
+    )
+  }
+
+  /** Builds `TreeNode` items for `ProjectsPane` with collapsed-branch active-worktree filtering. */
+  get projectNodes(): TreeNode[] {
+    return this.projects.map((project) => {
+      const allWorktrees = project.worktrees ?? []
+      const visibleWorktrees = project.collapsed
+        ? allWorktrees.filter((wt) => wt.path === this.root)
+        : allWorktrees
+      return {
+        value: project.rootPath,
+        label: project.name,
+        description: project.branch ?? project.rootPath,
+        branch: allWorktrees.length > 0,
+        children: visibleWorktrees.map((wt) => ({
+          value: wt.path,
+          label: wt.name,
+          description: wt.branch ? `${wt.branch} · ${wt.source}` : wt.source,
+          branch: false,
+        })),
+      }
+    })
+  }
+
+  /** Returns the list of expanded project root paths for `ProjectsPane`. */
+  get projectExpandedValues(): string[] {
+    return this.projects.filter((project) => !project.collapsed).map((project) => project.rootPath)
+  }
+
+  /** Returns the live `~/.lgtm/worktrees/<project>/<branch-slug>` preview path for the `New Worktree` dialog. */
+  get worktreePreviewPath(): string {
+    if (!this.worktreeDialog) return ''
+    const slug = branchToPathSlug(this.worktreeDialog.branch)
+    return `~/.lgtm/worktrees/${this.worktreeDialog.projectName}/${slug || '<branch-slug>'}`
   }
 
   private isDefaultWorkspaceRoot(path: string): boolean {
@@ -217,9 +391,319 @@ export class WorkspaceService {
       : undefined
   }
 
-  /** Opens the default or specified workspace directory and refreshes settings and LSP state. */
+  /** Switches the active left sidebar widget between `explorer` and `projects` and persists the choice. */
+  setSidebarWidget(widget: SidebarWidget) {
+    if (this.sidebarWidget === widget) return
+    this.sidebarWidget = widget
+    void this.saveCurrentWorkspaceSession()
+  }
+
+  /** Updates the tracked list of expanded directory paths in `WorkspaceExplorer` and persists session state. */
+  setExpandedDirs(dirs: string[]) {
+    this.expandedDirs = [...dirs]
+    void this.saveCurrentWorkspaceSession()
+  }
+
+  /** Synchronizes `ProjectsPane` branch expansion changes with `SessionService::set_project_collapsed`. */
+  async handleProjectExpandedChange(nextExpanded: string[]) {
+    const expandedSet = new Set(nextExpanded)
+    for (const project of this.projects) {
+      if ((project.worktrees ?? []).length === 0) continue
+      const nextCollapsed = !expandedSet.has(project.rootPath)
+      if (project.collapsed !== nextCollapsed) {
+        await this.setProjectCollapsed(project.id, nextCollapsed)
+      }
+    }
+  }
+
+  /** Sets the collapsed state for `projectId` and persists it to the session file. */
+  async setProjectCollapsed(projectId: string, collapsed: boolean) {
+    this.projects = this.projects.map((p) => (p.id === projectId ? { ...p, collapsed } : p))
+    if (!this.client.projectSetCollapsed) return
+    try {
+      const session = await this.client.projectSetCollapsed(projectId, collapsed)
+      if (this.active) this.applySession(session)
+    } catch (error) {
+      if (this.active) this.creationError = errorMessage(error)
+    }
+  }
+
+  /** Opens the `New Worktree` dialog for `projectId` (or the active project). */
+  openNewWorktreeDialog(projectId?: string) {
+    const project = projectId
+      ? this.projects.find((p) => p.id === projectId || p.rootPath === projectId)
+      : this.activeProject
+    if (!project) return
+    this.worktreeDialog = {
+      projectId: project.id,
+      projectName: project.name,
+      branch: generateDefaultBranchName(),
+      baseRef: project.branch ?? 'HEAD',
+      submitting: false,
+      error: null,
+    }
+  }
+
+  /** Closes the `New Worktree` dialog. */
+  closeNewWorktreeDialog() {
+    this.worktreeDialog = null
+  }
+
+  /** Creates a managed Git worktree from the `New Worktree` dialog and switches to it on success. */
+  async submitNewWorktree() {
+    const dialog = this.worktreeDialog
+    if (!dialog || dialog.submitting || !this.client.projectCreateWorktree) return
+    const branch = dialog.branch.trim()
+    if (!branch) {
+      this.worktreeDialog = { ...dialog, error: 'Branch name cannot be empty.' }
+      return
+    }
+    this.worktreeDialog = { ...dialog, submitting: true, error: null }
+    try {
+      const session = await this.client.projectCreateWorktree(
+        dialog.projectId,
+        branch,
+        dialog.baseRef.trim() || undefined,
+      )
+      if (!this.active) return
+      this.worktreeDialog = null
+      this.applySession(session)
+      if (session.activeWorkspaceRoot && session.activeWorkspaceRoot !== this.root) {
+        await this.open(session.activeWorkspaceRoot)
+      }
+    } catch (error) {
+      if (this.active && this.worktreeDialog) {
+        this.worktreeDialog = {
+          ...this.worktreeDialog,
+          submitting: false,
+          error: errorMessage(error),
+        }
+      }
+    }
+  }
+
+  /** Opens the removal confirmation modal for `worktreePath` under `projectId` (or detaches an external worktree). */
+  promptRemoveWorktree(projectId: string, worktreePath: string) {
+    const project = this.projects.find((p) => p.id === projectId || p.rootPath === projectId)
+    const worktree = project?.worktrees.find((wt) => wt.path === worktreePath)
+    if (!project || !worktree) return
+    this.removeWorktreeConfirm = {
+      projectId: project.id,
+      projectName: project.name,
+      worktreePath: worktree.path,
+      worktreeName: worktree.name,
+      source: worktree.source,
+      requiresForce: false,
+      submitting: false,
+      error: null,
+    }
+  }
+
+  /** Cancels the pending worktree removal confirmation dialog. */
+  cancelRemoveWorktree() {
+    this.removeWorktreeConfirm = null
+  }
+
+  /** Executes worktree removal (`Managed` deletes `~/.lgtm/worktrees/...`, `External` detaches from session). */
+  async confirmRemoveWorktree(force = false) {
+    const confirm = this.removeWorktreeConfirm
+    if (!confirm || confirm.submitting || !this.client.projectRemoveWorktree) return
+    this.removeWorktreeConfirm = { ...confirm, submitting: true, error: null }
+    try {
+      const session = await this.client.projectRemoveWorktree(
+        confirm.projectId,
+        confirm.worktreePath,
+        force || confirm.requiresForce,
+      )
+      if (!this.active) return
+      this.workspaceCache.delete(confirm.worktreePath)
+      this.sessionHydratedRoots.delete(confirm.worktreePath)
+      this.removeWorktreeConfirm = null
+      this.applySession(session)
+      if (session.activeWorkspaceRoot && session.activeWorkspaceRoot !== this.root) {
+        await this.open(session.activeWorkspaceRoot)
+      }
+    } catch (error) {
+      if (!this.active || !this.removeWorktreeConfirm) return
+      const msg = errorMessage(error)
+      const isDirty =
+        (typeof error === 'object' &&
+          error !== null &&
+          'kind' in error &&
+          (error as { kind?: string }).kind === 'dirtyWorktree') ||
+        msg.toLowerCase().includes('untracked') ||
+        msg.toLowerCase().includes('modified') ||
+        msg.toLowerCase().includes('force')
+      this.removeWorktreeConfirm = {
+        ...this.removeWorktreeConfirm,
+        submitting: false,
+        requiresForce: isDirty || this.removeWorktreeConfirm.requiresForce,
+        error: msg,
+      }
+    }
+  }
+
+  /** Detaches `projectId` from the session without deleting files on disk. */
+  async removeProject(projectId: string) {
+    if (!this.client.projectRemove) return
+    const project = this.projects.find((p) => p.id === projectId || p.rootPath === projectId)
+    if (!project) return
+    try {
+      const session = await this.client.projectRemove(project.id)
+      if (!this.active) return
+      this.workspaceCache.delete(project.rootPath)
+      this.sessionHydratedRoots.delete(project.rootPath)
+      this.applySession(session)
+      if (session.activeWorkspaceRoot && session.activeWorkspaceRoot !== this.root) {
+        await this.open(session.activeWorkspaceRoot)
+      }
+    } catch (error) {
+      if (this.active) this.creationError = errorMessage(error)
+    }
+  }
+
+  /** Builds right-click `ContextMenu` items for a project or worktree node in `ProjectsPane`. */
+  projectContextItems(node: TreeNode): ContextMenuItem[] {
+    const project = this.projects.find((p) => p.rootPath === node.value)
+    if (project) {
+      return [
+        { value: 'new-worktree', label: 'New Worktree' },
+        { value: 'open-primary', label: 'Open Primary Checkout' },
+        ...((project.worktrees ?? []).length > 0
+          ? [
+              {
+                value: project.collapsed ? 'expand-worktrees' : 'collapse-worktrees',
+                label: project.collapsed ? 'Expand Worktrees' : 'Collapse Worktrees',
+              },
+            ]
+          : []),
+        { value: 'remove-project', label: 'Remove Project', destructive: true },
+      ]
+    }
+    return [
+      { value: 'open-worktree', label: 'Open Worktree' },
+      { value: 'remove-worktree', label: 'Remove Worktree', destructive: true },
+    ]
+  }
+
+  /** Handles context menu and hotkey actions on project and worktree nodes in `ProjectsPane`. */
+  async projectContextAction(value: string, action: string) {
+    const directProject = this.projects.find((p) => p.rootPath === value)
+    const ownerProject =
+      directProject ??
+      this.projects.find((p) => (p.worktrees ?? []).some((wt) => wt.path === value))
+    if (action === 'new-worktree' || action === 'new-file' || action === 'new-folder') {
+      this.openNewWorktreeDialog(ownerProject?.id)
+      return
+    }
+    if (action === 'open-primary' || action === 'open-worktree') {
+      await this.selectWorkspace(value)
+      return
+    }
+    if (action === 'collapse-worktrees' && directProject) {
+      await this.setProjectCollapsed(directProject.id, true)
+      return
+    }
+    if (action === 'expand-worktrees' && directProject) {
+      await this.setProjectCollapsed(directProject.id, false)
+      return
+    }
+    if (action === 'remove-project' && directProject) {
+      await this.removeProject(directProject.id)
+      return
+    }
+    if (action === 'remove-worktree' && ownerProject && !directProject) {
+      this.promptRemoveWorktree(ownerProject.id, value)
+      return
+    }
+    if (action === 'delete') {
+      if (directProject) {
+        await this.removeProject(directProject.id)
+      } else if (ownerProject) {
+        this.promptRemoveWorktree(ownerProject.id, value)
+      }
+    }
+  }
+
+  /** Applies an incoming `Session` snapshot from the backend. */
+  applySession(session: Session) {
+    if (!this.active) return
+    this.projects = session.projects ?? []
+    this.sidebarWidget = session.sidebarWidget ?? 'explorer'
+  }
+
+  /** Synchronizes session state with the backend and optionally hydrates persisted tabs for `this.root`. */
+  async syncSession(hydrateTabs = false) {
+    if (!this.client.sessionGet) return
+    try {
+      const session = await this.client.sessionGet()
+      if (!this.active) return
+      this.applySession(session)
+      if (hydrateTabs && !this.sessionHydratedRoots.has(this.root)) {
+        this.sessionHydratedRoots.add(this.root)
+        const wsState = session.workspaces?.[this.root]
+        if (wsState) {
+          this.expandedDirs = [...(wsState.expandedDirs ?? [])]
+          if (this.tabs.length === 0 && (wsState.tabs ?? []).length > 0) {
+            await this.restorePersistedTabs(wsState.tabs)
+          }
+        }
+      }
+    } catch {
+      // Session commands are optional in lightweight unit test mocks.
+    }
+  }
+
+  /** Saves the active workspace's filtered tab candidates (`edited || lastOpened`) and expanded directories. */
+  async saveCurrentWorkspaceSession(targetRoot = this.root) {
+    if (!this.client.sessionSave || !targetRoot || this.isDefaultPlaceholderRoot(targetRoot)) {
+      return
+    }
+    const snapshot =
+      targetRoot === this.root
+        ? this.buildSnapshotForCurrentRoot()
+        : this.workspaceCache.get(targetRoot)
+    if (!snapshot) return
+    const candidates: TabCandidate[] = snapshot.tabs
+      .filter((tab) => tab.kind === 'file' && Boolean(tab.path))
+      .map((tab) => ({
+        path: tab.path!,
+        title: tab.title,
+        edited: Boolean(tab.edited),
+        lastOpened: tab.id === snapshot.activeTabId,
+      }))
+    try {
+      const session = await this.client.sessionSave({
+        workspaceRoot: targetRoot,
+        tabs: candidates,
+        expandedDirs: snapshot.expandedDirs,
+        sidebarWidget: this.sidebarWidget,
+      })
+      if (this.active) this.applySession(session)
+    } catch {
+      // Ignore background session save failures.
+    }
+  }
+
+  /** Opens the default or specified workspace directory and refreshes settings, session, and LSP state. */
   async open(path?: string) {
+    const outgoingRoot = this.root && !this.isDefaultPlaceholderRoot(this.root) ? this.root : null
+    if (outgoingRoot && path && path !== outgoingRoot) {
+      this.saveCurrentWorkspaceToCache(outgoingRoot)
+    }
     await this.flushSave()
+    if (outgoingRoot && path && path !== outgoingRoot) {
+      void this.saveCurrentWorkspaceSession(outgoingRoot)
+    }
+
+    const cached = path ? this.workspaceCache.get(path) : undefined
+    if (cached && path) {
+      this.applyCachedWorkspace(cached)
+      void this.refreshWorkspaceInBackground(path)
+      return
+    }
+
+    const seqBeforeOpen = this.openRequestSeq
     this.loading = true
     this.error = null
     this.creationError = null
@@ -231,17 +715,35 @@ export class WorkspaceService {
       if (!this.defaultRoot && !path && this.isDefaultWorkspaceRoot(result.root)) {
         this.defaultRoot = result.root
       }
+      const switchedCached = this.workspaceCache.get(result.root)
+      const fileOpenedDuringInit = !path && this.openRequestSeq !== seqBeforeOpen
       this.root = result.root
       this.settings.rememberRoot(result.root)
       this.entries = result.entries
-      this.listed = {}
-      this.tabs = []
-      this.activeTabId = null
-      this.lsp.reset()
-      this.clearSelected()
+      if (switchedCached) {
+        this.listed = switchedCached.listed
+        this.tabs = switchedCached.tabs
+        this.activeTabId = switchedCached.activeTabId
+        this.selected = switchedCached.selected
+        this.fileContent = switchedCached.fileContent
+        this.selectionOffset = switchedCached.selectionOffset
+        this.expandedDirs = switchedCached.expandedDirs
+      } else if (!fileOpenedDuringInit) {
+        this.listed = {}
+        this.tabs = []
+        this.activeTabId = null
+        this.expandedDirs = []
+        this.clearSelected()
+      }
+      if (!fileOpenedDuringInit) {
+        this.lsp.reset()
+        this.fileVersion++
+      }
       this.treeVersion++
       void this.settings.load()
       void this.syncLspState()
+      await this.syncSession(!switchedCached && !fileOpenedDuringInit)
+      this.saveCurrentWorkspaceToCache(this.root)
     } catch (error) {
       if (this.active) this.error = errorMessage(error)
     } finally {
@@ -306,6 +808,7 @@ export class WorkspaceService {
     const requestId = ++this.openRequestSeq
     await this.flushSave()
     if (requestId !== this.openRequestSeq) return
+    const existingTab = this.tabs.find((t) => t.id === tabId)
     this.selected = entry
     this.fileLoading = true
     this.openingError = null
@@ -326,6 +829,7 @@ export class WorkspaceService {
         content: content.content,
         readonly: false,
         dirty: false,
+        edited: Boolean(existingTab?.edited),
       })
       this.activeTabId = tabId
       this.selectionOffset = targetOffset ?? null
@@ -333,6 +837,8 @@ export class WorkspaceService {
       if (focus || targetOffset !== undefined) {
         this.focusRequest++
       }
+      this.saveCurrentWorkspaceToCache(this.root)
+      void this.saveCurrentWorkspaceSession()
       void this.syncLspState()
     } catch (error) {
       if (this.active && requestId === this.openRequestSeq) {
@@ -394,10 +900,16 @@ export class WorkspaceService {
     await this.flushSave()
     const remaining = this.tabs.filter((item) => item.id !== tabId)
     this.tabs = remaining
-    if (this.activeTabId !== tabId) return
+    if (this.activeTabId !== tabId) {
+      this.saveCurrentWorkspaceToCache(this.root)
+      void this.saveCurrentWorkspaceSession()
+      return
+    }
     const fallback = remaining[index] ?? remaining[index - 1] ?? null
     if (!fallback) {
       this.clearSelected()
+      this.saveCurrentWorkspaceToCache(this.root)
+      void this.saveCurrentWorkspaceSession()
       return
     }
     this.activeTabId = null
@@ -550,14 +1062,17 @@ export class WorkspaceService {
     await this.lsp.syncState()
   }
 
-  /** Updates the active editor buffer, notifies LSP `didChange`, and schedules a 150ms debounced save. */
+  /** Updates the active editor buffer, marks the tab as `edited`, notifies LSP `didChange`, and schedules a 150ms debounced save. */
   updateContent(content: string) {
     if (!this.selected || !this.fileContent || this.fileContent.content === content) return
     this.fileContent = { ...this.fileContent, content }
     const tabId = `file:${this.selected.path}`
-    this.tabs = this.tabs.map((tab) => (tab.id === tabId ? { ...tab, content, dirty: true } : tab))
+    this.tabs = this.tabs.map((tab) =>
+      tab.id === tabId ? { ...tab, content, dirty: true, edited: true } : tab,
+    )
     this.dirtyPath = this.selected.path
     this.dirtyContent = content
+    this.saveCurrentWorkspaceToCache(this.root)
     this.lsp.notifyDidChange(this.selected.path, content)
     if (this.saveTimer) clearTimeout(this.saveTimer)
     this.saveTimer = setTimeout(() => {
@@ -566,7 +1081,7 @@ export class WorkspaceService {
     }, 150)
   }
 
-  /** Flushes any pending debounced file save to disk. */
+  /** Flushes any pending debounced file save to disk and updates persisted session state. */
   async flushSave() {
     if (this.saveTimer) {
       clearTimeout(this.saveTimer)
@@ -587,7 +1102,9 @@ export class WorkspaceService {
           if (!this.active) return
           const tabId = `file:${path}`
           this.tabs = this.tabs.map((tab) =>
-            tab.id === tabId && tab.content === content ? { ...tab, dirty: false } : tab,
+            tab.id === tabId && tab.content === content
+              ? { ...tab, dirty: false, edited: true }
+              : tab,
           )
           if (this.selected?.path === path && this.fileContent?.content === content) {
             this.fileContent = {
@@ -597,6 +1114,8 @@ export class WorkspaceService {
               lspStatus: saved.lspStatus ?? this.fileContent.lspStatus,
             }
           }
+          this.saveCurrentWorkspaceToCache(this.root)
+          void this.saveCurrentWorkspaceSession()
           if (this.isConfigFilePath(path)) {
             await this.settings.load()
           }
@@ -785,7 +1304,7 @@ export class WorkspaceService {
     ]
   }
 
-  /** Flushes any dirty buffer and marks the service inactive on component teardown. */
+  /** Flushes any dirty buffer and session state, and marks the service inactive on component teardown. */
   dispose() {
     if (this.saveTimer) {
       clearTimeout(this.saveTimer)
@@ -796,7 +1315,134 @@ export class WorkspaceService {
       this.dirtyPath = null
       this.dirtyContent = null
     }
+    void this.saveCurrentWorkspaceSession()
     this.active = false
+  }
+
+  private isDefaultPlaceholderRoot(path: string): boolean {
+    return path === '~/.lgtm/workspace'
+  }
+
+  private buildSnapshotForCurrentRoot(): CachedWorkspaceSnapshot {
+    const retainedTabs = this.tabs.filter(
+      (tab) =>
+        tab.kind === 'file' &&
+        Boolean(tab.path) &&
+        (Boolean(tab.edited) || tab.id === this.activeTabId),
+    )
+    const activeTab =
+      retainedTabs.find((tab) => tab.id === this.activeTabId) ?? retainedTabs.at(-1) ?? null
+    return {
+      root: this.root,
+      entries: [...this.entries],
+      listed: { ...this.listed },
+      tabs: retainedTabs,
+      activeTabId: activeTab?.id ?? null,
+      selected: activeTab?.path
+        ? { path: activeTab.path, name: activeTab.title, kind: 'file' }
+        : null,
+      fileContent:
+        activeTab && this.fileContent
+          ? { ...this.fileContent, content: activeTab.content }
+          : activeTab
+            ? {
+                content: activeTab.content,
+                revision: 'cached',
+                languageId: activeTab.languageId ?? null,
+              }
+            : null,
+      selectionOffset: this.selectionOffset,
+      expandedDirs: [...this.expandedDirs],
+    }
+  }
+
+  private saveCurrentWorkspaceToCache(root: string) {
+    if (!root || this.isDefaultPlaceholderRoot(root)) return
+    this.workspaceCache.set(root, this.buildSnapshotForCurrentRoot())
+  }
+
+  private applyCachedWorkspace(cached: CachedWorkspaceSnapshot) {
+    this.loading = false
+    this.error = null
+    this.creationError = null
+    this.openingError = null
+    this.pendingEntry = null
+    this.pendingParent = ''
+    this.root = cached.root
+    this.entries = cached.entries
+    this.listed = cached.listed
+    this.tabs = cached.tabs
+    this.activeTabId = cached.activeTabId
+    this.selected = cached.selected
+    this.fileContent = cached.fileContent
+    this.selectionOffset = cached.selectionOffset
+    this.expandedDirs = cached.expandedDirs
+    this.lsp.reset()
+    this.treeVersion++
+    this.fileVersion++
+  }
+
+  private async refreshWorkspaceInBackground(path: string) {
+    try {
+      const result = await this.client.open(path)
+      if (!this.active || this.root !== path) return
+      this.root = result.root
+      this.settings.rememberRoot(result.root)
+      this.entries = result.entries
+      void this.settings.load()
+      void this.syncLspState()
+      await this.syncSession(false)
+      this.saveCurrentWorkspaceToCache(this.root)
+    } catch (error) {
+      if (this.active && this.root === path) {
+        this.error = errorMessage(error)
+      }
+    }
+  }
+
+  private async restorePersistedTabs(
+    persistedTabs: { path: string; title: string; edited: boolean; lastOpened: boolean }[],
+  ) {
+    const restored: WorkspaceTab[] = []
+    let activeId: string | null = null
+    let activeEntry: WorkspaceNode | null = null
+    let activeContent: FileContent | null = null
+
+    for (const item of persistedTabs) {
+      try {
+        const content = await this.client.read(item.path)
+        if (!this.active) return
+        const tabId = `file:${item.path}`
+        const tab: WorkspaceTab = {
+          id: tabId,
+          kind: 'file',
+          title: item.title || (item.path.split('/').at(-1) ?? item.path),
+          path: item.path,
+          languageId: content.languageId ?? null,
+          content: content.content,
+          readonly: false,
+          dirty: false,
+          edited: Boolean(item.edited),
+        }
+        restored.push(tab)
+        if (item.lastOpened || !activeId) {
+          activeId = tabId
+          activeEntry = { path: item.path, name: tab.title, kind: 'file' }
+          activeContent = content
+        }
+      } catch {
+        // Skip persisted tabs whose files were deleted outside the session.
+      }
+    }
+
+    if (restored.length > 0 && this.active) {
+      this.tabs = restored
+      this.activeTabId = activeId
+      this.selected = activeEntry
+      this.fileContent = activeContent
+      this.fileVersion++
+      this.saveCurrentWorkspaceToCache(this.root)
+    }
   }
 
   private sortEntries(entries: WorkspaceNode[]) {

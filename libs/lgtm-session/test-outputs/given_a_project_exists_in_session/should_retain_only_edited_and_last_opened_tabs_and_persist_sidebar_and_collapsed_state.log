@@ -1,0 +1,112 @@
+=== INITIAL STATE ===
+{
+  "id": "default",
+  "sidebarWidget": "explorer",
+  "activeWorkspaceRoot": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5Jo8Ct/.lgtm/worktrees/lgtm/feature-tabs",
+  "projects": [
+    {
+      "id": "729e164c-dae0-5e3a-8f75-8c672e3b01d4",
+      "name": "lgtm",
+      "rootPath": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5Jo8Ct/lgtm",
+      "branch": "main",
+      "gitCommonDir": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5Jo8Ct/lgtm/.git",
+      "icon": null,
+      "color": null,
+      "collapsed": false,
+      "worktrees": [
+        {
+          "path": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5Jo8Ct/.lgtm/worktrees/lgtm/feature-tabs",
+          "name": "feature-tabs",
+          "branch": "worktree/feature-tabs"
+        }
+      ],
+      "branches": [
+        "main",
+        "worktree/feature-tabs"
+      ]
+    }
+  ],
+  "workspaces": {
+    "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5Jo8Ct/.lgtm/worktrees/lgtm/feature-tabs": {
+      "workspaceRoot": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5Jo8Ct/.lgtm/worktrees/lgtm/feature-tabs",
+      "lastOpenedTabPath": null,
+      "expandedDirs": [],
+      "tabs": []
+    },
+    "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5Jo8Ct/lgtm": {
+      "workspaceRoot": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5Jo8Ct/lgtm",
+      "lastOpenedTabPath": null,
+      "expandedDirs": [],
+      "tabs": []
+    }
+  }
+}
+
+=== FINAL STATE ===
+{
+  "id": "default",
+  "sidebarWidget": "projects",
+  "activeWorkspaceRoot": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5Jo8Ct/.lgtm/worktrees/lgtm/feature-tabs",
+  "projects": [
+    {
+      "id": "729e164c-dae0-5e3a-8f75-8c672e3b01d4",
+      "name": "lgtm",
+      "rootPath": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5Jo8Ct/lgtm",
+      "branch": "main",
+      "gitCommonDir": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5Jo8Ct/lgtm/.git",
+      "icon": null,
+      "color": null,
+      "collapsed": true,
+      "worktrees": [
+        {
+          "path": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5Jo8Ct/.lgtm/worktrees/lgtm/feature-tabs",
+          "name": "feature-tabs",
+          "branch": "worktree/feature-tabs"
+        }
+      ],
+      "branches": [
+        "main",
+        "worktree/feature-tabs"
+      ]
+    }
+  ],
+  "workspaces": {
+    "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5Jo8Ct/.lgtm/worktrees/lgtm/feature-tabs": {
+      "workspaceRoot": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5Jo8Ct/.lgtm/worktrees/lgtm/feature-tabs",
+      "lastOpenedTabPath": "src/active.rs",
+      "expandedDirs": [
+        "src"
+      ],
+      "tabs": [
+        {
+          "path": "src/edited.rs",
+          "title": "edited.rs",
+          "edited": true,
+          "lastOpened": false
+        },
+        {
+          "path": "src/active.rs",
+          "title": "active.rs",
+          "edited": false,
+          "lastOpened": true
+        }
+      ]
+    },
+    "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5Jo8Ct/lgtm": {
+      "workspaceRoot": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5Jo8Ct/lgtm",
+      "lastOpenedTabPath": null,
+      "expandedDirs": [],
+      "tabs": []
+    }
+  }
+}
+
+=== LOGS & ERRORS ===
+DEBUG lgtm_project::services::project: refreshed project branch and worktree metadata project=lgtm worktree_count=1
+DEBUG lgtm_session::services::session: loaded session state session_id=default projects=1 active_workspace=/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5Jo8Ct/.lgtm/worktrees/lgtm/feature-tabs
+ INFO lgtm_session::services::session: saved workspace session state session_id=default workspace_root=/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5Jo8Ct/.lgtm/worktrees/lgtm/feature-tabs retained_tabs=2
+DEBUG lgtm_project::services::project: refreshed project branch and worktree metadata project=lgtm worktree_count=1
+DEBUG lgtm_session::services::session: loaded session state session_id=default projects=1 active_workspace=/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5Jo8Ct/.lgtm/worktrees/lgtm/feature-tabs
+ INFO lgtm_session::services::session: updated project collapsed state session_id=default project_id=729e164c-dae0-5e3a-8f75-8c672e3b01d4 collapsed=true
+DEBUG lgtm_project::services::project: refreshed project branch and worktree metadata project=lgtm worktree_count=1
+DEBUG lgtm_session::services::session: loaded session state session_id=default projects=1 active_workspace=/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmp5Jo8Ct/.lgtm/worktrees/lgtm/feature-tabs

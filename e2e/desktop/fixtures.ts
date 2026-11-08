@@ -1,6 +1,6 @@
 import { test as base, expect, type Page } from '@playwright/test'
-import { spawn } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, writeFile, rm, stat } from 'node:fs/promises'
+import { execFileSync, spawn } from 'node:child_process'
+import { mkdtemp, mkdir, readFile, realpath, writeFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -564,4 +564,45 @@ export async function exists(path: string) {
       throw error
     },
   )
+}
+
+export async function createGitRepo(
+  dir: string,
+  files: Record<string, string> = { 'README.md': '# Repo\n' },
+): Promise<string> {
+  await mkdir(dir, { recursive: true })
+  const canonical = await realpath(dir)
+  execFileSync('git', ['init', '-b', 'main'], { cwd: canonical, stdio: 'ignore' })
+  execFileSync('git', ['config', 'user.email', 'test@lgtm.dev'], {
+    cwd: canonical,
+    stdio: 'ignore',
+  })
+  execFileSync('git', ['config', 'user.name', 'LGTM Test'], {
+    cwd: canonical,
+    stdio: 'ignore',
+  })
+  for (const [relPath, content] of Object.entries(files)) {
+    const fullPath = join(canonical, relPath)
+    const lastSlash = fullPath.lastIndexOf('/')
+    if (lastSlash !== -1) {
+      await mkdir(fullPath.slice(0, lastSlash), { recursive: true })
+    }
+    await writeFile(fullPath, content, 'utf8')
+  }
+  execFileSync('git', ['add', '.'], { cwd: canonical, stdio: 'ignore' })
+  execFileSync('git', ['commit', '-m', 'Initial commit'], { cwd: canonical, stdio: 'ignore' })
+  return canonical
+}
+
+export async function createExternalWorktree(
+  repoDir: string,
+  worktreeDir: string,
+  branch: string,
+): Promise<string> {
+  await rm(worktreeDir, { recursive: true, force: true })
+  execFileSync('git', ['worktree', 'add', '-b', branch, worktreeDir, 'HEAD'], {
+    cwd: repoDir,
+    stdio: 'ignore',
+  })
+  return realpath(worktreeDir)
 }

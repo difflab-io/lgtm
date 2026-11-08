@@ -2,8 +2,8 @@
   import { tick } from 'svelte'
   import { Button, Pane, WhichKeyMode } from '@cloudvoyant/helical-svelte'
   import { CodeEditor, Tabs } from 'lgtm-ui'
-  import { ChevronRight, FileText } from 'lucide-svelte'
-  import type { HotkeyService } from '../services/hotkeyService.svelte'
+  import { ChevronRight, FileText, FolderTree, GitBranch } from 'lucide-svelte'
+  import type { SidebarWidget } from '../clients/workspaceClient'
   import type { WorkspaceService } from '../services/workspaceService.svelte'
   import LspStatusMenu from './LspStatusMenu.svelte'
 
@@ -36,16 +36,33 @@
   })
 </script>
 
-<Pane
-  paneId="editor"
-  paneTitle="Editor"
-  paneOrder={2}
-  role="main"
-  tabindex={-1}
-  class="document-pane relative flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground outline-none {workspace
-    .settings.paneOutline
-    ? 'data-[pane-active=true]:ring-1 data-[pane-active=true]:ring-ring/40 data-[pane-active=true]:ring-inset'
-    : 'ring-0 data-[pane-active=true]:ring-0'}"
+{#snippet sidebarModeButton(mode: SidebarWidget, label: string)}
+  {@const active = workspace.sidebarWidget === mode}
+  <button
+    type="button"
+    aria-label="{label} view"
+    aria-pressed={active}
+    class={[
+      'inline-flex h-5 items-center gap-1 rounded-none px-1.5 text-[10px] font-medium transition-colors outline-none focus-visible:ring-1 focus-visible:ring-ring',
+      active
+        ? 'bg-accent text-accent-foreground'
+        : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+    ].join(' ')}
+    onclick={() => workspace.setSidebarWidget(mode)}
+  >
+    {#if mode === 'explorer'}
+      <FolderTree size={11} strokeWidth={1.5} />
+    {:else}
+      <GitBranch size={11} strokeWidth={1.5} />
+    {/if}
+    <span>{label}</span>
+  </button>
+{/snippet}
+
+<main
+  data-pane-id="editor"
+  data-pane-title="Editor"
+  class="document-pane flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground outline-none"
   aria-label="File viewer"
 >
   {#if workspace.tabItems.length > 0}
@@ -117,6 +134,14 @@
     aria-live="polite"
   >
     <div class="flex min-w-0 items-center gap-2.5">
+      <div
+        class="flex shrink-0 items-center gap-0.5 border-r border-border pr-2"
+        role="group"
+        aria-label="Sidebar view"
+      >
+        {@render sidebarModeButton('explorer', 'Explorer')}
+        {@render sidebarModeButton('projects', 'Projects')}
+      </div>
       <LspStatusMenu {workspace} />
       <nav
         aria-label="Breadcrumb"

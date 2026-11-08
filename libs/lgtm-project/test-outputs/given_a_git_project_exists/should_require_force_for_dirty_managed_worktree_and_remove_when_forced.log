@@ -1,0 +1,43 @@
+=== INITIAL STATE ===
+{
+  "id": "74ed2b49-6e32-5d0b-bb3b-0ec933087cc9",
+  "name": "lgtm",
+  "rootPath": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmpVTLERh/lgtm",
+  "branch": "main",
+  "gitCommonDir": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmpVTLERh/lgtm/.git",
+  "icon": null,
+  "color": null,
+  "collapsed": false,
+  "worktrees": [
+    {
+      "path": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmpVTLERh/.lgtm/worktrees/lgtm/feature-clean",
+      "name": "feature-clean",
+      "branch": "worktree/feature-clean"
+    }
+  ],
+  "branches": [
+    "main"
+  ]
+}
+
+=== FINAL STATE ===
+{
+  "id": "74ed2b49-6e32-5d0b-bb3b-0ec933087cc9",
+  "name": "lgtm",
+  "rootPath": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmpVTLERh/lgtm",
+  "branch": "main",
+  "gitCommonDir": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmpVTLERh/lgtm/.git",
+  "icon": null,
+  "color": null,
+  "collapsed": false,
+  "worktrees": [],
+  "branches": [
+    "main",
+    "worktree/feature-clean"
+  ]
+}
+
+=== LOGS & ERRORS ===
+ WARN lgtm_project::services::project: failed to remove managed git worktree project=lgtm worktree=/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmpVTLERh/.lgtm/worktrees/lgtm/feature-clean force=false error=fatal: '/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmpVTLERh/.lgtm/worktrees/lgtm/feature-clean' contains modified or untracked files, use --force to delete it
+ INFO lgtm_project::services::project: removed managed git worktree from disk project=lgtm worktree=/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmpVTLERh/.lgtm/worktrees/lgtm/feature-clean force=true
+DEBUG lgtm_project::services::project: refreshed project branch and worktree metadata project=lgtm worktree_count=0

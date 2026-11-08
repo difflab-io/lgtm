@@ -5,8 +5,8 @@ export default defineConfig({
   testDir: '.',
   testMatch: [
     'workspace-file-tree.spec.ts',
-    'workspace-keybinds.spec.ts',
     'workspace-lsp.spec.ts',
+    'workspace-projects.spec.ts',
     'workspace-settings.spec.ts',
   ],
   fullyParallel: true,

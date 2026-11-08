@@ -1994,6 +1994,8 @@ version = "0.1.0"
 dependencies = [
  "lgtm-config",
  "lgtm-lsp",
+ "lgtm-project",
+ "lgtm-session",
  "rfd",
  "rustix",
  "serde",
@@ -2006,6 +2008,7 @@ dependencies = [
  "tauri-specta",
  "tempfile",
  "trash",
+ "uuid",
  "windows-sys 0.61.2",
 ]
 
@@ -2034,6 +2037,43 @@ dependencies = [
  "thiserror 2.0.21",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "lgtm-project"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "lgtm-rsutils",
+ "serde",
+ "specta",
+ "thiserror 2.0.21",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "lgtm-rsutils"
+version = "0.1.0"
+dependencies = [
+ "sha2",
+ "thiserror 2.0.21",
+ "url",
+]
+
+[[package]]
+name = "lgtm-session"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "lgtm-project",
+ "lgtm-rsutils",
+ "serde",
+ "serde_json",
+ "specta",
+ "thiserror 2.0.21",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -3350,6 +3390,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4432,6 +4478,7 @@ dependencies = [
  "getrandom 0.4.3",
  "js-sys",
  "serde_core",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 

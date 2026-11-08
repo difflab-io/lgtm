@@ -1,0 +1,18 @@
+=== INITIAL STATE ===
+session_file_exists: false
+
+=== FINAL STATE ===
+{
+  "id": "default",
+  "sidebarWidget": "explorer",
+  "activeWorkspaceRoot": "",
+  "projects": [],
+  "workspaces": {}
+}
+
+=== LOGS & ERRORS ===
+DEBUG lgtm_session::services::session: loaded session state session_id=default projects=0 active_workspace=
+DEBUG lgtm_session::services::session: loaded session state session_id=default projects=0 active_workspace=
+ WARN lgtm_project::services::project: project not found project_id=96eccc52-0e12-43cc-9d86-bff69b7f7dc4
+DEBUG lgtm_session::services::session: loaded session state session_id=default projects=0 active_workspace=
+ WARN lgtm_project::services::project: project not found project_id=96eccc52-0e12-43cc-9d86-bff69b7f7dc4

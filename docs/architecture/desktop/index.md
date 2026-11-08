@@ -205,6 +205,11 @@ When compiled with the `e2e-bridge` feature and launched with `--ipc-bridge <hom
 ## References
 
 - [Desktop event handling & service orchestration](events.md).
+- [Desktop project and session management](projects.md).
+- [Session library (`lgtm-session`) architecture](../session/index.md).
+- [Project library (`lgtm-project`) architecture](../project/index.md).
+- [Rust utilities library (`lgtm-rsutils`) architecture](../rsutils/index.md).
+- [ProjectsPane UI component](../web/projects-pane.md).
 - [LSP library (`lgtm-lsp`) architecture](../lsp/index.md).
 - [Environment library (`lgtm-env`) architecture](../env/index.md).
 - [Configuration library (`lgtm-config`) architecture](../config/index.md).

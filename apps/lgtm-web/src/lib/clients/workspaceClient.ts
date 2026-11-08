@@ -32,12 +32,21 @@ import {
   type LspSignatureInformation,
   type LspWorkspaceSnapshot,
   type MiseTaskConfig,
+  type PersistedTab,
+  type Project,
   type ResolvedConfigSnapshot,
+  type Session,
+  type SidebarWidget,
+  type TabCandidate,
   type ThemeMode,
   type WorkspaceError,
   type WorkspaceListing,
+  type WorkspaceSessionState,
   type WorkspaceSettings,
   type WorkspaceSettingsPatch,
+  type WorkspaceStatePatch,
+  type Worktree,
+  type WorktreeSource,
 } from '../gen/bindings'
 
 export type {
@@ -69,12 +78,21 @@ export type {
   LspSignatureInformation,
   LspWorkspaceSnapshot,
   MiseTaskConfig,
+  PersistedTab,
+  Project,
   ResolvedConfigSnapshot,
+  Session,
+  SidebarWidget,
+  TabCandidate,
   ThemeMode,
   WorkspaceError,
   WorkspaceListing,
+  WorkspaceSessionState,
   WorkspaceSettings,
   WorkspaceSettingsPatch,
+  WorkspaceStatePatch,
+  Worktree,
+  WorktreeSource,
 }
 
 export interface WorkspaceNode {
@@ -114,7 +132,15 @@ export interface WorkspaceClient {
   lspGetDiagnosticsBuffer(languageId?: string): Promise<LspDiagnosticsBuffer>
   lspRestart(languageId: string): Promise<LspServerStatusEvent>
   configGet?(): Promise<ResolvedConfigSnapshot>
-  configUpdate?(patch: LgtmConfigPatch, scope?: ConfigScope | null): Promise<ResolvedConfigSnapshot>
+  sessionGet?(sessionId?: string): Promise<Session>
+  sessionSave?(patch: WorkspaceStatePatch): Promise<Session>
+  projectSetCollapsed?(projectId: string, collapsed: boolean): Promise<Session>
+  projectCreateWorktree?(projectId: string, branch: string, baseRef?: string): Promise<Session>
+  projectRemoveWorktree?(projectId: string, worktreePath: string, force?: boolean): Promise<Session>
+  projectRemove?(projectId: string): Promise<Session>
+  registerSessionHandlers?(handlers: {
+    onSessionUpdated: (session: Session) => void
+  }): Promise<(() => void)[]>
   registerConfigHandlers?(handlers: {
     onConfigUpdated: (snapshot: ResolvedConfigSnapshot) => void
     onOpenFile?: (event: FileOpenedEvent) => void
@@ -185,7 +211,21 @@ export const workspaceClient: WorkspaceClient = {
     invoke('lsp_get_diagnostics_buffer', languageId ? { languageId } : {}),
   lspRestart: (languageId: string) => invoke('lsp_restart', { languageId }),
   configGet: () => commands.configGet(),
-  configUpdate: (patch, scope = null) => commands.configUpdate(patch, scope ?? null),
+  sessionGet: (sessionId?: string) => commands.sessionGet(sessionId ?? null),
+  sessionSave: (patch: WorkspaceStatePatch) => commands.sessionSave(patch),
+  projectSetCollapsed: (projectId: string, collapsed: boolean) =>
+    commands.projectSetCollapsed(projectId, collapsed),
+  projectCreateWorktree: (projectId: string, branch: string, baseRef?: string) =>
+    commands.projectCreateWorktree(projectId, branch, baseRef ?? null),
+  projectRemoveWorktree: (projectId: string, worktreePath: string, force?: boolean) =>
+    commands.projectRemoveWorktree(projectId, worktreePath, force ?? null),
+  projectRemove: (projectId: string) => commands.projectRemove(projectId),
+  registerSessionHandlers: (handlers) =>
+    Promise.all([
+      listen<Session>('session-updated', (event) => {
+        handlers.onSessionUpdated(event.payload)
+      }),
+    ]),
   registerConfigHandlers: (handlers) =>
     Promise.all([
       listen<ResolvedConfigSnapshot>('config-updated', (event) => {

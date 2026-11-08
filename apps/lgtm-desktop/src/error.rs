@@ -27,3 +27,30 @@ impl From<std::io::Error> for WorkspaceError {
         error("io", value.to_string())
     }
 }
+
+impl From<lgtm_project::LgtmProjectError> for WorkspaceError {
+    fn from(value: lgtm_project::LgtmProjectError) -> Self {
+        use lgtm_project::LgtmProjectError;
+        match value {
+            LgtmProjectError::InvalidBranch(msg) => error("invalidBranch", msg),
+            LgtmProjectError::BranchAlreadyCheckedOut(msg) => error("branchAlreadyCheckedOut", msg),
+            LgtmProjectError::CheckoutPathExists(msg) => error("checkoutPathExists", msg),
+            LgtmProjectError::NotGitRepository(msg) => error("notGitRepository", msg),
+            LgtmProjectError::DirtyWorktree(msg) => error("dirtyWorktree", msg),
+            LgtmProjectError::ExternalWorktree(msg) => error("externalWorktree", msg),
+            LgtmProjectError::InvalidPath(msg) => error("invalidWorkspace", msg),
+            LgtmProjectError::Git(msg) => error("git", msg),
+        }
+    }
+}
+
+impl From<lgtm_session::LgtmSessionError> for WorkspaceError {
+    fn from(value: lgtm_session::LgtmSessionError) -> Self {
+        use lgtm_session::LgtmSessionError;
+        match value {
+            LgtmSessionError::Project(err) => err.into(),
+            LgtmSessionError::NotFound(msg) => error("notFound", msg),
+            other => error("session", other.to_string()),
+        }
+    }
+}

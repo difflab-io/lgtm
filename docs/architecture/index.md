@@ -244,7 +244,12 @@ All workspace Cargo crates set `publish = false` and link directly via Cargo `pa
 - [CLI architecture (`lgtm-cli`)](cli/index.md).
 - [Desktop application architecture (`lgtm-desktop` & `lgtm-web`)](desktop/index.md).
 - [Desktop event handling & service orchestration](desktop/events.md).
+- [Desktop project and session management](desktop/projects.md).
 - [Web frontend architecture](web/index.md).
+- [ProjectsPane UI component](web/projects-pane.md).
+- [Session library architecture (`lgtm-session`)](session/index.md).
+- [Project library architecture (`lgtm-project`)](project/index.md).
+- [Rust utilities library architecture (`lgtm-rsutils`)](rsutils/index.md).
 - [Configuration library architecture (`lgtm-config`)](config/index.md).
 - [Environment library architecture (`lgtm-env`)](env/index.md).
 - [LSP library architecture (`lgtm-lsp`)](lsp/index.md).

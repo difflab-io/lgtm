@@ -178,9 +178,12 @@ flowchart TD
 
 ## References
 
-- [Modal keybindings & command surfaces (`lgtm-web` & `lgtm-ui`) architecture](keybindings.md).
+- [ProjectsPane UI component](projects-pane.md).
 - [Desktop application (`lgtm-desktop`) architecture](../desktop/index.md).
+- [Desktop project and session management](../desktop/projects.md).
 - [Desktop event handling & service orchestration](../desktop/events.md).
+- [Session library (`lgtm-session`) architecture](../session/index.md).
+- [Project library (`lgtm-project`) architecture](../project/index.md).
 - [Configuration library (`lgtm-config`) architecture](../config/index.md).
 - [LSP library (`lgtm-lsp`) architecture](../lsp/index.md).
 - [End-to-end testing architecture](../e2e/index.md).

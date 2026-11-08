@@ -1,0 +1,43 @@
+=== INITIAL STATE ===
+{
+  "id": "31ba973c-4285-589f-8422-f5ec54cbe378",
+  "name": "lgtm",
+  "rootPath": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmpuTZ0QL/lgtm",
+  "branch": "main",
+  "gitCommonDir": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmpuTZ0QL/lgtm/.git",
+  "icon": null,
+  "color": null,
+  "collapsed": false,
+  "worktrees": [],
+  "branches": [
+    "main"
+  ]
+}
+
+=== FINAL STATE ===
+{
+  "id": "31ba973c-4285-589f-8422-f5ec54cbe378",
+  "name": "lgtm",
+  "rootPath": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmpuTZ0QL/lgtm",
+  "branch": "main",
+  "gitCommonDir": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmpuTZ0QL/lgtm/.git",
+  "icon": null,
+  "color": null,
+  "collapsed": false,
+  "worktrees": [
+    {
+      "path": "/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmpuTZ0QL/.lgtm/worktrees/lgtm/feature-managed",
+      "name": "feature-managed",
+      "branch": "worktree/feature-managed"
+    }
+  ],
+  "branches": [
+    "main"
+  ]
+}
+
+=== LOGS & ERRORS ===
+ INFO lgtm_project::services::project: created managed git worktree project=lgtm worktree=/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmpuTZ0QL/.lgtm/worktrees/lgtm/feature-managed branch=Some("worktree/feature-managed")
+ WARN lgtm_project::services::project: failed to create git worktree project=lgtm branch=bad..branch error='bad..branch' is not a valid Git branch name.
+ WARN lgtm_project::services::project: failed to create git worktree project=lgtm branch=main error=Preparing worktree (checking out 'main')
+fatal: 'main' is already checked out at '/private/var/folders/w4/r2mq7p0s039ds60kgqytyqqr0000gn/T/.tmpuTZ0QL/lgtm'

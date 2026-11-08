@@ -1,9 +1,8 @@
-import { markdown } from '@codemirror/lang-markdown'
-import { HighlightStyle, LanguageDescription, syntaxHighlighting } from '@codemirror/language'
-import { languages } from '@codemirror/language-data'
+import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { type Extension } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { tags } from '@lezer/highlight'
+import { getCachedLanguageExtension, loadLanguageExtension } from './languages'
 import type { CodeEditorLineWrapping } from './types'
 
 /**
@@ -233,25 +232,11 @@ export function toLineWrappingExtension(mode: CodeEditorLineWrapping): Extension
   return [EditorView.lineWrapping]
 }
 
-function isMarkdownTarget(targetName: string): boolean {
-  const lower = targetName.toLowerCase()
-  return (
-    lower.endsWith('.md') ||
-    lower.endsWith('.markdown') ||
-    lower.endsWith('.mdx') ||
-    lower.endsWith('.mkd')
-  )
-}
+export { getCachedLanguageExtension, loadLanguageExtension }
 
 /**
  * Resolves the CodeMirror 6 language extension for `targetName` (filename or buffer title).
  */
 export async function resolveLanguageExtension(targetName: string | undefined): Promise<Extension> {
-  if (!targetName) return []
-  if (isMarkdownTarget(targetName)) {
-    return markdown({ codeLanguages: languages })
-  }
-  const description = LanguageDescription.matchFilename(languages, targetName)
-  if (!description) return []
-  return description.load()
+  return loadLanguageExtension(targetName)
 }
