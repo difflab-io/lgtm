@@ -41,6 +41,8 @@ export const commands = {
 	lspRestart: (languageId: string) => __TAURI_INVOKE<LspServerStatusEvent>("lsp_restart", { languageId }),
 	/**  Returns the resolved nested configuration snapshot across defaults, global settings, and project overrides. */
 	configGet: () => __TAURI_INVOKE<ResolvedConfigSnapshot>("config_get"),
+	/**  Applies a partial configuration patch to global or project `config.json` and emits `config-updated`. */
+	configUpdate: (patch: LgtmConfigPatch, scope: ConfigScope | null) => __TAURI_INVOKE<ResolvedConfigSnapshot>("config_update", { patch, scope }),
 };
 
 /* Types */
@@ -55,6 +57,20 @@ export type AppearanceSettingsPatch = {
 	/**  Preferred application color theme (`system`, `light`, or `dark`). */
 	theme?: ThemeMode | null,
 };
+
+/**  Active command surface style for `Mod+k` and leader command invocation (`keybindings.commandStyle`). */
+export type CommandStyle = 
+/**  Bottom-docked modal command bar (`CommandMenu`, `:` style). */
+"menu" | 
+/**  Centered modal command palette (`CommandPalette`, `Mod+k` style). */
+"palette";
+
+/**  Configuration storage scope (`global` or `project`). */
+export type ConfigScope = 
+/**  User-wide configuration stored in `~/.lgtm/config.json`. */
+"global" | 
+/**  Workspace-specific configuration stored in `<workspace>/.lgtm/config.json`. */
+"project";
 
 /**  Resolved code editor settings section (`editor.*`). */
 export type EditorSettings = {
@@ -90,6 +106,43 @@ export type FileOpenedEvent = {
 	offset: number | null,
 };
 
+/**  Modal keybinding preset for `WhichKey` and `CodeEditor` (`keybindings.preset`). */
+export type KeybindPreset = 
+/**  Selection-first Helix keybindings (`normal`, `select`, `insert`, `jump`). */
+"helix" | 
+/**  Operator-pending Vim keybindings. */
+"vim" | 
+/**  Selection-first Kakoune keybindings. */
+"kakoune";
+
+/**  Resolved modal keybinding and command surface settings (`keybindings.*`). */
+export type KeybindingSettings = {
+	/**  Primary command surface (`"menu"` by default, or `"palette"`). */
+	commandStyle?: CommandStyle,
+	/**  Modal editing preset (`"helix"` by default, `"vim"`, or `"kakoune"`). */
+	preset?: KeybindPreset,
+	/**  Restrict modal handling to the `Space` leader key and keep the editor in insert mode (`false` by default). */
+	leaderOnly?: boolean,
+	/**  Render active pane focus outline when switching panes with the keyboard (`true` by default). */
+	paneOutline?: boolean,
+	/**  Enter `insert` mode when clicking inside the code editor (`true` by default). */
+	clickToInsert?: boolean,
+};
+
+/**  Sparse modal keybinding and command surface overrides persisted under `keybindings.*` in `config.json`. */
+export type KeybindingSettingsPatch = {
+	/**  Primary command surface (`"menu"` or `"palette"`). */
+	commandStyle?: CommandStyle | null,
+	/**  Modal editing preset (`"helix"`, `"vim"`, or `"kakoune"`). */
+	preset?: KeybindPreset | null,
+	/**  Restrict modal handling to the `Space` leader key and keep the editor in insert mode. */
+	leaderOnly?: boolean | null,
+	/**  Render active pane focus outline when switching panes with the keyboard. */
+	paneOutline?: boolean | null,
+	/**  Enter `insert` mode when clicking inside the code editor. */
+	clickToInsert?: boolean | null,
+};
+
 /**  Language server and Mise tool preset for a single programming language. */
 export type LanguageConfig = {
 	/**  Whether this language preset is active. */
@@ -120,6 +173,8 @@ export type LgtmConfig = {
 	workspace?: WorkspaceSettings,
 	/**  Code editor display settings (`editor.*`). */
 	editor?: EditorSettings,
+	/**  Modal keybinding and command surface settings (`keybindings.*`). */
+	keybindings?: KeybindingSettings,
 	/**  Global LSP lifecycle and timeout settings (`lsp.*`). */
 	lsp?: LspSettings,
 	/**  Per-language LSP server and Mise toolchain definitions keyed by language ID (`languages.*`). */
@@ -136,6 +191,8 @@ export type LgtmConfigPatch = {
 	workspace?: WorkspaceSettingsPatch | null,
 	/**  Partial code editor settings overrides (`editor.*`). */
 	editor?: EditorSettingsPatch | null,
+	/**  Partial modal keybinding and command surface overrides (`keybindings.*`). */
+	keybindings?: KeybindingSettingsPatch | null,
 	/**  Partial LSP lifecycle and timeout overrides (`lsp.*`). */
 	lsp?: LspSettingsPatch | null,
 	/**  Per-language LSP server and Mise toolchain overrides keyed by language ID (`languages.*`). */

@@ -392,6 +392,63 @@ export class WorkspaceService {
     await this.activateTab(fallback.id)
   }
 
+  /** Closes the currently active editor tab, if any. */
+  async closeActiveTab() {
+    if (!this.activeTabId) return
+    await this.closeTab(this.activeTabId)
+  }
+
+  /** Cycles forward through open tabs by `count`. */
+  async selectNextTab(count = 1) {
+    if (this.blocked || this.tabs.length <= 1) return
+    const currentIdx = this.tabs.findIndex((tab) => tab.id === this.activeTabId)
+    const startIdx = currentIdx === -1 ? 0 : currentIdx
+    const step = Math.max(1, count)
+    const target = this.tabs[(startIdx + step) % this.tabs.length]
+    if (target) {
+      await this.activateTab(target.id)
+    }
+  }
+
+  /** Cycles backward through open tabs by `count`. */
+  async selectPrevTab(count = 1) {
+    if (this.blocked || this.tabs.length <= 1) return
+    const currentIdx = this.tabs.findIndex((tab) => tab.id === this.activeTabId)
+    const startIdx = currentIdx === -1 ? 0 : currentIdx
+    const step = Math.max(1, count)
+    const nextIdx = (((startIdx - step) % this.tabs.length) + this.tabs.length) % this.tabs.length
+    const target = this.tabs[nextIdx]
+    if (target) {
+      await this.activateTab(target.id)
+    }
+  }
+
+  /** Reloads any open, clean `config.json` editor tabs from disk after a programmatic settings update. */
+  async reloadCleanConfigTabs() {
+    for (const tab of this.tabs) {
+      if (tab.kind !== 'file' || !tab.path || tab.dirty || !this.isConfigFilePath(tab.path)) {
+        continue
+      }
+      if (this.dirtyPath === tab.path) continue
+      try {
+        const refreshed = await this.client.read(tab.path)
+        if (!this.active) return
+        this.tabs = this.tabs.map((item) =>
+          item.id === tab.id && !item.dirty ? { ...item, content: refreshed.content } : item,
+        )
+        if (
+          this.activeTabId === tab.id &&
+          this.selected?.path === tab.path &&
+          this.dirtyPath !== tab.path
+        ) {
+          this.fileContent = refreshed
+        }
+      } catch {
+        // Ignore read errors if the config file does not exist yet.
+      }
+    }
+  }
+
   /** Opens a read-only diagnostics buffer tab for all active servers or `languageId`. */
   async openDiagnosticsBuffer(languageId?: string) {
     await this.flushSave()

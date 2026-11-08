@@ -8,8 +8,9 @@
   import { EditorView, hoverTooltip, keymap, tooltips } from '@codemirror/view'
   import { tags } from '@lezer/highlight'
   import { basicSetup } from 'codemirror'
-  import { cn } from '@cloudvoyant/helical-ui'
+  import { cn, getDocumentWhichKeyController, registerModalEditor } from '@cloudvoyant/helical-ui'
   import { renderMarkdownToDom } from './markdown'
+  import { createCodeMirrorModalTarget } from './modalKeymap'
   import { codeEditorHoverTooltipVariants, codeEditorRootVariants } from './styles'
   import type { CodeEditorDiagnostic, CodeEditorLineWrapping, CodeEditorProps } from './types'
 
@@ -142,6 +143,12 @@
     '.cm-cursor, .cm-dropCursor, &.cm-editor .cm-cursor, &.cm-editor .cm-dropCursor': {
       borderLeftColor: 'var(--color-ring, #52a8ff)',
     },
+    '&.cm-editor[data-modal-mode="normal"] .cm-cursor, &.cm-editor[data-modal-mode="select"] .cm-cursor':
+      {
+        borderLeftWidth: '1ch',
+        borderLeftColor: 'color-mix(in srgb, var(--color-ring, #52a8ff) 55%, transparent)',
+        marginLeft: '0',
+      },
     '.cm-gutters, &.cm-editor .cm-gutters': {
       backgroundColor: 'var(--color-background, #101010)',
       color: 'var(--cm-gutter-fg, var(--color-muted-foreground, #676767))',
@@ -205,6 +212,7 @@
     filename,
     readonly = false,
     lineWrapping = 'auto',
+    clickToInsert = true,
     size = 'sm',
     label = 'Code editor',
     class: className = '',
@@ -213,6 +221,7 @@
     onchange,
     onhover,
     ongotodefinition,
+    onViewReady,
   }: CodeEditorProps = $props()
 
   // State ---------------------------------------------------------------------
@@ -284,6 +293,7 @@
       doc: initialDoc,
       extensions: [
         basicSetup,
+        EditorState.allowMultipleSelections.of(true),
         syntaxHighlighting(codeEditorHighlightStyle),
         codeEditorTooltipTheme,
         tooltips({
@@ -305,7 +315,11 @@
           EditorState.readOnly.of(initialReadOnly),
           EditorView.editable.of(!initialReadOnly),
         ]),
-        EditorView.contentAttributes.of({ 'aria-label': label }),
+        EditorView.contentAttributes.of({
+          'aria-label': label,
+          'data-pane-focus-target': '',
+          'data-modal-editor': 'true',
+        }),
         hoverTooltip(async (_view, pos) => {
           if (!onhover) return null
           const ch = _view.state.doc.sliceString(pos, pos + 1)
@@ -395,13 +409,28 @@
         ]),
         EditorView.domEventHandlers({
           mousedown(event, currentView) {
-            if (!ongotodefinition) return false
-            if (!(event.metaKey || event.ctrlKey) || event.button !== 0) return false
-            const pos = currentView.posAtCoords({ x: event.clientX, y: event.clientY })
-            if (pos === null) return false
-            event.preventDefault()
-            void ongotodefinition(pos)
-            return true
+            if (ongotodefinition && (event.metaKey || event.ctrlKey) && event.button === 0) {
+              const pos = currentView.posAtCoords({ x: event.clientX, y: event.clientY })
+              if (pos === null) return false
+              event.preventDefault()
+              void ongotodefinition(pos)
+              return true
+            }
+            if (event.button === 0 && clickToInsert && !readonly) {
+              const controller = getDocumentWhichKeyController(currentView.dom.ownerDocument)
+              if (controller && controller.getState().mode === 'normal') {
+                controller.setMode('insert')
+              }
+            }
+            return false
+          },
+          beforeinput(event, currentView) {
+            const modalMode = currentView.dom.dataset.modalMode
+            if (modalMode && modalMode !== 'insert') {
+              event.preventDefault()
+              return true
+            }
+            return false
           },
         }),
         EditorView.updateListener.of((update) => {
@@ -412,7 +441,19 @@
       ],
     })
     view = new EditorView({ state, parent: host })
+    const modalTarget = createCodeMirrorModalTarget(() => view)
+    const unregisterModal = registerModalEditor(host, modalTarget)
+    const controller = getDocumentWhichKeyController(host.ownerDocument)
+    if (controller) {
+      const wkState = controller.getState()
+      modalTarget.setModalState({ mode: wkState.mode, preset: wkState.preset })
+    } else {
+      modalTarget.setModalState({ mode: 'normal', preset: 'helix' })
+    }
+    onViewReady?.(view)
     return () => {
+      onViewReady?.(null)
+      unregisterModal()
       view?.destroy()
       view = undefined
     }
@@ -497,6 +538,15 @@
   export function focus() {
     view?.focus()
   }
+
+  export function getView(): EditorView | undefined {
+    return view
+  }
 </script>
 
-<div bind:this={host} class={rootClasses} data-slot="code-editor"></div>
+<div
+  bind:this={host}
+  data-modal-ignore-pointer={!clickToInsert || readonly ? 'true' : undefined}
+  class={rootClasses}
+  data-slot="code-editor"
+></div>

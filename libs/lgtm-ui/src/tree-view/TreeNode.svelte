@@ -3,6 +3,7 @@
   import { Folder, FolderOpen, FileText } from 'lucide-svelte'
   import ContextMenu from '../context-menu/ContextMenu.svelte'
   import { TreeView as ArkTreeView, useTreeViewContext } from '@ark-ui/svelte/tree-view'
+  import { getDocumentWhichKeyController } from '@cloudvoyant/helical-ui'
   import {
     treeViewListBase,
     treeViewBranchContentBase,
@@ -31,14 +32,20 @@
   const id = $props.id()
   const renameErrorId = `${id}-rename-error`
   const rowClass = treeViewRowVariants()
+  // Derived -------------------------------------------------------------------
+  const isDefaultFocusTarget = $derived(
+    indexPath.length === 1 && indexPath[0] === 0 && (tree().selectedValue?.length ?? 0) === 0,
+  )
 
   // Methods -------------------------------------------------------------------
   function action(value: string) {
     // Let Ark close the menu and restore focus before starting another interaction.
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
-        if (value === 'rename') tree().startRenaming(node.value)
-        else onaction?.(node.value, value)
+        if (value === 'rename') {
+          getDocumentWhichKeyController()?.setMode('insert')
+          tree().startRenaming(node.value)
+        } else onaction?.(node.value, value)
       }),
     )
   }
@@ -65,6 +72,10 @@
                 {...triggerProps}
                 class={rowClass}
                 title={node.description ?? node.value}
+                data-which-key-target=""
+                data-pane-focus-target={state().selected || isDefaultFocusTarget ? '' : undefined}
+                data-tree-node-value={node.value}
+                data-tree-node-branch="true"
               >
                 {@render nodeIcon(true, state().expanded)}
                 <ArkTreeView.BranchText class={treeViewLabelBase} hidden={state().renaming}
@@ -114,6 +125,10 @@
                 ? `${node.displayLabel ?? node.label} (${node.description})`
                 : (node.displayLabel ?? node.label)}
               title={node.value}
+              data-which-key-target=""
+              data-pane-focus-target={state().selected || isDefaultFocusTarget ? '' : undefined}
+              data-tree-node-value={node.value}
+              data-tree-node-branch="false"
             >
               {@render nodeIcon(false)}
               <ArkTreeView.ItemText class={treeViewLabelBase} hidden={state().renaming}

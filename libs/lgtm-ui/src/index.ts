@@ -16,10 +16,16 @@ export type {
   ThemeWindowBridge,
 } from './theme-toggle/types'
 export { default as CodeEditor } from './code-editor/CodeEditor.svelte'
+export {
+  createCodeMirrorModalTarget,
+  scrollEditorAlign,
+  scrollEditorHalfPage,
+} from './code-editor/modalKeymap'
 export type {
   CodeEditorDiagnostic,
   CodeEditorDiagnosticSeverity,
   CodeEditorHoverResult,
   CodeEditorLineWrapping,
   CodeEditorProps,
+  EditorView,
 } from './code-editor/types'

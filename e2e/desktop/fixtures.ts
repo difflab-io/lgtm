@@ -515,3 +515,31 @@ export async function exists(path: string) {
     },
   )
 }
+
+export function modeBadge(page: Page) {
+  return page.getByTestId('which-key-mode-badge')
+}
+
+export function whichKeyPanel(page: Page) {
+  return page.getByTestId('which-key-panel')
+}
+
+export function whichKeyExplorer(page: Page) {
+  return page.getByTestId('which-key-explorer')
+}
+
+export function commandMenu(page: Page) {
+  return page.getByTestId('command-menu')
+}
+
+export function commandMenuInput(page: Page) {
+  return page.getByTestId('command-menu-input')
+}
+
+export function commandPalette(page: Page) {
+  return page.getByTestId('command-palette')
+}
+
+export function commandPaletteInput(page: Page) {
+  return page.getByTestId('command-palette-input')
+}

@@ -5,7 +5,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use lgtm_config::{ConfigService, ResolvedConfigSnapshot};
+use lgtm_config::{ConfigScope, ConfigService, LgtmConfigPatch, ResolvedConfigSnapshot};
 use lgtm_lsp::{
     LspDiagnosticsBuffer, LspEvent, LspHoverResult, LspLocation, LspServerStatusEvent,
     LspWorkspaceSnapshot,
@@ -156,6 +156,7 @@ pub fn commands<R: tauri::Runtime>(invoke: tauri::ipc::Invoke<R>) -> bool {
         lsp_get_diagnostics_buffer,
         lsp_restart,
         config_get,
+        config_update,
     ];
     handler(invoke)
 }
@@ -185,6 +186,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             lsp_get_diagnostics_buffer,
             lsp_restart,
             config_get,
+            config_update,
         ])
 }
 
@@ -544,6 +546,32 @@ pub async fn config_get(state: State<'_, AppState>) -> Result<ResolvedConfigSnap
     .await
 }
 
+/// Applies a partial configuration patch to global or project `config.json` and emits `config-updated`.
+#[tauri::command]
+#[specta::specta]
+pub async fn config_update(
+    state: State<'_, AppState>,
+    patch: LgtmConfigPatch,
+    scope: Option<ConfigScope>,
+) -> Result<ResolvedConfigSnapshot> {
+    let config_service = state.config.clone();
+    let lsp_service = state.lsp.clone();
+    let events = state.events.clone();
+    let (snapshot, maybe_root) = run_blocking(state, move |w| {
+        let root = w.get_root().ok();
+        let snapshot = config_service
+            .update_config(root.as_deref(), patch, scope)
+            .map_err(|err| error("io", err.to_string()))?;
+        Ok((snapshot, root))
+    })
+    .await?;
+    if let Some(root) = maybe_root {
+        lsp_service.reload_workspace_config(&root);
+    }
+    events.emit_to_webview("config-updated", &snapshot);
+    Ok(snapshot)
+}
+
 // tests -----------------------------------------------------------------------
 
 #[cfg(test)]
@@ -569,6 +597,10 @@ mod tests {
 
                 // Assert
                 assert!(generated.contains("export type ThemeMode"));
+                assert!(generated.contains("export type CommandStyle"));
+                assert!(generated.contains("export type KeybindPreset"));
+                assert!(generated.contains("export type KeybindingSettings"));
+                assert!(generated.contains("export type KeybindingSettingsPatch"));
                 assert!(generated.contains("export type AppearanceSettings"));
                 assert!(generated.contains("export type WorkspaceSettings"));
                 assert!(generated.contains("export type EditorSettings"));
@@ -578,6 +610,7 @@ mod tests {
                 assert!(generated.contains("export type ResolvedConfigSnapshot"));
                 assert!(generated.contains("export type FileOpenedEvent"));
                 assert!(generated.contains("configGet"));
+                assert!(generated.contains("configUpdate"));
             }
         }
     }

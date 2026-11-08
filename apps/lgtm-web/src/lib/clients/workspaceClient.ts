@@ -6,10 +6,15 @@ import {
   commands,
   type AppearanceSettings,
   type AppearanceSettingsPatch,
+  type CommandStyle,
+  type ConfigScope,
   type EditorSettings,
   type EditorSettingsPatch,
   type FileContent,
   type FileOpenedEvent,
+  type KeybindPreset,
+  type KeybindingSettings,
+  type KeybindingSettingsPatch,
   type LanguageConfig,
   type LgtmConfig,
   type LgtmConfigPatch,
@@ -35,10 +40,15 @@ import {
 export type {
   AppearanceSettings,
   AppearanceSettingsPatch,
+  CommandStyle,
+  ConfigScope,
   EditorSettings,
   EditorSettingsPatch,
   FileContent,
   FileOpenedEvent,
+  KeybindPreset,
+  KeybindingSettings,
+  KeybindingSettingsPatch,
   LanguageConfig,
   LgtmConfig,
   LgtmConfigPatch,
@@ -96,6 +106,7 @@ export interface WorkspaceClient {
   lspGetDiagnosticsBuffer(languageId?: string): Promise<LspDiagnosticsBuffer>
   lspRestart(languageId: string): Promise<LspServerStatusEvent>
   configGet?(): Promise<ResolvedConfigSnapshot>
+  configUpdate?(patch: LgtmConfigPatch, scope?: ConfigScope | null): Promise<ResolvedConfigSnapshot>
   registerConfigHandlers?(handlers: {
     onConfigUpdated: (snapshot: ResolvedConfigSnapshot) => void
     onOpenFile?: (event: FileOpenedEvent) => void
@@ -163,6 +174,7 @@ export const workspaceClient: WorkspaceClient = {
     invoke('lsp_get_diagnostics_buffer', languageId ? { languageId } : {}),
   lspRestart: (languageId: string) => invoke('lsp_restart', { languageId }),
   configGet: () => commands.configGet(),
+  configUpdate: (patch, scope = null) => commands.configUpdate(patch, scope ?? null),
   registerConfigHandlers: (handlers) =>
     Promise.all([
       listen<ResolvedConfigSnapshot>('config-updated', (event) => {
