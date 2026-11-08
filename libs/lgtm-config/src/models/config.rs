@@ -544,6 +544,88 @@ impl LgtmConfigPatch {
         }
         text
     }
+
+    /// Parses a `config.json` string leniently, extracting valid fields and ignoring unknown properties, invalid leaf values, or syntax errors.
+    pub fn from_str_lenient(raw: &str) -> Self {
+        let Ok(serde_json::Value::Object(root)) = serde_json::from_str::<serde_json::Value>(raw)
+        else {
+            return Self::default();
+        };
+
+        let schema = root
+            .get("$schema")
+            .and_then(|v| serde_json::from_value::<String>(v.clone()).ok());
+
+        let appearance = root
+            .get("appearance")
+            .and_then(serde_json::Value::as_object)
+            .map(|obj| AppearanceSettingsPatch {
+                theme: obj
+                    .get("theme")
+                    .and_then(|v| serde_json::from_value::<ThemeMode>(v.clone()).ok()),
+            });
+
+        let workspace = root
+            .get("workspace")
+            .and_then(serde_json::Value::as_object)
+            .map(|obj| WorkspaceSettingsPatch {
+                active_root: obj
+                    .get("activeRoot")
+                    .and_then(|v| serde_json::from_value::<String>(v.clone()).ok()),
+                recent_roots: obj
+                    .get("recentRoots")
+                    .and_then(|v| serde_json::from_value::<Vec<String>>(v.clone()).ok()),
+            });
+
+        let editor = root
+            .get("editor")
+            .and_then(serde_json::Value::as_object)
+            .map(|obj| EditorSettingsPatch {
+                line_wrapping: obj
+                    .get("lineWrapping")
+                    .and_then(|v| serde_json::from_value::<LineWrap>(v.clone()).ok()),
+            });
+
+        let lsp = root
+            .get("lsp")
+            .and_then(serde_json::Value::as_object)
+            .map(|obj| LspSettingsPatch {
+                enabled: obj
+                    .get("enabled")
+                    .and_then(|v| serde_json::from_value::<bool>(v.clone()).ok()),
+                auto_install: obj
+                    .get("autoInstall")
+                    .or_else(|| obj.get("auto_install"))
+                    .and_then(|v| serde_json::from_value::<bool>(v.clone()).ok()),
+                request_timeout_ms: obj
+                    .get("requestTimeoutMs")
+                    .or_else(|| obj.get("request_timeout_ms"))
+                    .and_then(|v| serde_json::from_value::<u64>(v.clone()).ok()),
+            });
+
+        let languages = root
+            .get("languages")
+            .and_then(serde_json::Value::as_object)
+            .map(|obj| {
+                obj.iter()
+                    .filter_map(|(key, val)| {
+                        serde_json::from_value::<LanguageConfig>(val.clone())
+                            .ok()
+                            .map(|cfg| (key.clone(), cfg))
+                    })
+                    .collect::<BTreeMap<String, LanguageConfig>>()
+            })
+            .filter(|map| !map.is_empty());
+
+        Self {
+            schema,
+            appearance,
+            workspace,
+            editor,
+            lsp,
+            languages,
+        }
+    }
 }
 
 // tests -----------------------------------------------------------------------

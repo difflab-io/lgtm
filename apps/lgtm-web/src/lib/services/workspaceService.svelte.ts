@@ -242,97 +242,20 @@ export class WorkspaceService {
     }
   }
 
-  /** Ensures `~/.lgtm/config.json` exists and opens it in `CodeEditor` as a standard file tab. */
-  async openGlobalConfig() {
-    if (!this.client.openGlobalConfig) return
-    const path = '~/.lgtm/config.json'
-    const tabId = `file:${path}`
-    if (this.activeTabId === tabId && this.fileContent) {
-      this.focusRequest++
+  /** Requests the desktop host to open `path` with an optional custom tab `title` and cursor `offset`. */
+  async requestOpenFile(path: string, options?: { title?: string; offset?: number }) {
+    if (this.client.openFile) {
+      await this.client.openFile(path, options?.title, options?.offset)
       return
     }
-    const requestId = ++this.openRequestSeq
-    await this.flushSave()
-    if (requestId !== this.openRequestSeq) return
-    this.fileLoading = true
-    this.openingError = null
-    try {
-      const content = await this.client.openGlobalConfig()
-      void this.settings.load()
-      if (!this.active || requestId !== this.openRequestSeq) return
-      const title = 'Settings'
-      this.selected = { path, name: title, kind: 'file' }
-      this.fileContent = content
-      this.lsp.recordFileStatus(content.lspStatus)
-      this.upsertTab({
-        id: tabId,
-        kind: 'file',
-        title,
-        path,
-        languageId: content.languageId ?? 'json',
-        content: content.content,
-        readonly: false,
-        dirty: false,
-      })
-      this.activeTabId = tabId
-      this.selectionOffset = null
-      this.fileVersion++
-      this.focusRequest++
-      void this.syncLspState()
-    } catch (error) {
-      if (this.active && requestId === this.openRequestSeq) {
-        this.fileContent = null
-        this.openingError = errorMessage(error)
-      }
-    } finally {
-      if (this.active && requestId === this.openRequestSeq) this.fileLoading = false
-    }
+    await this.openPath(path, { ...options, focus: true })
   }
 
-  /** Ensures `<workspace>/.lgtm/config.json` exists and opens it in `CodeEditor` as a standard file tab. */
-  async openLocalConfig() {
-    if (!this.client.openLocalConfig) return
-    const path = '.lgtm/config.json'
-    const tabId = `file:${path}`
-    if (this.activeTabId === tabId && this.fileContent) {
-      this.focusRequest++
-      return
-    }
-    const requestId = ++this.openRequestSeq
-    await this.flushSave()
-    if (requestId !== this.openRequestSeq) return
-    this.fileLoading = true
-    this.openingError = null
-    try {
-      const content = await this.client.openLocalConfig()
-      void this.settings.load()
-      if (!this.active || requestId !== this.openRequestSeq) return
-      const title = 'Settings (project)'
-      this.selected = { path, name: title, kind: 'file' }
-      this.fileContent = content
-      this.lsp.recordFileStatus(content.lspStatus)
-      this.upsertTab({
-        id: tabId,
-        kind: 'file',
-        title,
-        path,
-        languageId: content.languageId ?? 'json',
-        content: content.content,
-        readonly: false,
-        dirty: false,
-      })
-      this.activeTabId = tabId
-      this.selectionOffset = null
-      this.fileVersion++
-      this.focusRequest++
-      void this.syncLspState()
-    } catch (error) {
-      if (this.active && requestId === this.openRequestSeq) {
-        this.fileContent = null
-        this.openingError = errorMessage(error)
-      }
-    } finally {
-      if (this.active && requestId === this.openRequestSeq) this.fileLoading = false
+  /** Opens `path` in an editor tab with an optional custom tab `title`, cursor `offset`, and editor `focus`. */
+  async openPath(path: string, options?: { title?: string; offset?: number; focus?: boolean }) {
+    const entry = this.resolveFileEntry(path, options?.title)
+    if (entry.kind === 'file') {
+      await this.openFile(entry, options?.offset, options?.focus)
     }
   }
 
@@ -367,12 +290,16 @@ export class WorkspaceService {
   /** Selects and opens a file node from the sidebar tree by its workspace-relative path. */
   async select(path: string) {
     if (this.busy) return
-    const entry = this.resolveFileEntry(path)
-    if (entry.kind === 'file') await this.openFile(entry)
+    await this.openPath(path)
   }
 
   /** Reads a file from the workspace, opens or activates its tab, and optionally positions the cursor at `targetOffset`. */
-  async openFile(entry: WorkspaceNode, targetOffset?: number) {
+  async openFile(entry: WorkspaceNode, targetOffset?: number, focus = false) {
+    const tabId = `file:${entry.path}`
+    if (this.activeTabId === tabId && this.fileContent && targetOffset === undefined) {
+      this.focusRequest++
+      return
+    }
     const requestId = ++this.openRequestSeq
     await this.flushSave()
     if (requestId !== this.openRequestSeq) return
@@ -381,10 +308,12 @@ export class WorkspaceService {
     this.openingError = null
     try {
       const content = await this.client.read(entry.path)
+      if (this.isConfigFilePath(entry.path)) {
+        void this.settings.load()
+      }
       if (!this.active || requestId !== this.openRequestSeq) return
       this.fileContent = content
       this.lsp.recordFileStatus(content.lspStatus)
-      const tabId = `file:${entry.path}`
       this.upsertTab({
         id: tabId,
         kind: 'file',
@@ -398,6 +327,9 @@ export class WorkspaceService {
       this.activeTabId = tabId
       this.selectionOffset = targetOffset ?? null
       this.fileVersion++
+      if (focus || targetOffset !== undefined) {
+        this.focusRequest++
+      }
       void this.syncLspState()
     } catch (error) {
       if (this.active && requestId === this.openRequestSeq) {
@@ -507,9 +439,7 @@ export class WorkspaceService {
 
   /** Opens `path` and moves the editor selection to `offset`. */
   async jumpToLocation(path: string, offset: number) {
-    const entry = this.resolveFileEntry(path)
-    await this.openFile(entry, offset)
-    this.focusRequest++
+    await this.openPath(path, { offset, focus: true })
   }
 
   /** Requests LSP hover documentation at `offset` in the currently selected file. */
@@ -809,7 +739,10 @@ export class WorkspaceService {
     this.refreshFolder = { path, version: (this.refreshFolder?.version ?? 0) + 1 }
   }
 
-  private resolveFileEntry(path: string): WorkspaceNode {
+  private resolveFileEntry(path: string, title?: string): WorkspaceNode {
+    if (title) {
+      return { path, name: title, kind: 'file' }
+    }
     return (
       this.entries.find((item) => item.path === path) ??
       this.listed[path] ?? {

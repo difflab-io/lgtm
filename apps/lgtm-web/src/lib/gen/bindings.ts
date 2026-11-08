@@ -15,10 +15,8 @@ export const commands = {
 	workspaceList: (relativePath: string) => __TAURI_INVOKE<WorkspaceNode[]>("workspace_list", { relativePath }),
 	/**  Reads UTF-8 file contents and synchronizes the document with its language server. */
 	workspaceRead: (relativePath: string) => __TAURI_INVOKE<FileContent>("workspace_read", { relativePath }),
-	/**  Ensures the global `~/.lgtm/config.json` file exists, synchronizes LSP, and returns its contents. */
-	workspaceOpenGlobalConfig: () => __TAURI_INVOKE<FileContent>("workspace_open_global_config"),
-	/**  Ensures the global config exists, opens `.lgtm/config.json` (or an empty JSON temp buffer if absent), and synchronizes LSP. */
-	workspaceOpenLocalConfig: () => __TAURI_INVOKE<FileContent>("workspace_open_local_config"),
+	/**  Dispatches a `workspace-open-file` event instructing the webview to open `path` with an optional custom `title` and cursor `offset`. */
+	workspaceOpenFile: (path: string, title: string | null, offset: number | null) => __TAURI_INVOKE<OpenFileEvent>("workspace_open_file", { path, title, offset }),
 	/**  Writes UTF-8 file contents to disk and dispatches `AppEvent::FileSaved`. */
 	workspaceWrite: (relativePath: string, content: string) => __TAURI_INVOKE<FileContent>("workspace_write", { relativePath, content }),
 	/**  Creates a new file inside a workspace-relative directory. */
@@ -301,6 +299,16 @@ string |
 description?: string | null; 
 /**  Shell command executed by `mise run`. */
 run: string };
+
+/**  Payload emitted on `workspace-open-file` instructing the webview to open a file tab with an optional custom title and cursor offset. */
+export type OpenFileEvent = {
+	/**  Workspace-relative or config file path to open (`~/.lgtm/config.json`, `.lgtm/config.json`, or relative path). */
+	path: string,
+	/**  Optional custom tab title (such as `"Settings"` or `"Settings (project)"`). */
+	title: string | null,
+	/**  Optional UTF-16 character offset to position the cursor at after opening. */
+	offset: number | null,
+};
 
 /**  Merged configuration snapshot together with per-scope patch trees returned to the frontend. */
 export type ResolvedConfigSnapshot = {

@@ -55,22 +55,7 @@ run = 'echo "Private package; publication disabled"'
 [tasks.run]
 description = "Start the LGTM backend"
 depends = ["//apps/lgtm-web:generate"]
-run = '''
-set -eu
-if [ -z "${LGTM_BACKEND_ADDR:-}" ]; then
-  backend_port="$(node -e '
-    const net = require("node:net");
-    const srv = net.createServer();
-    srv.once("error", () => {
-      const fb = net.createServer();
-      fb.listen(0, "127.0.0.1", () => { console.log(fb.address().port); fb.close(); });
-    });
-    srv.listen(8080, "127.0.0.1", () => { console.log(8080); srv.close(); });
-  ')"
-  export LGTM_BACKEND_ADDR="127.0.0.1:${backend_port}"
-fi
-cargo run -p lgtm-forge
-'''
+run = "cargo run -p lgtm-forge"
 
 [tasks.dev]
 description = "Watch backend and Protobuf sources and restart the server"

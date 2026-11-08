@@ -1,6 +1,6 @@
 //! Native application menu bar construction and menu event routing for `lgtm-desktop`.
 
-use crate::events::{AppEvent, AppEvents};
+use crate::events::{AppEvent, AppEvents, OpenFileEvent};
 
 /// Builds the native Tauri application menu bar with global (`CmdOrCtrl+,`) and project (`CmdOrCtrl+Shift+,`) settings actions.
 pub fn build_app_menu<R: tauri::Runtime>(
@@ -134,10 +134,18 @@ pub fn build_app_menu<R: tauri::Runtime>(
 pub fn handle_menu_event(events: &AppEvents, menu_id: &str) {
     match menu_id {
         "open-global-config" => {
-            events.dispatch(AppEvent::MenuOpenGlobalConfig);
+            events.dispatch(AppEvent::OpenFile(OpenFileEvent {
+                path: "~/.lgtm/config.json".to_string(),
+                title: Some("Settings".to_string()),
+                offset: None,
+            }));
         }
         "open-local-config" => {
-            events.dispatch(AppEvent::MenuOpenLocalConfig);
+            events.dispatch(AppEvent::OpenFile(OpenFileEvent {
+                path: ".lgtm/config.json".to_string(),
+                title: Some("Settings (project)".to_string()),
+                offset: None,
+            }));
         }
         _ => {}
     }
@@ -161,17 +169,13 @@ mod tests {
             #[test]
             fn should_dispatch_global_and_local_config_events_and_ignore_unknown_ids() {
                 // Arrange
-                let recorded: Arc<Mutex<Vec<&'static str>>> = Arc::new(Mutex::new(Vec::new()));
+                let recorded: Arc<Mutex<Vec<OpenFileEvent>>> = Arc::new(Mutex::new(Vec::new()));
                 let recorded_clone = recorded.clone();
                 let events = AppEvents::default();
-                events.set_handler(move |event| match event {
-                    AppEvent::MenuOpenGlobalConfig => {
-                        recorded_clone.lock().unwrap().push("open-global-config");
+                events.set_handler(move |event| {
+                    if let AppEvent::OpenFile(payload) = event {
+                        recorded_clone.lock().unwrap().push(payload);
                     }
-                    AppEvent::MenuOpenLocalConfig => {
-                        recorded_clone.lock().unwrap().push("open-local-config");
-                    }
-                    _ => {}
                 });
 
                 // Act
@@ -182,7 +186,18 @@ mod tests {
                 // Assert
                 assert_eq!(
                     *recorded.lock().unwrap(),
-                    vec!["open-global-config", "open-local-config"]
+                    vec![
+                        OpenFileEvent {
+                            path: "~/.lgtm/config.json".to_string(),
+                            title: Some("Settings".to_string()),
+                            offset: None,
+                        },
+                        OpenFileEvent {
+                            path: ".lgtm/config.json".to_string(),
+                            title: Some("Settings (project)".to_string()),
+                            offset: None,
+                        },
+                    ]
                 );
             }
         }

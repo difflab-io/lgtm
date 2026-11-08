@@ -57,9 +57,9 @@
       if ((event.metaKey || event.ctrlKey) && !event.altKey && isComma) {
         event.preventDefault()
         if (event.shiftKey || event.key === '<') {
-          void workspace.openLocalConfig()
+          void workspace.requestOpenFile('.lgtm/config.json', { title: 'Settings (project)' })
         } else {
-          void workspace.openGlobalConfig()
+          void workspace.requestOpenFile('~/.lgtm/config.json', { title: 'Settings' })
         }
       }
     }
@@ -100,11 +100,12 @@
           onConfigUpdated: (snapshot) => {
             workspace.settings.handleUpdated(snapshot)
           },
-          onOpenGlobalConfig: () => {
-            void workspace.openGlobalConfig()
-          },
-          onOpenLocalConfig: () => {
-            void workspace.openLocalConfig()
+          onOpenFile: (event) => {
+            void workspace.openPath(event.path, {
+              title: event.title ?? undefined,
+              offset: event.offset ?? undefined,
+              focus: true,
+            })
           },
         })
         .then((stops) => {

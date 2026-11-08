@@ -145,7 +145,7 @@ test.describe(
 
     test.describe('When there are errors in global settings', () => {
       test(
-        'should show inline error markers in the settings file and display the error in the LGTM IDE diagnostics buffer',
+        'should show inline error markers and diagnostics while still applying valid settings and default fallbacks',
         { tag: '@smoke' },
         async ({ page, workspace }) => {
           // Arrange
@@ -165,12 +165,13 @@ test.describe(
           await editorContent.click()
           await page.keyboard.press('ControlOrMeta+a')
           await page.keyboard.insertText(
-            '{\n  "appearance": {\n    "theme": "invalid-theme"\n  }\n}\n',
+            '{\n  "appearance": {\n    "theme": "invalid-theme"\n  },\n  "editor": {\n    "lineWrapping": "off"\n  }\n}\n',
           )
 
-          // Assert: inline error marker appears in the settings file and LSP status reports 1 error
+          // Assert: inline error marker appears, valid lineWrapping off is applied, and LSP status reports 1 error
           await expect(page.locator('.cm-lintRange-error').first()).toBeVisible()
           await expect(lspButton).toContainText('LSP: json (ready, 1 error)')
+          await expect(page.locator('.cm-content')).not.toHaveClass(/cm-lineWrapping/)
 
           // Act: open LGTM IDE diagnostics buffer
           await lspButton.click()
@@ -302,7 +303,7 @@ test.describe('Given global and local settings', { tag: ['@desktop', '@settings'
 
   test.describe('When there are errors in local settings', () => {
     test(
-      'should show inline error markers in the local settings file and display the error in the LGTM IDE diagnostics buffer',
+      'should show inline error markers and diagnostics while preserving valid local and global settings',
       { tag: '@smoke' },
       async ({ page, workspace }) => {
         // Arrange
@@ -312,7 +313,15 @@ test.describe('Given global and local settings', { tag: ['@desktop', '@settings'
         await mkdir(localConfigDir, { recursive: true })
         await writeFile(
           globalConfigPath,
-          JSON.stringify({ $schema: SCHEMA_URL, appearance: { theme: 'dark' } }, null, 2) + '\n',
+          JSON.stringify(
+            {
+              $schema: SCHEMA_URL,
+              appearance: { theme: 'dark' },
+              editor: { lineWrapping: 'auto' },
+            },
+            null,
+            2,
+          ) + '\n',
           'utf8',
         )
         await writeFile(
@@ -320,6 +329,7 @@ test.describe('Given global and local settings', { tag: ['@desktop', '@settings'
           JSON.stringify({ $schema: SCHEMA_URL, appearance: { theme: 'light' } }, null, 2) + '\n',
           'utf8',
         )
+        await page.reload()
         const lspButton = page.getByRole('button', { name: 'LSP status', exact: true })
         const tablist = page.getByRole('tablist', { name: 'Open editors' })
         await page.keyboard.press('Meta+Shift+,')
@@ -329,12 +339,14 @@ test.describe('Given global and local settings', { tag: ['@desktop', '@settings'
         await editorContent.click()
         await page.keyboard.press('ControlOrMeta+a')
         await page.keyboard.insertText(
-          '{\n  "appearance": {\n    "unknownLocalField": true\n  }\n}\n',
+          '{\n  "appearance": {\n    "unknownLocalField": true\n  },\n  "editor": {\n    "lineWrapping": "off"\n  }\n}\n',
         )
 
-        // Assert: inline error marker appears in local settings and LSP status reports 1 error
+        // Assert: inline error marker appears, valid local lineWrapping off and global dark theme apply
         await expect(page.locator('.cm-lintRange-error').first()).toBeVisible()
         await expect(lspButton).toContainText('LSP: json (ready, 1 error)')
+        await expect(page.locator('html')).toHaveClass(/dark/)
+        await expect(page.locator('.cm-content')).not.toHaveClass(/cm-lineWrapping/)
 
         // Act: open LGTM IDE diagnostics buffer
         await lspButton.click()
@@ -349,6 +361,57 @@ test.describe('Given global and local settings', { tag: ['@desktop', '@settings'
         await expect(page.locator('.cm-content')).toContainText('# LSP Diagnostics')
         await expect(page.locator('.cm-content')).toContainText('.lgtm/config.json:3:5 [ERROR]')
         await expect(page.locator('.cm-content')).toContainText('unknownLocalField')
+      },
+    )
+  })
+
+  test.describe('When there are errors in both global and local settings', () => {
+    test(
+      'should show diagnostics and fall back to default settings so a valid config is always active',
+      { tag: '@smoke' },
+      async ({ page, workspace }) => {
+        // Arrange
+        const globalConfigPath = join(workspace.lgtmHomeDir, 'config.json')
+        const localConfigDir = join(workspace.root, '.lgtm')
+        const localConfigPath = join(localConfigDir, 'config.json')
+        await mkdir(localConfigDir, { recursive: true })
+        await writeFile(
+          globalConfigPath,
+          '{\n  "appearance": {\n    "theme": "invalid-theme"\n  }\n}\n',
+          'utf8',
+        )
+        await writeFile(
+          localConfigPath,
+          '{\n  "appearance": {\n    "unknownLocalField": true\n  }\n}\n',
+          'utf8',
+        )
+        await page.reload()
+        const lspButton = page.getByRole('button', { name: 'LSP status', exact: true })
+        const tablist = page.getByRole('tablist', { name: 'Open editors' })
+
+        // Act: open both settings files
+        await page.keyboard.press('Meta+,')
+        await expect(page.locator('.cm-lintRange-error').first()).toBeVisible()
+        await page.keyboard.press('Meta+Shift+,')
+        await expect(page.locator('.cm-lintRange-error').first()).toBeVisible()
+
+        // Assert: default lineWrapping ("auto") and system dark theme fallback remain active
+        await expect(page.locator('.cm-content')).toHaveClass(/cm-lineWrapping/)
+        await expect(page.locator('html')).toHaveClass(/dark/)
+        await expect(lspButton).toContainText('LSP: json (ready, 2 errors)')
+
+        // Act: open LGTM IDE diagnostics buffer
+        await lspButton.click()
+        const menu = page.getByRole('menu', { name: 'LSP servers and diagnostics' })
+        await expect(menu).toBeVisible()
+        await menu.getByRole('menuitem', { name: 'Open diagnostics buffer', exact: true }).click()
+
+        // Assert: both global and local errors are reported in the diagnostics buffer
+        await expect(
+          tablist.getByRole('tab', { name: 'LSP Diagnostics', exact: true }),
+        ).toHaveAttribute('aria-selected', 'true')
+        await expect(page.locator('.cm-content')).toContainText('~/.lgtm/config.json:3:5 [ERROR]')
+        await expect(page.locator('.cm-content')).toContainText('.lgtm/config.json:3:5 [ERROR]')
       },
     )
   })

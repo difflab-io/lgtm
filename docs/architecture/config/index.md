@@ -8,11 +8,10 @@
 
 ### Functional
 
-- Unified configuration model: Load defaults (`LgtmConfig::default_presets()`), deep-merge `~/.lgtm/config.json` (`LgtmConfigPatch`), and overlay leaf-level overrides from `<workspace>/.lgtm/config.json` inside `ConfigService` (`get_config` and `get_config_snapshot`).
-- Schema and TypeScript parity: Derive `schemars::JsonSchema` and `specta::Type` on `LgtmConfig`, `LgtmConfigPatch`, and all nested section structs so `schemas/config.schema.json` and `apps/lgtm-web/src/lib/gen/bindings.ts` share a single Rust source of truth.
-- Clear boundary between `config.json` and `mise.toml`: Persist all user and runtime settings in `config.json` via `lgtm-config`, while delegating global and workspace developer tools and tasks (`~/.lgtm/mise.toml` and `<workspace>/.lgtm/mise.toml`) to `lgtm-env`.
-- Language and root discovery: Resolve a file's language from its extension and walk ancestor directories up to the workspace boundary to find the nearest language root marker (`Cargo.toml`, `tsconfig.json`, `package.json`, `pyproject.toml`, `requirements.txt`, `go.mod`, `.marksman.toml`).
-- Git worktree hygiene: Create `<workspace>/.lgtm/` and register `.lgtm/` idempotently in `<git-dir>/info/exclude` (supporting both standard `.git` directories and worktree `.git` pointer files) without modifying tracked `.gitignore` files.
+- Load built-in language and tool presets, merge `~/.lgtm/config.json` (or `$LGTM_HOME/config.json`), and overlay leaf-level overrides from `<workspace>/.lgtm/config.json`.
+- Generate `schemas/config.schema.json` and TypeScript bindings from the unified configuration model.
+- Resolve a file's language from its extension and walk ancestor directories up to the workspace root to find the nearest project root marker.
+- Create `<workspace>/.lgtm/` and register `.lgtm/` in `<git-dir>/info/exclude` without modifying tracked `.gitignore` files.
 
 ### Non-Functional
 

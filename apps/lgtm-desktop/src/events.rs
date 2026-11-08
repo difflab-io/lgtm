@@ -4,10 +4,24 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use lgtm_lsp::{LspFileDiagnosticsEvent, LspServerStatusEvent};
+use serde::{Deserialize, Serialize};
+use specta::Type;
 use tauri::Emitter;
 
 type WebviewSink = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
 type EventHandler = Arc<dyn Fn(AppEvent) + Send + Sync>;
+
+/// Payload emitted on `workspace-open-file` instructing the webview to open a file tab with an optional custom title and cursor offset.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenFileEvent {
+    /// Workspace-relative or config file path to open (`~/.lgtm/config.json`, `.lgtm/config.json`, or relative path).
+    pub path: String,
+    /// Optional custom tab title (such as `"Settings"` or `"Settings (project)"`).
+    pub title: Option<String>,
+    /// Optional UTF-16 character offset to position the cursor at after opening.
+    pub offset: Option<u32>,
+}
 
 /// Strongly typed backend domain and lifecycle event dispatched through [`AppEvents`].
 #[derive(Clone, Debug)]
@@ -41,10 +55,8 @@ pub enum AppEvent {
     LspStatus(LspServerStatusEvent),
     /// A language server or config validator published diagnostics for a file.
     LspDiagnostics(LspFileDiagnosticsEvent),
-    /// The user selected `Settings…` (`CmdOrCtrl+,`) in the native OS menu.
-    MenuOpenGlobalConfig,
-    /// The user selected `Project Settings…` (`CmdOrCtrl+Shift+,`) in the native OS menu.
-    MenuOpenLocalConfig,
+    /// A request to open a file in the webview editor with an optional custom tab title and offset.
+    OpenFile(OpenFileEvent),
     /// The OS requested application exit (`RunEvent::ExitRequested`).
     QuitRequested,
 }
@@ -141,8 +153,8 @@ mod tests {
                     AppEvent::FileClosed { path, .. } => {
                         recorded_closed.lock().unwrap().push(path);
                     }
-                    AppEvent::MenuOpenGlobalConfig => {
-                        forward_events.emit_to_webview("workspace-open-global-config", &());
+                    AppEvent::OpenFile(payload) => {
+                        forward_events.emit_to_webview("workspace-open-file", &payload);
                     }
                     _ => {}
                 });
@@ -152,7 +164,11 @@ mod tests {
                     root: PathBuf::from("/workspace"),
                     path: PathBuf::from("/workspace/README.md"),
                 });
-                events.dispatch(AppEvent::MenuOpenGlobalConfig);
+                events.dispatch(AppEvent::OpenFile(OpenFileEvent {
+                    path: "~/.lgtm/config.json".to_string(),
+                    title: Some("Settings".to_string()),
+                    offset: None,
+                }));
 
                 // Assert
                 assert_eq!(
@@ -160,10 +176,7 @@ mod tests {
                     &[PathBuf::from("/workspace/README.md")]
                 );
                 assert_eq!(webview_log.lock().unwrap().len(), 1);
-                assert_eq!(
-                    webview_log.lock().unwrap()[0].0,
-                    "workspace-open-global-config"
-                );
+                assert_eq!(webview_log.lock().unwrap()[0].0, "workspace-open-file");
             }
         }
     }

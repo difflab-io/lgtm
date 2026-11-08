@@ -1,8 +1,6 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use serde::de::DeserializeOwned;
-
 use crate::error::{LgtmConfigError, Result};
 use crate::models::config::{LanguageConfig, LgtmConfig, LgtmConfigPatch, ResolvedConfigSnapshot};
 
@@ -93,8 +91,8 @@ impl ConfigService {
         workspace_root: Option<&Path>,
     ) -> Result<ResolvedConfigSnapshot> {
         let global_path = self.get_global_config_path();
-        let global_patch: LgtmConfigPatch = if global_path.is_file() {
-            Self::read_scoped_file(ConfigScope::Global, &global_path)?
+        let global_patch = if global_path.is_file() {
+            Self::read_scoped_patch(ConfigScope::Global, &global_path)
         } else {
             LgtmConfigPatch::default()
         };
@@ -103,7 +101,7 @@ impl ConfigService {
             Some(ws) => {
                 let p_path = Self::get_project_config_path(ws);
                 let patch = if p_path.is_file() {
-                    Some(Self::read_scoped_file(ConfigScope::Project, &p_path)?)
+                    Some(Self::read_scoped_patch(ConfigScope::Project, &p_path))
                 } else {
                     None
                 };
@@ -273,42 +271,33 @@ impl ConfigService {
         config
     }
 
-    fn read_scoped_file<T: DeserializeOwned + Default>(
-        scope: ConfigScope,
-        path: &Path,
-    ) -> Result<T> {
-        let raw = std::fs::read_to_string(path)
-            .map_err(|source| Self::scoped_io_error(scope, path, source))?;
+    fn read_scoped_patch(scope: ConfigScope, path: &Path) -> LgtmConfigPatch {
+        let raw = match std::fs::read_to_string(path) {
+            Ok(raw) => raw,
+            Err(err) => {
+                tracing::warn!(
+                    scope = ?scope,
+                    path = %path.display(),
+                    error = %err,
+                    "failed to read config file; falling back to defaults"
+                );
+                return LgtmConfigPatch::default();
+            }
+        };
         if raw.trim().is_empty() {
-            return Ok(T::default());
+            return LgtmConfigPatch::default();
         }
-        serde_json::from_str::<T>(&raw)
-            .map_err(|err| Self::scoped_parse_error(scope, path, err.to_string()))
-    }
-
-    fn scoped_io_error(scope: ConfigScope, path: &Path, source: std::io::Error) -> LgtmConfigError {
-        match scope {
-            ConfigScope::Global => LgtmConfigError::GlobalConfigIo {
-                path: path.to_path_buf(),
-                source,
-            },
-            ConfigScope::Project => LgtmConfigError::ProjectConfigIo {
-                path: path.to_path_buf(),
-                source,
-            },
-        }
-    }
-
-    fn scoped_parse_error(scope: ConfigScope, path: &Path, message: String) -> LgtmConfigError {
-        match scope {
-            ConfigScope::Global => LgtmConfigError::GlobalConfigParse {
-                path: path.to_path_buf(),
-                message,
-            },
-            ConfigScope::Project => LgtmConfigError::ProjectConfigParse {
-                path: path.to_path_buf(),
-                message,
-            },
+        match serde_json::from_str::<LgtmConfigPatch>(&raw) {
+            Ok(patch) => patch,
+            Err(err) => {
+                tracing::warn!(
+                    scope = ?scope,
+                    path = %path.display(),
+                    error = %err,
+                    "config file contains invalid entries; ignoring invalid properties"
+                );
+                LgtmConfigPatch::from_str_lenient(&raw)
+            }
         }
     }
 

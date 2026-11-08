@@ -26,11 +26,6 @@ pub struct WorkspaceService {
 }
 
 impl WorkspaceService {
-    /// Selects the default workspace under the supplied home directory.
-    pub fn from_home(home: PathBuf) -> Self {
-        Self::new(home, None)
-    }
-
     /// Creates a workspace service rooted at `workspace_path` when provided and valid on disk (otherwise `<home>/.lgtm/workspace`).
     pub fn new(home: PathBuf, workspace_path: Option<PathBuf>) -> Self {
         let lgtm_home = home.join(".lgtm");
@@ -82,23 +77,6 @@ impl WorkspaceService {
         })
     }
 
-    /// Ensures the global `~/.lgtm/config.json` file exists and reads its UTF-8 content.
-    pub fn open_global_config(&self) -> Result<FileContent> {
-        self.ensure_global_config_file()?;
-        self.get_file_content("~/.lgtm/config.json")
-    }
-
-    /// Ensures the global `~/.lgtm/config.json` exists and reads `.lgtm/config.json`, or returns an empty JSON temp buffer if `.lgtm/config.json` is absent.
-    pub fn open_local_config(&self) -> Result<FileContent> {
-        self.ensure_global_config_file()?;
-        let root = self.get_root()?;
-        let config_path = root.join(".lgtm").join("config.json");
-        if config_path.is_file() {
-            return self.get_file_content(".lgtm/config.json");
-        }
-        FileContent::from_bytes(b"{\n}\n".to_vec())
-    }
-
     /// Returns whether `path` points to the global `~/.lgtm/config.json` or active workspace `.lgtm/config.json`.
     pub fn is_config_path(&self, path: &Path) -> bool {
         let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
@@ -148,10 +126,19 @@ impl WorkspaceService {
         Ok(entries)
     }
 
-    /// Reads UTF-8 text and revision hash for a workspace-relative file.
+    /// Reads UTF-8 text and revision hash for a workspace-relative or config file.
     pub fn get_file_content(&self, relative: &str) -> Result<FileContent> {
         if relative.is_empty() {
             return Err(error("unsupported", "Choose a file inside the workspace."));
+        }
+        if self.is_global_config_reference(relative) {
+            self.ensure_global_config_file()?;
+        } else if relative == ".lgtm/config.json" {
+            self.ensure_global_config_file()?;
+            let root = self.get_root()?;
+            if !root.join(".lgtm").join("config.json").is_file() {
+                return FileContent::from_bytes(b"{\n}\n".to_vec());
+            }
         }
         let path = self.get_entry_path(relative)?;
         if !fs::metadata(&path)?.is_file() {
@@ -470,7 +457,7 @@ mod tests {
     impl WorkspaceFixture {
         fn new() -> Self {
             let home = TempDir::new().unwrap();
-            let service = WorkspaceService::from_home(home.path().to_path_buf());
+            let service = WorkspaceService::new(home.path().to_path_buf(), None);
             Self { home, service }
         }
 
