@@ -146,51 +146,35 @@ impl ConfigService {
             }
         });
 
-        match (scope, workspace_root) {
-            (Some(ConfigScope::Project), Some(ws)) => {
-                self.ensure_workspace_dir(ws)?;
-                let p_path = Self::get_project_config_path(ws);
-                let mut proj = existing_project.unwrap_or_else(|| LgtmConfigPatch {
-                    schema: Some(DEFAULT_SCHEMA_URL.to_string()),
-                    ..LgtmConfigPatch::default()
-                });
-                proj.merge_patch(patch);
-                if proj.schema.is_none() {
-                    proj.schema = Some(DEFAULT_SCHEMA_URL.to_string());
-                }
-                Self::write_scoped_patch(ConfigScope::Project, &p_path, &proj)?;
+        let (global_overlay, project_overlay) = match (scope, workspace_root) {
+            (Some(ConfigScope::Project), Some(_)) => (None, Some(patch)),
+            (Some(ConfigScope::Global), _) | (_, None) => (Some(patch), None),
+            (None, Some(_)) => {
+                let (g, p) = patch.split_by_project_overrides(existing_project.as_ref());
+                ((!g.is_empty()).then_some(g), (!p.is_empty()).then_some(p))
             }
-            (Some(ConfigScope::Global), _) | (_, None) => {
-                global_patch.merge_patch(patch);
-                if global_patch.schema.is_none() {
-                    global_patch.schema = Some(DEFAULT_SCHEMA_URL.to_string());
-                }
-                Self::write_scoped_patch(ConfigScope::Global, &global_path, &global_patch)?;
+        };
+
+        if let (Some(overlay), Some(ws)) = (project_overlay, workspace_root) {
+            self.ensure_workspace_dir(ws)?;
+            let p_path = Self::get_project_config_path(ws);
+            let mut proj = existing_project.unwrap_or_else(|| LgtmConfigPatch {
+                schema: Some(DEFAULT_SCHEMA_URL.to_string()),
+                ..LgtmConfigPatch::default()
+            });
+            proj.merge_patch(overlay);
+            if proj.schema.is_none() {
+                proj.schema = Some(DEFAULT_SCHEMA_URL.to_string());
             }
-            (None, Some(ws)) => {
-                let (global_overlay, project_overlay) =
-                    patch.split_by_project_overrides(existing_project.as_ref());
-                if !project_overlay.is_empty() {
-                    self.ensure_workspace_dir(ws)?;
-                    let p_path = Self::get_project_config_path(ws);
-                    let mut proj = existing_project.unwrap_or_else(|| LgtmConfigPatch {
-                        schema: Some(DEFAULT_SCHEMA_URL.to_string()),
-                        ..LgtmConfigPatch::default()
-                    });
-                    proj.merge_patch(project_overlay);
-                    if proj.schema.is_none() {
-                        proj.schema = Some(DEFAULT_SCHEMA_URL.to_string());
-                    }
-                    Self::write_scoped_patch(ConfigScope::Project, &p_path, &proj)?;
-                }
-                if !global_overlay.is_empty() {
-                    global_patch.merge_patch(global_overlay);
-                    if global_patch.schema.is_none() {
-                        global_patch.schema = Some(DEFAULT_SCHEMA_URL.to_string());
-                    }
-                    Self::write_scoped_patch(ConfigScope::Global, &global_path, &global_patch)?;
-                }
+            Self::write_scoped_patch(ConfigScope::Project, &p_path, &proj)?;
+        }
+
+        if let Some(overlay) = global_overlay {
+            global_patch.merge_patch(overlay);
+            if global_patch.schema.is_none() {
+                global_patch.schema = Some(DEFAULT_SCHEMA_URL.to_string());
             }
+            Self::write_scoped_patch(ConfigScope::Global, &global_path, &global_patch)?;
         }
 
         self.get_config_snapshot(workspace_root)

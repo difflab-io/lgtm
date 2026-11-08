@@ -71,16 +71,6 @@
         event.preventDefault()
         event.stopPropagation()
         hotkeys.setCommandOpen(false)
-        return
-      }
-      const isComma = event.key === ',' || event.key === '<' || event.code === 'Comma'
-      if ((event.metaKey || event.ctrlKey) && !event.altKey && isComma) {
-        event.preventDefault()
-        if (event.shiftKey || event.key === '<') {
-          void workspace.openPath('.lgtm/config.json', { title: 'Settings (project)', focus: true })
-        } else {
-          void workspace.openPath('~/.lgtm/config.json', { title: 'Settings', focus: true })
-        }
       }
     }
     window.addEventListener('keydown', handleKeydown, true)

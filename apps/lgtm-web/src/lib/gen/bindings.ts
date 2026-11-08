@@ -129,17 +129,17 @@ export type KeybindingSettings = {
 	clickToInsert?: boolean,
 };
 
-/**  Sparse modal keybinding and command surface overrides persisted under `keybindings.*` in `config.json`. */
+/**  Resolved modal keybinding and command surface settings (`keybindings.*`). */
 export type KeybindingSettingsPatch = {
-	/**  Primary command surface (`"menu"` or `"palette"`). */
+	/**  Primary command surface (`"menu"` by default, or `"palette"`). */
 	commandStyle?: CommandStyle | null,
-	/**  Modal editing preset (`"helix"`, `"vim"`, or `"kakoune"`). */
+	/**  Modal editing preset (`"helix"` by default, `"vim"`, or `"kakoune"`). */
 	preset?: KeybindPreset | null,
-	/**  Restrict modal handling to the `Space` leader key and keep the editor in insert mode. */
+	/**  Restrict modal handling to the `Space` leader key and keep the editor in insert mode (`false` by default). */
 	leaderOnly?: boolean | null,
-	/**  Render active pane focus outline when switching panes with the keyboard. */
+	/**  Render active pane focus outline when switching panes with the keyboard (`true` by default). */
 	paneOutline?: boolean | null,
-	/**  Enter `insert` mode when clicking inside the code editor. */
+	/**  Enter `insert` mode when clicking inside the code editor (`true` by default). */
 	clickToInsert?: boolean | null,
 };
 

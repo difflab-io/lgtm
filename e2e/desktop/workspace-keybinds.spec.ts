@@ -130,8 +130,10 @@ test.describe('Given an open file in the code editor', { tag: ['@desktop', '@key
       'should start in normal mode with a block cursor and show helix · normal in the status bar',
       { tag: '@smoke' },
       async ({ page }) => {
-        // Arrange & Act
+        // Arrange
         await entry(page, 'Drafts').getByRole('button', { name: 'Drafts', exact: true }).focus()
+
+        // Act
         await page.keyboard.press('l')
         await page.keyboard.press('l')
         await page.keyboard.press('Enter')
@@ -260,24 +262,38 @@ test.describe('Given WhichKey and the command surfaces', { tag: ['@desktop', '@k
         // Act: press f then s to save file and close WhichKey
         await page.keyboard.press('f')
         await page.keyboard.press('s')
+
+        // Assert
         await expect(whichKeyPanel(page)).toBeHidden()
 
-        // Act: press Space then e to toggle sidebar closed and open again
+        // Act: press Space then e to toggle sidebar closed
         await page.keyboard.press('Space')
         await page.keyboard.press('e')
+
+        // Assert
         await expect
           .poll(async () => (await page.locator('.document-pane').boundingBox())?.x)
           .toBe(0)
+
+        // Act: press Space then e to toggle sidebar open again
         await page.keyboard.press('Space')
         await page.keyboard.press('e')
+
+        // Assert
         await expect
           .poll(async () => (await page.locator('.document-pane').boundingBox())?.x ?? 0)
           .toBeGreaterThan(0)
 
-        // Act: press ? to open WhichKeyExplorer and Escape to close
+        // Act: press ? to open WhichKeyExplorer
         await page.keyboard.press('?')
+
+        // Assert
         await expect(whichKeyExplorer(page)).toBeVisible()
+
+        // Act: press Escape to close WhichKeyExplorer
         await page.keyboard.press('Escape')
+
+        // Assert
         await expect(whichKeyExplorer(page)).toBeHidden()
       },
     )
@@ -293,8 +309,14 @@ test.describe('Given WhichKey and the command surfaces', { tag: ['@desktop', '@k
 
         // Act: press : in normal mode to open CommandMenu
         await page.keyboard.press(':')
+
+        // Assert
         await expect(commandMenu(page)).toBeVisible()
+
+        // Act: close CommandMenu with Escape
         await page.keyboard.press('Escape')
+
+        // Assert
         await expect(commandMenu(page)).toBeHidden()
 
         // Act: press Meta+k to open default CommandMenu and switch command-style to palette
@@ -302,15 +324,22 @@ test.describe('Given WhichKey and the command surfaces', { tag: ['@desktop', '@k
         await expect(commandMenu(page)).toBeVisible()
         await commandMenuInput(page).fill('command-style palette')
         await commandMenuInput(page).press('Enter')
+
+        // Assert
         await expect(commandMenu(page)).toBeHidden()
 
-        // Act: press Meta+k again — now opens CommandPalette, while : still opens CommandMenu
+        // Act: press Meta+k again
         await page.keyboard.press('Meta+k')
+
+        // Assert: Meta+k now opens CommandPalette
         await expect(commandPalette(page)).toBeVisible()
+
+        // Act: close CommandPalette and press :
         await commandPaletteInput(page).press('Escape')
         await expect(commandPalette(page)).toBeHidden()
-
         await page.keyboard.press(':')
+
+        // Assert: : still opens CommandMenu
         await expect(commandMenu(page)).toBeVisible()
         await page.keyboard.press('Escape')
         await expect(commandMenu(page)).toBeHidden()

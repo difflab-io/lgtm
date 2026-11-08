@@ -76,6 +76,13 @@ pub enum KeybindPreset {
 }
 
 /// Resolved modal keybinding and command surface settings (`keybindings.*`).
+#[optfield(
+    pub KeybindingSettingsPatch,
+    doc,
+    attrs = add(derive(Default)),
+    field_doc,
+    field_attrs = (serde(skip_serializing_if = "Option::is_none")),
+)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Type)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct KeybindingSettings {
@@ -89,27 +96,6 @@ pub struct KeybindingSettings {
     pub pane_outline: bool,
     /// Enter `insert` mode when clicking inside the code editor (`true` by default).
     pub click_to_insert: bool,
-}
-
-/// Sparse modal keybinding and command surface overrides persisted under `keybindings.*` in `config.json`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Type)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct KeybindingSettingsPatch {
-    /// Primary command surface (`"menu"` or `"palette"`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub command_style: Option<CommandStyle>,
-    /// Modal editing preset (`"helix"`, `"vim"`, or `"kakoune"`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub preset: Option<KeybindPreset>,
-    /// Restrict modal handling to the `Space` leader key and keep the editor in insert mode.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub leader_only: Option<bool>,
-    /// Render active pane focus outline when switching panes with the keyboard.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pane_outline: Option<bool>,
-    /// Enter `insert` mode when clicking inside the code editor.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub click_to_insert: Option<bool>,
 }
 
 /// Resolved appearance settings section (`appearance.*`).
@@ -599,34 +585,6 @@ impl LgtmConfig {
     }
 }
 
-impl Default for LgtmConfig {
-    fn default() -> Self {
-        Self::default_presets()
-    }
-}
-
-impl Default for KeybindingSettings {
-    fn default() -> Self {
-        Self {
-            command_style: CommandStyle::Menu,
-            preset: KeybindPreset::Helix,
-            leader_only: false,
-            pane_outline: true,
-            click_to_insert: true,
-        }
-    }
-}
-
-impl Default for LspSettings {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            auto_install: true,
-            request_timeout_ms: 15_000,
-        }
-    }
-}
-
 impl LgtmConfigPatch {
     // Public ------------------------------------------------------------------
 
@@ -766,200 +724,152 @@ impl LgtmConfigPatch {
         if let Some(app) = &self.appearance
             && let Some(theme) = app.theme
         {
-            if proj.appearance.as_ref().and_then(|a| a.theme).is_some() {
-                project_out
-                    .appearance
-                    .get_or_insert_with(AppearanceSettingsPatch::default)
-                    .theme = Some(theme);
+            let out = if proj.appearance.as_ref().and_then(|a| a.theme).is_some() {
+                &mut project_out
             } else {
-                global_out
-                    .appearance
-                    .get_or_insert_with(AppearanceSettingsPatch::default)
-                    .theme = Some(theme);
-            }
+                &mut global_out
+            };
+            out.appearance
+                .get_or_insert_with(AppearanceSettingsPatch::default)
+                .theme = Some(theme);
         }
 
         if let Some(ws) = &self.workspace {
+            let proj_ws = proj.workspace.as_ref();
             if let Some(active_root) = &ws.active_root {
-                if proj
-                    .workspace
-                    .as_ref()
-                    .and_then(|w| w.active_root.as_ref())
-                    .is_some()
-                {
-                    project_out
-                        .workspace
-                        .get_or_insert_with(WorkspaceSettingsPatch::default)
-                        .active_root = Some(active_root.clone());
+                let out = if proj_ws.and_then(|w| w.active_root.as_ref()).is_some() {
+                    &mut project_out
                 } else {
-                    global_out
-                        .workspace
-                        .get_or_insert_with(WorkspaceSettingsPatch::default)
-                        .active_root = Some(active_root.clone());
-                }
+                    &mut global_out
+                };
+                out.workspace
+                    .get_or_insert_with(WorkspaceSettingsPatch::default)
+                    .active_root = Some(active_root.clone());
             }
             if let Some(recent_roots) = &ws.recent_roots {
-                if proj
-                    .workspace
-                    .as_ref()
-                    .and_then(|w| w.recent_roots.as_ref())
-                    .is_some()
-                {
-                    project_out
-                        .workspace
-                        .get_or_insert_with(WorkspaceSettingsPatch::default)
-                        .recent_roots = Some(recent_roots.clone());
+                let out = if proj_ws.and_then(|w| w.recent_roots.as_ref()).is_some() {
+                    &mut project_out
                 } else {
-                    global_out
-                        .workspace
-                        .get_or_insert_with(WorkspaceSettingsPatch::default)
-                        .recent_roots = Some(recent_roots.clone());
-                }
+                    &mut global_out
+                };
+                out.workspace
+                    .get_or_insert_with(WorkspaceSettingsPatch::default)
+                    .recent_roots = Some(recent_roots.clone());
             }
         }
 
         if let Some(ed) = &self.editor
             && let Some(line_wrapping) = ed.line_wrapping
         {
-            if proj.editor.as_ref().and_then(|e| e.line_wrapping).is_some() {
-                project_out
-                    .editor
-                    .get_or_insert_with(EditorSettingsPatch::default)
-                    .line_wrapping = Some(line_wrapping);
+            let out = if proj.editor.as_ref().and_then(|e| e.line_wrapping).is_some() {
+                &mut project_out
             } else {
-                global_out
-                    .editor
-                    .get_or_insert_with(EditorSettingsPatch::default)
-                    .line_wrapping = Some(line_wrapping);
-            }
+                &mut global_out
+            };
+            out.editor
+                .get_or_insert_with(EditorSettingsPatch::default)
+                .line_wrapping = Some(line_wrapping);
         }
 
         if let Some(kb) = &self.keybindings {
             let proj_kb = proj.keybindings.as_ref();
             if let Some(command_style) = kb.command_style {
-                if proj_kb.and_then(|k| k.command_style).is_some() {
-                    project_out
-                        .keybindings
-                        .get_or_insert_with(KeybindingSettingsPatch::default)
-                        .command_style = Some(command_style);
+                let out = if proj_kb.and_then(|k| k.command_style).is_some() {
+                    &mut project_out
                 } else {
-                    global_out
-                        .keybindings
-                        .get_or_insert_with(KeybindingSettingsPatch::default)
-                        .command_style = Some(command_style);
-                }
+                    &mut global_out
+                };
+                out.keybindings
+                    .get_or_insert_with(KeybindingSettingsPatch::default)
+                    .command_style = Some(command_style);
             }
             if let Some(preset) = kb.preset {
-                if proj_kb.and_then(|k| k.preset).is_some() {
-                    project_out
-                        .keybindings
-                        .get_or_insert_with(KeybindingSettingsPatch::default)
-                        .preset = Some(preset);
+                let out = if proj_kb.and_then(|k| k.preset).is_some() {
+                    &mut project_out
                 } else {
-                    global_out
-                        .keybindings
-                        .get_or_insert_with(KeybindingSettingsPatch::default)
-                        .preset = Some(preset);
-                }
+                    &mut global_out
+                };
+                out.keybindings
+                    .get_or_insert_with(KeybindingSettingsPatch::default)
+                    .preset = Some(preset);
             }
             if let Some(leader_only) = kb.leader_only {
-                if proj_kb.and_then(|k| k.leader_only).is_some() {
-                    project_out
-                        .keybindings
-                        .get_or_insert_with(KeybindingSettingsPatch::default)
-                        .leader_only = Some(leader_only);
+                let out = if proj_kb.and_then(|k| k.leader_only).is_some() {
+                    &mut project_out
                 } else {
-                    global_out
-                        .keybindings
-                        .get_or_insert_with(KeybindingSettingsPatch::default)
-                        .leader_only = Some(leader_only);
-                }
+                    &mut global_out
+                };
+                out.keybindings
+                    .get_or_insert_with(KeybindingSettingsPatch::default)
+                    .leader_only = Some(leader_only);
             }
             if let Some(pane_outline) = kb.pane_outline {
-                if proj_kb.and_then(|k| k.pane_outline).is_some() {
-                    project_out
-                        .keybindings
-                        .get_or_insert_with(KeybindingSettingsPatch::default)
-                        .pane_outline = Some(pane_outline);
+                let out = if proj_kb.and_then(|k| k.pane_outline).is_some() {
+                    &mut project_out
                 } else {
-                    global_out
-                        .keybindings
-                        .get_or_insert_with(KeybindingSettingsPatch::default)
-                        .pane_outline = Some(pane_outline);
-                }
+                    &mut global_out
+                };
+                out.keybindings
+                    .get_or_insert_with(KeybindingSettingsPatch::default)
+                    .pane_outline = Some(pane_outline);
             }
             if let Some(click_to_insert) = kb.click_to_insert {
-                if proj_kb.and_then(|k| k.click_to_insert).is_some() {
-                    project_out
-                        .keybindings
-                        .get_or_insert_with(KeybindingSettingsPatch::default)
-                        .click_to_insert = Some(click_to_insert);
+                let out = if proj_kb.and_then(|k| k.click_to_insert).is_some() {
+                    &mut project_out
                 } else {
-                    global_out
-                        .keybindings
-                        .get_or_insert_with(KeybindingSettingsPatch::default)
-                        .click_to_insert = Some(click_to_insert);
-                }
+                    &mut global_out
+                };
+                out.keybindings
+                    .get_or_insert_with(KeybindingSettingsPatch::default)
+                    .click_to_insert = Some(click_to_insert);
             }
         }
 
         if let Some(lsp) = &self.lsp {
             let proj_lsp = proj.lsp.as_ref();
             if let Some(enabled) = lsp.enabled {
-                if proj_lsp.and_then(|l| l.enabled).is_some() {
-                    project_out
-                        .lsp
-                        .get_or_insert_with(LspSettingsPatch::default)
-                        .enabled = Some(enabled);
+                let out = if proj_lsp.and_then(|l| l.enabled).is_some() {
+                    &mut project_out
                 } else {
-                    global_out
-                        .lsp
-                        .get_or_insert_with(LspSettingsPatch::default)
-                        .enabled = Some(enabled);
-                }
+                    &mut global_out
+                };
+                out.lsp
+                    .get_or_insert_with(LspSettingsPatch::default)
+                    .enabled = Some(enabled);
             }
             if let Some(auto_install) = lsp.auto_install {
-                if proj_lsp.and_then(|l| l.auto_install).is_some() {
-                    project_out
-                        .lsp
-                        .get_or_insert_with(LspSettingsPatch::default)
-                        .auto_install = Some(auto_install);
+                let out = if proj_lsp.and_then(|l| l.auto_install).is_some() {
+                    &mut project_out
                 } else {
-                    global_out
-                        .lsp
-                        .get_or_insert_with(LspSettingsPatch::default)
-                        .auto_install = Some(auto_install);
-                }
+                    &mut global_out
+                };
+                out.lsp
+                    .get_or_insert_with(LspSettingsPatch::default)
+                    .auto_install = Some(auto_install);
             }
             if let Some(request_timeout_ms) = lsp.request_timeout_ms {
-                if proj_lsp.and_then(|l| l.request_timeout_ms).is_some() {
-                    project_out
-                        .lsp
-                        .get_or_insert_with(LspSettingsPatch::default)
-                        .request_timeout_ms = Some(request_timeout_ms);
+                let out = if proj_lsp.and_then(|l| l.request_timeout_ms).is_some() {
+                    &mut project_out
                 } else {
-                    global_out
-                        .lsp
-                        .get_or_insert_with(LspSettingsPatch::default)
-                        .request_timeout_ms = Some(request_timeout_ms);
-                }
+                    &mut global_out
+                };
+                out.lsp
+                    .get_or_insert_with(LspSettingsPatch::default)
+                    .request_timeout_ms = Some(request_timeout_ms);
             }
         }
 
         if let Some(langs) = &self.languages {
             let proj_langs = proj.languages.as_ref();
             for (k, v) in langs {
-                if proj_langs.is_some_and(|m| m.contains_key(k)) {
-                    project_out
-                        .languages
-                        .get_or_insert_with(BTreeMap::new)
-                        .insert(k.clone(), v.clone());
+                let out = if proj_langs.is_some_and(|m| m.contains_key(k)) {
+                    &mut project_out
                 } else {
-                    global_out
-                        .languages
-                        .get_or_insert_with(BTreeMap::new)
-                        .insert(k.clone(), v.clone());
-                }
+                    &mut global_out
+                };
+                out.languages
+                    .get_or_insert_with(BTreeMap::new)
+                    .insert(k.clone(), v.clone());
             }
         }
 
@@ -1067,6 +977,34 @@ impl LgtmConfigPatch {
             keybindings,
             lsp,
             languages,
+        }
+    }
+}
+
+impl Default for LgtmConfig {
+    fn default() -> Self {
+        Self::default_presets()
+    }
+}
+
+impl Default for KeybindingSettings {
+    fn default() -> Self {
+        Self {
+            command_style: CommandStyle::Menu,
+            preset: KeybindPreset::Helix,
+            leader_only: false,
+            pane_outline: true,
+            click_to_insert: true,
+        }
+    }
+}
+
+impl Default for LspSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto_install: true,
+            request_timeout_ms: 15_000,
         }
     }
 }

@@ -31,6 +31,68 @@ function leaf(
   return { key, label, category, commandId, description, ...(mode ? { mode } : {}) }
 }
 
+interface BooleanSettingCommandOptions {
+  value: string
+  aliases?: string[]
+  label: string
+  actionNoun?: string
+  description: string
+  shortcut?: CommandNode['shortcut']
+  current: boolean
+  apply: (next: boolean) => void
+}
+
+function booleanSettingCommand({
+  value,
+  aliases,
+  label,
+  actionNoun = label,
+  description,
+  shortcut,
+  current,
+  apply,
+}: BooleanSettingCommandOptions): CommandNode {
+  return {
+    value,
+    command: value,
+    ...(aliases ? { aliases } : {}),
+    label,
+    description,
+    group: 'Preferences',
+    shortcut,
+    children: [
+      {
+        value: `${value}-on`,
+        command: 'on',
+        aliases: ['true', 'enable'],
+        label: `Enable ${actionNoun}`,
+        active: current,
+        onSelect: () => {
+          apply(true)
+        },
+      },
+      {
+        value: `${value}-off`,
+        command: 'off',
+        aliases: ['false', 'disable'],
+        label: `Disable ${actionNoun}`,
+        active: !current,
+        onSelect: () => {
+          apply(false)
+        },
+      },
+      {
+        value: `${value}-toggle`,
+        command: 'toggle',
+        label: `Toggle ${actionNoun}`,
+        onSelect: () => {
+          apply(!current)
+        },
+      },
+    ],
+  }
+}
+
 /**
  * Application-level modal keybinding, `WhichKey` leader menu, and `CommandMenu`/`CommandPalette` registry.
  */
@@ -45,6 +107,11 @@ export class HotkeyService {
   commandStyleOverride = $state<'colon' | null>(null)
   /** Currently mounted CodeMirror 6 `EditorView`, if a file or diagnostics buffer is open. */
   activeEditorView = $state<EditorView | null>(null)
+
+  /** Constructs a `HotkeyService` bound to `workspace`. */
+  constructor(workspace: WorkspaceService) {
+    this.workspace = workspace
+  }
 
   /** Effective Helical command surface style (`menu`, `palette`, or `colon`). */
   get effectiveCommandStyle(): HelicalCommandStyle {
@@ -86,6 +153,38 @@ export class HotkeyService {
       'Workspace',
       'workspace.toggleExplorer',
       'Toggle the workspace explorer sidebar open or closed',
+      ['normal', 'select', 'insert'],
+    ),
+    'Mod+,': leaf(
+      'Mod+,',
+      'Global Settings',
+      'Preferences',
+      'settings.openGlobal',
+      'Open ~/.lgtm/config.json in the editor',
+      ['normal', 'select', 'insert'],
+    ),
+    'Mod+Shift+,': leaf(
+      'Mod+Shift+,',
+      'Project Settings',
+      'Preferences',
+      'settings.openProject',
+      'Open .lgtm/config.json in the editor',
+      ['normal', 'select', 'insert'],
+    ),
+    'Mod+Shift+<': leaf(
+      'Mod+Shift+<',
+      'Project Settings',
+      'Preferences',
+      'settings.openProject',
+      'Open .lgtm/config.json in the editor',
+      ['normal', 'select', 'insert'],
+    ),
+    'Mod+<': leaf(
+      'Mod+<',
+      'Project Settings',
+      'Preferences',
+      'settings.openProject',
+      'Open .lgtm/config.json in the editor',
       ['normal', 'select', 'insert'],
     ),
     ':': leaf(
@@ -622,6 +721,17 @@ export class HotkeyService {
         },
       },
       {
+        value: 'write-quit',
+        command: 'wq',
+        aliases: ['write-quit'],
+        label: 'Save and Close Tab',
+        description: 'Save pending changes and close the active editor tab',
+        group: 'File',
+        onSelect: () => {
+          void this.workspace.flushSave().then(() => this.workspace.closeActiveTab())
+        },
+      },
+      {
         value: 'buffer-next',
         command: 'bn',
         aliases: ['bnext', 'tab-next'],
@@ -860,120 +970,37 @@ export class HotkeyService {
           },
         ],
       },
-      {
+      booleanSettingCommand({
         value: 'leader-only',
-        command: 'leader-only',
         label: 'Leader-Only Mode',
         description: 'Only open WhichKey popup for Space leader sequences',
-        group: 'Preferences',
         shortcut: 'Space u m',
-        children: [
-          {
-            value: 'leader-only-on',
-            command: 'on',
-            aliases: ['true', 'enable'],
-            label: 'Enable Leader-Only Mode',
-            active: this.workspace.settings.leaderOnly,
-            onSelect: () => {
-              this.setLeaderOnly(true)
-            },
-          },
-          {
-            value: 'leader-only-off',
-            command: 'off',
-            aliases: ['false', 'disable'],
-            label: 'Disable Leader-Only Mode',
-            active: !this.workspace.settings.leaderOnly,
-            onSelect: () => {
-              this.setLeaderOnly(false)
-            },
-          },
-          {
-            value: 'leader-only-toggle',
-            command: 'toggle',
-            label: 'Toggle Leader-Only Mode',
-            onSelect: () => {
-              this.setLeaderOnly(!this.workspace.settings.leaderOnly)
-            },
-          },
-        ],
-      },
-      {
+        current: this.workspace.settings.leaderOnly,
+        apply: (next) => {
+          this.setLeaderOnly(next)
+        },
+      }),
+      booleanSettingCommand({
         value: 'pane-outline',
-        command: 'pane-outline',
         label: 'Active Pane Outline',
         description: 'Show or hide focus outline around the active spatial pane',
-        group: 'Preferences',
         shortcut: 'Space u o',
-        children: [
-          {
-            value: 'pane-outline-on',
-            command: 'on',
-            aliases: ['true', 'enable'],
-            label: 'Enable Active Pane Outline',
-            active: this.workspace.settings.paneOutline,
-            onSelect: () => {
-              this.setPaneOutline(true)
-            },
-          },
-          {
-            value: 'pane-outline-off',
-            command: 'off',
-            aliases: ['false', 'disable'],
-            label: 'Disable Active Pane Outline',
-            active: !this.workspace.settings.paneOutline,
-            onSelect: () => {
-              this.setPaneOutline(false)
-            },
-          },
-          {
-            value: 'pane-outline-toggle',
-            command: 'toggle',
-            label: 'Toggle Active Pane Outline',
-            onSelect: () => {
-              this.setPaneOutline(!this.workspace.settings.paneOutline)
-            },
-          },
-        ],
-      },
-      {
+        current: this.workspace.settings.paneOutline,
+        apply: (next) => {
+          this.setPaneOutline(next)
+        },
+      }),
+      booleanSettingCommand({
         value: 'click-to-insert',
-        command: 'click-to-insert',
         label: 'Click Editor to Insert',
+        actionNoun: 'Click to Insert',
         description: 'Enter insert mode automatically when clicking inside the code editor',
-        group: 'Preferences',
         shortcut: 'Space u i',
-        children: [
-          {
-            value: 'click-to-insert-on',
-            command: 'on',
-            aliases: ['true', 'enable'],
-            label: 'Enable Click to Insert',
-            active: this.workspace.settings.clickToInsert,
-            onSelect: () => {
-              this.setClickToInsert(true)
-            },
-          },
-          {
-            value: 'click-to-insert-off',
-            command: 'off',
-            aliases: ['false', 'disable'],
-            label: 'Disable Click to Insert',
-            active: !this.workspace.settings.clickToInsert,
-            onSelect: () => {
-              this.setClickToInsert(false)
-            },
-          },
-          {
-            value: 'click-to-insert-toggle',
-            command: 'toggle',
-            label: 'Toggle Click to Insert',
-            onSelect: () => {
-              this.setClickToInsert(!this.workspace.settings.clickToInsert)
-            },
-          },
-        ],
-      },
+        current: this.workspace.settings.clickToInsert,
+        apply: (next) => {
+          this.setClickToInsert(next)
+        },
+      }),
       {
         value: 'wrap',
         command: 'wrap',
@@ -1031,45 +1058,18 @@ export class HotkeyService {
           },
         ],
       },
-      {
+      booleanSettingCommand({
         value: 'lsp-mode',
-        command: 'lsp-mode',
         aliases: ['lsp'],
         label: 'LSP Integration',
+        actionNoun: 'LSP',
         description: 'Enable or disable workspace language servers',
-        group: 'Preferences',
         shortcut: 'Space u l',
-        children: [
-          {
-            value: 'lsp-mode-on',
-            command: 'on',
-            aliases: ['true', 'enable'],
-            label: 'Enable LSP',
-            active: this.workspace.settings.lspEnabled,
-            onSelect: () => {
-              this.setLspEnabled(true)
-            },
-          },
-          {
-            value: 'lsp-mode-off',
-            command: 'off',
-            aliases: ['false', 'disable'],
-            label: 'Disable LSP',
-            active: !this.workspace.settings.lspEnabled,
-            onSelect: () => {
-              this.setLspEnabled(false)
-            },
-          },
-          {
-            value: 'lsp-mode-toggle',
-            command: 'toggle',
-            label: 'Toggle LSP',
-            onSelect: () => {
-              this.setLspEnabled(!this.workspace.settings.lspEnabled)
-            },
-          },
-        ],
-      },
+        current: this.workspace.settings.lspEnabled,
+        apply: (next) => {
+          this.setLspEnabled(next)
+        },
+      }),
       {
         value: 'keybindings-help',
         command: 'keybindings',
@@ -1083,11 +1083,6 @@ export class HotkeyService {
         },
       },
     ]
-  }
-
-  /** Constructs a `HotkeyService` bound to `workspace`. */
-  constructor(workspace: WorkspaceService) {
-    this.workspace = workspace
   }
 
   /** Registers or clears the active CodeMirror 6 `EditorView` instance. */

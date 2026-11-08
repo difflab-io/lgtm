@@ -2,7 +2,7 @@
 
 ## Overview
 
-`lgtm-web` and `lgtm-ui` adopt `@cloudvoyant/helical-svelte` `v0.23.0` to provide modal keyboard navigation across panes, files, and the CodeMirror 6 editor. One document-level `WhichKeyController` owns modal state (`normal`, `insert`, `visual`, `visual_line`, `goto`), pane focus (`workspace` and `editor`), Flash two-character jump labels, and `Space` leader sequences. `HotkeyService` registers all application keybindings and command nodes in one place, feeding `WhichKey`, `CommandMenu` (`:` and default `Mod+k`), and `CommandPalette` (`Mod+k` when `keybindings.commandStyle == "palette"`).
+`lgtm-web` and `lgtm-ui` adopt `@cloudvoyant/helical-svelte` `v0.23.0` to provide modal keyboard navigation across panes, files, and the CodeMirror 6 editor. One document-level `WhichKeyController` owns modal state (`normal`, `select`, `insert`, `jump`), pane focus (`workspace` and `editor`), Flash two-character jump labels, and `Space` leader sequences. `HotkeyService` registers all application keybindings and command nodes in one place, feeding `WhichKey`, `CommandMenu` (`:` and default `Mod+k`), and `CommandPalette` (`Mod+k` when `keybindings.commandStyle == "palette"`).
 
 ## Requirement
 
@@ -50,9 +50,9 @@ flowchart TB
     SHELL --> CM
 ```
 
-- `HotkeyService` (`apps/lgtm-web/src/lib/services/hotkeyService.svelte.ts`): Single source of truth for app-level `KeymapBinding[]` (`Space` leader tree, `Mod+k`, `Mod+,`, `Mod+Shift+,`) and hierarchical `CommandNode[]` items (Ex aliases `:w`, `:q`, `:wq`, `:e`, `:bn`, `:bp`, `:bd`, `:theme`, `:preset`, `:command-style`, `:wrap`, `:diagnostics`, `:lsp-restart`, and nested settings toggles).
-- `createCodeMirrorModalTarget` (`libs/lgtm-ui/src/code-editor/modalKeymap.ts`): Pure TypeScript adapter implementing `ModalEditorTarget` over a CodeMirror 6 `EditorView`, mapping `vim`, `kakoune`, and `helix` motions, text objects, operators, visual ranges, multi-cursor selections (`Alt+j` / `Alt+k`, `C`, `,`), and viewport scrolling (`zz`, `zt`, `zb`, `Ctrl-d`, `Ctrl-u`).
-- `CodeEditor.svelte` (`libs/lgtm-ui/src/code-editor/CodeEditor.svelte`): Registers the active `EditorView` with `WhichKeyController.registerModalEditor`, enables `EditorState.allowMultipleSelections.of(true)`, gates pointer-to-insert transitions with `data-modal-ignore-pointer`, and styles normal/visual mode cursors as solid `1ch` blocks (`html[data-modal-mode='normal'] .cm-cursor`).
+- `HotkeyService` (`apps/lgtm-web/src/lib/services/hotkeyService.svelte.ts`): Single source of truth for app-level `Record<string, WhichKeyNode>` (`Space` leader tree, `Mod+k`, `Mod+,`, `Mod+Shift+,`) and hierarchical `CommandNode[]` items (Ex commands `:w`, `:wa`, `:q`, `:wq`, `:bn`, `:bp`, `:bd`, `:new`, `:mkdir`, `:workspace`, `:settings`, `:project-settings`, `:diagnostics`, `:lsp-restart`, `:theme`, `:preset`, `:command-style`, `:wrap`, and nested settings toggles).
+- `createCodeMirrorModalTarget` (`libs/lgtm-ui/src/code-editor/modalKeymap.ts`): Pure TypeScript adapter implementing `ModalEditorTarget` over a CodeMirror 6 `EditorView`, mapping `helix`, `vim`, and `kakoune` motions, text objects, operators, selection ranges, multi-cursor selections (`Alt+j` / `Alt+k`, `C`, `,`), and viewport scrolling (`zz`, `zt`, `zb`, `Ctrl-d`, `Ctrl-u`).
+- `CodeEditor.svelte` (`libs/lgtm-ui/src/code-editor/CodeEditor.svelte`): Registers the active `EditorView` with `registerModalEditor`, enables `EditorState.allowMultipleSelections.of(true)`, gates pointer-to-insert transitions with `data-modal-ignore-pointer`, and styles normal/select mode cursors as solid `1ch` blocks (`html[data-modal-mode='normal'] .cm-cursor`).
 - `TreeView.svelte` (`libs/lgtm-ui/src/tree-view/TreeView.svelte`): Registers pane-scoped bindings (`j`, `k`, `h`, `l`, `Enter`, `Home`, `End`, `a`, `A`, `r`, `F2`, `d`, `Delete`) via `useKeymap(..., { priority: 'pane' })`.
 
 ### Data and Control Flow
@@ -66,13 +66,13 @@ sequenceDiagram
     participant Set as SettingsService
     participant Host as lgtm-desktop (config_update)
 
-    User->>WK: Press w / d w / v i w in normal mode
-    WK->>CM: ModalEditorTarget.moveMotion / deleteMotion / selectTextObject
+    User->>WK: Press w / d / m i w in normal mode
+    WK->>CM: ModalEditorTarget.move / execOperator / selectTextObject
     CM-->>User: CodeMirror 6 selection / document transaction + 1ch block cursor
 
     User->>WK: Press : or Mod+k
     WK->>HK: Open CommandMenu (or CommandPalette when commandStyle == 'palette')
-    User->>HK: Run ":preset helix" or "Settings: Keybind Preset -> Helix"
+    User->>HK: Run ":preset helix" or "Keybinding Preset -> Helix"
     HK->>Set: update({ keybindings: { preset: 'helix' } }, 'global')
     Set->>Host: invoke('config_update', { patch, scope: 'global' })
     Host-->>Set: ResolvedConfigSnapshot + emit('config-updated')
@@ -85,7 +85,7 @@ sequenceDiagram
 | --- | --- | --- |
 | `createCodeMirrorModalTarget` | `libs/lgtm-ui/src/code-editor/modalKeymap.ts` | Adapt a CodeMirror 6 `EditorView` to Helical UI's `ModalEditorTarget` contract. |
 | `scrollEditorAlign` / `scrollEditorHalfPage` | `libs/lgtm-ui/src/code-editor/modalKeymap.ts` | Scroll the active CodeMirror cursor line (`center`, `top`, `bottom`) or move by a half page (`down`, `up`). |
-| `HotkeyService` | `apps/lgtm-web/src/lib/services/hotkeyService.svelte.ts` | Build reactive `KeymapBinding[]`, `CommandNode[]`, and `CommandPaletteItem[]` catalogs and execute workspace, LSP, and settings commands. |
+| `HotkeyService` | `apps/lgtm-web/src/lib/services/hotkeyService.svelte.ts` | Expose the `Record<string, WhichKeyNode>` keymap, `Record<string, KeymapHandler>` command map, and reactive `CommandNode[]` catalog for workspace, LSP, and settings commands. |
 | `SettingsService.update` | `apps/lgtm-web/src/lib/services/settingsService.svelte.ts` | Persist a scoped `LgtmConfigPatch` via `config_update` and refresh reactive settings state. |
 
 ## References
