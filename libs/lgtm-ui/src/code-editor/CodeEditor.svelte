@@ -495,6 +495,54 @@
         }),
         keymap.of([
           {
+            key: 'Tab',
+            run(currentView) {
+              if (currentView.state.readOnly) return false
+              const { state } = currentView
+              const { from, to } = state.selection.main
+              const startLine = state.doc.lineAt(from)
+              const endLine = state.doc.lineAt(to)
+              if (startLine.number !== endLine.number) {
+                const changes = []
+                for (let lineNum = startLine.number; lineNum <= endLine.number; lineNum++) {
+                  const line = state.doc.line(lineNum)
+                  changes.push({ from: line.from, insert: '  ' })
+                }
+                currentView.dispatch({ changes, scrollIntoView: true })
+                return true
+              }
+              currentView.dispatch({
+                changes: { from, to, insert: '  ' },
+                selection: { anchor: from + 2 },
+                scrollIntoView: true,
+              })
+              return true
+            },
+          },
+          {
+            key: 'Shift-Tab',
+            run(currentView) {
+              if (currentView.state.readOnly) return false
+              const { state } = currentView
+              const { from, to } = state.selection.main
+              const startLine = state.doc.lineAt(from)
+              const endLine = state.doc.lineAt(to)
+              const changes = []
+              for (let lineNum = startLine.number; lineNum <= endLine.number; lineNum++) {
+                const line = state.doc.line(lineNum)
+                if (line.text.startsWith('  ')) {
+                  changes.push({ from: line.from, to: line.from + 2, insert: '' })
+                } else if (line.text.startsWith(' ') || line.text.startsWith('\t')) {
+                  changes.push({ from: line.from, to: line.from + 1, insert: '' })
+                }
+              }
+              if (changes.length > 0) {
+                currentView.dispatch({ changes, scrollIntoView: true })
+              }
+              return true
+            },
+          },
+          {
             key: 'F12',
             run(currentView) {
               if (!ongotodefinition) return false
