@@ -35,7 +35,3 @@ export const diffEditorRootVariants = cva(
 
 /** Variant props for `diffEditorRootVariants`. */
 export type DiffEditorRootVariants = VariantProps<typeof diffEditorRootVariants>
-
-/** Alias for `diffEditorRootVariants`. */
-export const diffEditorStyles = diffEditorRootVariants
-export type DiffEditorVariantProps = DiffEditorRootVariants

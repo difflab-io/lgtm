@@ -21,7 +21,6 @@ const MAX_COMMIT_HISTORY: usize = 64;
 
 struct RepoHandles {
     worktree_dir: PathBuf,
-    common_git_dir: String,
     branch: String,
     head_oid: Option<gix::ObjectId>,
     user_name: String,
@@ -108,8 +107,8 @@ impl DiffService {
         })
     }
 
-    /// Lists changed files and their `+additions` / `-deletions` counts across `commit_ids`.
-    pub fn list_files(
+    /// Returns changed files and their `+additions` / `-deletions` counts across `commit_ids`.
+    pub fn get_files(
         &self,
         workspace_root: &Path,
         lgtm_home: &Path,
@@ -126,8 +125,8 @@ impl DiffService {
         compute_diff_files(&handles, &base_sha, &head_sha)
     }
 
-    /// Reads the raw `base_content` and `head_content` of `path` across `commit_ids`.
-    pub fn read_file(
+    /// Returns the raw `base_content` and `head_content` of `path` across `commit_ids`.
+    pub fn get_file_diff(
         &self,
         workspace_root: &Path,
         lgtm_home: &Path,
@@ -184,7 +183,7 @@ fn open_repo_handles(workspace_root: &Path, lgtm_home: &Path) -> Result<Option<R
     if !workspace_root.exists() {
         return Ok(None);
     }
-    let Ok((worktree_git_dir, worktree_dir, common_git_dir)) = resolve_git_paths(workspace_root)
+    let Ok((worktree_git_dir, worktree_dir, _common_git_dir)) = resolve_git_paths(workspace_root)
     else {
         return Ok(None);
     };
@@ -221,7 +220,6 @@ fn open_repo_handles(workspace_root: &Path, lgtm_home: &Path) -> Result<Option<R
 
     Ok(Some(RepoHandles {
         worktree_dir,
-        common_git_dir,
         branch,
         head_oid,
         user_name,
@@ -231,7 +229,50 @@ fn open_repo_handles(workspace_root: &Path, lgtm_home: &Path) -> Result<Option<R
 }
 
 fn build_all_known_commits(handles: &RepoHandles) -> Result<Vec<DiffCommitItem>> {
-    build_commit_checklist(handles, ReviewMode::Local)
+    let mut items = Vec::new();
+    let mut visited = BTreeSet::new();
+    let (snapshot_items, git_start_oid) = collect_local_snapshot_commits(handles, &mut visited);
+    items.extend(snapshot_items);
+    if let Some(head_oid) = handles.head_oid {
+        items.extend(collect_git_commits(
+            &handles.git_repo,
+            head_oid,
+            &mut visited,
+        ));
+    }
+    if let Some(start_oid) = git_start_oid {
+        items.extend(collect_git_commits(
+            &handles.git_repo,
+            start_oid,
+            &mut visited,
+        ));
+    }
+    let worktree_base_sha = items
+        .first()
+        .map(|first| first.id.clone())
+        .or_else(|| handles.head_oid.map(|oid| oid.to_hex().to_string()))
+        .unwrap_or_default();
+    let latest_ts = items
+        .first()
+        .map(|first| first.timestamp + 1)
+        .unwrap_or(1_700_000_000);
+    items.insert(
+        0,
+        DiffCommitItem {
+            id: "working_tree".to_string(),
+            short_sha: "WORKTREE".to_string(),
+            title: "Working Tree".to_string(),
+            author: handles.user_name.clone(),
+            timestamp: latest_ts,
+            parent_sha: if worktree_base_sha.is_empty() {
+                None
+            } else {
+                Some(worktree_base_sha)
+            },
+            source: DiffCommitSource::WorkingTree,
+        },
+    );
+    Ok(items)
 }
 
 fn build_commit_checklist(handles: &RepoHandles, mode: ReviewMode) -> Result<Vec<DiffCommitItem>> {
@@ -636,7 +677,6 @@ fn read_revision_bytes(handles: &RepoHandles, rev_id: &str) -> Result<BTreeMap<S
         return read_commit_blobs(snapshot_repo, Some(&handles.git_repo), oid);
     }
 
-    let _ = &handles.common_git_dir;
     Err(error(
         "notFound",
         format!("Commit '{trimmed}' was not found in repository or snapshot store."),

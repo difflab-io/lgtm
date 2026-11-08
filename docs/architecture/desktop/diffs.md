@@ -15,13 +15,13 @@
 - Synchronize the `head` side of working-tree diffs with `LspService` and `WorkspaceService` so live diagnostics, hover tooltips, go-to-definition, and `150ms` debounced saves work inside the diff view.
 - Provide full keyboard navigation to toggle `Local` vs. `ForgeBacked` review modes, switch between `unified` and `split` views, toggle `showFullFile` (`Hunks Only` vs. `Full File`), step to the next or previous changed file, and jump to the next or previous diff hunk.
 - Refresh the changed file list and line counts automatically through `AppEvents` whenever a workspace file is saved, created, renamed, or deleted.
-- Future `lgtm-forge` integration: Support attaching `lgtm-forge` review state (`ReviewSummary`, inline `CommentDetail` threads, and `SetFileReviewed` checkmarks) to the same `DiffService` and `DiffEditor` pipeline in a subsequent phase without changing how commit and file diffs are fetched or rendered.
+- Support attaching `lgtm-forge` review state (`ReviewSummary`, inline `CommentDetail` threads, and `SetFileReviewed` checkmarks) to the same `DiffService` and `DiffEditor` pipeline in a subsequent phase without changing how commit and file diffs are fetched or rendered.
 
 ### Non-Functional
 
 - Never modify `.git/index`, `HEAD`, or remote refs when inspecting working-tree diffs or local shadow commits under `~/.lgtm/snapshots/$repoSlug`.
 - Keep `DiffService` decoupled from `WorkspaceService` and `LspService` by routing workspace switches and file saves through `AppEvents` in `apps/lgtm-desktop/src/app.rs`.
-- Constrain all keyboard shortcut definitions to a single registry module (`apps/lgtm-web/src/lib/keybindings.ts` and `libs/lgtm-ui/src/diff-editor/keybindings.ts`) so they plug directly into Helical UI `which-key` and hotkey primitives without modifying component files.
+- Constrain all keyboard shortcut definitions to `HotkeyService` (`apps/lgtm-web/src/lib/services/hotkeyService.svelte.ts`) and `modalKeymap.ts` (`libs/lgtm-ui/src/code-editor/modalKeymap.ts`) so they plug directly into Helical UI `WhichKeyProvider`, `CommandMenu`, and `CommandPalette` primitives without modifying component files.
 - Compute line hunks, word-level highlights, and collapsed context regions in `DiffEditor` (`@codemirror/merge`) on the client so layout toggles (`unified` vs `split`) are instantaneous.
 
 ## Design
@@ -199,41 +199,43 @@ sequenceDiagram
 | Command / Event | Direction | Signature | Description |
 | --- | --- | --- | --- |
 | `review_set_mode` | UI -> Host | `(mode: ReviewMode) -> DiffWorkspaceSnapshot` | Set the active review diff mode (`"local"` or `"forge_backed"`) in `ReviewService` and return the corresponding `DiffWorkspaceSnapshot`. |
-| `diff_get_state` | UI -> Host | `(mode?: ReviewMode, commitIds?: string[]) -> DiffWorkspaceSnapshot` | Discover Git and LGTM local shadow commits for the active workspace and review mode, and return the changed files across `commitIds`. |
-| `diff_list_files` | UI -> Host | `(commitIds: string[]) -> DiffFileEntry[]` | Return the sorted list of changed files (`status`, `additions`, `deletions`) across the checked commits (`oldest.base_sha .. newest.head_sha`). |
-| `diff_read_file` | UI -> Host | `(relativePath: string, commitIds: string[]) -> FileDiffContent` | Read `base_content` and `head_content` for `relativePath` across `commitIds`, and sync `LspService` when `"working_tree"` is checked. |
+| `diff_get_state` | UI -> Host | `() -> DiffWorkspaceSnapshot` | Discover Git and LGTM local shadow commits for the active workspace and review mode, and return the changed files across `selected_commit_ids`. |
+| `diff_list_files` | UI -> Host | `(selectedCommitIds: string[]) -> DiffFileEntry[]` | Return the sorted list of changed files (`status`, `additions`, `deletions`) across the checked commits (`oldest.parent_sha .. newest.id`) via `DiffService::get_files`. |
+| `diff_read_file` | UI -> Host | `(relativePath: string, selectedCommitIds: string[]) -> FileDiffContent` | Read `base_content` and `head_content` for `relativePath` across `selectedCommitIds` via `DiffService::get_file_diff`, and sync `LspService` when `"working_tree"` is the head target. |
 | `diff-updated` | Host -> UI | `DiffWorkspaceSnapshot` | Push updated working-tree file statuses and line counts after `AppEvent::FileSaved`, `FileClosed`, or `WorkspaceOpened`. |
 
 #### 2. Rust & Specta Domain Models (`apps/lgtm-desktop/src/models/diff.rs`)
 
 ```rust
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ReviewMode {
+    #[default]
     Local,
     ForgeBacked,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum DiffCommitSource {
     WorkingTree,
-    Local,
-    Git,
+    LocalSnapshot,
+    GitCommit,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DiffCommitItem {
     pub id: String,
     pub short_sha: String,
     pub title: String,
+    pub author: String,
+    pub timestamp: i64,
+    pub parent_sha: Option<String>,
     pub source: DiffCommitSource,
-    pub base_sha: String,
-    pub head_sha: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum DiffFileStatus {
     Added,
@@ -242,7 +244,7 @@ pub enum DiffFileStatus {
     Renamed,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DiffFileEntry {
     pub path: String,
@@ -252,28 +254,25 @@ pub struct DiffFileEntry {
     pub deletions: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct FileDiffContent {
     pub path: String,
     pub old_path: Option<String>,
     pub status: DiffFileStatus,
-    pub commit_ids: Vec<String>,
     pub base_sha: String,
-    pub head_sha: Option<String>,
+    pub head_sha: String,
     pub base_content: String,
     pub head_content: String,
-    pub is_working_tree: bool,
-    pub language_id: Option<String>,
-    pub lsp_status: Option<LspServerState>,
+    pub is_binary: bool,
+    pub readonly: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DiffWorkspaceSnapshot {
-    pub root: String,
-    pub branch: Option<String>,
-    pub mode: ReviewMode,
+    pub review_mode: ReviewMode,
+    pub branch: String,
     pub commits: Vec<DiffCommitItem>,
     pub selected_commit_ids: Vec<String>,
     pub files: Vec<DiffFileEntry>,
@@ -287,11 +286,13 @@ pub struct DiffWorkspaceSnapshot {
 ```text
 lgtm/
 ├── libs/lgtm-ui/src/
+│   ├── code-editor/
+│   │   ├── modalKeymap.ts                 Helical UI modal editor registration and goToNextHunk / goToPrevHunk commands
+│   │   └── shared.ts                      Shared highlight style, line wrapping, and diagnostic helpers
 │   └── diff-editor/
 │       ├── DiffEditor.svelte              Unified and synced Split CodeMirror 6 diff viewer (@codemirror/merge)
-│       ├── keybindings.ts                 Isolated CodeMirror keymap definitions for Helical UI hotkey wiring
 │       ├── styles.ts                      cva variants and diff color tokens
-│       └── types.ts                       DiffViewMode, DiffEditorProps, and hunk navigation types
+│       └── types.ts                       DiffEditorMode and DiffEditorProps
 ├── apps/lgtm-desktop/src/
 │   ├── app.rs                             Registers ReviewService and DiffService in AppState and wires review_* / diff_* commands
 │   ├── events.rs                          Routes WorkspaceOpened / FileSaved / FileClosed to DiffService
@@ -301,9 +302,9 @@ lgtm/
 │       ├── review.rs                      ReviewService managing Local vs ForgeBacked diff entry modes
 │       └── diff.rs                        DiffService resolving .git and ~/.lgtm/snapshots/$repoSlug
 └── apps/lgtm-web/src/lib/
-    ├── keybindings.ts                     Centralized frontend shortcut bindings for Helical UI which-key / hotkeys
     ├── clients/workspaceClient.ts         Adds reviewSetMode, diffGetState, diffListFiles, diffReadFile, and registerDiffHandlers
     ├── services/
+    │   ├── hotkeyService.svelte.ts        Centralized WhichKey leader tree, [f / ]f, [c / ]c, and Ex command catalog
     │   ├── reviewService.svelte.ts        Reactive ReviewMode ('local' | 'forge_backed') entry service
     │   └── diffService.svelte.ts          Reactive commit checklist, changed file list, active diff tab, viewMode, and showFullFile
     └── components/
@@ -334,30 +335,30 @@ flowchart LR
     S2 -.->|"Working Tree diff target"| WT
 ```
 
-| `CommitSelector` Entry | `source` | `base_sha` | `head_sha` | How `DiffService` Reads Blobs |
+| `CommitSelector` Entry | `source` | `parent_sha` | `id` | How `DiffService` Reads Blobs |
 | --- | --- | --- | --- | --- |
-| `Working Tree` | `WorkingTree` | Latest shadow commit `S2` (or `HEAD` `C2` if no shadow ref exists) | `None` (live disk) | `base`: read from `~/.lgtm/snapshots/$repoSlug` or `.git`. `head`: read from workspace disk via `WorkspaceService`. |
-| `Shadow Commit S_k` | `Local` | Parent `S_{k-1}` (or `refs/lgtm/heads/<branch>` for `S1`) | `S_k` | Read trees and blobs from `~/.lgtm/snapshots/$repoSlug` via `gitoxide`. |
-| `Git Commit C_k` | `Git` | Parent `C_{k-1}` | `C_k` | Read trees and blobs from `<workspace>/.git` via `gitoxide`. |
+| `Working Tree` | `WorkingTree` | Latest shadow commit `S2` (or `HEAD` `C2` if no shadow ref exists) | `"working_tree"` | `base`: read from `~/.lgtm/snapshots/$repoSlug` or `.git`. `head`: read from workspace disk via `WorkspaceService`. |
+| `Shadow Commit S_k` | `LocalSnapshot` | Parent `S_{k-1}` (or `refs/lgtm/heads/<branch>` for `S1`) | `S_k` | Read trees and blobs from `~/.lgtm/snapshots/$repoSlug` via `gitoxide`. |
+| `Git Commit C_k` | `GitCommit` | Parent `C_{k-1}` | `C_k` | Read trees and blobs from `<workspace>/.git` via `gitoxide`. |
 
-### Keyboard Navigation and Isolated Keybinding Registry
+### Keyboard Navigation and Modal Keybinding Integration
 
-All desktop and diff keyboard shortcuts live in a single declarative registry (`apps/lgtm-web/src/lib/keybindings.ts`, paired with `libs/lgtm-ui/src/diff-editor/keybindings.ts` for CodeMirror buffer commands). Components never attach ad-hoc `keydown` listeners. `Shell.svelte` mounts `registerAppKeybindings`, which maps directly to `@cloudvoyant/helical-svelte` `which-key` and hotkey primitives:
+All desktop and diff keyboard shortcuts live in `HotkeyService` (`apps/lgtm-web/src/lib/services/hotkeyService.svelte.ts`), paired with `libs/lgtm-ui/src/code-editor/modalKeymap.ts` for CodeMirror buffer commands (`goToNextHunk` and `goToPrevHunk`). Components never attach ad-hoc `keydown` listeners. `Shell.svelte` mounts `WhichKeyProvider`, `CommandMenu`, and `CommandPalette` using `HotkeyService`:
 
 ```mermaid
 flowchart LR
-    subgraph Registry["Isolated Keybinding Modules"]
-        WEB_KEYS["apps/lgtm-web/src/lib/keybindings.ts\nDeclarative Action + Key Chord Table\n(Helical UI which-key / hotkey ready)"]
-        CM_KEYS["libs/lgtm-ui/src/diff-editor/keybindings.ts\nCodeMirror EditorView Keymap"]
+    subgraph Registry["Keybinding Services & Modal Target"]
+        WEB_KEYS["apps/lgtm-web/src/lib/services/hotkeyService.svelte.ts\nWhichKey Tree (Space d) + [f / ]f + [c / ]c + Ex Command Catalog"]
+        CM_KEYS["libs/lgtm-ui/src/code-editor/modalKeymap.ts\ncreateCodeMirrorModalTarget + goToNextHunk / goToPrevHunk"]
     end
 
     subgraph Actions["Target Service & Component Actions"]
-        ACT_MODE["review.toggleMode() / review.openDiffMode('local' | 'forge_backed')"]
-        ACT_VIEW["diff.toggleViewMode() ('unified' <-> 'split')"]
-        ACT_FULL["diff.toggleFullFile() (Hunks <-> Full File)"]
-        ACT_FILE["diff.nextFile() / diff.prevFile()"]
-        ACT_HUNK["diffEditor.nextHunk() / diffEditor.prevHunk()"]
-        ACT_CFG["workspace.openPath('~/.lgtm/config.json' | '.lgtm/config.json')"]
+        ACT_MODE["workspace.toggleReviewMode() ('local' <-> 'forge_backed')"]
+        ACT_VIEW["workspace.diff.toggleViewMode() ('unified' <-> 'split')"]
+        ACT_FULL["workspace.diff.toggleFullFile() (Hunks <-> Full File)"]
+        ACT_FILE["workspace.diff.selectNextFile() / workspace.diff.selectPrevFile()"]
+        ACT_HUNK["goToNextHunk(view) / goToPrevHunk(view)"]
+        ACT_CFG["workspace.openGlobalSettings() / workspace.openLocalSettings()"]
     end
 
     WEB_KEYS --> ACT_MODE
@@ -369,23 +370,24 @@ flowchart LR
     CM_KEYS --> ACT_HUNK
 ```
 
-| Action ID | Default Shortcut | Target Call | Description |
-| --- | --- | --- | --- |
-| `diff.nextFile` | `] f` | `diff.nextFile()` | Open the next changed file in `DiffExplorer` inside `DiffEditor`. |
-| `diff.prevFile` | `[ f` | `diff.prevFile()` | Open the previous changed file in `DiffExplorer` inside `DiffEditor`. |
-| `diff.nextHunk` | `] c` | `diffEditor.nextHunk()` | Scroll both synced panes to the next diff hunk in the active file. |
-| `diff.prevHunk` | `[ c` | `diffEditor.prevHunk()` | Scroll both synced panes to the previous diff hunk in the active file. |
-| `diff.toggleViewMode` | `Mod+Shift+D` | `diff.toggleViewMode()` | Toggle `DiffEditor` between `unified` (single-column) and `split` (two-column) views. |
-| `diff.toggleFullFile` | `Mod+Shift+F` | `diff.toggleFullFile()` | Toggle `DiffEditor` between collapsed diff hunks (`showFullFile = false`) and the full file (`showFullFile = true`). |
-| `review.toggleMode` | `Mod+Shift+M` | `review.toggleMode()` | Switch diff inspection between `Local` (`~/.lgtm/snapshots/$repoSlug`) and `ForgeBacked` (`.git`). |
-| `settings.openGlobal` | `Mod+,` | `workspace.openPath("~/.lgtm/config.json")` | Open global configuration in a `Settings` tab. |
-| `settings.openLocal` | `Mod+Shift+,` | `workspace.openPath(".lgtm/config.json")` | Open project configuration in a `Settings (project)` tab. |
+| Action ID | Default Shortcut | Ex Command | Target Call | Description |
+| --- | --- | --- | --- | --- |
+| `diff.toggleSidebar` | `Space d d` | `:diffs` | `workspace.setSidebarMode(...)` | Toggle between the `Diffs` sidebar and `Explorer` sidebar. |
+| `diff.nextFile` | `]f` / `Space d n` | `:dfn` | `workspace.diff.selectNextFile()` | Open the next changed file in `DiffExplorer` inside `DiffEditor`. |
+| `diff.prevFile` | `[f` / `Space d p` | `:dfp` | `workspace.diff.selectPrevFile()` | Open the previous changed file in `DiffExplorer` inside `DiffEditor`. |
+| `diff.nextHunk` | `]c` / `Space d j` | `:dhn` | `goToNextHunk(view)` | Scroll both synced panes to the next diff hunk in the active file. |
+| `diff.prevHunk` | `[c` / `Space d k` | `:dhp` | `goToPrevHunk(view)` | Scroll both synced panes to the previous diff hunk in the active file. |
+| `diff.toggleViewMode` | `Space d m` | `:diff-mode` | `workspace.diff.toggleViewMode()` | Toggle `DiffEditor` between `unified` (single-column) and `split` (two-column) views. |
+| `diff.toggleFullFile` | `Space d f` | `:diff-full` | `workspace.diff.toggleFullFile()` | Toggle `DiffEditor` between collapsed diff hunks (`showFullFile = false`) and the full file (`showFullFile = true`). |
+| `review.toggleMode` | `Space d r` | `:review-mode` | `workspace.toggleReviewMode()` | Switch diff inspection between `Local` (`~/.lgtm/snapshots/$repoSlug`) and `ForgeBacked` (`.git`). |
+| `settings.openGlobal` | `Mod+,` / `Space f c` | `:settings` | `workspace.openGlobalSettings()` | Open global configuration in a `Settings` tab. |
+| `settings.openLocal` | `Mod+Shift+,` / `Space f p` | `:project-settings` | `workspace.openLocalSettings()` | Open project configuration in a `Settings (project)` tab. |
 
 ### `lgtm-forge` Alignment Invariants
 
-- Shared `$repoSlug` calculation: `DiffService` and `lgtm-forge` (`SnapshotStore`) must compute the exact same `<repo-name>-<6-byte-sha256(common_git_dir)>` directory name under `~/.lgtm/snapshots/$repoSlug` so linked worktrees and local reviews resolve to the same bare repository.
-- Cross-ODB blob resolution: When a user checks both a `Git` commit (`C1`) and a `Local` shadow commit (`S2`) in `CommitSelector`, `DiffService` resolves `oldest.base_sha` from `<workspace>/.git/objects` and `newest.head_sha` from `~/.lgtm/snapshots/$repoSlug/objects` rather than assuming a single Git object database.
-- Stale shadow base detection: If the user creates a native `git commit` after creating local shadow commits, `HEAD` advances past `refs/lgtm/heads/<branch>`. `DiffService` inspects whether `refs/lgtm/heads/<branch>` is an ancestor of `HEAD` and orders shadow commits relative to their recorded `refs/lgtm/heads/<branch>` base.
+- Compute the exact same `<repo-name>-<6-byte-sha256(common_git_dir)>` directory name under `~/.lgtm/snapshots/$repoSlug` in both `DiffService` and `lgtm-forge` (`SnapshotStore`) so linked worktrees and local reviews resolve to the same bare repository.
+- Resolve `oldest.parent_sha` from `<workspace>/.git/objects` and `newest.id` from `~/.lgtm/snapshots/$repoSlug/objects` when a user checks both a `GitCommit` and a `LocalSnapshot` in `CommitSelector` rather than assuming a single Git object database.
+- Walk both `refs/lgtm/snapshots/<branch>` and `HEAD` history when building the commit list so commits on `<workspace>/.git` and local shadow commits relative to `refs/lgtm/heads/<branch>` resolve accurately across both `Local` and `ForgeBacked` modes.
 
 ## References
 

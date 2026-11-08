@@ -15,7 +15,7 @@ pub struct WorkspaceError {
 pub type Result<T> = std::result::Result<T, WorkspaceError>;
 
 /// Builds a stable workspace failure for services and transport adapters.
-pub fn error(code: &'static str, message: impl Into<String>) -> WorkspaceError {
+pub(crate) fn error(code: &'static str, message: impl Into<String>) -> WorkspaceError {
     WorkspaceError {
         code,
         message: message.into(),

@@ -1,4 +1,6 @@
 //! Tauri application state, lifecycle, Specta TypeScript binding generation, and IPC command handlers.
+#![allow(unreachable_pub)]
+
 use std::path::PathBuf;
 use std::sync::{
     Arc, Mutex,
@@ -669,7 +671,7 @@ pub async fn diff_list_files(
     let diff_service = state.diff.clone();
     run_blocking(state, move |w| {
         let root = w.get_root()?;
-        diff_service.list_files(&root, w.get_lgtm_home(), &commit_ids)
+        diff_service.get_files(&root, w.get_lgtm_home(), &commit_ids)
     })
     .await
 }
@@ -685,7 +687,7 @@ pub async fn diff_read_file(
     let diff_service = state.diff.clone();
     run_blocking(state, move |w| {
         let root = w.get_root()?;
-        diff_service.read_file(&root, w.get_lgtm_home(), &path, &commit_ids)
+        diff_service.get_file_diff(&root, w.get_lgtm_home(), &path, &commit_ids)
     })
     .await
 }

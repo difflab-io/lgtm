@@ -1,8 +1,8 @@
 //! Domain models for desktop workspace management, file buffers, and diff inspection.
 
-pub mod diff;
-pub mod file_content;
-pub mod workspace;
+pub(crate) mod diff;
+pub(crate) mod file_content;
+pub(crate) mod workspace;
 
 pub use diff::DiffCommitItem;
 pub use diff::DiffCommitSource;

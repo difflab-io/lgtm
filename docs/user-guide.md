@@ -34,6 +34,7 @@ Switch between three modal presets in `config.json` or from the command menu:
 | `K` / `Space k` | Show LSP hover documentation at cursor (Vim/Kakoune `K`, Helix `Space k`) |
 | `gd` / `F12` | Jump to LSP definition at cursor |
 | `]d` / `[d`, `]D` / `[D` | Jump to next, previous, last, or first inline diagnostic |
+| `]f` / `[f`, `]c` / `[c` | Jump to next or previous changed file or diff hunk in Diffs view |
 | `Control+Space` / `Control+x` | Trigger autocomplete suggestions (`Ctrl+x` in `insert` mode matches Helix/Vim) |
 | `Control+n` / `Control+p` / `Control+y` | Select next, select previous, or accept autocomplete candidate |
 | `Escape` / `Control+e` / `Control+o` | Dismiss autocomplete or tooltip popup (`Ctrl+e` in Vim, `Ctrl+o` in Kakoune) |
@@ -55,7 +56,9 @@ Press `Space` in `normal` or `select` mode to open the WhichKey popup:
 | `Space b n` / `Space b p` / `Space b d` | Next tab, previous tab, close active tab |
 | `Space w h` / `Space w l` / `Space w w` | Focus pane left/right or cycle panes |
 | `Space w e` / `Space w c` | Focus explorer pane or editor pane directly |
-| `Space k` / `Space s` / `Space d` / `Space D` | Show hover documentation, signature help, or open workspace diagnostics (Helix leader bindings) |
+| `Space d d` / `Space d m` / `Space d f` / `Space d r` | Toggle Diffs view, toggle Split/Unified layout, toggle Full File/Hunks, or toggle Local/ForgeBacked review mode |
+| `Space d n` / `Space d p` / `Space d j` / `Space d k` | Jump to next/previous changed file or next/previous diff hunk |
+| `Space k` / `Space s` / `Space D` | Show hover documentation, signature help, or open workspace diagnostics (Helix leader bindings) |
 | `Space l g` / `Space l k` / `Space l h` / `Space l s` / `Space l c` | Go to definition, hover documentation, signature help, or autocomplete (Kakoune `kak-lsp` user mode) |
 | `Space l n` / `Space l p` / `Space l d` / `Space l r` | Next/previous diagnostic, open diagnostics buffer, or restart language servers |
 | `Space u t` / `Space u c` / `Space u k` | Switch theme, command surface style, or keybinding preset |
@@ -68,6 +71,6 @@ Press `Space` in `normal` or `select` mode to open the WhichKey popup:
 
 ### Command Menu and Command Palette
 
-- Press `:` in `normal` mode to open the bottom `CommandMenu` bar (`:w`, `:wa`, `:q`, `:wq`, `:bn`, `:bp`, `:bd`, `:new`, `:mkdir`, `:workspace`, `:settings`, `:project-settings`, `:gd`, `:hover`, `:signature`, `:complete`, `:dn`, `:dp`, `:diagnostics`, `:lsp-restart`, `:theme`, `:command-style`, `:preset`, `:leader-only`, `:pane-outline`, `:click-to-insert`, `:wrap`, `:lsp-mode`, `:keybindings`).
+- Press `:` in `normal` mode to open the bottom `CommandMenu` bar (`:w`, `:wa`, `:q`, `:wq`, `:bn`, `:bp`, `:bd`, `:new`, `:mkdir`, `:workspace`, `:settings`, `:project-settings`, `:diffs`, `:diff-mode`, `:diff-full`, `:review-mode`, `:dfn`, `:dfp`, `:dhn`, `:dhp`, `:gd`, `:hover`, `:signature`, `:complete`, `:dn`, `:dp`, `:diagnostics`, `:lsp-restart`, `:theme`, `:command-style`, `:preset`, `:leader-only`, `:pane-outline`, `:click-to-insert`, `:wrap`, `:lsp-mode`, `:keybindings`).
 - Press `Mod+k` (`Cmd+k` on macOS, `Ctrl+k` on Linux/Windows) to open the configured command surface (`keybindings.commandStyle`: `"menu"` by default, or `"palette"` for the centered fuzzy `CommandPalette` modal).
 - Toggle or switch any preference directly from `CommandMenu` or `CommandPalette` without editing JSON by hand.

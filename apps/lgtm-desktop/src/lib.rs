@@ -1,11 +1,13 @@
 //! LGTM desktop application shell, IPC command handlers, and local workspace, diff, review, and LSP services.
 
+#![warn(missing_docs, unreachable_pub)]
+
 mod app;
-pub mod error;
-pub mod events;
-pub mod menus;
-pub mod models;
-pub mod services;
+mod error;
+mod events;
+mod menus;
+mod models;
+mod services;
 
 pub use app::AppState;
 pub use app::builder;
@@ -20,6 +22,8 @@ pub use error::WorkspaceError;
 pub use events::AppEvent;
 pub use events::AppEvents;
 pub use events::FileOpenedEvent;
+pub use menus::build_app_menu;
+pub use menus::handle_menu_event;
 pub use models::DiffCommitItem;
 pub use models::DiffCommitSource;
 pub use models::DiffFileEntry;

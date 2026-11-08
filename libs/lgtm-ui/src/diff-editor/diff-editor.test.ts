@@ -2,7 +2,12 @@ import { describe, expect, it } from 'bun:test'
 import { Chunk, getChunks, unifiedMergeView } from '@codemirror/merge'
 import { EditorState, Text } from '@codemirror/state'
 import { goToNextHunk, goToPrevHunk } from '../code-editor/modalKeymap'
-import { diffEditorRootVariants, diffEditorStyles } from './styles'
+import {
+  isMarkdownTarget,
+  toCodeMirrorDiagnostics,
+  toLineWrappingExtension,
+} from '../code-editor/shared'
+import { diffEditorRootVariants } from './styles'
 
 describe('Given a DiffEditor in split mode / When rendering base and head content', () => {
   it('should build split and unified CVA classes and compute changed chunks between base and head documents', () => {
@@ -28,7 +33,7 @@ describe('Given a DiffEditor in split mode / When rendering base and head conten
 
     // Act
     const splitClass = diffEditorRootVariants({ size: 'sm', mode: 'split' })
-    const unifiedClass = diffEditorStyles({ size: 'md', mode: 'unified' })
+    const unifiedClass = diffEditorRootVariants({ size: 'md', mode: 'unified' })
     const chunks = Chunk.build(baseText, headText)
 
     // Assert
@@ -38,44 +43,39 @@ describe('Given a DiffEditor in split mode / When rendering base and head conten
     expect(chunks.length).toBe(2)
   })
 
-  it('should toggle between collapsed unchanged hunks and the full uncollapsed file via showFullFile', () => {
+  it('should clamp diagnostics, detect Markdown filenames, and build line-wrapping extensions via shared editor helpers', () => {
     // Arrange
-    const baseDoc = Array.from({ length: 20 }, (_, idx) => `line ${idx + 1}`).join('\n')
-    const headDoc = Array.from({ length: 20 }, (_, idx) =>
-      idx === 10 ? 'line 11 modified' : `line ${idx + 1}`,
-    ).join('\n')
+    const diagnostics = [
+      {
+        from: -5,
+        to: 999,
+        severity: 'error' as const,
+        message: 'Unexpected token',
+        source: 'rust-analyzer',
+        code: 'E0001',
+      },
+    ]
 
     // Act
-    const hunkState = EditorState.create({
-      doc: headDoc,
-      extensions: [
-        unifiedMergeView({
-          original: baseDoc,
-          mergeControls: false,
-          collapseUnchanged: { margin: 3, minSize: 4 },
-        }),
-      ],
-    })
-    const fullFileState = EditorState.create({
-      doc: headDoc,
-      extensions: [
-        unifiedMergeView({
-          original: baseDoc,
-          mergeControls: false,
-          collapseUnchanged: undefined,
-        }),
-      ],
-    })
+    const mapped = toCodeMirrorDiagnostics(24, diagnostics)
+    const wrapOff = toLineWrappingExtension('off')
+    const wrapAuto = toLineWrappingExtension('auto')
+    const wrapColumn = toLineWrappingExtension(80)
 
     // Assert
-    expect(getChunks(hunkState)?.chunks.length).toBe(1)
-    expect(getChunks(fullFileState)?.chunks.length).toBe(1)
-    expect(fullFileState.doc.lines).toBe(20)
+    expect(mapped[0]?.from).toBe(0)
+    expect(mapped[0]?.to).toBe(24)
+    expect(mapped[0]?.source).toBe('rust-analyzer E0001')
+    expect(isMarkdownTarget('docs/architecture/diffs.md')).toBe(true)
+    expect(isMarkdownTarget('src/services/diff.rs')).toBe(false)
+    expect(Array.isArray(wrapOff) && wrapOff.length).toBe(0)
+    expect(Array.isArray(wrapAuto) && wrapAuto.length).toBe(1)
+    expect(Array.isArray(wrapColumn) && wrapColumn.length).toBe(2)
   })
 })
 
 describe('Given a DiffEditor in unified mode / When editing head content with readonly false', () => {
-  it('should update changed chunks dynamically and expose modal hunk navigation helpers', () => {
+  it('should update changed chunks dynamically and guard modal hunk navigation when no view is mounted', () => {
     // Arrange
     const baseDoc = 'fn main() {\n  println!("old");\n}\n'
     const headDoc = 'fn main() {\n  println!("new");\n}\n'

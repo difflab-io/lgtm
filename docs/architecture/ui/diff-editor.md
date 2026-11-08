@@ -66,64 +66,66 @@ flowchart TB
 
 ### Behavior
 
-- Default: Render the file diff in the selected `mode` (`"split"` or `"unified"`) with `showFullFile = false` (collapsing unchanged regions of four or more lines with three context lines) and highlight added, removed, and intraline-changed spans.
-- Interaction: In `"split"` mode, keep the left (`a`) and right (`b`) panes synchronized across vertical scrolling, horizontal scrolling, collapsed hunk expansion, and alignment spacers at all times.
-- Interaction: Toggle `showFullFile` (or call `toggleFullFile()` on `DiffEditor` / `DiffService`) to switch between viewing only diff hunks (`showFullFile = false`) and viewing the full uncollapsed file (`showFullFile = true`) without re-fetching blobs.
-- Interaction: Switch between `"unified"` and `"split"` without re-fetching file blobs from the backend.
-- Interaction: Call `nextHunk()` or `prevHunk()` (exposed on `DiffEditor` and via `goToNextHunk` / `goToPrevHunk` in `libs/lgtm-ui/src/code-editor/modalKeymap.ts`) to scroll both synced panes to the next or previous changed hunk.
-- Interaction: Hover over symbols or trigger go-to-definition in the `head` buffer to invoke `onhover` and `ongotodefinition` at the UTF-16 offset in `headValue`.
-- Interaction: Keep the `base` buffer strictly read-only in all modes, and make the `head` buffer read-only unless `readonly = false` (when viewing the live working tree).
-- Loading, empty, and error: Render a single-side addition diff when `baseValue` is empty (`Added` file), a single-side deletion diff when `headValue` is empty (`Deleted` file), and an inline "No changes in this file" banner when `baseValue === headValue`.
-- Accessibility: Expose `aria-label` on both CodeMirror content regions (`"<filename> base diff"` and `"<filename> head diff"`), preserve keyboard hunk navigation, and maintain focus in the `head` editor when toggling layout mode or `showFullFile`.
+- Render the file diff by default in the selected `mode` (`"split"` or `"unified"`) with `showFullFile = false` (collapsing unchanged regions of four or more lines with three context lines) and highlight added, removed, and intraline-changed spans.
+- Keep the left (`a`) and right (`b`) panes synchronized in `"split"` mode across vertical scrolling, horizontal scrolling, collapsed hunk expansion, and alignment spacers at all times.
+- Toggle `showFullFile` (or call `toggleFullFile()` on `DiffService`) to switch between viewing only diff hunks (`showFullFile = false`) and viewing the full uncollapsed file (`showFullFile = true`) without re-fetching blobs.
+- Switch between `"unified"` and `"split"` without re-fetching file blobs from the backend.
+- Call `goToNextHunk` or `goToPrevHunk` (`libs/lgtm-ui/src/code-editor/modalKeymap.ts`) to scroll both synced panes to the next or previous changed hunk.
+- Hover over symbols or trigger go-to-definition in the `head` buffer to invoke `onhover` and `ongotodefinition` at the UTF-16 offset in `headValue`.
+- Keep the `base` buffer strictly read-only in all modes, and make the `head` buffer read-only unless `readonly = false` (when viewing the live working tree).
+- Render a single-side addition diff when `baseValue` is empty (`Added` file), a single-side deletion diff when `headValue` is empty (`Deleted` file), and an inline "No textual changes in this file." banner when `baseValue === headValue`.
+- Expose `aria-label` on both CodeMirror content regions (`"<filename> base diff"` and `"<filename> head diff"`), preserve keyboard hunk navigation, and maintain focus in the `head` editor when toggling layout mode or `showFullFile`.
 
 ## Implementation
 
 ### Public API
 
 ```ts
-export type DiffViewMode = 'unified' | 'split'
-
-export interface DiffCollapseOptions {
-  margin?: number
-  minSize?: number
-}
+export type DiffEditorMode = 'unified' | 'split'
 
 export interface DiffEditorProps {
   baseValue: string
-  headValue: string
+  headValue?: string
   filename?: string
-  mode?: DiffViewMode
+  mode?: DiffEditorMode
   showFullFile?: boolean
-  collapseOptions?: DiffCollapseOptions
   readonly?: boolean
   lineWrapping?: CodeEditorLineWrapping
-  size?: 'sm' | 'md' | 'lg'
+  clickToInsert?: boolean
+  collapseUnchangedMargin?: number
+  collapseUnchangedMinSize?: number
+  size?: DiffEditorRootVariants['size']
   label?: string
   class?: string
   diagnostics?: CodeEditorDiagnostic[]
-  selectionOffset?: number | null
   onchange?: (value: string) => void
-  onhover?: (offset: number) => Promise<CodeEditorHoverResult | null> | CodeEditorHoverResult | null
-  ongotodefinition?: (offset: number) => Promise<void> | void
-  onshowfullfilechange?: (showFullFile: boolean) => void
+  onsave?: (value: string) => void
+  onhover?: (offset: number) => Promise<CodeEditorHoverResult | null>
+  ongotodefinition?: (offset: number) => void | Promise<void>
+  onmodetoggle?: (mode: DiffEditorMode) => void
+  onfullfiletoggle?: (showFullFile: boolean) => void
+  onViewReady?: (view: EditorView | null) => void
 }
 ```
 
 ```svelte
 <DiffEditor
-  bind:this={diffEditorRef}
-  baseValue={diff.baseContent}
-  headValue={diff.headContent}
-  filename={diff.filePath}
-  mode={diff.viewMode}
-  showFullFile={diff.showFullFile}
-  readonly={!diff.isWorkingTree}
+  baseValue={workspace.diff.activeDiff.baseContent}
+  headValue={workspace.diff.draftHeadContent ?? workspace.diff.activeDiff.headContent}
+  filename={workspace.diff.activeDiff.path}
+  mode={workspace.diff.viewMode}
+  showFullFile={workspace.diff.showFullFile}
+  readonly={workspace.diff.activeDiff.readonly}
   lineWrapping={workspace.settings.lineWrapping}
-  diagnostics={workspace.activeDiagnostics}
-  onchange={(next) => workspace.updateActiveContent(next)}
-  onhover={(offset) => workspace.hoverAtActiveFile(offset)}
-  ongotodefinition={(offset) => workspace.gotoDefinitionFromActiveFile(offset)}
-  onshowfullfilechange={(next) => diff.setShowFullFile(next)}
+  clickToInsert={workspace.settings.clickToInsert}
+  diagnostics={workspace.diagnosticsForPath(workspace.diff.activeDiff.path)}
+  onchange={(next) => workspace.updateDiffContent(next)}
+  onsave={(next) => void workspace.saveDiffNow(next)}
+  onhover={(offset) => workspace.hoverAtPath(workspace.diff.activeDiff.path, offset)}
+  ongotodefinition={(offset) => void workspace.gotoDefinitionAtPath(workspace.diff.activeDiff.path, offset)}
+  onViewReady={(view) => {
+    activeEditorView = view
+  }}
 />
 ```
 

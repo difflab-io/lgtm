@@ -68,16 +68,21 @@
       })
     }
   })
-
-  // Public --------------------------------------------------------------------
-  export function goToNextHunk(): boolean {
-    return diffEditorRef?.goToNextHunk() ?? false
-  }
-
-  export function goToPrevHunk(): boolean {
-    return diffEditorRef?.goToPrevHunk() ?? false
-  }
 </script>
+
+{#snippet segmentedToggleButton(active: boolean, label: string, onclick: () => void)}
+  <button
+    type="button"
+    class={[
+      'px-2 py-0.5 text-[10px] font-medium',
+      active ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground',
+    ]}
+    aria-pressed={active}
+    {onclick}
+  >
+    {label}
+  </button>
+{/snippet}
 
 <main
   bind:this={mainEl}
@@ -117,32 +122,12 @@
           role="group"
           aria-label="Review mode"
         >
-          <button
-            type="button"
-            class={[
-              'px-2 py-0.5 text-[10px] font-medium',
-              workspace.review.mode === 'local'
-                ? 'bg-accent text-accent-foreground'
-                : 'text-muted-foreground hover:text-foreground',
-            ]}
-            aria-pressed={workspace.review.mode === 'local'}
-            onclick={() => void workspace.review.setMode('local')}
-          >
-            Local
-          </button>
-          <button
-            type="button"
-            class={[
-              'px-2 py-0.5 text-[10px] font-medium',
-              workspace.review.mode === 'forge_backed'
-                ? 'bg-accent text-accent-foreground'
-                : 'text-muted-foreground hover:text-foreground',
-            ]}
-            aria-pressed={workspace.review.mode === 'forge_backed'}
-            onclick={() => void workspace.review.setMode('forge_backed')}
-          >
-            Branch
-          </button>
+          {@render segmentedToggleButton(workspace.review.mode === 'local', 'Local', () => {
+            void workspace.review.setMode('local')
+          })}
+          {@render segmentedToggleButton(workspace.review.mode === 'forge_backed', 'Branch', () => {
+            void workspace.review.setMode('forge_backed')
+          })}
         </div>
 
         <div
@@ -150,32 +135,12 @@
           role="group"
           aria-label="Diff layout mode"
         >
-          <button
-            type="button"
-            class={[
-              'px-2 py-0.5 text-[10px] font-medium',
-              workspace.diff.viewMode === 'split'
-                ? 'bg-accent text-accent-foreground'
-                : 'text-muted-foreground hover:text-foreground',
-            ]}
-            aria-pressed={workspace.diff.viewMode === 'split'}
-            onclick={() => workspace.diff.setViewMode('split')}
-          >
-            Split
-          </button>
-          <button
-            type="button"
-            class={[
-              'px-2 py-0.5 text-[10px] font-medium',
-              workspace.diff.viewMode === 'unified'
-                ? 'bg-accent text-accent-foreground'
-                : 'text-muted-foreground hover:text-foreground',
-            ]}
-            aria-pressed={workspace.diff.viewMode === 'unified'}
-            onclick={() => workspace.diff.setViewMode('unified')}
-          >
-            Unified
-          </button>
+          {@render segmentedToggleButton(workspace.diff.viewMode === 'split', 'Split', () => {
+            workspace.diff.setViewMode('split')
+          })}
+          {@render segmentedToggleButton(workspace.diff.viewMode === 'unified', 'Unified', () => {
+            workspace.diff.setViewMode('unified')
+          })}
         </div>
 
         <button
@@ -224,7 +189,7 @@
           <DiffEditor
             bind:this={diffEditorRef}
             baseValue={workspace.diff.activeDiff.baseContent}
-            headValue={workspace.diff.activeDiff.headContent}
+            headValue={workspace.diff.draftHeadContent ?? workspace.diff.activeDiff.headContent}
             filename={workspace.diff.activeDiff.path}
             label={`Diff editor for ${workspace.diff.activeDiff.path}`}
             mode={workspace.diff.viewMode}

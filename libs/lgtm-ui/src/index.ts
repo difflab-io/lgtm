@@ -46,10 +46,5 @@ export type {
   EditorView,
 } from './code-editor/types'
 export { default as DiffEditor } from './diff-editor/DiffEditor.svelte'
-export { diffEditorRootVariants, diffEditorStyles } from './diff-editor/index'
-export type {
-  DiffEditorMode,
-  DiffEditorProps,
-  DiffEditorRootVariants,
-  DiffEditorVariantProps,
-} from './diff-editor/index'
+export { diffEditorRootVariants } from './diff-editor/index'
+export type { DiffEditorMode, DiffEditorProps, DiffEditorRootVariants } from './diff-editor/index'

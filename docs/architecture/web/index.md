@@ -8,18 +8,18 @@
 
 ### Functional
 
-- Reactive workspace and editor state (`WorkspaceService`): Browse workspace directories, manage open file and read-only diagnostics tabs, debounce editor buffer saves (`150ms`), open global (`~/.lgtm/config.json`) and local (`.lgtm/config.json`) configuration files as standard editor tabs (`Cmd+,` and `Cmd+Shift+,`), refresh clean config tabs on external updates, and flush pending saves on tab switch, workspace switch, or application exit.
-- Review mode entry (`ReviewService`): Enter diff inspection in either `Local` mode (LGTM shadow commits in `~/.lgtm/snapshots/$repoSlug` plus uncommitted working-tree changes) or `ForgeBacked` mode (standard Git branch commits in `.git`), and coordinate with `DiffService` to populate the diff sidebar and editor.
-- Single-file diff viewer, changed-file tree, and commit checklist (`DiffService`): Track the commit checklist (`commits` and `selectedCommitIds`) in `CommitSelector`, list changed files (`A`, `M`, `D`, `R`, `+additions`, `-deletions`) in `DiffExplorer`, open one file diff at a time in `DiffEditor`, and toggle between `unified` and `split` columns or between collapsed hunks (`showFullFile = false`) and the full file (`showFullFile = true`).
-- Language server status, diagnostics, and navigation (`LspService`): Track per-language server readiness (`Starting`, `Ready`, `Unavailable`, `Stopped`) and file diagnostics (`lsp-status` and `lsp-diagnostics` events), forward live buffer edits (`lsp_did_change`), resolve hover documentation (`lsp_hover`) and go-to-definition locations (`lsp_goto_definition`), and open or refresh read-only diagnostics buffer tabs.
-- File-driven and command-driven user settings (`SettingsService`): Load the resolved configuration snapshot (`config_get`), apply scoped partial updates (`config_update`), react to live `config-updated` events emitted whenever `~/.lgtm/config.json` or `<workspace>/.lgtm/config.json` is saved, synchronize the active color theme (`system`, `light`, `dark`), expose editor (`lineWrapping`) and modal keybinding (`commandStyle`, `preset`, `leaderOnly`, `paneOutline`, `clickToInsert`) preferences, and persist recent workspace roots in `localStorage`.
-- Modal keybindings and command surfaces (`HotkeyService`): Register app-level `WhichKey` leader bindings (`Space`), diff and review bindings (`Space d`, `[f` / `]f`, `[c` / `]c`), global shortcuts (`Mod+k`, `Mod+,`, `Mod+Shift+,`), and the hierarchical `CommandNode[]` catalog shared by `CommandMenu` (`:` and `Mod+k` when `commandStyle == "menu"`) and `CommandPalette` (`Mod+k` when `commandStyle == "palette"`). See [Modal keybindings architecture](keybindings.md).
+- Browse workspace directories, manage open file and read-only diagnostics tabs, debounce editor buffer saves (`150ms`), open global (`~/.lgtm/config.json`) and local (`.lgtm/config.json`) configuration files as standard editor tabs (`Cmd+,` and `Cmd+Shift+,`), refresh clean config tabs on external updates, and flush pending saves on tab switch, workspace switch, or application exit in `WorkspaceService`.
+- Enter diff inspection in either `Local` mode (LGTM shadow commits in `~/.lgtm/snapshots/$repoSlug` plus uncommitted working-tree changes) or `ForgeBacked` mode (standard Git branch commits in `.git`) through `ReviewService`, and coordinate with `DiffService` to populate the diff sidebar and editor.
+- Track the commit checklist (`commits` and `selectedCommitIds`) in `CommitSelector`, list changed files (`A`, `M`, `D`, `R`, `+additions`, `-deletions`) in `DiffExplorer`, open one file diff at a time in `DiffEditor`, and toggle between `unified` and `split` columns or between collapsed hunks (`showFullFile = false`) and the full file (`showFullFile = true`) in `DiffService`.
+- Track per-language server readiness (`Starting`, `Ready`, `Unavailable`, `Stopped`) and file diagnostics (`lsp-status` and `lsp-diagnostics` events), forward live buffer edits (`lsp_did_change`), resolve hover documentation (`lsp_hover`) and go-to-definition locations (`lsp_goto_definition`), and open or refresh read-only diagnostics buffer tabs in `LspService`.
+- Load the resolved configuration snapshot (`config_get`), apply scoped partial updates (`config_update`), react to live `config-updated` events emitted whenever `~/.lgtm/config.json` or `<workspace>/.lgtm/config.json` is saved, synchronize the active color theme (`system`, `light`, `dark`), expose editor (`lineWrapping`) and modal keybinding (`commandStyle`, `preset`, `leaderOnly`, `paneOutline`, `clickToInsert`) preferences, and persist recent workspace roots in `localStorage` in `SettingsService`.
+- Register app-level `WhichKey` leader bindings (`Space`), diff and review bindings (`Space d`, `[f` / `]f`, `[c` / `]c`), global shortcuts (`Mod+k`, `Mod+,`, `Mod+Shift+,`), and the hierarchical `CommandNode[]` catalog shared by `CommandMenu` (`:` and `Mod+k` when `commandStyle == "menu"`) and `CommandPalette` (`Mod+k` when `commandStyle == "palette"`) in `HotkeyService`. See [Modal keybindings architecture](keybindings.md).
 
 ### Non-Functional
 
-- Single-responsibility services: Keep `WorkspaceService`, `ReviewService`, `DiffService`, `LspService`, `SettingsService`, and `HotkeyService` focused on their respective domains, and wire cross-service event subscriptions (`lsp-status`, `lsp-diagnostics`, `config-updated`, `diff-updated`, `workspace-quit-requested`) in `Shell.svelte`.
-- Modal keybinding parity: Centralize frontend shortcut definitions and command items in `HotkeyService` so they register directly with Helical UI `WhichKeyProvider`, `CommandMenu`, and `CommandPalette`.
-- Generated IPC type parity: Consume Specta-generated TypeScript bindings (`src/lib/gen/bindings.ts`) inside `WorkspaceClient` so frontend services and Rust Tauri commands share compile-time contract checks.
+- Keep `WorkspaceService`, `ReviewService`, `DiffService`, `LspService`, `SettingsService`, and `HotkeyService` focused on their respective domains, and wire cross-service event subscriptions (`lsp-status`, `lsp-diagnostics`, `config-updated`, `diff-updated`, `workspace-quit-requested`) in `Shell.svelte`.
+- Centralize frontend shortcut definitions and command items in `HotkeyService` so they register directly with Helical UI `WhichKeyProvider`, `CommandMenu`, and `CommandPalette`.
+- Consume Specta-generated TypeScript bindings (`src/lib/gen/bindings.ts`) inside `WorkspaceClient` so frontend services and Rust Tauri commands share compile-time contract checks.
 
 ## Design
 
@@ -27,22 +27,14 @@
 
 ```ts
 import { createWorkspaceClient } from '$lib/clients/workspaceClient'
-import { DiffService } from '$lib/services/diffService.svelte'
-import { LspService } from '$lib/services/lspService.svelte'
-import { ReviewService } from '$lib/services/reviewService.svelte'
-import { SettingsService } from '$lib/services/settingsService.svelte'
 import { WorkspaceService } from '$lib/services/workspaceService.svelte'
 
 const client = createWorkspaceClient()
-const lsp = new LspService(client)
-const settings = new SettingsService(client)
-const workspace = new WorkspaceService(client, lsp, settings)
-const diff = new DiffService(client, workspace)
-const review = new ReviewService(client, diff)
+const workspace = new WorkspaceService(client)
 
 await workspace.init()
-await review.openDiffMode('local')
-await diff.toggleFullFile()
+await workspace.setReviewMode('local')
+workspace.diff.toggleFullFile()
 ```
 
 ### Components and Responsibilities
@@ -110,16 +102,16 @@ sequenceDiagram
     participant Host as lgtm-desktop (app.rs)
 
     User->>RevSvc: Switch to Diffs in Local or ForgeBacked mode
-    RevSvc->>DiffSvc: loadDiffState(mode)
-    DiffSvc->>Client: diffGetState({ mode, commitIds: null })
-    Client->>Host: invoke("diff_get_state", { mode, commitIds: null })
-    Host-->>DiffSvc: DiffWorkspaceSnapshot { mode, commits, selectedCommitIds, files }
+    RevSvc->>Client: reviewSetMode(mode)
+    Client->>Host: invoke("review_set_mode", { mode })
+    Host-->>RevSvc: DiffWorkspaceSnapshot { reviewMode, branch, commits, selectedCommitIds, files }
+    RevSvc->>DiffSvc: applySnapshot(snapshot)
     DiffSvc-->>User: Render DiffExplorer file tree and bottom CommitSelector checklist
 
     User->>DiffSvc: Click file in DiffExplorer or toggle commit checkbox
-    DiffSvc->>Client: diffReadFile({ relativePath, mode, commitIds })
-    Client->>Host: invoke("diff_read_file", { relativePath, mode, commitIds })
-    Host-->>DiffSvc: FileDiffContent { baseContent, headContent, isWorkingTree }
+    DiffSvc->>Client: diffReadFile(relativePath, selectedCommitIds)
+    Client->>Host: invoke("diff_read_file", { relativePath, selectedCommitIds })
+    Host-->>DiffSvc: FileDiffContent { baseContent, headContent, readonly }
     DiffSvc-->>User: Render synced Unified or Split diff in DiffEditor
 ```
 
@@ -177,7 +169,7 @@ flowchart TD
 | --- | --- | --- | --- |
 | `registerLspHandlers` | `"lsp-status"`<br/>`"lsp-diagnostics"` | `LspServerStatusEvent`<br/>`LspFileDiagnosticsEvent` | `workspace.handleLspStatus(event)`<br/>`workspace.handleLspDiagnostics(event)` |
 | `registerConfigHandlers` | `"config-updated"`<br/>`"workspace-open-file"` | `ResolvedConfigSnapshot`<br/>`FileOpenedEvent` | `workspace.settings.handleUpdated(snapshot)`<br/>`workspace.openPath(event.path, { title: event.title, focus: event.focus })` |
-| `registerDiffHandlers` | `"diff-updated"` | `DiffWorkspaceSnapshot` | `diff.handleUpdated(snapshot)` |
+| `registerDiffHandlers` | `"diff-updated"` | `DiffWorkspaceSnapshot` | `workspace.handleDiffUpdated(snapshot)` |
 | `registerQuitHandlers` | `"workspace-quit-requested"`<br/>`Window.onCloseRequested` | `void`<br/>`CloseRequestedEvent` | `await workspace.flushSave()` -> `finishQuit()` / `destroy()` |
 
 ### Interfaces and Contracts
@@ -189,11 +181,11 @@ flowchart TD
 | `WorkspaceService.selectFile` | `selectFile(relativePath: string): Promise<void>` | Read a workspace file, open or focus its editor tab, and synchronize LSP status. |
 | `WorkspaceService.openPath` | `openPath(path: string, options?: OpenPathOptions): Promise<void>` | Open or focus any workspace file or configuration file (`~/.lgtm/config.json` or `.lgtm/config.json`) via `workspace_read`, attach `vscode-json-language-server` asynchronously, and refresh configuration when opening config files. |
 | `WorkspaceService.scheduleSave` / `flushSave` | `scheduleSave(content: string): void` / `flushSave(): Promise<void>` | Forward live `didChange` updates to `LspService` and persist dirty buffers after `150ms` or before navigation/quit. |
-| `ReviewService.openDiffMode` | `openDiffMode(mode: ReviewMode): Promise<void>` | Set the active review diff mode (`'local'` or `'forge_backed'`), switch the sidebar to `DiffExplorer`, and load commits and changed files through `DiffService`. |
-| `DiffService.loadState` | `loadState(mode: ReviewMode, commitIds?: string[]): Promise<void>` | Fetch `DiffWorkspaceSnapshot` (`commits`, `selectedCommitIds`, `files`) for the active workspace and review mode. |
+| `ReviewService.setMode` / `toggleMode` | `setMode(mode: ReviewMode): Promise<DiffWorkspaceSnapshot \| null>` / `toggleMode(): Promise<DiffWorkspaceSnapshot \| null>` | Set or toggle the active review diff mode (`'local'` or `'forge_backed'`) and forward the returned `DiffWorkspaceSnapshot` to `DiffService`. |
+| `DiffService.refresh` / `applySnapshot` | `refresh(): Promise<void>` / `applySnapshot(snapshot: DiffWorkspaceSnapshot): Promise<void>` | Fetch or apply `DiffWorkspaceSnapshot` (`commits`, `selectedCommitIds`, `files`) for the active workspace and review mode. |
 | `DiffService.toggleCommit` | `toggleCommit(commitId: string): Promise<void>` | Toggle a commit checkbox in `CommitSelector`, refresh `files` across `selectedCommitIds`, and reload the active file in `DiffEditor`. |
-| `DiffService.openFileDiff` | `openFileDiff(relativePath: string): Promise<void>` | Fetch `FileDiffContent` (`baseContent`, `headContent`) for `relativePath` across `selectedCommitIds` and open it in `DiffEditor`. |
-| `DiffService.nextFile` / `prevFile` | `nextFile(): Promise<void>` / `prevFile(): Promise<void>` | Step to the next or previous changed file in `DiffExplorer` and load its diff into `DiffEditor`. |
+| `DiffService.selectFile` | `selectFile(path: string): Promise<void>` | Fetch `FileDiffContent` (`baseContent`, `headContent`) for `path` across `selectedCommitIds` and open it in `DiffEditor`. |
+| `DiffService.selectNextFile` / `selectPrevFile` | `selectNextFile(): Promise<void>` / `selectPrevFile(): Promise<void>` | Step to the next or previous changed file in `DiffExplorer` and load its diff into `DiffEditor`. |
 | `DiffService.toggleViewMode` / `toggleFullFile` | `toggleViewMode(): void` / `toggleFullFile(): void` | Toggle `DiffEditor` between `'unified'` and `'split'` columns or between collapsed hunks (`showFullFile = false`) and the full file (`showFullFile = true`). |
 | `LspService.refresh` | `refresh(): Promise<void>` | Fetch the current `LspWorkspaceSnapshot` (`servers` and `diagnostics`) for the active workspace. |
 | `LspService.requestHover` / `getDefinitions` | `requestHover(path: string, offset: number)` / `getDefinitions(path: string, offset: number)` | Query LSP hover Markdown or definition locations at a UTF-16 code-unit offset. |

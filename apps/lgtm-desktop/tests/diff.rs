@@ -89,7 +89,7 @@ mod given_a_git_workspace_in_local_mode {
 
             // Act: select S1 + S2 (compares C2 in .git against S2 in ~/.lgtm/snapshots/$repoSlug)
             let s1_to_s2_files = diff_service
-                .list_files(
+                .get_files(
                     &seeded.workspace_root,
                     &seeded.lgtm_home,
                     &[seeded.s1_sha.clone(), seeded.s2_sha.clone()],
@@ -98,7 +98,7 @@ mod given_a_git_workspace_in_local_mode {
 
             // Act: select C2 + S1 + S2 + WT (compares C1 in .git against live Working Tree)
             let c2_to_wt_files = diff_service
-                .list_files(
+                .get_files(
                     &seeded.workspace_root,
                     &seeded.lgtm_home,
                     &[
@@ -191,7 +191,7 @@ mod given_a_git_workspace_in_local_mode {
 
             // Act
             let wt_diff = diff_service
-                .read_file(
+                .get_file_diff(
                     &seeded.workspace_root,
                     &seeded.lgtm_home,
                     "src/lib.rs",
@@ -199,7 +199,7 @@ mod given_a_git_workspace_in_local_mode {
                 )
                 .unwrap();
             let s2_diff = diff_service
-                .read_file(
+                .get_file_diff(
                     &seeded.workspace_root,
                     &seeded.lgtm_home,
                     "src/lib.rs",
@@ -226,31 +226,27 @@ mod given_a_git_workspace_in_local_mode {
             // Arrange
             let seeded = seed_five_stage_workspace();
             let diff_service = DiffService::new();
-
-            // Check S1 single-stage diff (Added src/services/diff.rs +4 -0, Deleted src/old.rs +0 -2)
-            let s1_files = diff_service
-                .list_files(
-                    &seeded.workspace_root,
-                    &seeded.lgtm_home,
-                    std::slice::from_ref(&seeded.s1_sha),
-                )
-                .unwrap();
-
-            // Also rename docs/architecture/index.md -> docs/architecture/overview.md in working tree
             let old_doc = seeded.workspace_root.join("docs/architecture/index.md");
             let new_doc = seeded.workspace_root.join("docs/architecture/overview.md");
             std::fs::rename(&old_doc, &new_doc).unwrap();
 
             // Act
+            let s1_files = diff_service
+                .get_files(
+                    &seeded.workspace_root,
+                    &seeded.lgtm_home,
+                    std::slice::from_ref(&seeded.s1_sha),
+                )
+                .unwrap();
             let wt_files = diff_service
-                .list_files(
+                .get_files(
                     &seeded.workspace_root,
                     &seeded.lgtm_home,
                     &["working_tree".to_string()],
                 )
                 .unwrap();
             let renamed_diff = diff_service
-                .read_file(
+                .get_file_diff(
                     &seeded.workspace_root,
                     &seeded.lgtm_home,
                     "docs/architecture/overview.md",

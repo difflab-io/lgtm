@@ -1,13 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { markdown } from '@codemirror/lang-markdown'
-  import { HighlightStyle, LanguageDescription, syntaxHighlighting } from '@codemirror/language'
+  import { LanguageDescription, syntaxHighlighting } from '@codemirror/language'
   import { languages } from '@codemirror/language-data'
-  import { lintGutter, setDiagnostics, type Diagnostic } from '@codemirror/lint'
+  import { lintGutter, setDiagnostics } from '@codemirror/lint'
   import { MergeView, unifiedMergeView } from '@codemirror/merge'
   import { Compartment, EditorState, type Extension } from '@codemirror/state'
   import { EditorView, hoverTooltip, keymap, tooltips } from '@codemirror/view'
-  import { tags } from '@lezer/highlight'
   import { basicSetup } from 'codemirror'
   import { cn, getDocumentWhichKeyController, registerModalEditor } from '@cloudvoyant/helical-ui'
   import { renderMarkdownToDom } from '../code-editor/markdown'
@@ -17,94 +16,15 @@
     goToNextHunk as stepNextHunk,
     goToPrevHunk as stepPrevHunk,
   } from '../code-editor/modalKeymap'
+  import {
+    codeEditorHighlightStyle as diffEditorHighlightStyle,
+    isMarkdownTarget,
+    toCodeMirrorDiagnostics,
+    toLineWrappingExtension,
+  } from '../code-editor/shared'
   import { codeEditorHoverTooltipVariants } from '../code-editor/styles'
-  import type { CodeEditorDiagnostic, CodeEditorLineWrapping } from '../code-editor/types'
   import { diffEditorRootVariants } from './styles'
   import type { DiffEditorMode, DiffEditorProps } from './types'
-
-  const diffEditorHighlightStyle = HighlightStyle.define([
-    {
-      tag: [
-        tags.keyword,
-        tags.controlKeyword,
-        tags.moduleKeyword,
-        tags.definitionKeyword,
-        tags.modifier,
-      ],
-      color: 'var(--cm-syntax-keyword, #8b5cf6)',
-    },
-    {
-      tag: [tags.operator, tags.operatorKeyword, tags.punctuation],
-      color: 'var(--cm-syntax-operator, inherit)',
-    },
-    {
-      tag: [tags.string, tags.special(tags.string), tags.regexp, tags.character],
-      color: 'var(--cm-syntax-string, #2ebd6b)',
-    },
-    {
-      tag: [
-        tags.number,
-        tags.integer,
-        tags.float,
-        tags.bool,
-        tags.null,
-        tags.atom,
-        tags.constant(tags.variableName),
-      ],
-      color: 'var(--cm-syntax-number, #f59e0b)',
-    },
-    {
-      tag: [
-        tags.function(tags.variableName),
-        tags.function(tags.propertyName),
-        tags.definition(tags.function(tags.variableName)),
-        tags.definition(tags.typeName),
-      ],
-      color: 'var(--cm-syntax-function, #52a8ff)',
-    },
-    {
-      tag: [tags.typeName, tags.className, tags.namespace],
-      color: 'var(--cm-syntax-type, inherit)',
-    },
-    {
-      tag: [tags.propertyName, tags.definition(tags.propertyName)],
-      color: 'var(--cm-syntax-property, inherit)',
-    },
-    {
-      tag: [tags.definition(tags.variableName), tags.variableName],
-      color: 'var(--cm-syntax-variable, inherit)',
-    },
-    {
-      tag: [tags.self, tags.tagName, tags.labelName, tags.standard(tags.variableName)],
-      color: 'var(--cm-syntax-builtin, #f12b82)',
-    },
-    {
-      tag: [tags.macroName, tags.attributeName, tags.annotation, tags.escape],
-      color: 'var(--cm-syntax-macro, #00aa95)',
-    },
-    {
-      tag: [tags.comment, tags.lineComment, tags.blockComment, tags.docComment],
-      color: 'var(--cm-syntax-comment, #a1a1a1)',
-      fontStyle: 'italic',
-    },
-    {
-      tag: [
-        tags.heading1,
-        tags.heading2,
-        tags.heading3,
-        tags.heading4,
-        tags.heading5,
-        tags.heading6,
-        tags.heading,
-        tags.list,
-      ],
-      color: 'var(--cm-syntax-heading, #52a8ff)',
-      fontWeight: '600',
-    },
-    { tag: tags.inserted, color: 'var(--cm-syntax-inserted, #2ebd6b)' },
-    { tag: tags.deleted, color: 'var(--cm-syntax-deleted, #f32e40)' },
-    { tag: tags.changed, color: 'var(--cm-syntax-changed, #ffae00)' },
-  ])
 
   const diffEditorTheme = EditorView.theme({
     '&': {
@@ -191,55 +111,6 @@
 
   // Derived -------------------------------------------------------------------
   const rootClasses = $derived(cn(diffEditorRootVariants({ size, mode }), className))
-
-  function isMarkdownTarget(targetName: string): boolean {
-    const lower = targetName.toLowerCase()
-    return (
-      lower.endsWith('.md') ||
-      lower.endsWith('.markdown') ||
-      lower.endsWith('.mdx') ||
-      lower.endsWith('.mkd')
-    )
-  }
-
-  function toLineWrappingExtension(wrapMode: CodeEditorLineWrapping): Extension {
-    if (!wrapMode || wrapMode === 'off') {
-      return []
-    }
-    if (typeof wrapMode === 'number' && Number.isFinite(wrapMode) && wrapMode > 0) {
-      const cols = Math.max(1, Math.floor(wrapMode))
-      return [
-        EditorView.lineWrapping,
-        EditorView.theme({
-          '.cm-content, &.cm-editor .cm-content': {
-            maxWidth: `${cols}ch`,
-          },
-        }),
-      ]
-    }
-    return [EditorView.lineWrapping]
-  }
-
-  function toCodeMirrorDiagnostics(docLength: number, items: CodeEditorDiagnostic[]): Diagnostic[] {
-    return items.map((item) => {
-      const from = Math.max(0, Math.min(docLength, item.from))
-      const to = Math.max(from, Math.min(docLength, item.to))
-      const sourceLabel = [item.source, item.code].filter(Boolean).join(' ')
-      return {
-        from,
-        to,
-        severity: item.severity,
-        message: item.message,
-        renderMessage() {
-          const wrapper = document.createElement('div')
-          wrapper.setAttribute('data-slot', 'code-editor-diagnostic-message')
-          wrapper.appendChild(renderMarkdownToDom(item.message))
-          return wrapper
-        },
-        ...(sourceLabel ? { source: sourceLabel } : {}),
-      }
-    })
-  }
 
   function buildCollapseConfig(fullFile: boolean) {
     return fullFile

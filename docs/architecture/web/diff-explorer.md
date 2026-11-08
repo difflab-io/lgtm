@@ -64,38 +64,39 @@ flowchart TB
 
 ### Behavior
 
-- Default: When the user switches the sidebar to `Diffs`, `DiffService` checks `Working Tree` (if uncommitted changes exist) or the latest commit in the embedded `CommitSelector` checklist, builds a collapsible hierarchical directory `TreeNode[]` tree from the flat `DiffFileEntry[]` paths (compacting single-child intermediate folders such as `docs/architecture` to match `codediff.nvim` and expanding all folder branches by default), populates `DiffExplorer` via `TreeView` (`libs/lgtm-ui`), and opens the first changed file in `DiffEditor`.
-- Folder collapse and expand: Clicking a directory branch row in `DiffExplorer` collapses or expands its child files and subdirectories using `TreeView` (`@ark-ui/svelte/tree-view`) with indent guides and `Folder` / `FolderOpen` icons.
-- Interaction (`CommitSelector` checklist -> `DiffExplorer` & `DiffEditor`): Checking or unchecking a commit row in `CommitSelector` updates `selectedCommitIds` in `DiffService`, recomputes the combined diff from the oldest checked commit's `baseSha` to the newest checked commit's `headSha`, refreshes `DiffExplorer`, and updates `DiffEditor`:
-  - If the currently open `activeFilePath` is still modified across `selectedCommitIds`, `DiffService` fetches the new `(baseContent, headContent)` pair for that file and updates `DiffEditor` in place.
-  - If `activeFilePath` is no longer in the changed list, `DiffService` selects the first changed file in the new list and loads it into `DiffEditor`.
-  - When `Working Tree` is the newest checked item, `DiffService` sets `readonly = false` on `DiffEditor`. Otherwise `DiffService` sets `readonly = true`.
-- Interaction (`DiffExplorer` -> `DiffEditor`): Click any file row in `DiffExplorer` to load its `(baseContent, headContent)` pair for the currently checked commits into `DiffEditor`.
-- Interaction (`ContentPane` toolbar): Use the diff toolbar or Helical UI shortcuts registered in `HotkeyService` (`apps/lgtm-web/src/lib/services/hotkeyService.svelte.ts`) to jump between hunks (`[c` / `]c`, `Space d k` / `Space d j`, `:dhp` / `:dhn`), step to the previous or next changed file (`[f` / `]f`, `Space d p` / `Space d n`, `:dfp` / `:dfn`), toggle between `Hunks Only` (`showFullFile = false`) and `Full File` (`showFullFile = true`) (`Space d f`, `:diff-full`), or toggle between `Unified` and `Split` columns (`Space d m`, `:diff-mode`).
-- Loading, empty, and error: Display `"Select at least one commit"` when all checkboxes are unchecked or `"No changes in selected commits"` when the net diff is empty, while keeping `CommitSelector` visible at the bottom.
-- Accessibility: Expose `role="tree"` on `DiffExplorer` and `role="group"` with `aria-label="Commits"` and native checkbox semantics (`role="checkbox"`, `aria-checked`) on each `CommitSelector` row.
+- Check `Working Tree` (if uncommitted changes exist) or the latest commit in the embedded `CommitSelector` checklist when switching the sidebar to `Diffs`, build a collapsible hierarchical directory `TreeNode[]` tree from the flat `DiffFileEntry[]` paths (compacting single-child intermediate folders such as `docs/architecture` to match `codediff.nvim` and expanding all folder branches by default), populate `DiffExplorer` via `TreeView` (`libs/lgtm-ui`), and open the first changed file in `DiffEditor`.
+- Collapse or expand child files and subdirectories when clicking a directory branch row in `DiffExplorer` using `TreeView` (`@ark-ui/svelte/tree-view`) with indent guides and `Folder` / `FolderOpen` icons.
+- Update `selectedCommitIds` in `DiffService` when checking or unchecking a commit row in `CommitSelector`, recompute the combined diff from the oldest checked commit's `parentSha` to the newest checked commit's `id`, refresh `DiffExplorer`, and update `DiffEditor`:
+  - Fetch the new `(baseContent, headContent)` pair in place if the currently open `activeFilePath` is still modified across `selectedCommitIds`.
+  - Select the first changed file in the new list and load it into `DiffEditor` if `activeFilePath` is no longer in the changed list.
+  - Set `readonly = false` on `DiffEditor` when `Working Tree` is the newest checked item, and set `readonly = true` otherwise.
+- Load the file's `(baseContent, headContent)` pair for the currently checked commits into `DiffEditor` when clicking any file row in `DiffExplorer`.
+- Jump between hunks (`[c` / `]c`, `Space d k` / `Space d j`, `:dhp` / `:dhn`), step to the previous or next changed file (`[f` / `]f`, `Space d p` / `Space d n`, `:dfp` / `:dfn`), toggle between `Hunks` (`showFullFile = false`) and `Full` (`showFullFile = true`) (`Space d f`, `:diff-full`), or toggle between `Unified` and `Split` columns (`Space d m`, `:diff-mode`) using the diff toolbar or Helical UI shortcuts registered in `HotkeyService` (`apps/lgtm-web/src/lib/services/hotkeyService.svelte.ts`).
+- Display `"No changes in selected range."` when the net diff is empty while keeping `CommitSelector` visible at the bottom.
+- Expose `role="tree"` on `DiffExplorer` and `aria-label="Commits checklist"` with native checkbox inputs on each `CommitSelector` row.
 
 ## Implementation
 
 ### Public API
 
 ```ts
-export type DiffCommitSource = 'working_tree' | 'local' | 'git'
+export type DiffCommitSource = 'working_tree' | 'local_snapshot' | 'git_commit'
 
 export interface DiffCommitItem {
   id: string
   shortSha: string
   title: string
+  author: string
+  timestamp: number
+  parentSha: string | null
   source: DiffCommitSource
-  baseSha: string
-  headSha: string | null
 }
 
 export type DiffFileStatus = 'added' | 'modified' | 'deleted' | 'renamed'
 
 export interface DiffFileEntry {
   path: string
-  oldPath?: string | null
+  oldPath: string | null
   status: DiffFileStatus
   additions: number
   deletions: number
@@ -103,30 +104,17 @@ export interface DiffFileEntry {
 
 export interface DiffExplorerProps {
   diff: DiffService
-  workspace: WorkspaceService
 }
 
 export interface CommitSelectorProps {
-  items: DiffCommitItem[]
-  selectedIds: string[]
-  loading?: boolean
-  ontoggle: (commitId: string) => void
+  diff: DiffService
 }
 ```
 
 ```svelte
 <div class="flex h-full min-h-0 flex-col">
-  <div class="min-h-0 flex-1 overflow-y-auto">
-    <DiffExplorer {diff} {workspace} />
-  </div>
-  <div class="h-44 shrink-0 overflow-y-auto border-t border-border">
-    <CommitSelector
-      items={diff.commits}
-      selectedIds={diff.selectedCommitIds}
-      loading={diff.loading}
-      ontoggle={(id) => void diff.toggleCommit(id)}
-    />
-  </div>
+  <DiffExplorer diff={workspace.diff} />
+  <CommitSelector diff={workspace.diff} />
 </div>
 ```
 
