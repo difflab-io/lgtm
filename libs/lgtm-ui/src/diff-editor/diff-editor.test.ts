@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { Chunk, getChunks, unifiedMergeView } from '@codemirror/merge'
 import { EditorState, Text } from '@codemirror/state'
-import { DIFF_EDITOR_KEYBINDINGS, diffHunkKeymap, goToNextHunk, goToPrevHunk } from './keybindings'
+import { goToNextHunk, goToPrevHunk } from '../code-editor/modalKeymap'
 import { diffEditorRootVariants, diffEditorStyles } from './styles'
 
 describe('Given a DiffEditor in split mode / When rendering base and head content', () => {
@@ -75,14 +75,13 @@ describe('Given a DiffEditor in split mode / When rendering base and head conten
 })
 
 describe('Given a DiffEditor in unified mode / When editing head content with readonly false', () => {
-  it('should update changed chunks dynamically and expose isolated hunk keybindings', () => {
+  it('should update changed chunks dynamically and expose modal hunk navigation helpers', () => {
     // Arrange
     const baseDoc = 'fn main() {\n  println!("old");\n}\n'
     const headDoc = 'fn main() {\n  println!("new");\n}\n'
     const state = EditorState.create({
       doc: headDoc,
       extensions: [
-        diffHunkKeymap,
         unifiedMergeView({
           original: baseDoc,
           mergeControls: false,
@@ -98,10 +97,6 @@ describe('Given a DiffEditor in unified mode / When editing head content with re
     // Assert
     expect(nextTransaction.state.doc.toString()).toContain('// extra line')
     expect(getChunks(nextTransaction.state)?.chunks.length).toBeGreaterThanOrEqual(1)
-    expect(DIFF_EDITOR_KEYBINDINGS.map((binding) => binding.key)).toEqual([
-      'Alt-PageDown',
-      'Alt-PageUp',
-    ])
     expect(goToNextHunk(undefined)).toBe(false)
     expect(goToPrevHunk(undefined)).toBe(false)
   })

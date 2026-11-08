@@ -2,19 +2,16 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use crate::error::{LgtmConfigError, Result};
-use crate::models::config::{LanguageConfig, LgtmConfig, LgtmConfigPatch, ResolvedConfigSnapshot};
+use crate::models::config::{
+    ConfigScope, DEFAULT_SCHEMA_URL, LanguageConfig, LgtmConfig, LgtmConfigPatch,
+    ResolvedConfigSnapshot,
+};
 
 /// Environment variable passing the startup workspace directory from `lgtm-cli` to `lgtm-desktop`.
 pub const LGTM_WORKSPACE_ENV: &str = "LGTM_WORKSPACE";
 
 /// Environment variable overriding the `lgtm-desktop` binary path or executable name.
 pub const LGTM_DESKTOP_BIN_ENV: &str = "LGTM_DESKTOP_BIN";
-
-#[derive(Debug, Clone, Copy)]
-enum ConfigScope {
-    Global,
-    Project,
-}
 
 /// Resolves global (`~/.lgtm/config.json`) and workspace (`<workspace>/.lgtm/config.json`) configuration, JSON Schema files, and `.lgtm/` directory layout.
 #[derive(Debug, Clone, Default)]
@@ -121,6 +118,66 @@ impl ConfigService {
             global_path: resolved_global.to_string_lossy().to_string(),
             project_path: resolved_project.to_string_lossy().to_string(),
         })
+    }
+
+    /// Applies a partial configuration patch to the resolved target scope (`Global` by default, or `Project` when a changed leaf is already overridden in `<workspace>/.lgtm/config.json` or `scope` is `Some(ConfigScope::Project)`), persists it atomically, and returns the updated [`ResolvedConfigSnapshot`].
+    pub fn update_config(
+        &self,
+        workspace_root: Option<&Path>,
+        patch: LgtmConfigPatch,
+        scope: Option<ConfigScope>,
+    ) -> Result<ResolvedConfigSnapshot> {
+        let global_path = self.get_global_config_path();
+        let mut global_patch = if global_path.is_file() {
+            Self::read_scoped_patch(ConfigScope::Global, &global_path)
+        } else {
+            LgtmConfigPatch {
+                schema: Some(DEFAULT_SCHEMA_URL.to_string()),
+                ..LgtmConfigPatch::default()
+            }
+        };
+
+        let existing_project = workspace_root.and_then(|ws| {
+            let p_path = Self::get_project_config_path(ws);
+            if p_path.is_file() {
+                Some(Self::read_scoped_patch(ConfigScope::Project, &p_path))
+            } else {
+                None
+            }
+        });
+
+        let (global_overlay, project_overlay) = match (scope, workspace_root) {
+            (Some(ConfigScope::Project), Some(_)) => (None, Some(patch)),
+            (Some(ConfigScope::Global), _) | (_, None) => (Some(patch), None),
+            (None, Some(_)) => {
+                let (g, p) = patch.split_by_project_overrides(existing_project.as_ref());
+                ((!g.is_empty()).then_some(g), (!p.is_empty()).then_some(p))
+            }
+        };
+
+        if let (Some(overlay), Some(ws)) = (project_overlay, workspace_root) {
+            self.ensure_workspace_dir(ws)?;
+            let p_path = Self::get_project_config_path(ws);
+            let mut proj = existing_project.unwrap_or_else(|| LgtmConfigPatch {
+                schema: Some(DEFAULT_SCHEMA_URL.to_string()),
+                ..LgtmConfigPatch::default()
+            });
+            proj.merge_patch(overlay);
+            if proj.schema.is_none() {
+                proj.schema = Some(DEFAULT_SCHEMA_URL.to_string());
+            }
+            Self::write_scoped_patch(ConfigScope::Project, &p_path, &proj)?;
+        }
+
+        if let Some(overlay) = global_overlay {
+            global_patch.merge_patch(overlay);
+            if global_patch.schema.is_none() {
+                global_patch.schema = Some(DEFAULT_SCHEMA_URL.to_string());
+            }
+            Self::write_scoped_patch(ConfigScope::Global, &global_path, &global_patch)?;
+        }
+
+        self.get_config_snapshot(workspace_root)
     }
 
     /// Ensures `<workspace>/.lgtm/` exists and registers `.lgtm/` in `<git-dir>/info/exclude`.
@@ -299,6 +356,44 @@ impl ConfigService {
                 LgtmConfigPatch::from_str_lenient(&raw)
             }
         }
+    }
+
+    fn write_scoped_patch(scope: ConfigScope, path: &Path, patch: &LgtmConfigPatch) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| match scope {
+                ConfigScope::Global => LgtmConfigError::GlobalConfigIo {
+                    path: parent.to_path_buf(),
+                    source,
+                },
+                ConfigScope::Project => LgtmConfigError::ProjectConfigIo {
+                    path: parent.to_path_buf(),
+                    source,
+                },
+            })?;
+        }
+        let mut serialized = serde_json::to_string_pretty(patch).map_err(|err| match scope {
+            ConfigScope::Global => LgtmConfigError::GlobalConfigParse {
+                path: path.to_path_buf(),
+                message: err.to_string(),
+            },
+            ConfigScope::Project => LgtmConfigError::ProjectConfigParse {
+                path: path.to_path_buf(),
+                message: err.to_string(),
+            },
+        })?;
+        if !serialized.ends_with('\n') {
+            serialized.push('\n');
+        }
+        std::fs::write(path, serialized).map_err(|source| match scope {
+            ConfigScope::Global => LgtmConfigError::GlobalConfigIo {
+                path: path.to_path_buf(),
+                source,
+            },
+            ConfigScope::Project => LgtmConfigError::ProjectConfigIo {
+                path: path.to_path_buf(),
+                source,
+            },
+        })
     }
 
     fn scan_directory_languages(

@@ -73,7 +73,9 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@diffs'] }, ()
       // Assert
       await expect(page.getByTestId('diff-file-stats-src/lib.rs')).toContainText('M +1 -1')
       await expect(page.getByTestId('diff-file-stats-src/old.rs')).toContainText('D +0 -2')
-      await expect(page.getByTestId('diff-file-stats-src/services/diff.rs')).toContainText('A +5 -0')
+      await expect(page.getByTestId('diff-file-stats-src/services/diff.rs')).toContainText(
+        'A +5 -0',
+      )
       await entry(page, 'src/services/diff.rs').click()
       await expect(page.getByTestId('diff-active-filepath')).toHaveText('src/services/diff.rs')
       await expect(page.locator('.cm-mergeViewEditor').nth(1)).toContainText(
@@ -157,8 +159,10 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@diffs'] }, ()
         const checklist = page.getByRole('list', { name: 'Commit range checklist' })
         await expect(checklist.getByRole('checkbox')).toHaveCount(5)
 
-        // Act: switch ReviewService to ForgeBacked mode with Alt+r
-        await page.keyboard.press('Alt+r')
+        // Act: switch ReviewService to ForgeBacked mode with Space d r
+        await page.keyboard.press(' ')
+        await page.keyboard.press('d')
+        await page.keyboard.press('r')
 
         // Assert: only the 2 standard Git branch commits (C2 and C1) remain in the checklist
         await expect(
@@ -174,11 +178,14 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@diffs'] }, ()
           'docs/architecture/index.md',
         )
 
-        // Act: navigate to next changed file with Alt+ArrowDown and toggle view mode with Alt+m
-        await page.keyboard.press('Alt+ArrowDown')
+        // Act: navigate to next changed file with ]f and toggle view mode with Space d m
+        await page.keyboard.press(']')
+        await page.keyboard.press('f')
         await expect(page.getByTestId('diff-active-filepath')).toHaveText('src/lib.rs')
 
-        await page.keyboard.press('Alt+m')
+        await page.keyboard.press(' ')
+        await page.keyboard.press('d')
+        await page.keyboard.press('m')
         await expect(
           page
             .getByRole('group', { name: 'Diff layout mode' })

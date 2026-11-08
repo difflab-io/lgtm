@@ -5,10 +5,10 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use lgtm_config::{ConfigService, ResolvedConfigSnapshot};
+use lgtm_config::{ConfigScope, ConfigService, LgtmConfigPatch, ResolvedConfigSnapshot};
 use lgtm_lsp::{
-    LspDiagnosticsBuffer, LspEvent, LspHoverResult, LspLocation, LspServerStatusEvent,
-    LspWorkspaceSnapshot,
+    LspCompletionItem, LspDiagnosticsBuffer, LspEvent, LspHoverResult, LspLocation,
+    LspServerStatusEvent, LspSignatureHelp, LspWorkspaceSnapshot,
 };
 use tauri::{Manager, State};
 
@@ -164,10 +164,13 @@ pub fn commands<R: tauri::Runtime>(invoke: tauri::ipc::Invoke<R>) -> bool {
         lsp_did_change,
         lsp_hover,
         lsp_goto_definition,
+        lsp_completion,
+        lsp_signature_help,
         lsp_get_state,
         lsp_get_diagnostics_buffer,
         lsp_restart,
         config_get,
+        config_update,
         review_set_mode,
         diff_get_state,
         diff_list_files,
@@ -197,10 +200,13 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             lsp_did_change,
             lsp_hover,
             lsp_goto_definition,
+            lsp_completion,
+            lsp_signature_help,
             lsp_get_state,
             lsp_get_diagnostics_buffer,
             lsp_restart,
             config_get,
+            config_update,
             review_set_mode,
             diff_get_state,
             diff_list_files,
@@ -514,6 +520,39 @@ pub async fn lsp_goto_definition(
     run_lsp_blocking(state, move |s| s.get_definition(&root, &file_path, offset)).await
 }
 
+/// Requests code completion candidates (`textDocument/completion`) at a UTF-16 editor offset.
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_completion(
+    state: State<'_, AppState>,
+    relative_path: String,
+    offset: u32,
+) -> Result<Vec<LspCompletionItem>> {
+    let (root, file_path) = run_blocking(state.clone(), move |w| {
+        Ok((w.get_root()?, w.get_entry_path(&relative_path)?))
+    })
+    .await?;
+    run_lsp_blocking(state, move |s| s.get_completions(&root, &file_path, offset)).await
+}
+
+/// Requests callable signature help (`textDocument/signatureHelp`) at a UTF-16 editor offset.
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_signature_help(
+    state: State<'_, AppState>,
+    relative_path: String,
+    offset: u32,
+) -> Result<Option<LspSignatureHelp>> {
+    let (root, file_path) = run_blocking(state.clone(), move |w| {
+        Ok((w.get_root()?, w.get_entry_path(&relative_path)?))
+    })
+    .await?;
+    run_lsp_blocking(state, move |s| {
+        s.get_signature_help(&root, &file_path, offset)
+    })
+    .await
+}
+
 /// Returns the current workspace LSP server statuses and diagnostics snapshot.
 #[tauri::command]
 #[specta::specta]
@@ -562,6 +601,32 @@ pub async fn config_get(state: State<'_, AppState>) -> Result<ResolvedConfigSnap
             .map_err(|err| error("io", err.to_string()))
     })
     .await
+}
+
+/// Applies a partial configuration patch to global or project `config.json` and emits `config-updated`.
+#[tauri::command]
+#[specta::specta]
+pub async fn config_update(
+    state: State<'_, AppState>,
+    patch: LgtmConfigPatch,
+    scope: Option<ConfigScope>,
+) -> Result<ResolvedConfigSnapshot> {
+    let config_service = state.config.clone();
+    let lsp_service = state.lsp.clone();
+    let events = state.events.clone();
+    let (snapshot, maybe_root) = run_blocking(state, move |w| {
+        let root = w.get_root().ok();
+        let snapshot = config_service
+            .update_config(root.as_deref(), patch, scope)
+            .map_err(|err| error("io", err.to_string()))?;
+        Ok((snapshot, root))
+    })
+    .await?;
+    if let Some(root) = maybe_root {
+        lsp_service.reload_workspace_config(&root);
+    }
+    events.emit_to_webview("config-updated", &snapshot);
+    Ok(snapshot)
 }
 
 /// Switches the active [`ReviewMode`] (`Local` vs. `ForgeBacked`) and returns the refreshed workspace diff snapshot.
@@ -650,6 +715,10 @@ mod tests {
 
                 // Assert
                 assert!(generated.contains("export type ThemeMode"));
+                assert!(generated.contains("export type CommandStyle"));
+                assert!(generated.contains("export type KeybindPreset"));
+                assert!(generated.contains("export type KeybindingSettings"));
+                assert!(generated.contains("export type KeybindingSettingsPatch"));
                 assert!(generated.contains("export type AppearanceSettings"));
                 assert!(generated.contains("export type WorkspaceSettings"));
                 assert!(generated.contains("export type EditorSettings"));
@@ -658,11 +727,16 @@ mod tests {
                 assert!(generated.contains("export type LgtmConfigPatch"));
                 assert!(generated.contains("export type ResolvedConfigSnapshot"));
                 assert!(generated.contains("export type FileOpenedEvent"));
+                assert!(generated.contains("export type LspCompletionItem"));
+                assert!(generated.contains("export type LspSignatureHelp"));
                 assert!(generated.contains("export type ReviewMode"));
                 assert!(generated.contains("export type DiffWorkspaceSnapshot"));
                 assert!(generated.contains("export type DiffFileEntry"));
                 assert!(generated.contains("export type FileDiffContent"));
+                assert!(generated.contains("lspCompletion"));
+                assert!(generated.contains("lspSignatureHelp"));
                 assert!(generated.contains("configGet"));
+                assert!(generated.contains("configUpdate"));
                 assert!(generated.contains("reviewSetMode"));
                 assert!(generated.contains("diffGetState"));
                 assert!(generated.contains("diffListFiles"));

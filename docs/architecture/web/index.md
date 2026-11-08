@@ -2,22 +2,23 @@
 
 ## Overview
 
-`lgtm-web` is the Svelte 5 and SvelteKit frontend for LGTM, serving both the native Tauri v2 desktop IDE shell (`lgtm-desktop`) and the browser-accessible review interface (`lgtm-forge`). In desktop mode, `lgtm-web` composes portable Helical UI primitives from `@cloudvoyant/helical-svelte` and `lgtm-ui` (`CodeEditor`, `DiffEditor`, `TreeView`, `Tabs`, `Menu`, `ContextMenu`) with single-responsibility reactive services (`WorkspaceService`, `ReviewService`, `DiffService`, `LspService`, and `SettingsService`) over a typed Specta IPC client (`WorkspaceClient`), coordinating cross-service lifecycle events in `Shell.svelte`.
+`lgtm-web` is the Svelte 5 and SvelteKit frontend for LGTM, serving both the native Tauri v2 desktop IDE shell (`lgtm-desktop`) and the browser-accessible review interface (`lgtm-forge`). In desktop mode, `lgtm-web` composes portable Helical UI primitives from `@cloudvoyant/helical-svelte` and `lgtm-ui` (`CodeEditor`, `DiffEditor`, `TreeView`, `Tabs`, `Menu`, `ContextMenu`) with single-responsibility reactive services (`WorkspaceService`, `ReviewService`, `DiffService`, `LspService`, `SettingsService`, and `HotkeyService`) over a typed Specta IPC client (`WorkspaceClient`), coordinating cross-service lifecycle events in `Shell.svelte`.
 
 ## Requirement
 
 ### Functional
 
-- Reactive workspace and editor state (`WorkspaceService`): Browse workspace directories, manage open file and read-only diagnostics tabs, debounce editor buffer saves (`150ms`), open global (`~/.lgtm/config.json`) and local (`.lgtm/config.json`) configuration files as standard editor tabs (`Cmd+,` and `Cmd+Shift+,`), and flush pending saves on tab switch, workspace switch, or application exit.
+- Reactive workspace and editor state (`WorkspaceService`): Browse workspace directories, manage open file and read-only diagnostics tabs, debounce editor buffer saves (`150ms`), open global (`~/.lgtm/config.json`) and local (`.lgtm/config.json`) configuration files as standard editor tabs (`Cmd+,` and `Cmd+Shift+,`), refresh clean config tabs on external updates, and flush pending saves on tab switch, workspace switch, or application exit.
 - Review mode entry (`ReviewService`): Enter diff inspection in either `Local` mode (LGTM shadow commits in `~/.lgtm/snapshots/$repoSlug` plus uncommitted working-tree changes) or `ForgeBacked` mode (standard Git branch commits in `.git`), and coordinate with `DiffService` to populate the diff sidebar and editor.
 - Single-file diff viewer, changed-file tree, and commit checklist (`DiffService`): Track the commit checklist (`commits` and `selectedCommitIds`) in `CommitSelector`, list changed files (`A`, `M`, `D`, `R`, `+additions`, `-deletions`) in `DiffExplorer`, open one file diff at a time in `DiffEditor`, and toggle between `unified` and `split` columns or between collapsed hunks (`showFullFile = false`) and the full file (`showFullFile = true`).
 - Language server status, diagnostics, and navigation (`LspService`): Track per-language server readiness (`Starting`, `Ready`, `Unavailable`, `Stopped`) and file diagnostics (`lsp-status` and `lsp-diagnostics` events), forward live buffer edits (`lsp_did_change`), resolve hover documentation (`lsp_hover`) and go-to-definition locations (`lsp_goto_definition`), and open or refresh read-only diagnostics buffer tabs.
-- File-driven user configuration (`SettingsService`): Load the resolved configuration snapshot (`config_get`), react to live `config-updated` events emitted whenever `~/.lgtm/config.json` or `<workspace>/.lgtm/config.json` is saved, synchronize the active color theme (`system`, `light`, `dark`) with the document root and native Tauri window chrome, expose editor preferences (`lineWrapping`), and persist recent workspace roots in `localStorage`.
+- File-driven and command-driven user settings (`SettingsService`): Load the resolved configuration snapshot (`config_get`), apply scoped partial updates (`config_update`), react to live `config-updated` events emitted whenever `~/.lgtm/config.json` or `<workspace>/.lgtm/config.json` is saved, synchronize the active color theme (`system`, `light`, `dark`), expose editor (`lineWrapping`) and modal keybinding (`commandStyle`, `preset`, `leaderOnly`, `paneOutline`, `clickToInsert`) preferences, and persist recent workspace roots in `localStorage`.
+- Modal keybindings and command surfaces (`HotkeyService`): Register app-level `WhichKey` leader bindings (`Space`), diff and review bindings (`Space d`, `[f` / `]f`, `[c` / `]c`), global shortcuts (`Mod+k`, `Mod+,`, `Mod+Shift+,`), and the hierarchical `CommandNode[]` catalog shared by `CommandMenu` (`:` and `Mod+k` when `commandStyle == "menu"`) and `CommandPalette` (`Mod+k` when `commandStyle == "palette"`). See [Modal keybindings architecture](keybindings.md).
 
 ### Non-Functional
 
-- Single-responsibility services: Keep `WorkspaceService`, `ReviewService`, `DiffService`, `LspService`, and `SettingsService` focused on their respective domains, and wire cross-service event subscriptions (`lsp-status`, `lsp-diagnostics`, `config-updated`, `diff-updated`, `workspace-quit-requested`) in `Shell.svelte`.
-- Isolated keybindings: Centralize frontend shortcut definitions in `src/lib/keybindings.ts` so they can register directly with Helical UI `which-key` and hotkey primitives.
+- Single-responsibility services: Keep `WorkspaceService`, `ReviewService`, `DiffService`, `LspService`, `SettingsService`, and `HotkeyService` focused on their respective domains, and wire cross-service event subscriptions (`lsp-status`, `lsp-diagnostics`, `config-updated`, `diff-updated`, `workspace-quit-requested`) in `Shell.svelte`.
+- Modal keybinding parity: Centralize frontend shortcut definitions and command items in `HotkeyService` so they register directly with Helical UI `WhichKeyProvider`, `CommandMenu`, and `CommandPalette`.
 - Generated IPC type parity: Consume Specta-generated TypeScript bindings (`src/lib/gen/bindings.ts`) inside `WorkspaceClient` so frontend services and Rust Tauri commands share compile-time contract checks.
 
 ## Design
@@ -90,7 +91,7 @@ flowchart TB
     SET_SVC --> WS_CLIENT
 ```
 
-- `Shell.svelte`: Application entry point that instantiates `WorkspaceService`, `ReviewService`, `DiffService`, `LspService`, and `SettingsService`, subscribes to Tauri backend events (`lsp-status`, `lsp-diagnostics`, `config-updated`, `diff-updated`, `workspace-quit-requested`), synchronizes OS/window color scheme media queries with `SettingsService.theme`, and binds shortcuts from `src/lib/keybindings.ts`.
+- `Shell.svelte`: Application entry point that instantiates `WorkspaceService`, `ReviewService`, `DiffService`, `LspService`, `SettingsService`, and `HotkeyService`, subscribes to Tauri backend events (`lsp-status`, `lsp-diagnostics`, `config-updated`, `diff-updated`, `workspace-quit-requested`), synchronizes OS/window color scheme media queries with `SettingsService.theme`, and mounts `WhichKeyProvider`, `CommandMenu`, and `CommandPalette`.
 - `WorkspaceService` (`workspaceService.svelte.ts`): Owns the active workspace tree, expanded directories, open editor tabs, dirty buffer tracking, and `150ms` debounced save timer, delegates LSP notifications to `LspService`, and loads initial configuration through `SettingsService`.
 - `ReviewService` (`reviewService.svelte.ts`): Owns the active review context mode (`mode: 'local' | 'forge_backed'`), enters diff viewing in either local shadow-commit mode or branch Git-commit mode, and prepares the hook point for future `lgtm-forge` review sessions and comments.
 - `DiffService` (`diffService.svelte.ts`): Owns the reactive commit checklist (`commits`, `selectedCommitIds`), changed file list (`files`), active single-file diff payload (`activeFile`), layout mode (`viewMode: 'unified' | 'split'`), and full-file vs. hunks-only state (`showFullFile: boolean`). See [DiffExplorer & CommitSelector architecture](diff-explorer.md).
@@ -195,12 +196,17 @@ flowchart TD
 | `DiffService.nextFile` / `prevFile` | `nextFile(): Promise<void>` / `prevFile(): Promise<void>` | Step to the next or previous changed file in `DiffExplorer` and load its diff into `DiffEditor`. |
 | `DiffService.toggleViewMode` / `toggleFullFile` | `toggleViewMode(): void` / `toggleFullFile(): void` | Toggle `DiffEditor` between `'unified'` and `'split'` columns or between collapsed hunks (`showFullFile = false`) and the full file (`showFullFile = true`). |
 | `LspService.refresh` | `refresh(): Promise<void>` | Fetch the current `LspWorkspaceSnapshot` (`servers` and `diagnostics`) for the active workspace. |
-| `LspService.hover` / `gotoDefinition` | `hover(path: string, offset: number)` / `gotoDefinition(path: string, offset: number)` | Query LSP hover Markdown or definition locations at a UTF-16 code-unit offset. |
+| `LspService.requestHover` / `getDefinitions` | `requestHover(path: string, offset: number)` / `getDefinitions(path: string, offset: number)` | Query LSP hover Markdown or definition locations at a UTF-16 code-unit offset. |
+| `LspService.requestCompletions` / `requestSignatureHelp` | `requestCompletions(path: string, offset: number)` / `requestSignatureHelp(path: string, offset: number)` | Query LSP completion items or signature help at a UTF-16 code-unit offset. |
 | `SettingsService.load` | `load(): Promise<ResolvedConfigSnapshot \| null>` | Fetch the latest `ResolvedConfigSnapshot` from `config_get` and update reactive preferences. |
+| `SettingsService.update` | `update(patch: LgtmConfigPatch, scope?: ConfigScope): Promise<ResolvedConfigSnapshot>` | Persist a partial `LgtmConfigPatch` to global or project `config.json` via `config_update` and apply the returned snapshot. |
 | `SettingsService.handleUpdated` | `handleUpdated(next: ResolvedConfigSnapshot): void` | Apply a live `config-updated` event payload when `~/.lgtm/config.json` or `.lgtm/config.json` is saved. |
+| `SettingsService.rememberRoot` | `rememberRoot(root: string): void` | Prepend `root` to `knownRoots` and persist the MRU list to `localStorage`. |
+| `HotkeyService.keymap` / `commandItems` | `readonly keymap: Record<string, WhichKeyNode>` / `get commandItems(): CommandNode[]` | Return the `WhichKey` binding tree and reactive hierarchical `CommandMenu` / `CommandPalette` command catalog. |
 
 ## References
 
+- [Modal keybindings & command surfaces (`lgtm-web` & `lgtm-ui`) architecture](keybindings.md).
 - [DiffExplorer & CommitSelector UI components](diff-explorer.md).
 - [DiffEditor UI component (`libs/lgtm-ui`)](../ui/diff-editor.md).
 - [Desktop diff viewer and commit inspection](../desktop/diffs.md).

@@ -6,6 +6,8 @@ import {
   commands,
   type AppearanceSettings,
   type AppearanceSettingsPatch,
+  type CommandStyle,
+  type ConfigScope,
   type DiffCommitItem,
   type DiffCommitSource,
   type DiffFileEntry,
@@ -16,10 +18,14 @@ import {
   type FileContent,
   type FileDiffContent,
   type FileOpenedEvent,
+  type KeybindPreset,
+  type KeybindingSettings,
+  type KeybindingSettingsPatch,
   type LanguageConfig,
   type LgtmConfig,
   type LgtmConfigPatch,
   type LineWrap,
+  type LspCompletionItem,
   type LspDiagnostic,
   type LspDiagnosticsBuffer,
   type LspHoverResult,
@@ -28,6 +34,8 @@ import {
   type LspServerStatusEvent,
   type LspSettings,
   type LspSettingsPatch,
+  type LspSignatureHelp,
+  type LspSignatureInformation,
   type LspWorkspaceSnapshot,
   type MiseTaskConfig,
   type ResolvedConfigSnapshot,
@@ -42,6 +50,8 @@ import {
 export type {
   AppearanceSettings,
   AppearanceSettingsPatch,
+  CommandStyle,
+  ConfigScope,
   DiffCommitItem,
   DiffCommitSource,
   DiffFileEntry,
@@ -52,10 +62,14 @@ export type {
   FileContent,
   FileDiffContent,
   FileOpenedEvent,
+  KeybindPreset,
+  KeybindingSettings,
+  KeybindingSettingsPatch,
   LanguageConfig,
   LgtmConfig,
   LgtmConfigPatch,
   LineWrap,
+  LspCompletionItem,
   LspDiagnostic,
   LspDiagnosticsBuffer,
   LspHoverResult,
@@ -64,6 +78,8 @@ export type {
   LspServerStatusEvent,
   LspSettings,
   LspSettingsPatch,
+  LspSignatureHelp,
+  LspSignatureInformation,
   LspWorkspaceSnapshot,
   MiseTaskConfig,
   ResolvedConfigSnapshot,
@@ -106,10 +122,13 @@ export interface WorkspaceClient {
   lspDidChange(path: string, content: string): Promise<void>
   lspHover(path: string, offset: number): Promise<LspHoverResult | null>
   lspGotoDefinition(path: string, offset: number): Promise<LspLocation[]>
+  lspCompletion?(path: string, offset: number): Promise<LspCompletionItem[]>
+  lspSignatureHelp?(path: string, offset: number): Promise<LspSignatureHelp | null>
   lspGetState(): Promise<LspWorkspaceSnapshot>
   lspGetDiagnosticsBuffer(languageId?: string): Promise<LspDiagnosticsBuffer>
   lspRestart(languageId: string): Promise<LspServerStatusEvent>
   configGet?(): Promise<ResolvedConfigSnapshot>
+  configUpdate?(patch: LgtmConfigPatch, scope?: ConfigScope | null): Promise<ResolvedConfigSnapshot>
   registerConfigHandlers?(handlers: {
     onConfigUpdated: (snapshot: ResolvedConfigSnapshot) => void
     onOpenFile?: (event: FileOpenedEvent) => void
@@ -177,11 +196,15 @@ export const workspaceClient: WorkspaceClient = {
   lspHover: (relativePath, offset) => invoke('lsp_hover', { relativePath, offset }),
   lspGotoDefinition: (relativePath, offset) =>
     invoke('lsp_goto_definition', { relativePath, offset }),
+  lspCompletion: (relativePath, offset) => invoke('lsp_completion', { relativePath, offset }),
+  lspSignatureHelp: (relativePath, offset) =>
+    invoke('lsp_signature_help', { relativePath, offset }),
   lspGetState: () => invoke('lsp_get_state'),
   lspGetDiagnosticsBuffer: (languageId?: string) =>
     invoke('lsp_get_diagnostics_buffer', languageId ? { languageId } : {}),
   lspRestart: (languageId: string) => invoke('lsp_restart', { languageId }),
   configGet: () => commands.configGet(),
+  configUpdate: (patch, scope = null) => commands.configUpdate(patch, scope ?? null),
   registerConfigHandlers: (handlers) =>
     Promise.all([
       listen<ResolvedConfigSnapshot>('config-updated', (event) => {

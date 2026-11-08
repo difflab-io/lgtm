@@ -9,17 +9,19 @@ use std::time::Duration;
 use lgtm_config::{ConfigService, LanguageConfig, LgtmConfig};
 use lgtm_env::MiseService;
 use lsp_types::{
-    DiagnosticSeverity, GotoDefinitionResponse, Hover, HoverContents, MarkedString, NumberOrString,
-    PublishDiagnosticsParams, Range,
+    CompletionItem, CompletionItemKind, CompletionResponse, CompletionTextEdit, DiagnosticSeverity,
+    Documentation, GotoDefinitionResponse, Hover, HoverContents, MarkedString, NumberOrString,
+    ParameterLabel, PublishDiagnosticsParams, Range, SignatureHelp,
 };
 use serde_json::{Value, json};
 
 use crate::error::{LspError, Result};
 use crate::models::cache::{LspCachedDocument, LspDocumentSyncAction, LspSessionKey};
 use crate::models::lsp::{
-    LspDiagnostic, LspDiagnosticSeverity, LspDiagnosticsBuffer, LspEvent, LspHoverResult,
-    LspLocation, LspServerStatus, LspServerStatusEvent, LspWorkspaceSnapshot, file_uri_to_path,
-    offset_to_position, path_to_file_uri, position_to_offset,
+    LspCompletionItem, LspDiagnostic, LspDiagnosticSeverity, LspDiagnosticsBuffer, LspEvent,
+    LspHoverResult, LspLocation, LspServerStatus, LspServerStatusEvent, LspSignatureHelp,
+    LspSignatureInformation, LspWorkspaceSnapshot, file_uri_to_path, offset_to_position,
+    path_to_file_uri, position_to_offset,
 };
 use crate::services::cache::LspCacheService;
 
@@ -480,6 +482,76 @@ impl LgtmLspManager {
 
         let parsed: GotoDefinitionResponse = serde_json::from_value(response)?;
         Ok(self.parse_definition_response(&workspace_root, parsed))
+    }
+
+    /// Requests code completion candidates (`textDocument/completion`) at the given UTF-16 `offset` in `file_path`.
+    pub fn get_completions(
+        &self,
+        workspace_root: &Path,
+        file_path: &Path,
+        offset: u32,
+    ) -> Result<Vec<LspCompletionItem>> {
+        if self.disabled {
+            return Ok(Vec::new());
+        }
+        let workspace_root = Self::canonical_or_owned(workspace_root);
+        let file_path = Self::canonical_or_owned(file_path);
+        let Some((handle, text)) = self.resolve_file_session(&workspace_root, &file_path) else {
+            return Ok(Vec::new());
+        };
+        let Some(uri) = path_to_file_uri(&file_path) else {
+            return Ok(Vec::new());
+        };
+        let (line, character) = offset_to_position(&text, offset);
+        let response = handle.request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character },
+            }),
+        )?;
+
+        if response.is_null() {
+            return Ok(Vec::new());
+        }
+
+        let parsed: CompletionResponse = serde_json::from_value(response)?;
+        Ok(Self::parse_completion_response(&text, parsed))
+    }
+
+    /// Requests callable signature help (`textDocument/signatureHelp`) at the given UTF-16 `offset` in `file_path`.
+    pub fn get_signature_help(
+        &self,
+        workspace_root: &Path,
+        file_path: &Path,
+        offset: u32,
+    ) -> Result<Option<LspSignatureHelp>> {
+        if self.disabled {
+            return Ok(None);
+        }
+        let workspace_root = Self::canonical_or_owned(workspace_root);
+        let file_path = Self::canonical_or_owned(file_path);
+        let Some((handle, text)) = self.resolve_file_session(&workspace_root, &file_path) else {
+            return Ok(None);
+        };
+        let Some(uri) = path_to_file_uri(&file_path) else {
+            return Ok(None);
+        };
+        let (line, character) = offset_to_position(&text, offset);
+        let response = handle.request(
+            "textDocument/signatureHelp",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character },
+            }),
+        )?;
+
+        if response.is_null() {
+            return Ok(None);
+        }
+
+        let parsed: SignatureHelp = serde_json::from_value(response)?;
+        Ok(Self::parse_signature_help(parsed))
     }
 
     /// Returns a snapshot of all tracked language servers and diagnostics for `workspace_root`.
@@ -1000,6 +1072,17 @@ impl LgtmLspManager {
                         "definition": {
                             "linkSupport": true,
                         },
+                        "completion": {
+                            "completionItem": {
+                                "documentationFormat": ["markdown", "plaintext"],
+                                "snippetSupport": false,
+                            },
+                        },
+                        "signatureHelp": {
+                            "signatureInformation": {
+                                "documentationFormat": ["markdown", "plaintext"],
+                            },
+                        },
                         "publishDiagnostics": {
                             "relatedInformation": true,
                         },
@@ -1319,6 +1402,139 @@ impl LgtmLspManager {
             line,
             character,
         })
+    }
+
+    fn parse_completion_response(
+        text: &str,
+        response: CompletionResponse,
+    ) -> Vec<LspCompletionItem> {
+        let items = match response {
+            CompletionResponse::Array(items) => items,
+            CompletionResponse::List(list) => list.items,
+        };
+        items
+            .into_iter()
+            .filter(|item| !item.label.trim().is_empty())
+            .map(|item| Self::map_completion_item(text, item))
+            .collect()
+    }
+
+    fn map_completion_item(text: &str, item: CompletionItem) -> LspCompletionItem {
+        let kind = item.kind.map(|k| {
+            match k {
+                CompletionItemKind::METHOD => "method",
+                CompletionItemKind::FUNCTION | CompletionItemKind::CONSTRUCTOR => "function",
+                CompletionItemKind::FIELD | CompletionItemKind::PROPERTY => "property",
+                CompletionItemKind::VARIABLE => "variable",
+                CompletionItemKind::CLASS | CompletionItemKind::STRUCT => "class",
+                CompletionItemKind::INTERFACE => "interface",
+                CompletionItemKind::MODULE | CompletionItemKind::UNIT => "namespace",
+                CompletionItemKind::ENUM => "enum",
+                CompletionItemKind::ENUM_MEMBER
+                | CompletionItemKind::CONSTANT
+                | CompletionItemKind::VALUE => "constant",
+                CompletionItemKind::KEYWORD | CompletionItemKind::OPERATOR => "keyword",
+                CompletionItemKind::TYPE_PARAMETER => "type",
+                _ => "text",
+            }
+            .to_string()
+        });
+        let documentation = item
+            .documentation
+            .as_ref()
+            .map(Self::format_documentation)
+            .filter(|doc| !doc.trim().is_empty());
+        let (insert_text, from, to) = match item.text_edit {
+            Some(CompletionTextEdit::Edit(edit)) => {
+                if edit.range.start.line == edit.range.end.line {
+                    let (_, _, _, _, start_offset, end_offset) =
+                        Self::map_lsp_range(text, &edit.range);
+                    (Some(edit.new_text), Some(start_offset), Some(end_offset))
+                } else {
+                    (Some(edit.new_text), None, None)
+                }
+            }
+            Some(CompletionTextEdit::InsertAndReplace(edit)) => {
+                if edit.replace.start.line == edit.replace.end.line {
+                    let (_, _, _, _, start_offset, end_offset) =
+                        Self::map_lsp_range(text, &edit.replace);
+                    (Some(edit.new_text), Some(start_offset), Some(end_offset))
+                } else {
+                    (Some(edit.new_text), None, None)
+                }
+            }
+            None => (item.insert_text, None, None),
+        };
+        LspCompletionItem {
+            label: item.label,
+            kind,
+            detail: item.detail.filter(|d| !d.trim().is_empty()),
+            documentation,
+            insert_text: insert_text.filter(|t| !t.is_empty()),
+            from,
+            to,
+        }
+    }
+
+    fn parse_signature_help(help: SignatureHelp) -> Option<LspSignatureHelp> {
+        if help.signatures.is_empty() {
+            return None;
+        }
+        let active_signature = help.active_signature.unwrap_or(0);
+        let active_sig_ref = help
+            .signatures
+            .get(active_signature as usize)
+            .or_else(|| help.signatures.first());
+        let active_parameter = active_sig_ref
+            .and_then(|sig| sig.active_parameter)
+            .or(help.active_parameter)
+            .unwrap_or(0);
+        let signatures = help
+            .signatures
+            .into_iter()
+            .map(|sig| {
+                let label = sig.label;
+                let documentation = sig
+                    .documentation
+                    .as_ref()
+                    .map(Self::format_documentation)
+                    .filter(|doc| !doc.trim().is_empty());
+                let parameters = sig
+                    .parameters
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|param| match param.label {
+                        ParameterLabel::Simple(s) => s,
+                        ParameterLabel::LabelOffsets([start, end]) => {
+                            let units: Vec<u16> = label
+                                .encode_utf16()
+                                .skip(start as usize)
+                                .take((end.saturating_sub(start)) as usize)
+                                .collect();
+                            String::from_utf16_lossy(&units)
+                        }
+                    })
+                    .collect();
+                LspSignatureInformation {
+                    label,
+                    documentation,
+                    parameters,
+                }
+            })
+            .collect();
+        Some(LspSignatureHelp {
+            signatures,
+            active_signature,
+            active_parameter,
+        })
+    }
+
+    fn format_documentation(doc: &Documentation) -> String {
+        let raw = match doc {
+            Documentation::String(s) => s.clone(),
+            Documentation::MarkupContent(markup) => markup.value.clone(),
+        };
+        Self::unescape_markdown_punctuation(&raw)
     }
 }
 

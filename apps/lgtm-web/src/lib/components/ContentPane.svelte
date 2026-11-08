@@ -1,24 +1,41 @@
 <script lang="ts">
   import { tick } from 'svelte'
-  import { Button, Row } from '@cloudvoyant/helical-svelte'
+  import {
+    Button,
+    Row,
+    WhichKeyMode,
+    useOptionalPaneRegistration,
+  } from '@cloudvoyant/helical-svelte'
   import { CodeEditor, DiffEditor, Tabs } from 'lgtm-ui'
   import { ChevronRight, FileText, GitCompare } from 'lucide-svelte'
+  import type { HotkeyService } from '../services/hotkeyService.svelte'
   import type { WorkspaceService } from '../services/workspaceService.svelte'
   import LspStatusMenu from './LspStatusMenu.svelte'
 
   // Props ---------------------------------------------------------------------
   interface ContentPaneProps {
     workspace: WorkspaceService
+    hotkeys: HotkeyService
   }
-  let { workspace }: ContentPaneProps = $props()
+  let { workspace, hotkeys }: ContentPaneProps = $props()
 
   // State ---------------------------------------------------------------------
+  let mainEl = $state<HTMLElement | null>(null)
   let editorRef = $state<{ focus: () => void }>()
   let diffEditorRef = $state<{
     focus: () => void
     goToNextHunk: () => boolean
     goToPrevHunk: () => boolean
   }>()
+  const pane = useOptionalPaneRegistration(
+    () => mainEl,
+    () => ({
+      paneId: 'editor',
+      paneTitle: 'Editor',
+      paneOrder: 2,
+      defaultTitle: 'Editor',
+    }),
+  )
 
   // Derived -------------------------------------------------------------------
   const editorDiagnostics = $derived(
@@ -63,7 +80,14 @@
 </script>
 
 <main
-  class="document-pane flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground"
+  bind:this={mainEl}
+  {...pane.dataAttributes}
+  tabindex="-1"
+  class={[
+    'document-pane relative flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground outline-none',
+    workspace.settings.paneOutline &&
+      'data-[pane-active=true]:ring-1 data-[pane-active=true]:ring-ring/40 data-[pane-active=true]:ring-inset',
+  ]}
   aria-label="File viewer"
 >
   {#if workspace.sidebarMode === 'diffs'}
@@ -207,6 +231,7 @@
             showFullFile={workspace.diff.showFullFile}
             readonly={workspace.diff.activeDiff.readonly}
             lineWrapping={workspace.settings.lineWrapping}
+            clickToInsert={workspace.settings.clickToInsert}
             onchange={(content) => workspace.diff.updateDraft(content)}
             onsave={(content) => {
               if (!workspace.diff.activeDiff) return
@@ -214,6 +239,7 @@
             }}
             onmodetoggle={(nextMode) => workspace.diff.setViewMode(nextMode)}
             onfullfiletoggle={(nextShow) => workspace.diff.setShowFullFile(nextShow)}
+            onViewReady={(v) => hotkeys.setEditorView(v)}
           />
         {/key}
       </div>
@@ -269,11 +295,15 @@
             label={workspace.selectedTitle}
             readonly={workspace.activeTab?.readonly ?? false}
             lineWrapping={workspace.settings.lineWrapping}
+            clickToInsert={workspace.settings.clickToInsert}
             diagnostics={editorDiagnostics}
             selectionOffset={workspace.selectionOffset}
             onchange={(content) => workspace.updateContent(content)}
             onhover={(offset) => workspace.requestHover(offset)}
             ongotodefinition={(offset) => workspace.gotoDefinition(offset)}
+            oncompletion={(offset) => workspace.requestCompletions(offset)}
+            onsignaturehelp={(offset) => workspace.requestSignatureHelp(offset)}
+            onViewReady={(v) => hotkeys.setEditorView(v)}
           />
         {/key}
       </div>
@@ -319,8 +349,11 @@
         {/if}
       </nav>
     </div>
-    <span class={workspace.openingError ? 'shrink-0 text-warn' : 'shrink-0'}
-      >{workspace.status}</span
-    >
+    <div class="flex shrink-0 items-center gap-2.5">
+      <WhichKeyMode showPreset aria-label="Editor mode" />
+      <span class={workspace.openingError ? 'shrink-0 text-warn' : 'shrink-0'}
+        >{workspace.status}</span
+      >
+    </div>
   </footer>
 </main>

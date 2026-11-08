@@ -1,15 +1,33 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte'
+  import {
+    acceptCompletion,
+    autocompletion,
+    completeAnyWord,
+    completionStatus,
+    moveCompletionSelection,
+    startCompletion,
+    type Completion,
+    type CompletionContext,
+    type CompletionResult,
+  } from '@codemirror/autocomplete'
   import { markdown } from '@codemirror/lang-markdown'
   import { HighlightStyle, LanguageDescription, syntaxHighlighting } from '@codemirror/language'
   import { languages } from '@codemirror/language-data'
   import { lintGutter, setDiagnostics, type Diagnostic } from '@codemirror/lint'
-  import { Compartment, EditorState, type Extension } from '@codemirror/state'
+  import { Compartment, EditorState, Prec, type Extension } from '@codemirror/state'
   import { EditorView, hoverTooltip, keymap, tooltips } from '@codemirror/view'
   import { tags } from '@lezer/highlight'
   import { basicSetup } from 'codemirror'
-  import { cn } from '@cloudvoyant/helical-ui'
+  import { cn, getDocumentWhichKeyController, registerModalEditor } from '@cloudvoyant/helical-ui'
   import { renderMarkdownToDom } from './markdown'
+  import {
+    createCodeMirrorModalTarget,
+    dismissEditorIntellisense,
+    editorCursorTooltipField,
+    hasEditorIntellisenseActive,
+    showEditorSignatureHelpTooltip,
+  } from './modalKeymap'
   import { codeEditorHoverTooltipVariants, codeEditorRootVariants } from './styles'
   import type { CodeEditorDiagnostic, CodeEditorLineWrapping, CodeEditorProps } from './types'
 
@@ -142,6 +160,12 @@
     '.cm-cursor, .cm-dropCursor, &.cm-editor .cm-cursor, &.cm-editor .cm-dropCursor': {
       borderLeftColor: 'var(--color-ring, #52a8ff)',
     },
+    '&.cm-editor[data-modal-mode="normal"] .cm-cursor, &.cm-editor[data-modal-mode="select"] .cm-cursor':
+      {
+        borderLeftWidth: '1ch',
+        borderLeftColor: 'color-mix(in srgb, var(--color-ring, #52a8ff) 55%, transparent)',
+        marginLeft: '0',
+      },
     '.cm-gutters, &.cm-editor .cm-gutters': {
       backgroundColor: 'var(--color-background, #101010)',
       color: 'var(--cm-gutter-fg, var(--color-muted-foreground, #676767))',
@@ -205,6 +229,7 @@
     filename,
     readonly = false,
     lineWrapping = 'auto',
+    clickToInsert = true,
     size = 'sm',
     label = 'Code editor',
     class: className = '',
@@ -213,6 +238,9 @@
     onchange,
     onhover,
     ongotodefinition,
+    oncompletion,
+    onsignaturehelp,
+    onViewReady,
   }: CodeEditorProps = $props()
 
   // State ---------------------------------------------------------------------
@@ -274,6 +302,58 @@
     return [EditorView.lineWrapping]
   }
 
+  async function resolveCompletions(context: CompletionContext): Promise<CompletionResult | null> {
+    const modalMode = view?.dom.dataset.modalMode
+    if (!context.explicit && modalMode && modalMode !== 'insert') {
+      return null
+    }
+    const word = context.matchBefore(/[\w$]+/)
+    const triggerBefore = context.matchBefore(/[.:<"/]/)
+    if (!context.explicit && !word && !triggerBefore) {
+      return null
+    }
+    if (oncompletion) {
+      const items = await oncompletion(context.pos)
+      if (items && items.length > 0) {
+        const defaultFrom = word ? word.from : context.pos
+        const docLen = context.state.doc.length
+        let resultFrom = defaultFrom
+        const options: Completion[] = items.map((item) => {
+          if (item.from !== undefined) {
+            resultFrom = Math.max(0, Math.min(docLen, item.from))
+          }
+          return {
+            label: item.label,
+            ...(item.kind ? { type: item.kind } : {}),
+            ...(item.detail ? { detail: item.detail } : {}),
+            ...(item.insertText && item.insertText !== item.label
+              ? { apply: item.insertText }
+              : {}),
+            ...(item.documentation
+              ? {
+                  info: () => {
+                    const dom = document.createElement('div')
+                    dom.className = codeEditorHoverTooltipVariants()
+                    dom.setAttribute('data-slot', 'code-editor-completion-info')
+                    dom.appendChild(renderMarkdownToDom(item.documentation!))
+                    return dom
+                  },
+                }
+              : {}),
+          }
+        })
+        return {
+          from: resultFrom,
+          options,
+        }
+      }
+    }
+    if (context.explicit) {
+      return completeAnyWord(context)
+    }
+    return null
+  }
+
   // Lifecycle -----------------------------------------------------------------
   onMount(() => {
     if (!host) return
@@ -284,8 +364,15 @@
       doc: initialDoc,
       extensions: [
         basicSetup,
+        EditorState.allowMultipleSelections.of(true),
         syntaxHighlighting(codeEditorHighlightStyle),
         codeEditorTooltipTheme,
+        editorCursorTooltipField,
+        autocompletion({
+          override: [resolveCompletions],
+          interactionDelay: 0,
+          activateOnTyping: true,
+        }),
         tooltips({
           tooltipSpace(currentView) {
             const rect = currentView.scrollDOM.getBoundingClientRect()
@@ -305,7 +392,11 @@
           EditorState.readOnly.of(initialReadOnly),
           EditorView.editable.of(!initialReadOnly),
         ]),
-        EditorView.contentAttributes.of({ 'aria-label': label }),
+        EditorView.contentAttributes.of({
+          'aria-label': label,
+          'data-pane-focus-target': '',
+          'data-modal-editor': 'true',
+        }),
         hoverTooltip(async (_view, pos) => {
           if (!onhover) return null
           const ch = _view.state.doc.sliceString(pos, pos + 1)
@@ -334,6 +425,95 @@
             },
           }
         }),
+        Prec.highest(
+          keymap.of([
+            {
+              key: 'Escape',
+              run(currentView) {
+                return dismissEditorIntellisense(currentView)
+              },
+            },
+            {
+              key: 'Ctrl-e',
+              run(currentView) {
+                if (!hasEditorIntellisenseActive(currentView)) return false
+                return dismissEditorIntellisense(currentView)
+              },
+            },
+            {
+              key: 'Ctrl-o',
+              run(currentView) {
+                if (!hasEditorIntellisenseActive(currentView)) return false
+                return dismissEditorIntellisense(currentView)
+              },
+            },
+            {
+              key: 'Ctrl-Space',
+              run(currentView) {
+                if (currentView.state.readOnly) return false
+                return startCompletion(currentView)
+              },
+            },
+            {
+              key: 'Ctrl-x',
+              run(currentView) {
+                if (currentView.state.readOnly) return false
+                return startCompletion(currentView)
+              },
+            },
+            {
+              key: 'Ctrl-Shift-Space',
+              run(currentView) {
+                if (!onsignaturehelp) return false
+                const pos = currentView.state.selection.main.head
+                void onsignaturehelp(pos).then((help) => {
+                  if (help) showEditorSignatureHelpTooltip(currentView, help)
+                })
+                return true
+              },
+            },
+            {
+              key: 'Alt-s',
+              run(currentView) {
+                if (!onsignaturehelp) return false
+                const pos = currentView.state.selection.main.head
+                void onsignaturehelp(pos).then((help) => {
+                  if (help) showEditorSignatureHelpTooltip(currentView, help)
+                })
+                return true
+              },
+            },
+            {
+              key: 'Ctrl-n',
+              run(currentView) {
+                if (completionStatus(currentView.state) === 'active') {
+                  return moveCompletionSelection(true)(currentView)
+                }
+                if (currentView.state.readOnly) return false
+                return startCompletion(currentView)
+              },
+            },
+            {
+              key: 'Ctrl-p',
+              run(currentView) {
+                if (completionStatus(currentView.state) === 'active') {
+                  return moveCompletionSelection(false)(currentView)
+                }
+                if (currentView.state.readOnly) return false
+                return startCompletion(currentView)
+              },
+            },
+            {
+              key: 'Ctrl-y',
+              run(currentView) {
+                if (completionStatus(currentView.state) === 'active') {
+                  return acceptCompletion(currentView)
+                }
+                return false
+              },
+            },
+          ]),
+        ),
         keymap.of([
           {
             key: 'Tab',
@@ -395,13 +575,28 @@
         ]),
         EditorView.domEventHandlers({
           mousedown(event, currentView) {
-            if (!ongotodefinition) return false
-            if (!(event.metaKey || event.ctrlKey) || event.button !== 0) return false
-            const pos = currentView.posAtCoords({ x: event.clientX, y: event.clientY })
-            if (pos === null) return false
-            event.preventDefault()
-            void ongotodefinition(pos)
-            return true
+            if (ongotodefinition && (event.metaKey || event.ctrlKey) && event.button === 0) {
+              const pos = currentView.posAtCoords({ x: event.clientX, y: event.clientY })
+              if (pos === null) return false
+              event.preventDefault()
+              void ongotodefinition(pos)
+              return true
+            }
+            if (event.button === 0 && clickToInsert && !readonly) {
+              const controller = getDocumentWhichKeyController(currentView.dom.ownerDocument)
+              if (controller && controller.getState().mode === 'normal') {
+                controller.setMode('insert')
+              }
+            }
+            return false
+          },
+          beforeinput(event, currentView) {
+            const modalMode = currentView.dom.dataset.modalMode
+            if (modalMode && modalMode !== 'insert') {
+              event.preventDefault()
+              return true
+            }
+            return false
           },
         }),
         EditorView.updateListener.of((update) => {
@@ -412,7 +607,19 @@
       ],
     })
     view = new EditorView({ state, parent: host })
+    const modalTarget = createCodeMirrorModalTarget(() => view)
+    const unregisterModal = registerModalEditor(host, modalTarget)
+    const controller = getDocumentWhichKeyController(host.ownerDocument)
+    if (controller) {
+      const wkState = controller.getState()
+      modalTarget.setModalState({ mode: wkState.mode, preset: wkState.preset })
+    } else {
+      modalTarget.setModalState({ mode: 'normal', preset: 'helix' })
+    }
+    onViewReady?.(view)
     return () => {
+      onViewReady?.(null)
+      unregisterModal()
       view?.destroy()
       view = undefined
     }
@@ -497,6 +704,15 @@
   export function focus() {
     view?.focus()
   }
+
+  export function getView(): EditorView | undefined {
+    return view
+  }
 </script>
 
-<div bind:this={host} class={rootClasses} data-slot="code-editor"></div>
+<div
+  bind:this={host}
+  data-modal-ignore-pointer={!clickToInsert || readonly ? 'true' : undefined}
+  class={rootClasses}
+  data-slot="code-editor"
+></div>

@@ -50,7 +50,7 @@ flowchart TB
             S_LEFT <--> S_SYNC
             S_RIGHT <--> S_SYNC
         end
-        KEYS["keybindings.ts (Isolated Keymap Module)"]
+        KEYS["modalKeymap.ts (registerModalEditor + goToNextHunk / goToPrevHunk)"]
         LSP_EXT["Head EditorView Extensions: Lezer syntax, lintGutter, hoverTooltip"]
         PROPS --> FOLD
         FOLD -->|"false"| HUNKS --> SWITCH
@@ -70,7 +70,7 @@ flowchart TB
 - Interaction: In `"split"` mode, keep the left (`a`) and right (`b`) panes synchronized across vertical scrolling, horizontal scrolling, collapsed hunk expansion, and alignment spacers at all times.
 - Interaction: Toggle `showFullFile` (or call `toggleFullFile()` on `DiffEditor` / `DiffService`) to switch between viewing only diff hunks (`showFullFile = false`) and viewing the full uncollapsed file (`showFullFile = true`) without re-fetching blobs.
 - Interaction: Switch between `"unified"` and `"split"` without re-fetching file blobs from the backend.
-- Interaction: Call `nextHunk()` or `prevHunk()` (bound in `keybindings.ts`) to scroll both synced panes to the next or previous changed hunk.
+- Interaction: Call `nextHunk()` or `prevHunk()` (exposed on `DiffEditor` and via `goToNextHunk` / `goToPrevHunk` in `libs/lgtm-ui/src/code-editor/modalKeymap.ts`) to scroll both synced panes to the next or previous changed hunk.
 - Interaction: Hover over symbols or trigger go-to-definition in the `head` buffer to invoke `onhover` and `ongotodefinition` at the UTF-16 offset in `headValue`.
 - Interaction: Keep the `base` buffer strictly read-only in all modes, and make the `head` buffer read-only unless `readonly = false` (when viewing the live working tree).
 - Loading, empty, and error: Render a single-side addition diff when `baseValue` is empty (`Added` file), a single-side deletion diff when `headValue` is empty (`Deleted` file), and an inline "No changes in this file" banner when `baseValue === headValue`.
@@ -172,6 +172,6 @@ sequenceDiagram
 
 ### Maintainer Notes
 
-- Isolate all CodeMirror keymaps (`Tab`, `Shift-Tab`, `F12`, `[c`, `]c`) inside `libs/lgtm-ui/src/diff-editor/keybindings.ts` and `libs/lgtm-ui/src/code-editor/keybindings.ts` so they can be wired directly into `@cloudvoyant/helical-svelte` `which-key` and hotkey registries without touching editor component lifecycle code.
+- Register the active `head` `EditorView` with Helical UI's `registerModalEditor` via `createCodeMirrorModalTarget` (`libs/lgtm-ui/src/code-editor/modalKeymap.ts`) and expose `goToNextHunk` and `goToPrevHunk` so `HotkeyService` can drive `[c` / `]c` and `Space d j` / `Space d k` across both `CodeEditor` and `DiffEditor`.
 - Share the Lezer highlight style, Markdown tooltip renderer (`renderMarkdownToDom`), and line-wrapping helper between `CodeEditor` and `DiffEditor` under `libs/lgtm-ui/src/code-editor/` to avoid duplicate theme definitions.
 - Do not pass pre-computed unified diff hunks into `DiffEditor`. Always pass full `baseValue` and `headValue` strings so `@codemirror/merge` can toggle `showFullFile` between collapsed hunks and the full file in memory without IPC round-trips.

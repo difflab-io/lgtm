@@ -71,7 +71,7 @@ flowchart TB
   - If `activeFilePath` is no longer in the changed list, `DiffService` selects the first changed file in the new list and loads it into `DiffEditor`.
   - When `Working Tree` is the newest checked item, `DiffService` sets `readonly = false` on `DiffEditor`. Otherwise `DiffService` sets `readonly = true`.
 - Interaction (`DiffExplorer` -> `DiffEditor`): Click any file row in `DiffExplorer` to load its `(baseContent, headContent)` pair for the currently checked commits into `DiffEditor`.
-- Interaction (`ContentPane` toolbar): Use the diff toolbar (or shortcuts registered in `apps/lgtm-web/src/lib/keybindings.ts`) to jump between hunks, step to the previous or next changed file, toggle between `Hunks Only` (`showFullFile = false`) and `Full File` (`showFullFile = true`), or toggle between `Unified` and `Split` columns.
+- Interaction (`ContentPane` toolbar): Use the diff toolbar or Helical UI shortcuts registered in `HotkeyService` (`apps/lgtm-web/src/lib/services/hotkeyService.svelte.ts`) to jump between hunks (`[c` / `]c`, `Space d k` / `Space d j`, `:dhp` / `:dhn`), step to the previous or next changed file (`[f` / `]f`, `Space d p` / `Space d n`, `:dfp` / `:dfn`), toggle between `Hunks Only` (`showFullFile = false`) and `Full File` (`showFullFile = true`) (`Space d f`, `:diff-full`), or toggle between `Unified` and `Split` columns (`Space d m`, `:diff-mode`).
 - Loading, empty, and error: Display `"Select at least one commit"` when all checkboxes are unchecked or `"No changes in selected commits"` when the net diff is empty, while keeping `CommitSelector` visible at the bottom.
 - Accessibility: Expose `role="tree"` on `DiffExplorer` and `role="group"` with `aria-label="Commits"` and native checkbox semantics (`role="checkbox"`, `aria-checked`) on each `CommitSelector` row.
 
@@ -178,5 +178,5 @@ sequenceDiagram
 ### Maintainer Notes
 
 - `DiffEditor` has no knowledge of commits or Git history. `DiffService` translates `selectedCommitIds` + `activeFilePath` into plain `(baseValue, headValue, readonly)` props for `DiffEditor`.
-- Centralize all diff navigation and view-toggle shortcuts (`nextHunk`, `prevHunk`, `nextFile`, `prevFile`, `toggleViewMode`, `toggleFullFile`) in `apps/lgtm-web/src/lib/keybindings.ts` so they can be registered directly with Helical UI's `which-key` and hotkey system.
+- Centralize all diff navigation and view-toggle shortcuts (`diff.nextHunk`, `diff.prevHunk`, `diff.nextFile`, `diff.prevFile`, `diff.toggleViewMode`, `diff.toggleFullFile`, `review.toggleMode`) in `HotkeyService` (`apps/lgtm-web/src/lib/services/hotkeyService.svelte.ts`) under `Space d`, `[f` / `]f`, `[c` / `]c`, and Ex commands (`:diffs`, `:diff-mode`, `:diff-full`, `:review-mode`, `:dfn`, `:dfp`, `:dhn`, `:dhp`).
 - When `"working_tree"` is included in `selectedCommitIds`, saving the `head` buffer in `DiffEditor` dispatches `AppEvent::FileSaved`, which refreshes the file's `+additions / -deletions` counts in `DiffExplorer` automatically.

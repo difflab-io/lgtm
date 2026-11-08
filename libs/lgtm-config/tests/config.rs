@@ -1,4 +1,8 @@
-use lgtm_config::{ConfigService, DEFAULT_SCHEMA_URL, LgtmConfig, LineWrap, ThemeMode};
+use lgtm_config::{
+    AppearanceSettingsPatch, CommandStyle, ConfigScope, ConfigService, DEFAULT_SCHEMA_URL,
+    EditorSettingsPatch, KeybindPreset, KeybindingSettingsPatch, LgtmConfig, LgtmConfigPatch,
+    LineWrap, ThemeMode,
+};
 
 // tests -----------------------------------------------------------------------
 
@@ -353,6 +357,238 @@ mod given_global_and_local_configs {
             assert_eq!(partial.effective.editor.line_wrapping, LineWrap::Auto);
             assert_eq!(partial.effective.lsp.request_timeout_ms, 8000);
             assert_eq!(total_fallback.effective, LgtmConfig::default());
+        }
+    }
+}
+
+mod given_a_config_service {
+    use super::*;
+
+    mod when_resolving_keybinding_settings {
+        use super::*;
+
+        #[test]
+        fn should_default_command_style_to_menu_and_preset_to_helix() {
+            // Arrange
+            let temp = tempfile::tempdir().unwrap();
+            let home = temp.path().join("home");
+            let workspace_root = temp.path().join("workspace");
+            std::fs::create_dir_all(&workspace_root).unwrap();
+            let service = ConfigService::from_home(home);
+
+            // Act
+            let snapshot = service.get_config_snapshot(Some(&workspace_root)).unwrap();
+
+            // Assert
+            assert_eq!(
+                snapshot.effective.keybindings.command_style,
+                CommandStyle::Menu
+            );
+            assert_eq!(snapshot.effective.keybindings.preset, KeybindPreset::Helix);
+            assert!(!snapshot.effective.keybindings.leader_only);
+            assert!(snapshot.effective.keybindings.pane_outline);
+            assert!(snapshot.effective.keybindings.click_to_insert);
+        }
+
+        #[test]
+        fn should_merge_project_keybinding_overrides_over_global_settings() {
+            // Arrange
+            let temp = tempfile::tempdir().unwrap();
+            let home = temp.path().join("home");
+            let workspace_root = temp.path().join("workspace");
+            std::fs::create_dir_all(home.join(".lgtm")).unwrap();
+            std::fs::create_dir_all(workspace_root.join(".lgtm")).unwrap();
+            std::fs::write(
+                home.join(".lgtm/config.json"),
+                r#"{
+  "keybindings": {
+    "commandStyle": "palette",
+    "preset": "vim",
+    "leaderOnly": true
+  }
+}
+"#,
+            )
+            .unwrap();
+            std::fs::write(
+                workspace_root.join(".lgtm/config.json"),
+                r#"{
+  "keybindings": {
+    "preset": "kakoune",
+    "clickToInsert": false
+  }
+}
+"#,
+            )
+            .unwrap();
+            let service = ConfigService::from_home(home);
+
+            // Act
+            let snapshot = service.get_config_snapshot(Some(&workspace_root)).unwrap();
+
+            // Assert
+            assert_eq!(
+                snapshot.effective.keybindings.command_style,
+                CommandStyle::Palette
+            );
+            assert_eq!(
+                snapshot.effective.keybindings.preset,
+                KeybindPreset::Kakoune
+            );
+            assert!(snapshot.effective.keybindings.leader_only);
+            assert!(snapshot.effective.keybindings.pane_outline);
+            assert!(!snapshot.effective.keybindings.click_to_insert);
+        }
+    }
+
+    mod when_updating_config_with_a_patch {
+        use super::*;
+
+        #[test]
+        fn should_write_patch_to_global_config_by_default_and_preserve_sibling_fields() {
+            // Arrange
+            let temp = tempfile::tempdir().unwrap();
+            let home = temp.path().join("home");
+            let workspace_root = temp.path().join("workspace");
+            std::fs::create_dir_all(home.join(".lgtm")).unwrap();
+            std::fs::create_dir_all(&workspace_root).unwrap();
+            std::fs::write(
+                home.join(".lgtm/config.json"),
+                r#"{
+  "appearance": {
+    "theme": "dark"
+  },
+  "editor": {
+    "lineWrapping": 100
+  }
+}
+"#,
+            )
+            .unwrap();
+            let service = ConfigService::from_home(home.clone());
+
+            // Act
+            let snapshot = service
+                .update_config(
+                    Some(&workspace_root),
+                    LgtmConfigPatch {
+                        keybindings: Some(KeybindingSettingsPatch {
+                            command_style: Some(CommandStyle::Palette),
+                            preset: Some(KeybindPreset::Vim),
+                            ..KeybindingSettingsPatch::default()
+                        }),
+                        ..LgtmConfigPatch::default()
+                    },
+                    None,
+                )
+                .unwrap();
+
+            // Assert
+            assert_eq!(snapshot.effective.appearance.theme, ThemeMode::Dark);
+            assert_eq!(
+                snapshot.effective.editor.line_wrapping,
+                LineWrap::Column(100)
+            );
+            assert_eq!(
+                snapshot.effective.keybindings.command_style,
+                CommandStyle::Palette
+            );
+            assert_eq!(snapshot.effective.keybindings.preset, KeybindPreset::Vim);
+            assert!(!workspace_root.join(".lgtm/config.json").exists());
+        }
+
+        #[test]
+        fn should_write_patch_to_project_config_when_leaf_is_already_overridden_in_project() {
+            // Arrange
+            let temp = tempfile::tempdir().unwrap();
+            let home = temp.path().join("home");
+            let workspace_root = temp.path().join("workspace");
+            std::fs::create_dir_all(home.join(".lgtm")).unwrap();
+            std::fs::create_dir_all(workspace_root.join(".lgtm")).unwrap();
+            std::fs::write(
+                home.join(".lgtm/config.json"),
+                r#"{
+  "appearance": {
+    "theme": "dark"
+  },
+  "keybindings": {
+    "commandStyle": "menu"
+  }
+}
+"#,
+            )
+            .unwrap();
+            std::fs::write(
+                workspace_root.join(".lgtm/config.json"),
+                r#"{
+  "keybindings": {
+    "commandStyle": "palette"
+  }
+}
+"#,
+            )
+            .unwrap();
+            let service = ConfigService::from_home(home);
+
+            // Act
+            let snapshot = service
+                .update_config(
+                    Some(&workspace_root),
+                    LgtmConfigPatch {
+                        appearance: Some(AppearanceSettingsPatch {
+                            theme: Some(ThemeMode::Light),
+                        }),
+                        editor: Some(EditorSettingsPatch {
+                            line_wrapping: Some(LineWrap::Off),
+                        }),
+                        keybindings: Some(KeybindingSettingsPatch {
+                            command_style: Some(CommandStyle::Menu),
+                            preset: Some(KeybindPreset::Kakoune),
+                            ..KeybindingSettingsPatch::default()
+                        }),
+                        ..LgtmConfigPatch::default()
+                    },
+                    None,
+                )
+                .unwrap();
+            let explicit_project = service
+                .update_config(
+                    Some(&workspace_root),
+                    LgtmConfigPatch {
+                        keybindings: Some(KeybindingSettingsPatch {
+                            leader_only: Some(true),
+                            ..KeybindingSettingsPatch::default()
+                        }),
+                        ..LgtmConfigPatch::default()
+                    },
+                    Some(ConfigScope::Project),
+                )
+                .unwrap();
+
+            // Assert
+            assert_eq!(snapshot.effective.appearance.theme, ThemeMode::Light);
+            assert_eq!(snapshot.effective.editor.line_wrapping, LineWrap::Off);
+            assert_eq!(
+                snapshot.effective.keybindings.command_style,
+                CommandStyle::Menu
+            );
+            assert_eq!(
+                snapshot.effective.keybindings.preset,
+                KeybindPreset::Kakoune
+            );
+            assert_eq!(
+                snapshot
+                    .project
+                    .as_ref()
+                    .and_then(|p| p.keybindings.as_ref())
+                    .and_then(|k| k.command_style),
+                Some(CommandStyle::Menu)
+            );
+            assert_eq!(
+                snapshot.global.keybindings.as_ref().and_then(|k| k.preset),
+                Some(KeybindPreset::Kakoune)
+            );
+            assert!(explicit_project.effective.keybindings.leader_only);
         }
     }
 }

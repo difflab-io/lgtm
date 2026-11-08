@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test'
 import { buildDiffFileTree } from './diffService.svelte'
-import { createKeybindingDispatcher } from '../keybindings'
 
 describe('Given a list of changed files / When building the hierarchical diff tree', () => {
   test('should compact single-child folder chains and expand all folder branches by default', () => {
@@ -50,48 +49,5 @@ describe('Given a list of changed files / When building the hierarchical diff tr
         },
       ],
     })
-  })
-})
-
-describe('Given the centralized keybinding dispatcher / When pressing diff and review shortcuts', () => {
-  test('should invoke matching handlers for Alt shortcuts and bracket chords', () => {
-    // Arrange
-    const triggered: string[] = []
-    const dispatch = createKeybindingDispatcher({
-      'diff.nextFile': () => triggered.push('nextFile'),
-      'diff.prevFile': () => triggered.push('prevFile'),
-      'diff.toggleViewMode': () => triggered.push('toggleViewMode'),
-      'diff.toggleFullFile': () => triggered.push('toggleFullFile'),
-      'review.toggleMode': () => triggered.push('toggleReviewMode'),
-    })
-
-    const makeKeyEvent = (key: string, code = key, altKey = false): KeyboardEvent =>
-      ({
-        key,
-        code,
-        altKey,
-        metaKey: false,
-        ctrlKey: false,
-        target: null,
-        preventDefault: () => {},
-      }) as unknown as KeyboardEvent
-
-    // Act
-    dispatch(makeKeyEvent('m', 'KeyM', true))
-    dispatch(makeKeyEvent('f', 'KeyF', true))
-    dispatch(makeKeyEvent('r', 'KeyR', true))
-    dispatch(makeKeyEvent(']'))
-    dispatch(makeKeyEvent('f'))
-    dispatch(makeKeyEvent('['))
-    dispatch(makeKeyEvent('f'))
-
-    // Assert
-    expect(triggered).toEqual([
-      'toggleViewMode',
-      'toggleFullFile',
-      'toggleReviewMode',
-      'nextFile',
-      'prevFile',
-    ])
   })
 })

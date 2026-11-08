@@ -186,6 +186,15 @@ mod given_a_workspace_with_a_configured_language_server {
                 .manager
                 .get_definition(&fixture.workspace_root, &src_file, 31)
                 .unwrap();
+            let completions = fixture
+                .manager
+                .get_completions(&fixture.workspace_root, &src_file, 34)
+                .unwrap();
+            let signature_help = fixture
+                .manager
+                .get_signature_help(&fixture.workspace_root, &src_file, 37)
+                .unwrap()
+                .expect("expected signature help");
 
             // Assert
             assert!(hover.contents.contains("fn helper() -> usize"));
@@ -195,6 +204,31 @@ mod given_a_workspace_with_a_configured_language_server {
             assert_eq!(definitions[0].path, "lib.rs");
             assert_eq!(definitions[0].offset, 3);
             assert_eq!(definitions[0].end_offset, 9);
+            assert_eq!(completions.len(), 1);
+            assert_eq!(completions[0].label, "helper");
+            assert_eq!(completions[0].kind.as_deref(), Some("function"));
+            assert_eq!(
+                completions[0].detail.as_deref(),
+                Some("fn helper() -> usize")
+            );
+            assert_eq!(
+                completions[0].documentation.as_deref(),
+                Some("Computes the helper value.")
+            );
+            assert_eq!(completions[0].insert_text.as_deref(), Some("helper()"));
+            assert_eq!(completions[0].from, Some(31));
+            assert_eq!(completions[0].to, Some(34));
+            assert_eq!(signature_help.active_signature, 0);
+            assert_eq!(signature_help.active_parameter, 1);
+            assert_eq!(signature_help.signatures.len(), 1);
+            assert_eq!(
+                signature_help.signatures[0].label,
+                "fn helper(count: usize, label: &str) -> usize"
+            );
+            assert_eq!(
+                signature_help.signatures[0].parameters,
+                vec!["count: usize".to_string(), "label: &str".to_string()]
+            );
         }
     }
 

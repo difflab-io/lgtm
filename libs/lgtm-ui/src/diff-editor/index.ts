@@ -1,5 +1,5 @@
 export { default as DiffEditor } from './DiffEditor.svelte'
-export { DIFF_EDITOR_KEYBINDINGS, diffHunkKeymap, goToNextHunk, goToPrevHunk } from './keybindings'
+export { goToNextHunk, goToPrevHunk } from '../code-editor/modalKeymap'
 export {
   diffEditorRootVariants,
   diffEditorStyles,

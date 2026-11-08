@@ -118,6 +118,12 @@ function handleMessage(msg) {
           textDocumentSync: 1,
           hoverProvider: true,
           definitionProvider: true,
+          completionProvider: {
+            triggerCharacters: ['.', ':'],
+          },
+          signatureHelpProvider: {
+            triggerCharacters: ['(', ','],
+          },
         },
       },
     });
@@ -197,6 +203,49 @@ function handleMessage(msg) {
           },
         },
       ],
+    });
+    return;
+  }
+  if (msg.method === 'textDocument/completion') {
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        isIncomplete: false,
+        items: [
+          {
+            label: 'helper_value',
+            kind: 3,
+            detail: 'fn helper_value() -> i32',
+            documentation: {
+              kind: 'markdown',
+              value: 'Returns the **helper** value.',
+            },
+            insertText: 'helper_value()',
+          },
+        ],
+      },
+    });
+    return;
+  }
+  if (msg.method === 'textDocument/signatureHelp') {
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        signatures: [
+          {
+            label: 'fn helper(x: i32, y: i32) -> i32',
+            documentation: {
+              kind: 'markdown',
+              value: 'Computes the sum of \`x\` and \`y\`.',
+            },
+            parameters: [{ label: 'x: i32' }, { label: 'y: i32' }],
+          },
+        ],
+        activeSignature: 0,
+        activeParameter: 0,
+      },
     });
     return;
   }
@@ -738,4 +787,32 @@ export async function exists(path: string) {
       throw error
     },
   )
+}
+
+export function modeBadge(page: Page) {
+  return page.getByTestId('which-key-mode-badge')
+}
+
+export function whichKeyPanel(page: Page) {
+  return page.getByTestId('which-key-panel')
+}
+
+export function whichKeyExplorer(page: Page) {
+  return page.getByTestId('which-key-explorer')
+}
+
+export function commandMenu(page: Page) {
+  return page.getByTestId('command-menu')
+}
+
+export function commandMenuInput(page: Page) {
+  return page.getByTestId('command-menu-input')
+}
+
+export function commandPalette(page: Page) {
+  return page.getByTestId('command-palette')
+}
+
+export function commandPaletteInput(page: Page) {
+  return page.getByTestId('command-palette-input')
 }

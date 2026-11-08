@@ -135,6 +135,58 @@ function handleMessage(msg) {
     });
     return;
   }
+  if (msg.method === 'textDocument/completion') {
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        isIncomplete: false,
+        items: [
+          {
+            label: 'helper',
+            kind: 3,
+            detail: 'fn helper() -> usize',
+            documentation: {
+              kind: 'markdown',
+              value: 'Computes the helper value.',
+            },
+            textEdit: {
+              range: {
+                start: { line: msg.params.position.line, character: 4 },
+                end: { line: msg.params.position.line, character: msg.params.position.character },
+              },
+              newText: 'helper()',
+            },
+          },
+        ],
+      },
+    });
+    return;
+  }
+  if (msg.method === 'textDocument/signatureHelp') {
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        signatures: [
+          {
+            label: 'fn helper(count: usize, label: &str) -> usize',
+            documentation: {
+              kind: 'markdown',
+              value: 'Runs `helper` with a count and label.',
+            },
+            parameters: [
+              { label: 'count: usize' },
+              { label: 'label: &str' },
+            ],
+          },
+        ],
+        activeSignature: 0,
+        activeParameter: 1,
+      },
+    });
+    return;
+  }
   if (msg.method === 'shutdown') {
     send({ jsonrpc: '2.0', id: msg.id, result: null });
     return;

@@ -2,6 +2,7 @@ import type {
   CodeEditorDiagnostic,
   CodeEditorHoverResult,
   CodeEditorLineWrapping,
+  EditorView,
 } from '../code-editor/types'
 import type { DiffEditorRootVariants } from './styles'
 
@@ -30,6 +31,8 @@ export interface DiffEditorProps {
   readonly?: boolean
   /** Line wrapping mode applied to the diff editor panes. */
   lineWrapping?: CodeEditorLineWrapping
+  /** Whether clicking inside the head editor enters insert mode when `readonly` is `false`. */
+  clickToInsert?: boolean
   /** Number of unchanged context lines visible around each diff hunk when `showFullFile` is `false`. */
   collapseUnchangedMargin?: number
   /** Minimum number of unchanged lines required before collapsing a block when `showFullFile` is `false`. */
@@ -54,4 +57,6 @@ export interface DiffEditorProps {
   onmodetoggle?: (mode: DiffEditorMode) => void
   /** Callback fired when the full-file versus hunk-only toggle (`showFullFile`) changes. */
   onfullfiletoggle?: (showFullFile: boolean) => void
+  /** Callback fired when the head CodeMirror `EditorView` mounts or unmounts. */
+  onViewReady?: (view: EditorView | null) => void
 }
