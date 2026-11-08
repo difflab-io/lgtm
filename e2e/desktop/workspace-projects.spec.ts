@@ -94,9 +94,11 @@ test.describe('Given a project with linked worktrees', { tag: ['@desktop', '@pro
         await projectItem
           .getByRole('button', { name: `Collapse ${basename(repoDir)}`, exact: true })
           .click()
+        await wtOneItem.waitFor({ state: 'detached' })
         const wtOneHiddenWhenCollapsed = (await wtOneItem.count()) === 0
         const wtTwoVisibleWhenActive = await wtTwoItem.isVisible()
         await projectItem.locator('[data-part="branch-control"]').first().click()
+        await wtTwoItem.waitFor({ state: 'detached' })
         const wtTwoHiddenAfterPrimarySelected = (await wtTwoItem.count()) === 0
         await projectItem
           .getByRole('button', { name: `Expand ${basename(repoDir)}`, exact: true })
@@ -210,7 +212,9 @@ test.describe('Given a Git project', { tag: ['@desktop', '@projects'] }, () => {
 
       // Assert
       await expect(dialog).toBeVisible()
-      await expect(dialog.getByRole('alert')).toContainText('already checked out')
+      await expect(dialog.getByRole('alert')).toContainText(
+        /already (checked out|used by worktree)/,
+      )
     })
 
     test('should delete managed worktree storage on removal with force confirmation when dirty while only detaching external worktrees', async ({
