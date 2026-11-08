@@ -1,25 +1,11 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte'
   import { markdown } from '@codemirror/lang-markdown'
-  import {
-    HighlightStyle,
-    LanguageDescription,
-    matchBrackets,
-    syntaxHighlighting,
-  } from '@codemirror/language'
+  import { HighlightStyle, LanguageDescription, syntaxHighlighting } from '@codemirror/language'
   import { languages } from '@codemirror/language-data'
   import { lintGutter, setDiagnostics, type Diagnostic } from '@codemirror/lint'
-  import { Compartment, EditorState, RangeSetBuilder, type Extension } from '@codemirror/state'
-  import {
-    Decoration,
-    type DecorationSet,
-    EditorView,
-    hoverTooltip,
-    keymap,
-    tooltips,
-    ViewPlugin,
-    type ViewUpdate,
-  } from '@codemirror/view'
+  import { Compartment, EditorState, type Extension } from '@codemirror/state'
+  import { EditorView, hoverTooltip, keymap, tooltips } from '@codemirror/view'
   import { tags } from '@lezer/highlight'
   import { basicSetup } from 'codemirror'
   import { cn } from '@cloudvoyant/helical-ui'
@@ -170,43 +156,10 @@
       fontWeight: '600',
     },
     '&.cm-focused .cm-matchingBracket, .cm-matchingBracket': {
-      backgroundColor: 'color-mix(in oklab, var(--color-foreground, #ededed) 12%, transparent)',
-      color: 'var(--color-foreground, #ededed)',
-      textDecoration: 'none',
-      fontWeight: '700',
-      borderRadius: '2px',
-    },
-    '&.cm-focused .cm-nonmatchingBracket, .cm-nonmatchingBracket': {
-      backgroundColor: 'color-mix(in oklab, var(--color-danger, #f32e40) 20%, transparent)',
-      color: 'var(--color-danger, #f32e40)',
-      textDecoration: 'none',
-      borderRadius: '2px',
-    },
-    '.cm-line.cm-bracket-guide-open, .cm-line.cm-bracket-guide-mid, .cm-line.cm-bracket-guide-close':
-      {
-        position: 'relative',
-      },
-    '.cm-line.cm-bracket-guide-open::before, .cm-line.cm-bracket-guide-mid::before, .cm-line.cm-bracket-guide-close::before':
-      {
-        content: '""',
-        position: 'absolute',
-        left: 'calc(6px + var(--cm-guide-col, 0ch) + 0.45ch)',
-        width: '0',
-        borderLeft:
-          '1px solid color-mix(in oklab, var(--color-foreground, #ededed) 28%, transparent)',
-        pointerEvents: 'none',
-      },
-    '.cm-line.cm-bracket-guide-open::before': {
-      top: '78%',
-      bottom: '0',
-    },
-    '.cm-line.cm-bracket-guide-mid::before': {
-      top: '0',
-      bottom: '0',
-    },
-    '.cm-line.cm-bracket-guide-close::before': {
-      top: '0',
-      bottom: '78%',
+      backgroundColor: 'transparent',
+      color: 'var(--cm-match-paren, #ffae00)',
+      textDecoration: 'underline',
+      fontWeight: '600',
     },
     '.cm-foldPlaceholder, &.cm-editor .cm-foldPlaceholder': {
       backgroundColor: 'var(--color-muted, #1a1a1a)',
@@ -321,117 +274,6 @@
     return [EditorView.lineWrapping]
   }
 
-  function leadingIndentColumns(lineText: string): number {
-    let cols = 0
-    for (let i = 0; i < lineText.length; i++) {
-      const ch = lineText[i]
-      if (ch === ' ') cols += 1
-      else if (ch === '\t') cols += 2
-      else break
-    }
-    return cols
-  }
-
-  function findActiveBracketPair(state: EditorState): { open: number; close: number } | null {
-    const head = state.selection.main.head
-    for (const dir of [-1, 1] as const) {
-      const direct = matchBrackets(state, head, dir)
-      if (direct?.matched && direct.start && direct.end) {
-        return {
-          open: Math.min(direct.start.from, direct.end.from),
-          close: Math.max(direct.start.from, direct.end.from),
-        }
-      }
-    }
-
-    const scanLimit = 8000
-    const minPos = Math.max(0, head - scanLimit)
-    const slice = state.doc.sliceString(minPos, head)
-    const stack: string[] = []
-    for (let i = slice.length - 1; i >= 0; i--) {
-      const ch = slice[i]
-      if (ch === '}' || ch === ']' || ch === ')') {
-        stack.push(ch)
-      } else if (ch === '{' || ch === '[' || ch === '(') {
-        const expected = ch === '{' ? '}' : ch === '[' ? ']' : ')'
-        if (stack.length > 0 && stack[stack.length - 1] === expected) {
-          stack.pop()
-        } else {
-          const openPos = minPos + i
-          const matched = matchBrackets(state, openPos, 1)
-          if (matched?.matched && matched.end && matched.end.from >= head) {
-            return { open: openPos, close: matched.end.from }
-          }
-        }
-      }
-    }
-    return null
-  }
-
-  function buildBracketGuideDecorations(state: EditorState): DecorationSet {
-    const pair = findActiveBracketPair(state)
-    if (!pair) return Decoration.none
-
-    const openLine = state.doc.lineAt(pair.open)
-    const closeLine = state.doc.lineAt(pair.close)
-    const builder = new RangeSetBuilder<Decoration>()
-    const mark = Decoration.mark({ class: 'cm-matchingBracket' })
-
-    if (openLine.number === closeLine.number) {
-      builder.add(pair.open, pair.open + 1, mark)
-      builder.add(pair.close, pair.close + 1, mark)
-      return builder.finish()
-    }
-
-    const guideCol = Math.min(
-      leadingIndentColumns(openLine.text),
-      leadingIndentColumns(closeLine.text),
-    )
-    const style = `--cm-guide-col: ${guideCol}ch`
-
-    builder.add(
-      openLine.from,
-      openLine.from,
-      Decoration.line({ attributes: { class: 'cm-bracket-guide-open', style } }),
-    )
-    builder.add(pair.open, pair.open + 1, mark)
-
-    for (let lineNum = openLine.number + 1; lineNum < closeLine.number; lineNum++) {
-      const line = state.doc.line(lineNum)
-      builder.add(
-        line.from,
-        line.from,
-        Decoration.line({ attributes: { class: 'cm-bracket-guide-mid', style } }),
-      )
-    }
-
-    builder.add(
-      closeLine.from,
-      closeLine.from,
-      Decoration.line({ attributes: { class: 'cm-bracket-guide-close', style } }),
-    )
-    builder.add(pair.close, pair.close + 1, mark)
-
-    return builder.finish()
-  }
-
-  const bracketGuideExtension = ViewPlugin.fromClass(
-    class {
-      decorations: DecorationSet
-      constructor(currentView: EditorView) {
-        this.decorations = buildBracketGuideDecorations(currentView.state)
-      }
-      update(update: ViewUpdate) {
-        if (update.docChanged || update.selectionSet) {
-          this.decorations = buildBracketGuideDecorations(update.state)
-        }
-      }
-    },
-    {
-      decorations: (plugin) => plugin.decorations,
-    },
-  )
-
   // Lifecycle -----------------------------------------------------------------
   onMount(() => {
     if (!host) return
@@ -442,7 +284,6 @@
       doc: initialDoc,
       extensions: [
         basicSetup,
-        bracketGuideExtension,
         syntaxHighlighting(codeEditorHighlightStyle),
         codeEditorTooltipTheme,
         tooltips({

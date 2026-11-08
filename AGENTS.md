@@ -2,12 +2,12 @@
 
 ## Hard Rules
 
-- Run builds, formatters, linters, and tests through project [Mise tasks](mise.toml) invoked by Premise (`premise run format`, `premise run lint`, `premise run test`, `premise run e2e:smoke`). Keep task scripts tracked and generated outputs ignored. Keep all Mise path helpers (`get_global_mise_path`, `get_workspace_mise_path`), task definitions, and developer tool management (`manage_dev_tools`, `add_dev_tool`, `remove_dev_tool`) inside [`libs/lgtm-env`](libs/lgtm-env/src/lib.rs) and `[.]mise.toml` files (such as `.lgtm/mise.toml`), never inside [`libs/lgtm-config`](libs/lgtm-config/src/lib.rs) or `.lgtm/config.json`.
-- Store generated JSON Schemas under [`schemas/`](schemas/) at the repository root and reference them via versioned jsDelivr tag URLs (`https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v<version>/schemas/...`) rather than writing local schema copies into `.lgtm/`.
+- Run builds, formatters, linters, and tests through project [Mise tasks](mise.toml) invoked by Premise (`premise run format`, `premise run lint`, `premise run test`, `premise run e2e:smoke`). Keep task scripts tracked and generated outputs ignored. Keep all Mise path helpers, task definitions, and developer tool management inside [`libs/lgtm-env`](libs/lgtm-env/src/lib.rs) and `[.]mise.toml` files, never inside [`libs/lgtm-config`](libs/lgtm-config/src/lib.rs) or `.lgtm/config.json`.
+- Store generated config JSON Schemas under [`schemas/`](schemas/) at the repository root and reference them via versioned jsDelivr tag URLs (`https://cdn.jsdelivr.net/gh/difflab-io/lgtm@v<version>/schemas/...`) rather than writing local schema copies into `.lgtm/`.
 - During alpha, update branch-introduced contracts directly without compatibility shims or duplicate fields.
 - Expose database queries and mutations only through named repository methods in [`libs/lgtm-db`](libs/lgtm-db/src/lib.rs). Keep SeaORM `Entity` and `ActiveModel` types `pub(crate)`; never expose raw connections, query builders, or raw SQL to callers.
 - Models validate, map data, and implement pure domain behavior; services own persistence orchestration, cross-scope configuration merging, transactions, and external I/O.
-- Give each file and service a single responsibility; extract distinct capabilities (such as caching, configuration, native menu construction in `apps/lgtm-desktop/src/menus.rs`, the in-process `AppEvents` bus in `apps/lgtm-desktop/src/events.rs`, or LSP orchestration) into dedicated model and service modules with their own integration suites, combine host services into a single `AppState` in `apps/lgtm-desktop/src/app.rs`, and wire event handling and cross-service coordination in the application entry point (`app.rs` / `Shell.svelte`) rather than emitting framework events or calling sibling services inside domain services. See [`docs/architecture/desktop/events.md`](docs/architecture/desktop/events.md).
+- Give each file and service a single responsibility; extract distinct capabilities into dedicated model and service modules with their own integration suites, combine host services into a single unified host state, and wire event handling and cross-service coordination in application entry points rather than emitting framework events or calling sibling services inside domain services. See [`docs/architecture/desktop/events.md`](docs/architecture/desktop/events.md).
 - Treat `LgtmConfig` in [`libs/lgtm-config`](libs/lgtm-config/src/lib.rs) as the single configuration and user-settings contract (`~/.lgtm/config.json` and `<workspace>/.lgtm/config.json`); do not split `LgtmConfig` and `UserSettings` into parallel models or service APIs. Configure preferences by editing `config.json` directly in the editor and applying resolved settings when saved, rather than exposing programmatic preference-mutation UI buttons or RPCs.
 - Keep CLI review and comment commands as thin RPC clients over `lgtm-forge`. Preserve daemon and health behavior; do not embed review persistence in `lgtm-cli`.
 - Establish tracing spans at CLI/RPC boundaries (`#[tracing::instrument]`). Services emit tracing events and never store request spans.
@@ -17,22 +17,10 @@
 
 ## Organization
 
-```text
-apps/
-├── lgtm-cli/       # Thin RPC CLI client, daemon launcher, and terminal/JSON view models
-├── lgtm-desktop/   # Tauri desktop host and Specta IPC command handlers
-├── lgtm-forge/     # Connect RPC backend, review orchestration, and Git/GitHub adapters
-└── lgtm-web/       # Svelte 5 desktop frontend
-libs/
-├── lgtm-config/    # Nested .lgtm/config.json settings, JSON Schema, and language discovery
-├── lgtm-db/        # Private SeaORM entities and named repositories
-├── lgtm-env/       # Managed mise binary lifecycle and .lgtm/mise.toml synthesis
-├── lgtm-lsp/       # Language server process manager, cache service, and stdio JSON-RPC client
-└── lgtm-ui/        # Portable Helical UI components and services
-e2e/                # Vitest E2E suites (common, forge, cli, nvim, desktop)
-```
+- `apps/`: User-facing applications and command-line interfaces.
+- `libs/`: Shared domain, configuration, environment, protocol, database, and UI libraries.
+- `e2e/`: Cross-tier integration and end-to-end test suites.
 
-- [Proposed] Name architecture documentation and E2E suite directories for `lgtm-forge` as `forge` (`docs/architecture/forge/` and `e2e/forge/`) rather than `backend`.
 - [Proposed] Preserve existing documentation template headings and structure; use `NA/WIP` for unimplemented sections.
 - [Proposed] Centralize shared workspace path resolution and desktop executable discovery in [`libs/lgtm-config`](libs/lgtm-config/src/lib.rs) rather than duplicating configuration across `lgtm-cli` and `lgtm-desktop`.
 
