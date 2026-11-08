@@ -10,6 +10,7 @@ import {
   type LspServerStatusEvent,
 } from '../clients/workspaceClient'
 import { LspService } from './lspService.svelte'
+import { SettingsService } from './settingsService.svelte'
 
 export interface FolderRefresh {
   path: string
@@ -27,12 +28,12 @@ export interface WorkspaceTab {
   dirty?: boolean
 }
 
-/** Workspace view model. Rust retains filesystem ownership, path validation, and LSP orchestration. */
+/** Workspace view model coordinating file tree browsing, open tabs, debounced saves, LSP state, and settings. */
 export class WorkspaceService {
   readonly lsp: LspService
+  readonly settings: SettingsService
   defaultRoot = $state('')
   root = $state('~/.lgtm/workspace')
-  recentWorkspaces = $state<string[]>([])
   entries = $state<WorkspaceNode[]>([])
   loading = $state(true)
   error = $state<string | null>(null)
@@ -60,23 +61,29 @@ export class WorkspaceService {
   private inFlightSave: Promise<void> | null = null
   private openRequestSeq = 0
 
+  /** Constructs a `WorkspaceService` with its own `LspService` and `SettingsService` instances. */
   constructor(private client: WorkspaceClient) {
     this.lsp = new LspService(client)
+    this.settings = new SettingsService(client)
   }
 
+  /** Returns whether a file or tree operation is currently in progress. */
   get blocked() {
     return this.busy || this.fileLoading
   }
 
+  /** Returns whether creating a new file or folder is currently disabled. */
   get cannotCreate() {
     return this.blocked || this.loading || Boolean(this.error || this.pendingEntry)
   }
 
+  /** Returns the currently active editor tab, if any. */
   get activeTab(): WorkspaceTab | null {
     if (!this.activeTabId) return null
     return this.tabs.find((tab) => tab.id === this.activeTabId) ?? null
   }
 
+  /** Returns tab bar items formatted for the Helical `Tabs` component. */
   get tabItems(): TabItem[] {
     return this.tabs.map((tab) => ({
       value: tab.id,
@@ -86,26 +93,43 @@ export class WorkspaceService {
     }))
   }
 
+  /** Returns the display title of the active tab or selected file. */
   get selectedTitle() {
-    if (this.activeTab?.kind === 'diagnostics') return this.activeTab.title
+    if (this.activeTab?.kind === 'diagnostics') {
+      return this.activeTab.title
+    }
     return this.selected ? this.selected.name : 'No file selected'
   }
 
+  /** Returns the path or title shown in the footer breadcrumb tooltip. */
   get selectedPath() {
     if (this.activeTab?.kind === 'diagnostics') return this.activeTab.title
     return this.selected?.path
   }
 
+  /** Returns the filename passed to `CodeEditor` for syntax highlighting. */
+  get activeEditorFilename(): string {
+    if (this.activeTab?.kind === 'diagnostics') return 'diagnostics.md'
+    if (this.selected?.path.endsWith('config.json')) return 'config.json'
+    return this.selected?.name ?? 'diagnostics.md'
+  }
+
+  /** Returns path segments rendered in the footer breadcrumb bar. */
   get breadcrumbs(): string[] {
     if (this.activeTab?.kind === 'diagnostics') return [this.activeTab.title]
     if (!this.selected) return []
+    if (this.isConfigFilePath(this.selected.path)) {
+      return ['.lgtm', 'config.json']
+    }
     return this.selected.path.split(/[\\/]/).filter(Boolean)
   }
 
+  /** Returns LSP diagnostics for the currently selected file. */
   get activeDiagnostics(): LspDiagnostic[] {
     return this.lsp.getDiagnosticsForPath(this.selected?.path)
   }
 
+  /** Returns the language ID of the active editor buffer. */
   get activeLanguageId(): string | null {
     if (this.activeTab?.kind === 'diagnostics') {
       return this.activeTab.languageId ?? null
@@ -113,18 +137,22 @@ export class WorkspaceService {
     return this.fileContent?.languageId ?? null
   }
 
+  /** Returns the active language server status for the current file or workspace. */
   get activeLspServer(): LspServerStatusEvent | null {
     return this.lsp.getActiveServer(this.activeLanguageId)
   }
 
+  /** Returns all language servers tracked in the active workspace. */
   get allLspServers(): LspServerStatusEvent[] {
     return this.lsp.allServers
   }
 
+  /** Returns the map of workspace file paths to LSP diagnostics. */
   get lspDiagnostics(): Record<string, LspDiagnostic[]> {
     return this.lsp.diagnostics
   }
 
+  /** Returns the human-readable editor status label for the footer. */
   get status() {
     if (this.openingError) return this.openingError
     if (this.fileLoading) return 'Opening file…'
@@ -133,12 +161,13 @@ export class WorkspaceService {
     return 'Idle'
   }
 
+  /** Returns selectable workspace items for the titlebar workspace switcher. */
   get items() {
-    const roots = this.recentWorkspaces.length ? this.recentWorkspaces : [this.root]
+    const roots = this.settings.recentRoots.length ? this.settings.recentRoots : [this.root]
     return [
       ...roots.map((path) => ({
         label:
-          path === this.defaultRoot || path === '~/.lgtm/workspace'
+          path === this.defaultRoot || this.isDefaultWorkspaceRoot(path)
             ? 'Local workspace'
             : (path.split(/[\\/]/).filter(Boolean).at(-1) ?? path),
         value: path,
@@ -147,6 +176,24 @@ export class WorkspaceService {
     ]
   }
 
+  private isDefaultWorkspaceRoot(path: string): boolean {
+    return (
+      path === '~/.lgtm/workspace' ||
+      path.endsWith('/.lgtm/workspace') ||
+      path.endsWith('\\.lgtm\\workspace')
+    )
+  }
+
+  private isConfigFilePath(path: string): boolean {
+    return (
+      path === '~/.lgtm/config.json' ||
+      path === '.lgtm/config.json' ||
+      path === this.settings.snapshot?.globalPath ||
+      path === this.settings.snapshot?.projectPath
+    )
+  }
+
+  /** Returns top-level tree nodes for the sidebar `TreeView`. */
   get nodes() {
     return [
       ...(this.pendingEntry && !this.pendingParent
@@ -156,12 +203,14 @@ export class WorkspaceService {
     ]
   }
 
+  /** Returns the pending inline folder creation node, if active. */
   get pendingNode() {
     return this.pendingEntry
       ? new WorkspaceNodeViewModel(this.pendingEntry).toTreeNode()
       : undefined
   }
 
+  /** Opens the default or specified workspace directory and refreshes settings and LSP state. */
   async open(path?: string) {
     await this.flushSave()
     this.loading = true
@@ -172,13 +221,11 @@ export class WorkspaceService {
     try {
       const result = await this.client.open(path)
       if (!this.active) return
-      if (!this.defaultRoot && !path) {
+      if (!this.defaultRoot && !path && this.isDefaultWorkspaceRoot(result.root)) {
         this.defaultRoot = result.root
       }
       this.root = result.root
-      if (!this.recentWorkspaces.includes(result.root)) {
-        this.recentWorkspaces = [...this.recentWorkspaces, result.root]
-      }
+      this.settings.rememberRoot(result.root)
       this.entries = result.entries
       this.listed = {}
       this.tabs = []
@@ -186,6 +233,7 @@ export class WorkspaceService {
       this.lsp.reset()
       this.clearSelected()
       this.treeVersion++
+      void this.settings.load()
       void this.syncLspState()
     } catch (error) {
       if (this.active) this.error = errorMessage(error)
@@ -194,6 +242,15 @@ export class WorkspaceService {
     }
   }
 
+  /** Opens `path` in an editor tab with an optional custom tab `title`, cursor `offset`, and editor `focus`. */
+  async openPath(path: string, options?: { title?: string; offset?: number; focus?: boolean }) {
+    const entry = this.resolveFileEntry(path, options?.title)
+    if (entry.kind === 'file') {
+      await this.openFile(entry, options?.offset, options?.focus)
+    }
+  }
+
+  /** Switches to a selected workspace root or opens the native folder picker dialog. */
   async selectWorkspace(value: string) {
     if (this.blocked) return
     if (value === '__open_folder__') {
@@ -212,6 +269,7 @@ export class WorkspaceService {
     }
   }
 
+  /** Lazily loads child nodes for an expanded directory in the sidebar tree. */
   async loadChildren(node: TreeNode) {
     if (node.value === this.pendingEntry?.path) return []
     const items = await this.client.list(node.value)
@@ -220,13 +278,19 @@ export class WorkspaceService {
     return items.map((entry) => new WorkspaceNodeViewModel(entry).toTreeNode())
   }
 
+  /** Selects and opens a file node from the sidebar tree by its workspace-relative path. */
   async select(path: string) {
     if (this.busy) return
-    const entry = this.resolveFileEntry(path)
-    if (entry.kind === 'file') await this.openFile(entry)
+    await this.openPath(path)
   }
 
-  async openFile(entry: WorkspaceNode, targetOffset?: number) {
+  /** Reads a file from the workspace, opens or activates its tab, and optionally positions the cursor at `targetOffset`. */
+  async openFile(entry: WorkspaceNode, targetOffset?: number, focus = false) {
+    const tabId = `file:${entry.path}`
+    if (this.activeTabId === tabId && this.fileContent && targetOffset === undefined) {
+      this.focusRequest++
+      return
+    }
     const requestId = ++this.openRequestSeq
     await this.flushSave()
     if (requestId !== this.openRequestSeq) return
@@ -235,10 +299,12 @@ export class WorkspaceService {
     this.openingError = null
     try {
       const content = await this.client.read(entry.path)
+      if (this.isConfigFilePath(entry.path)) {
+        void this.settings.load()
+      }
       if (!this.active || requestId !== this.openRequestSeq) return
       this.fileContent = content
       this.lsp.recordFileStatus(content.lspStatus)
-      const tabId = `file:${entry.path}`
       this.upsertTab({
         id: tabId,
         kind: 'file',
@@ -252,6 +318,9 @@ export class WorkspaceService {
       this.activeTabId = tabId
       this.selectionOffset = targetOffset ?? null
       this.fileVersion++
+      if (focus || targetOffset !== undefined) {
+        this.focusRequest++
+      }
       void this.syncLspState()
     } catch (error) {
       if (this.active && requestId === this.openRequestSeq) {
@@ -263,6 +332,7 @@ export class WorkspaceService {
     }
   }
 
+  /** Activates an open file or diagnostics tab by its ID. */
   async activateTab(tabId: string) {
     if (this.blocked || this.activeTabId === tabId) return
     const tab = this.tabs.find((item) => item.id === tabId)
@@ -304,6 +374,7 @@ export class WorkspaceService {
     }
   }
 
+  /** Flushes pending saves and closes the tab with `tabId`. */
   async closeTab(tabId: string) {
     if (this.blocked) return
     const index = this.tabs.findIndex((item) => item.id === tabId)
@@ -321,6 +392,7 @@ export class WorkspaceService {
     await this.activateTab(fallback.id)
   }
 
+  /** Opens a read-only diagnostics buffer tab for all active servers or `languageId`. */
   async openDiagnosticsBuffer(languageId?: string) {
     await this.flushSave()
     try {
@@ -351,21 +423,23 @@ export class WorkspaceService {
     }
   }
 
+  /** Restarts the language server for `languageId`. */
   async restartLanguageServer(languageId: string) {
     await this.lsp.restartServer(languageId)
   }
 
+  /** Opens `path` and moves the editor selection to `offset`. */
   async jumpToLocation(path: string, offset: number) {
-    const entry = this.resolveFileEntry(path)
-    await this.openFile(entry, offset)
-    this.focusRequest++
+    await this.openPath(path, { offset, focus: true })
   }
 
+  /** Requests LSP hover documentation at `offset` in the currently selected file. */
   async requestHover(offset: number): Promise<CodeEditorHoverResult | null> {
     if (!this.selected) return null
     return this.lsp.requestHover(this.selected.path, offset)
   }
 
+  /** Jumps to the first LSP definition location for the symbol at `offset`. */
   async gotoDefinition(offset: number): Promise<void> {
     if (!this.selected) return
     const locations = await this.lsp.getDefinitions(this.selected.path, offset)
@@ -374,11 +448,13 @@ export class WorkspaceService {
     await this.jumpToLocation(first.path, first.offset)
   }
 
+  /** Handles an incoming `lsp-status` event from the desktop backend. */
   handleLspStatus(event: LspServerStatusEvent) {
     if (!this.active) return
     this.lsp.handleStatus(event)
   }
 
+  /** Handles an incoming `lsp-diagnostics` event and refreshes any open diagnostics tab. */
   handleLspDiagnostics(event: LspFileDiagnosticsEvent) {
     if (!this.active) return
     this.lsp.handleDiagnostics(event)
@@ -387,11 +463,13 @@ export class WorkspaceService {
     }
   }
 
+  /** Synchronizes workspace LSP state with the backend. */
   async syncLspState() {
     if (!this.active) return
     await this.lsp.syncState()
   }
 
+  /** Updates the active editor buffer, notifies LSP `didChange`, and schedules a 150ms debounced save. */
   updateContent(content: string) {
     if (!this.selected || !this.fileContent || this.fileContent.content === content) return
     this.fileContent = { ...this.fileContent, content }
@@ -407,6 +485,7 @@ export class WorkspaceService {
     }, 150)
   }
 
+  /** Flushes any pending debounced file save to disk. */
   async flushSave() {
     if (this.saveTimer) {
       clearTimeout(this.saveTimer)
@@ -423,7 +502,7 @@ export class WorkspaceService {
       this.saving = true
       const task = this.client
         .write(path, content)
-        .then((saved) => {
+        .then(async (saved) => {
           if (!this.active) return
           const tabId = `file:${path}`
           this.tabs = this.tabs.map((tab) =>
@@ -436,6 +515,9 @@ export class WorkspaceService {
               languageId: saved.languageId ?? this.fileContent.languageId,
               lspStatus: saved.lspStatus ?? this.fileContent.lspStatus,
             }
+          }
+          if (this.isConfigFilePath(path)) {
+            await this.settings.load()
           }
         })
         .catch((error) => {
@@ -450,6 +532,7 @@ export class WorkspaceService {
     }
   }
 
+  /** Clears the active file selection and editor buffer. */
   clearSelected() {
     if (this.saveTimer) {
       clearTimeout(this.saveTimer)
@@ -464,6 +547,7 @@ export class WorkspaceService {
     this.selectionOffset = null
   }
 
+  /** Creates a new untitled Markdown file inside `parent` and opens it in the editor. */
   async newFile(parent = '') {
     if (this.cannotCreate) return
     await this.flushSave()
@@ -490,6 +574,7 @@ export class WorkspaceService {
     }
   }
 
+  /** Begins creating a new file or folder inside `parent`. */
   startCreate(kind: 'file' | 'directory', parent = '') {
     if (kind === 'file') {
       void this.newFile(parent)
@@ -503,6 +588,7 @@ export class WorkspaceService {
     this.pendingEntry = { path: '__lgtm-new__', name, kind }
   }
 
+  /** Commits an inline folder creation or entry rename in the workspace tree. */
   async commitEntry(path: string, name: string) {
     if (this.blocked) throw new Error('Wait for the current operation to finish.')
     await this.flushSave()
@@ -560,6 +646,7 @@ export class WorkspaceService {
     if (openNext) await this.openFile(openNext)
   }
 
+  /** Executes a context menu action (`new-file`, `new-folder`, or `delete`) on `path`. */
   async contextAction(path: string, action: string) {
     if (action === 'new-file' || action === 'new-folder') {
       this.startCreate(action === 'new-file' ? 'file' : 'directory', path)
@@ -603,6 +690,7 @@ export class WorkspaceService {
     }
   }
 
+  /** Builds context menu items for a sidebar tree node. */
   contextItems(node: TreeNode): ContextMenuItem[] {
     return [
       ...(node.branch
@@ -616,6 +704,7 @@ export class WorkspaceService {
     ]
   }
 
+  /** Flushes any dirty buffer and marks the service inactive on component teardown. */
   dispose() {
     if (this.saveTimer) {
       clearTimeout(this.saveTimer)
@@ -641,7 +730,10 @@ export class WorkspaceService {
     this.refreshFolder = { path, version: (this.refreshFolder?.version ?? 0) + 1 }
   }
 
-  private resolveFileEntry(path: string): WorkspaceNode {
+  private resolveFileEntry(path: string, title?: string): WorkspaceNode {
+    if (title) {
+      return { path, name: title, kind: 'file' }
+    }
     return (
       this.entries.find((item) => item.path === path) ??
       this.listed[path] ?? {

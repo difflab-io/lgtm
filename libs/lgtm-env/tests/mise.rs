@@ -309,11 +309,11 @@ mod given_a_workspace_without_an_existing_mise_file {
 mod given_a_workspace_with_an_existing_managed_mise_file {
     use super::*;
 
-    mod when_project_config_changes {
+    mod when_synchronizing_workspace_mise {
         use super::*;
 
         #[test]
-        fn should_overwrite_stale_managed_mise_file_with_updated_tools_and_tasks() {
+        fn should_preserve_user_defined_tools_and_tasks_while_adding_detected_language_defaults() {
             // Arrange
             let temp = tempfile::tempdir().unwrap();
             let home = temp.path().join("home");
@@ -324,15 +324,10 @@ mod given_a_workspace_with_an_existing_managed_mise_file {
                 "[package]\nname = \"sample\"\n",
             )
             .unwrap();
-            let stale_mise_path = workspace_root.join(".lgtm/mise.toml");
+            let managed_mise_path = workspace_root.join(".lgtm/mise.toml");
             std::fs::write(
-                &stale_mise_path,
-                "# stale file\n[tools]\nrust-analyzer = \"0.0.1\"\n",
-            )
-            .unwrap();
-            std::fs::write(
-                workspace_root.join(".lgtm/config.toml"),
-                "[mise.tools]\nrust-analyzer = \"2026-01-01\"\n\n[mise.tasks.check]\ndescription = \"Custom clippy check\"\nrun = \"cargo clippy --all-targets\"\n",
+                &managed_mise_path,
+                "[tools]\nrust-analyzer = \"2026-01-01\"\n\n[tasks.check]\ndescription = \"Custom clippy check\"\nrun = \"cargo clippy --all-targets\"\n",
             )
             .unwrap();
             let config_service = ConfigService::from_home(home);
@@ -343,10 +338,10 @@ mod given_a_workspace_with_an_existing_managed_mise_file {
             let updated = std::fs::read_to_string(&updated_path).unwrap();
 
             // Assert
-            assert_eq!(updated_path, stale_mise_path);
+            assert_eq!(updated_path, managed_mise_path);
             assert!(updated.contains("rust-analyzer = \"2026-01-01\""));
             assert!(updated.contains("cargo clippy --all-targets"));
-            assert!(!updated.contains("0.0.1"));
+            assert!(updated.contains("[tasks.\"rust:check\"]"));
         }
     }
 }
@@ -371,8 +366,13 @@ mod given_a_workspace_with_a_user_provided_root_mise_file {
             std::fs::write(&user_mise_path, user_mise_content).unwrap();
             std::fs::write(workspace_root.join("tsconfig.json"), "{}\n").unwrap();
             std::fs::write(
-                workspace_root.join(".lgtm/config.toml"),
-                "[lsp]\nenabled = true\nauto_install = true\n\n[mise.tasks.check]\ndescription = \"Custom TS check\"\nrun = \"tsc -p tsconfig.json --noEmit\"\n",
+                workspace_root.join(".lgtm/config.json"),
+                "{\n  \"lsp\": {\n    \"enabled\": true,\n    \"auto_install\": true\n  }\n}\n",
+            )
+            .unwrap();
+            std::fs::write(
+                workspace_root.join(".lgtm/mise.toml"),
+                "[tasks.check]\ndescription = \"Custom TS check\"\nrun = \"tsc -p tsconfig.json --noEmit\"\n",
             )
             .unwrap();
 
@@ -392,6 +392,63 @@ mod given_a_workspace_with_a_user_provided_root_mise_file {
             assert_eq!(check_task.run, "tsc -p tsconfig.json --noEmit");
             let preset_task = tasks.iter().find(|t| t.name == "typescript:check").unwrap();
             assert_eq!(preset_task.run, "tsc --noEmit");
+        }
+    }
+}
+
+mod given_global_and_project_dev_tool_management {
+    use super::*;
+
+    mod when_adding_and_removing_dev_tools {
+        use super::*;
+
+        #[test]
+        fn should_manage_global_and_workspace_dev_tools_in_mise_toml_separately_from_config_json() {
+            // Arrange
+            let temp = tempfile::tempdir().unwrap();
+            let home = temp.path().join("home");
+            let workspace_root = temp.path().join("workspace");
+            std::fs::create_dir_all(&workspace_root).unwrap();
+            std::fs::write(
+                workspace_root.join("Cargo.toml"),
+                "[package]\nname = \"sample\"\n",
+            )
+            .unwrap();
+            let config_service = ConfigService::from_home(home.clone());
+            let mise_service = MiseService::new(config_service);
+
+            // Act
+            let global_added = mise_service.add_dev_tool(None, "biome", "1.9.4").unwrap();
+            let project_added = mise_service
+                .add_dev_tool(Some(&workspace_root), "cargo-nextest", "latest")
+                .unwrap();
+            let project_removed = mise_service
+                .remove_dev_tool(Some(&workspace_root), "cargo-nextest")
+                .unwrap();
+            let global_removed = mise_service.remove_dev_tool(None, "biome").unwrap();
+
+            // Assert
+            assert_eq!(
+                mise_service.get_global_mise_path(),
+                home.join(".lgtm/mise.toml")
+            );
+            assert_eq!(
+                MiseService::get_managed_mise_path(&workspace_root),
+                workspace_root.join(".lgtm/mise.toml")
+            );
+            assert_eq!(global_added.tools.get("biome"), Some(&"1.9.4".to_string()));
+            assert!(home.join(".lgtm/mise.toml").is_file());
+            assert_eq!(project_added.tools.get("biome"), Some(&"1.9.4".to_string()));
+            assert_eq!(
+                project_added.tools.get("cargo-nextest"),
+                Some(&"latest".to_string())
+            );
+            assert_eq!(
+                project_added.tools.get("rust-analyzer"),
+                Some(&"latest".to_string())
+            );
+            assert!(!project_removed.tools.contains_key("cargo-nextest"));
+            assert!(!global_removed.tools.contains_key("biome"));
         }
     }
 }

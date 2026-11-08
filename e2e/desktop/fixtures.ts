@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 export { expect }
 export interface Workspace {
   root: string
+  lgtmHomeDir: string
   pickedFolder: string | null
   failWrites: boolean
   failLists: boolean
@@ -29,6 +30,9 @@ interface CommandArgs {
   content?: string
   offset?: number
   languageId?: string
+  patch?: unknown
+  scope?: string | null
+  format?: string | null
 }
 
 interface BridgeMessage {
@@ -63,19 +67,28 @@ function send(msg) {
 function publishDiagnostics(uri, text) {
   const diagnostics = [];
   const lines = text.split('\\n');
+  const markers = ['BROKEN', 'invalid-theme', 'unknownLocalField'];
   for (let i = 0; i < lines.length; i++) {
-    const idx = lines[i].indexOf('BROKEN');
-    if (idx !== -1) {
-      diagnostics.push({
-        range: {
-          start: { line: i, character: idx },
-          end: { line: i, character: idx + 6 },
-        },
-        severity: 1,
-        source: 'rustc',
-        code: 'E0425',
-        message: 'cannot find value \`BROKEN\` in this scope',
-      });
+    for (const marker of markers) {
+      const idx = lines[i].indexOf(marker);
+      if (idx !== -1) {
+        const startChar =
+          marker === 'BROKEN' ? idx : lines[i].length - lines[i].trimStart().length;
+        const endChar = marker === 'BROKEN' ? idx + marker.length : lines[i].length;
+        diagnostics.push({
+          range: {
+            start: { line: i, character: startChar },
+            end: { line: i, character: endChar },
+          },
+          severity: 1,
+          source: 'rustc',
+          code: 'E0425',
+          message:
+            marker === 'BROKEN'
+              ? 'cannot find value \`BROKEN\` in this scope'
+              : \`invalid value or symbol \\\`\${marker}\\\`\`,
+        });
+      }
     }
   }
   send({
@@ -118,13 +131,17 @@ function handleMessage(msg) {
     return;
   }
   if (msg.method === 'textDocument/hover') {
+    const uri = msg.params.textDocument.uri;
+    const isConfig = uri.endsWith('/.lgtm/config.json') || uri.endsWith('\\\\.lgtm\\\\config.json');
     send({
       jsonrpc: '2.0',
       id: msg.id,
       result: {
         contents: {
           kind: 'markdown',
-          value: '\`\`\`rust\\npub fn helper() -> i32\\n\`\`\`\\n\\n---\\n\\nComputes the **workspace** answer using \`helper\`.',
+          value: isConfig
+            ? 'Resolved appearance settings section \\\\(\\\`appearance\\\\.\\\\*\\\`\\\\)\\\\.'
+            : '\`\`\`rust\\npub fn helper() -> i32\\n\`\`\`\\n\\n---\\n\\nComputes the **workspace** answer using \`helper\`.',
         },
         range: {
           start: { line: msg.params.position.line, character: 0 },
@@ -235,61 +252,6 @@ export const test = base.extend<{
       await mkdir(lgtmHomeDir, { recursive: true })
       const mockLspScript = join(homeRoot, 'mock-lsp.mjs')
       await writeFile(mockLspScript, MOCK_LSP_SERVER_SOURCE, 'utf8')
-      const escapedScript = mockLspScript.replace(/\\/g, '\\\\')
-      await writeFile(
-        join(lgtmHomeDir, 'config.toml'),
-        [
-          '[languages.rust]',
-          'enabled = true',
-          'extensions = ["rs"]',
-          'root_markers = ["Cargo.toml"]',
-          'mise_tools = {}',
-          'command = "node"',
-          `args = ["${escapedScript}"]`,
-          '',
-          '[languages.typescript]',
-          'enabled = true',
-          'extensions = ["ts", "tsx"]',
-          'root_markers = ["tsconfig.json", "package.json"]',
-          'mise_tools = {}',
-          'command = "node"',
-          `args = ["${escapedScript}"]`,
-          '',
-          '[languages.javascript]',
-          'enabled = true',
-          'extensions = ["js", "jsx"]',
-          'root_markers = ["package.json", "jsconfig.json"]',
-          'mise_tools = {}',
-          'command = "node"',
-          `args = ["${escapedScript}"]`,
-          '',
-          '[languages.python]',
-          'enabled = true',
-          'extensions = ["py"]',
-          'root_markers = ["pyproject.toml", "requirements.txt"]',
-          'mise_tools = {}',
-          'command = "node"',
-          `args = ["${escapedScript}"]`,
-          '',
-          '[languages.go]',
-          'enabled = true',
-          'extensions = ["go"]',
-          'root_markers = ["go.mod"]',
-          'mise_tools = {}',
-          'command = "node"',
-          `args = ["${escapedScript}"]`,
-          '',
-          '[languages.markdown]',
-          'enabled = true',
-          'extensions = ["md", "markdown", "mdx"]',
-          'root_markers = [".marksman.toml"]',
-          'mise_tools = {}',
-          'command = "node"',
-          `args = ["${escapedScript}"]`,
-          '',
-        ].join('\n'),
-        'utf8',
-      )
 
       const tauriConfRaw = await readFile(
         join(repoRoot, 'apps/lgtm-desktop/tauri.conf.json'),
@@ -304,6 +266,7 @@ export const test = base.extend<{
 
       const workspace: Workspace = {
         root: initialRoot,
+        lgtmHomeDir,
         pickedFolder: null,
         failLists: false,
         failWrites: false,
@@ -342,6 +305,7 @@ export const test = base.extend<{
           ...process.env,
           LGTM_IPC_BRIDGE: '1',
           LGTM_E2E_PERMANENT_DELETE: '1',
+          LGTM_E2E_LSP_SCRIPT: mockLspScript,
         },
         stdio: ['pipe', 'pipe', 'inherit'],
       })

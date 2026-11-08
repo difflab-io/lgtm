@@ -2,60 +2,61 @@ use std::{
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::Arc,
 };
+
+use lgtm_config::LgtmConfigPatch;
 
 use crate::{
     error::{Result, error},
     models::{FileContent, Workspace, WorkspaceListing, WorkspaceNode},
-    services::LspService,
 };
 
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
 
-/// Browses and mutates entries within the active local workspace and coordinates LSP document lifecycle.
+/// Browses and mutates entries within the active local workspace directory.
 pub struct WorkspaceService {
+    /// The global `.lgtm` home directory under the user's home directory.
+    lgtm_home: PathBuf,
     /// The default workspace directory under the user's home directory.
     default_workspace: Workspace,
     /// The active workspace location shared by file operations.
     workspace: Workspace,
     /// Whether the active workspace was explicitly chosen on disk.
     custom_root: bool,
-    /// Desktop LSP service bound to the active workspace lifecycle.
-    lsp_service: Arc<LspService>,
 }
 
 impl WorkspaceService {
-    /// Creates a workspace service rooted at `workspace_path` when provided and valid on disk (otherwise `<home>/.lgtm/workspace`) and binds `lsp_service`.
-    pub fn new(
-        home: PathBuf,
-        workspace_path: Option<PathBuf>,
-        lsp_service: Arc<LspService>,
-    ) -> Self {
+    /// Creates a workspace service rooted at `workspace_path` when provided and valid on disk (otherwise `<home>/.lgtm/workspace`).
+    pub fn new(home: PathBuf, workspace_path: Option<PathBuf>) -> Self {
+        let lgtm_home = home.join(".lgtm");
         let default_workspace = Workspace::from_home(home);
         if let Some(path) = workspace_path.filter(|path| path.is_dir())
             && path != default_workspace.root
         {
             return Self {
+                lgtm_home,
                 workspace: Workspace::from_path(path),
                 default_workspace,
                 custom_root: true,
-                lsp_service,
             };
         }
         Self {
+            lgtm_home,
             workspace: default_workspace.clone(),
             default_workspace,
             custom_root: false,
-            lsp_service,
         }
     }
 
     // Public ------------------------------------------------------------------
 
-    /// Opens the active workspace or switches to a chosen directory on disk, warming up workspace language servers.
+    /// Returns whether the active workspace was explicitly chosen rather than the default workspace.
+    pub fn is_custom_root(&self) -> bool {
+        self.custom_root
+    }
+
+    /// Opens the active workspace or switches to a chosen directory on disk.
     pub fn open(&mut self, path: Option<&str>) -> Result<WorkspaceListing> {
-        let previous_root = self.get_root().ok();
         if let Some(target) = path.map(str::trim).filter(|s| !s.is_empty()) {
             let candidate = PathBuf::from(target);
             if candidate == self.default_workspace.root {
@@ -70,11 +71,22 @@ impl WorkspaceService {
             }
         }
         let root = self.get_root()?;
-        self.lsp_service
-            .switch_workspace(previous_root.as_deref(), &root);
         Ok(WorkspaceListing {
             root: root.to_string_lossy().into_owned(),
             entries: self.get_entries("")?,
+        })
+    }
+
+    /// Returns whether `path` points to the global `~/.lgtm/config.json` or active workspace `.lgtm/config.json`.
+    pub fn is_config_path(&self, path: &Path) -> bool {
+        let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let global_path = self.lgtm_home.join("config.json");
+        if global_path.canonicalize().unwrap_or(global_path) == canon {
+            return true;
+        }
+        self.get_root().ok().is_some_and(|root| {
+            let local = root.join(".lgtm").join("config.json");
+            local.canonicalize().unwrap_or(local) == canon
         })
     }
 
@@ -114,12 +126,20 @@ impl WorkspaceService {
         Ok(entries)
     }
 
-    /// Reads UTF-8 text and revision hash for a workspace-relative file and synchronizes it with its LSP server.
+    /// Reads UTF-8 text and revision hash for a workspace-relative or config file.
     pub fn get_file_content(&self, relative: &str) -> Result<FileContent> {
         if relative.is_empty() {
             return Err(error("unsupported", "Choose a file inside the workspace."));
         }
-        let root = self.get_root()?;
+        if self.is_global_config_reference(relative) {
+            self.ensure_global_config_file()?;
+        } else if relative == ".lgtm/config.json" {
+            self.ensure_global_config_file()?;
+            let root = self.get_root()?;
+            if !root.join(".lgtm").join("config.json").is_file() {
+                return FileContent::from_bytes(b"{\n}\n".to_vec());
+            }
+        }
         let path = self.get_entry_path(relative)?;
         if !fs::metadata(&path)?.is_file() {
             return Err(error("unsupported", "Choose a file inside the workspace."));
@@ -138,25 +158,12 @@ impl WorkspaceService {
                 "This file is larger than the 16 MB viewing limit.",
             ));
         }
-        let content = FileContent::from_bytes(bytes)?;
-        let (language_id, lsp_status) =
-            self.lsp_service
-                .open_or_sync_file(&root, &path, &content.content);
-        Ok(content.with_lsp(language_id, lsp_status))
+        FileContent::from_bytes(bytes)
     }
 
-    /// Writes UTF-8 text to an existing workspace-relative file, notifies LSP `didSave`, and returns its new revision.
+    /// Writes UTF-8 text to an existing workspace-relative or config file and returns its new revision.
     pub fn write_file(&self, relative: &str, content: &str) -> Result<FileContent> {
         if relative.is_empty() {
-            return Err(error("unsupported", "Choose a file inside the workspace."));
-        }
-        let root = self.get_root()?;
-        let original = root.join(relative);
-        if fs::symlink_metadata(&original)?.file_type().is_symlink() {
-            return Err(error("unsupported", "Linked files cannot be modified."));
-        }
-        let path = self.get_entry_path(relative)?;
-        if !fs::metadata(&path)?.is_file() {
             return Err(error("unsupported", "Choose a file inside the workspace."));
         }
         if content.len() as u64 > MAX_BYTES {
@@ -165,15 +172,43 @@ impl WorkspaceService {
                 "This file is larger than the 16 MB viewing limit.",
             ));
         }
+        if relative == ".lgtm/config.json" {
+            let root = self.get_root()?;
+            let lgtm_dir = root.join(".lgtm");
+            fs::create_dir_all(&lgtm_dir)?;
+            let path = lgtm_dir.join("config.json");
+            if let Ok(meta) = fs::symlink_metadata(&path)
+                && meta.file_type().is_symlink()
+            {
+                return Err(error("unsupported", "Linked files cannot be modified."));
+            }
+            let mut file = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&path)?;
+            file.write_all(content.as_bytes())?;
+            file.sync_all()?;
+            return FileContent::from_bytes(content.as_bytes().to_vec());
+        }
+        if !self.is_global_config_reference(relative) {
+            let root = self.get_root()?;
+            let original = root.join(relative);
+            if fs::symlink_metadata(&original)?.file_type().is_symlink() {
+                return Err(error("unsupported", "Linked files cannot be modified."));
+            }
+        }
+        let path = self.get_entry_path(relative)?;
+        if !fs::metadata(&path)?.is_file() {
+            return Err(error("unsupported", "Choose a file inside the workspace."));
+        }
         let mut file = fs::OpenOptions::new()
             .write(true)
             .truncate(true)
             .open(&path)?;
         file.write_all(content.as_bytes())?;
         file.sync_all()?;
-        let written = FileContent::from_bytes(content.as_bytes().to_vec())?;
-        let _ = self.lsp_service.did_save(&root, &path, content);
-        Ok(written)
+        FileContent::from_bytes(content.as_bytes().to_vec())
     }
 
     /// Creates a new file inside a workspace-relative directory without overwriting existing files.
@@ -242,7 +277,7 @@ impl WorkspaceService {
         })
     }
 
-    /// Renames a file or folder exclusively without overwriting an existing entry and closes its old LSP document.
+    /// Renames a file or folder exclusively without overwriting an existing entry.
     pub fn rename(&self, relative: &str, name: &str) -> Result<WorkspaceNode> {
         let name = WorkspaceNode::validate_name(name)?;
         let source = self.get_entry_path(relative)?;
@@ -306,7 +341,6 @@ impl WorkspaceService {
                 ));
             }
         }
-        let _ = self.lsp_service.did_close(&root, &source);
         let path = target
             .strip_prefix(root)
             .unwrap()
@@ -319,7 +353,7 @@ impl WorkspaceService {
         })
     }
 
-    /// Moves a workspace entry to the system Trash (or permanently removes it in E2E harness runs) and closes its LSP document.
+    /// Moves a workspace entry to the system Trash (or permanently removes it in E2E harness runs).
     pub fn delete(&self, relative: &str) -> Result<()> {
         if relative.is_empty() {
             return Err(error(
@@ -342,11 +376,9 @@ impl WorkspaceService {
             } else {
                 fs::remove_file(&path)?;
             }
-            let _ = self.lsp_service.did_close(&root, &path);
             return Ok(());
         }
         trash::delete(&path).map_err(|e| error("io", e.to_string()))?;
-        let _ = self.lsp_service.did_close(&root, &path);
         Ok(())
     }
 
@@ -360,8 +392,17 @@ impl WorkspaceService {
         Ok(self.workspace.root.canonicalize()?)
     }
 
-    /// Resolves a workspace-relative path to a canonical path inside the active workspace.
+    /// Resolves a workspace-relative path (or the global `~/.lgtm/config.json` path) to a canonical path on disk.
     pub fn get_entry_path(&self, relative: &str) -> Result<PathBuf> {
+        if self.is_global_config_reference(relative) {
+            let global_path = self.lgtm_home.join("config.json");
+            return Ok(global_path.canonicalize().unwrap_or(global_path));
+        }
+        if relative == ".lgtm/config.json" {
+            let root = self.get_root()?;
+            let local_path = root.join(".lgtm").join("config.json");
+            return Ok(local_path.canonicalize().unwrap_or(local_path));
+        }
         let path = WorkspaceNode::validate_relative_path(relative)?;
         let root = self.get_root()?;
         let resolved = root.join(path).canonicalize()?;
@@ -372,6 +413,30 @@ impl WorkspaceService {
             ));
         }
         Ok(resolved)
+    }
+
+    // Private -----------------------------------------------------------------
+
+    fn ensure_global_config_file(&self) -> Result<PathBuf> {
+        fs::create_dir_all(&self.lgtm_home)?;
+        let config_path = self.lgtm_home.join("config.json");
+        if !config_path.is_file() {
+            fs::write(&config_path, LgtmConfigPatch::default_document())?;
+        }
+        Ok(config_path)
+    }
+
+    fn is_global_config_reference(&self, reference: &str) -> bool {
+        if reference == "~/.lgtm/config.json" {
+            return true;
+        }
+        let Ok(canon_ref) = Path::new(reference).canonicalize() else {
+            return false;
+        };
+        self.lgtm_home
+            .join("config.json")
+            .canonicalize()
+            .is_ok_and(|global| global == canon_ref)
     }
 }
 
@@ -392,12 +457,7 @@ mod tests {
     impl WorkspaceFixture {
         fn new() -> Self {
             let home = TempDir::new().unwrap();
-            let home_path = home.path().to_path_buf();
-            let service = WorkspaceService::new(
-                home_path.clone(),
-                None,
-                Arc::new(LspService::noop(home_path)),
-            );
+            let service = WorkspaceService::new(home.path().to_path_buf(), None);
             Self { home, service }
         }
 
@@ -437,11 +497,9 @@ mod tests {
                 let home = TempDir::new().unwrap();
                 let workspace_dir = TempDir::new().unwrap();
                 fs::write(workspace_dir.path().join("main.rs"), "fn main() {}\n").unwrap();
-                let lsp_service = Arc::new(LspService::noop(home.path().to_path_buf()));
                 let mut service = WorkspaceService::new(
                     home.path().to_path_buf(),
                     Some(workspace_dir.path().to_path_buf()),
-                    lsp_service,
                 );
 
                 // Act

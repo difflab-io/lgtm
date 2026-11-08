@@ -3,9 +3,14 @@ import { codeEditorMarkdownStyles } from './styles'
 const INLINE_TOKEN_RE =
   /(`[^`\n]+`|\*\*\*[^*\n]+\*\*\*|\*\*[^*\n]+\*\*|\*[^*\n]+\*|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\))/g
 
+function unescapeMarkdownSyntax(text: string): string {
+  return text.replace(/\\([\\`*_{}[\]()<>#+\-.!~|"])/g, '$1')
+}
+
 function appendInlineMarkdown(parent: Node, text: string) {
   const lines = text.split('\n')
-  lines.forEach((line, lineIdx) => {
+  lines.forEach((rawLine, lineIdx) => {
+    const line = unescapeMarkdownSyntax(rawLine)
     if (lineIdx > 0) {
       parent.appendChild(document.createElement('br'))
     }

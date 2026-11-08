@@ -9,18 +9,12 @@ use crate::models::mise::{GeneratedMiseFile, MiseTaskSummary};
 
 const DEFAULT_MISE_INSTALLER_URL: &str = "https://mise.run";
 
-/// Manages the `mise` binary lifecycle, `.lgtm/mise.toml` synthesis, and workspace task/tool execution.
+/// Manages the `mise` binary lifecycle, dev tool persistence (`~/.lgtm/mise.toml` and `<workspace>/.lgtm/mise.toml`), and workspace task/tool execution.
 #[derive(Debug, Clone)]
 pub struct MiseService {
     config_service: ConfigService,
     search_system_paths: bool,
     installer_url: String,
-}
-
-impl Default for MiseService {
-    fn default() -> Self {
-        Self::new(ConfigService::new())
-    }
 }
 
 impl MiseService {
@@ -50,6 +44,16 @@ impl MiseService {
             .get_lgtm_home_dir()
             .join("bin")
             .join(Self::binary_name())
+    }
+
+    /// Returns the global LGTM-managed Mise file path (`<lgtm_home>/mise.toml`).
+    pub fn get_global_mise_path(&self) -> PathBuf {
+        self.config_service.get_lgtm_home_dir().join("mise.toml")
+    }
+
+    /// Returns the workspace LGTM-managed Mise file path (`<workspace>/.lgtm/mise.toml`).
+    pub fn get_managed_mise_path(workspace_root: &Path) -> PathBuf {
+        workspace_root.join(".lgtm").join("mise.toml")
     }
 
     /// Locates an existing usable `mise` binary in `<lgtm_home>/bin/mise` or standard system paths.
@@ -133,36 +137,93 @@ impl MiseService {
         Ok(target_path)
     }
 
+    /// Synchronizes and returns the managed `mise.toml` dev tools and tasks for the global (`None`) or workspace (`Some(workspace_root)`) scope.
+    pub fn manage_dev_tools(&self, workspace_root: Option<&Path>) -> Result<GeneratedMiseFile> {
+        match workspace_root {
+            Some(ws) => {
+                let mise_path = self.sync_workspace_mise(ws)?;
+                self.build_generated_mise_file(ws, &mise_path)
+            }
+            None => {
+                let global_path = self.get_global_mise_path();
+                if let Some(parent) = global_path.parent() {
+                    std::fs::create_dir_all(parent).map_err(|source| {
+                        LgtmEnvError::ManagedMiseIo {
+                            path: parent.to_path_buf(),
+                            source,
+                        }
+                    })?;
+                }
+                let generated = Self::read_existing_mise_file(&global_path);
+                Self::write_mise_file_if_changed(&global_path, &generated)?;
+                Ok(generated)
+            }
+        }
+    }
+
+    /// Adds or updates a dev tool (`tool = version`) in the global (`None`) or workspace (`Some(workspace_root)`) `mise.toml` file and returns the updated model.
+    pub fn add_dev_tool(
+        &self,
+        workspace_root: Option<&Path>,
+        tool: &str,
+        version: &str,
+    ) -> Result<GeneratedMiseFile> {
+        match workspace_root {
+            Some(ws) => {
+                let _ = self.config_service.ensure_workspace_dir(ws)?;
+                let mise_path = Self::get_managed_mise_path(ws);
+                let mut generated = self.build_generated_mise_file(ws, &mise_path)?;
+                generated.add_dev_tool(tool, version);
+                Self::write_mise_file_if_changed(&mise_path, &generated)?;
+                Ok(generated)
+            }
+            None => {
+                let mut generated = self.manage_dev_tools(None)?;
+                generated.add_dev_tool(tool, version);
+                let global_path = self.get_global_mise_path();
+                Self::write_mise_file_if_changed(&global_path, &generated)?;
+                Ok(generated)
+            }
+        }
+    }
+
+    /// Removes a dev tool from the global (`None`) or workspace (`Some(workspace_root)`) `mise.toml` file and returns the updated model.
+    pub fn remove_dev_tool(
+        &self,
+        workspace_root: Option<&Path>,
+        tool: &str,
+    ) -> Result<GeneratedMiseFile> {
+        match workspace_root {
+            Some(ws) => {
+                let _ = self.config_service.ensure_workspace_dir(ws)?;
+                let mise_path = Self::get_managed_mise_path(ws);
+                let mut generated = self.build_generated_mise_file(ws, &mise_path)?;
+                generated.remove_dev_tool(tool);
+                Self::write_mise_file_if_changed(&mise_path, &generated)?;
+                Ok(generated)
+            }
+            None => {
+                let mut generated = self.manage_dev_tools(None)?;
+                generated.remove_dev_tool(tool);
+                let global_path = self.get_global_mise_path();
+                Self::write_mise_file_if_changed(&global_path, &generated)?;
+                Ok(generated)
+            }
+        }
+    }
+
     /// Ensures `<workspace>/.lgtm/` and `.git/info/exclude` are initialized and writes `<workspace>/.lgtm/mise.toml`.
     pub fn sync_workspace_mise(&self, workspace_root: &Path) -> Result<PathBuf> {
         let _ = self.config_service.ensure_workspace_dir(workspace_root)?;
-        let config = self.config_service.get_config(workspace_root)?;
-        let detected_languages = ConfigService::detect_workspace_languages(&config, workspace_root);
-        let generated = GeneratedMiseFile::from_config(&config, &detected_languages);
-        let rendered = generated.render_toml()?;
-        let mise_path = ConfigService::get_managed_mise_path(workspace_root);
-
-        let needs_write = match std::fs::read_to_string(&mise_path) {
-            Ok(existing) => existing != rendered,
-            Err(_) => true,
-        };
-
-        if needs_write {
-            std::fs::write(&mise_path, rendered).map_err(|source| LgtmEnvError::ManagedMiseIo {
-                path: mise_path.clone(),
-                source,
-            })?;
-        }
-
+        let mise_path = Self::get_managed_mise_path(workspace_root);
+        let generated = self.build_generated_mise_file(workspace_root, &mise_path)?;
+        Self::write_mise_file_if_changed(&mise_path, &generated)?;
         Ok(mise_path)
     }
 
     /// Synchronizes `.lgtm/mise.toml` and returns all synthesized task summaries for the workspace.
     pub fn get_tasks(&self, workspace_root: &Path) -> Result<Vec<MiseTaskSummary>> {
-        let _ = self.sync_workspace_mise(workspace_root)?;
-        let config = self.config_service.get_config(workspace_root)?;
-        let detected = ConfigService::detect_workspace_languages(&config, workspace_root);
-        let generated = GeneratedMiseFile::from_config(&config, &detected);
+        let generated = self.manage_dev_tools(Some(workspace_root))?;
         Ok(generated.get_task_summaries())
     }
 
@@ -248,7 +309,7 @@ impl MiseService {
             self.find_mise_binary()
                 .ok_or(LgtmEnvError::MiseNotInstalled)?
         };
-        let mise_file = ConfigService::get_managed_mise_path(workspace_root);
+        let mise_file = Self::get_managed_mise_path(workspace_root);
         let mut cmd = Command::new(mise_bin);
         cmd.arg("exec").arg("--cd").arg(project_root);
         for (tool, version) in tools {
@@ -264,6 +325,46 @@ impl MiseService {
     }
 
     // Private -----------------------------------------------------------------
+
+    fn build_generated_mise_file(
+        &self,
+        workspace_root: &Path,
+        mise_path: &Path,
+    ) -> Result<GeneratedMiseFile> {
+        let config = self.config_service.get_config(workspace_root)?;
+        let detected_languages = ConfigService::detect_workspace_languages(&config, workspace_root);
+        let mut generated = GeneratedMiseFile::from_config(&config, &detected_languages);
+        let global_mise_path = self.get_global_mise_path();
+        if global_mise_path.is_file() {
+            generated.merge_existing(Self::read_existing_mise_file(&global_mise_path));
+        }
+        if mise_path.is_file() {
+            generated.merge_existing(Self::read_existing_mise_file(mise_path));
+        }
+        Ok(generated)
+    }
+
+    fn read_existing_mise_file(path: &Path) -> GeneratedMiseFile {
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|raw| toml::from_str::<GeneratedMiseFile>(&raw).ok())
+            .unwrap_or_default()
+    }
+
+    fn write_mise_file_if_changed(mise_path: &Path, generated: &GeneratedMiseFile) -> Result<()> {
+        let rendered = generated.render_toml()?;
+        let needs_write = match std::fs::read_to_string(mise_path) {
+            Ok(existing) => existing != rendered,
+            Err(_) => true,
+        };
+        if needs_write {
+            std::fs::write(mise_path, rendered).map_err(|source| LgtmEnvError::ManagedMiseIo {
+                path: mise_path.to_path_buf(),
+                source,
+            })?;
+        }
+        Ok(())
+    }
 
     fn binary_name() -> &'static str {
         if cfg!(windows) { "mise.exe" } else { "mise" }
@@ -355,6 +456,12 @@ impl MiseService {
     }
 }
 
+impl Default for MiseService {
+    fn default() -> Self {
+        Self::new(ConfigService::new())
+    }
+}
+
 // tests -----------------------------------------------------------------------
 
 #[cfg(test)]
@@ -374,7 +481,7 @@ mod tests {
                 // Arrange
                 let temp = tempfile::tempdir().unwrap();
                 let workspace_root = temp.path();
-                let global_cfg = workspace_root.join("global.toml");
+                let global_cfg = workspace_root.join("global.json");
                 std::fs::write(
                     workspace_root.join("Cargo.toml"),
                     "[package]\nname = \"demo\"\n",
@@ -382,8 +489,8 @@ mod tests {
                 .unwrap();
                 std::fs::create_dir_all(workspace_root.join(".lgtm")).unwrap();
                 std::fs::write(
-                    workspace_root.join(".lgtm/config.toml"),
-                    "[mise.tasks.greet]\ndescription = \"Say hello\"\nrun = \"echo hello\"\n",
+                    workspace_root.join(".lgtm/mise.toml"),
+                    "[tasks.greet]\ndescription = \"Say hello\"\nrun = \"echo hello\"\n",
                 )
                 .unwrap();
                 let service = MiseService::new(ConfigService::with_global_config_path(global_cfg));

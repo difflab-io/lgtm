@@ -183,7 +183,7 @@ lgtm/
 │   ├── lgtm-forge/     Connect RPC review server, SnapshotStore, RemoteForge, and Protobuf schemas
 │   └── lgtm-web/       Svelte 5 desktop/web IDE shell, reactive services, and Tauri/RPC clients
 ├── libs/
-│   ├── lgtm-config/    Global/workspace `.lgtm/config.toml` resolution and language discovery SDK
+│   ├── lgtm-config/    Global/workspace JSON config, JSON Schema, and language discovery SDK
 │   ├── lgtm-db/        SeaORM SQLite/PostgreSQL persistence layer and named repositories
 │   ├── lgtm-env/       Managed `mise` binary lifecycle and `<workspace>/.lgtm/mise.toml` synthesis SDK
 │   ├── lgtm-lsp/       Stdio JSON-RPC 2.0 language server pool, document cache, and UTF-16 offset math
@@ -235,6 +235,7 @@ All workspace Cargo crates set `publish = false` and link directly via Cargo `pa
 
 ## References
 
+- [Neovim user guide](../user-guide.md).
 - [Forge architecture (`lgtm-forge`)](forge/index.md).
 - [Review RPC contracts](forge/reviews.md).
 - [Snapshot store architecture](forge/snapshot-store.md).
@@ -242,6 +243,8 @@ All workspace Cargo crates set `publish = false` and link directly via Cargo `pa
 - [Database library architecture (`lgtm-db`)](db/index.md).
 - [CLI architecture (`lgtm-cli`)](cli/index.md).
 - [Desktop application architecture (`lgtm-desktop` & `lgtm-web`)](desktop/index.md).
+- [Desktop event handling & service orchestration](desktop/events.md).
+- [Web frontend architecture](web/index.md).
 - [Configuration library architecture (`lgtm-config`)](config/index.md).
 - [Environment library architecture (`lgtm-env`)](env/index.md).
 - [LSP library architecture (`lgtm-lsp`)](lsp/index.md).

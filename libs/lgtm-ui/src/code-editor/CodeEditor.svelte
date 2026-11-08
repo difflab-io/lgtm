@@ -4,14 +4,14 @@
   import { HighlightStyle, LanguageDescription, syntaxHighlighting } from '@codemirror/language'
   import { languages } from '@codemirror/language-data'
   import { lintGutter, setDiagnostics, type Diagnostic } from '@codemirror/lint'
-  import { Compartment, EditorState } from '@codemirror/state'
+  import { Compartment, EditorState, type Extension } from '@codemirror/state'
   import { EditorView, hoverTooltip, keymap, tooltips } from '@codemirror/view'
   import { tags } from '@lezer/highlight'
   import { basicSetup } from 'codemirror'
   import { cn } from '@cloudvoyant/helical-ui'
   import { renderMarkdownToDom } from './markdown'
   import { codeEditorHoverTooltipVariants, codeEditorRootVariants } from './styles'
-  import type { CodeEditorDiagnostic, CodeEditorProps } from './types'
+  import type { CodeEditorDiagnostic, CodeEditorLineWrapping, CodeEditorProps } from './types'
 
   const codeEditorHighlightStyle = HighlightStyle.define([
     {
@@ -155,7 +155,7 @@
       color: 'var(--cm-gutter-active-fg, var(--color-foreground, #ededed))',
       fontWeight: '600',
     },
-    '&.cm-focused .cm-matchingBracket': {
+    '&.cm-focused .cm-matchingBracket, .cm-matchingBracket': {
       backgroundColor: 'transparent',
       color: 'var(--cm-match-paren, #ffae00)',
       textDecoration: 'underline',
@@ -204,7 +204,7 @@
     value,
     filename,
     readonly = false,
-    lineWrapping = true,
+    lineWrapping = 'auto',
     size = 'sm',
     label = 'Code editor',
     class: className = '',
@@ -256,6 +256,24 @@
     )
   }
 
+  function toLineWrappingExtension(mode: CodeEditorLineWrapping): Extension {
+    if (!mode || mode === 'off') {
+      return []
+    }
+    if (typeof mode === 'number' && Number.isFinite(mode) && mode > 0) {
+      const cols = Math.max(1, Math.floor(mode))
+      return [
+        EditorView.lineWrapping,
+        EditorView.theme({
+          '.cm-content, &.cm-editor .cm-content': {
+            maxWidth: `${cols}ch`,
+          },
+        }),
+      ]
+    }
+    return [EditorView.lineWrapping]
+  }
+
   // Lifecycle -----------------------------------------------------------------
   onMount(() => {
     if (!host) return
@@ -282,7 +300,7 @@
         }),
         lintGutter(),
         languageCompartment.of([]),
-        lineWrappingCompartment.of(initialLineWrapping ? [EditorView.lineWrapping] : []),
+        lineWrappingCompartment.of(toLineWrappingExtension(initialLineWrapping)),
         readOnlyCompartment.of([
           EditorState.readOnly.of(initialReadOnly),
           EditorView.editable.of(!initialReadOnly),
@@ -290,11 +308,19 @@
         EditorView.contentAttributes.of({ 'aria-label': label }),
         hoverTooltip(async (_view, pos) => {
           if (!onhover) return null
+          const ch = _view.state.doc.sliceString(pos, pos + 1)
+          if (!ch || /[\s{}[\](),;:]/.test(ch)) return null
           const hover = await onhover(pos)
           if (!hover || !hover.contents.trim()) return null
           const docLen = _view.state.doc.length
-          const from = hover.from !== undefined ? Math.max(0, Math.min(docLen, hover.from)) : pos
-          const to = hover.to !== undefined ? Math.max(from, Math.min(docLen, hover.to)) : undefined
+          const rawFrom = hover.from !== undefined ? Math.max(0, Math.min(docLen, hover.from)) : pos
+          const rawTo =
+            hover.to !== undefined ? Math.max(rawFrom, Math.min(docLen, hover.to)) : undefined
+          const sameLine =
+            rawTo === undefined ||
+            _view.state.doc.lineAt(rawFrom).number === _view.state.doc.lineAt(rawTo).number
+          const from = sameLine ? rawFrom : pos
+          const to = sameLine ? rawTo : undefined
           return {
             pos: from,
             ...(to !== undefined ? { end: to } : {}),
@@ -309,6 +335,54 @@
           }
         }),
         keymap.of([
+          {
+            key: 'Tab',
+            run(currentView) {
+              if (currentView.state.readOnly) return false
+              const { state } = currentView
+              const { from, to } = state.selection.main
+              const startLine = state.doc.lineAt(from)
+              const endLine = state.doc.lineAt(to)
+              if (startLine.number !== endLine.number) {
+                const changes = []
+                for (let lineNum = startLine.number; lineNum <= endLine.number; lineNum++) {
+                  const line = state.doc.line(lineNum)
+                  changes.push({ from: line.from, insert: '  ' })
+                }
+                currentView.dispatch({ changes, scrollIntoView: true })
+                return true
+              }
+              currentView.dispatch({
+                changes: { from, to, insert: '  ' },
+                selection: { anchor: from + 2 },
+                scrollIntoView: true,
+              })
+              return true
+            },
+          },
+          {
+            key: 'Shift-Tab',
+            run(currentView) {
+              if (currentView.state.readOnly) return false
+              const { state } = currentView
+              const { from, to } = state.selection.main
+              const startLine = state.doc.lineAt(from)
+              const endLine = state.doc.lineAt(to)
+              const changes = []
+              for (let lineNum = startLine.number; lineNum <= endLine.number; lineNum++) {
+                const line = state.doc.line(lineNum)
+                if (line.text.startsWith('  ')) {
+                  changes.push({ from: line.from, to: line.from + 2, insert: '' })
+                } else if (line.text.startsWith(' ') || line.text.startsWith('\t')) {
+                  changes.push({ from: line.from, to: line.from + 1, insert: '' })
+                }
+              }
+              if (changes.length > 0) {
+                currentView.dispatch({ changes, scrollIntoView: true })
+              }
+              return true
+            },
+          },
           {
             key: 'F12',
             run(currentView) {
@@ -369,9 +443,7 @@
     const nextLineWrapping = lineWrapping
     if (view) {
       view.dispatch({
-        effects: lineWrappingCompartment.reconfigure(
-          nextLineWrapping ? [EditorView.lineWrapping] : [],
-        ),
+        effects: lineWrappingCompartment.reconfigure(toLineWrappingExtension(nextLineWrapping)),
       })
     }
   })

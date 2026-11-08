@@ -22,7 +22,7 @@ pub struct RunArgs {
 pub async fn run(args: RunArgs, json: bool) -> anyhow::Result<()> {
     let workspace_root = std::env::current_dir()?;
     let config_service = ConfigService::new();
-    let mise_path = ConfigService::get_managed_mise_path(&workspace_root);
+    let mise_path = MiseService::get_managed_mise_path(&workspace_root);
     let mise_file = mise_path.to_string_lossy().to_string();
     let mise_service = MiseService::new(config_service);
 

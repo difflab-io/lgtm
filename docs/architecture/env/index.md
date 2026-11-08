@@ -2,7 +2,7 @@
 
 ## Overview
 
-`lgtm-env` is the Mise binary lifecycle, `<workspace>/.lgtm/mise.toml` synthesis, and task/tool execution SDK for LGTM (`lgtm-cli`, `lgtm-lsp`, and `lgtm-desktop`). Consuming `lgtm-config` (`ConfigService` and `LgtmConfig`), it detects whether a usable `mise` binary is present on the host, automatically bootstraps `mise` into `<lgtm_home>/bin/mise` when missing, synthesizes a deterministic `<workspace>/.lgtm/mise.toml` without touching any user-owned root `mise.toml`, and executes workspace tasks and language server tool installations.
+`lgtm-env` is the Mise binary lifecycle, dev tool and task management (`~/.lgtm/mise.toml` and `<workspace>/.lgtm/mise.toml`), and task/tool execution SDK for LGTM (`lgtm-cli`, `lgtm-lsp`, and `lgtm-desktop`). While [`lgtm-config`](../config/index.md) owns user and runtime configuration in `config.json`, `lgtm-env` owns developer tools (global language tooling, LSP binaries, and project-specific tasks) persisted in `mise.toml` via `manage_dev_tools`, `add_dev_tool`, and `remove_dev_tool`. It detects whether a usable `mise` binary is present on the host, automatically bootstraps `mise` into `<lgtm_home>/bin/mise` when missing, synthesizes a deterministic `<workspace>/.lgtm/mise.toml` without touching any user-owned root `mise.toml`, and executes workspace tasks and language server tool installations.
 
 ## Requirement
 
@@ -10,7 +10,7 @@
 
 - Manage developer tooling required for building, linting, formatting, testing, and powering diagnostics.
 - Allow global and project-level management of developer tooling.
-- Provide first-class support for Rust, TypeScript, JavaScript, Python, Go, and Markdown.
+- Provide first-class support for Rust, TypeScript, JavaScript, Python, Go, Markdown, JSON, and YAML.
 - Enable adding support for additional languages (future).
 
 ### Non-Functional
@@ -32,8 +32,10 @@ let workspace_root = Path::new("/path/to/workspace");
 let config_service = ConfigService::new();
 let mise_service = MiseService::new(config_service);
 
-// Synchronize <workspace>/.lgtm/mise.toml and .git/info/exclude
-let mise_path = mise_service.sync_workspace_mise(workspace_root)?;
+// Manage global or workspace dev tools in ~/.lgtm/mise.toml and <workspace>/.lgtm/mise.toml
+let global_tools = mise_service.add_dev_tool(None, "biome", "latest")?;
+let project_tools = mise_service.add_dev_tool(Some(workspace_root), "cargo-nextest", "latest")?;
+let synced = mise_service.manage_dev_tools(Some(workspace_root))?;
 
 // Ensure a usable mise binary exists (installing to ~/.lgtm/bin/mise if absent)
 let mise_bin = mise_service.ensure_mise_binary()?;
@@ -61,11 +63,11 @@ flowchart TB
     LSP --> MISE_SVC
     MISE_SVC --> CFG
     MISE_SVC --> BIN[("<lgtm_home>/bin/mise")]
-    MISE_SVC --> TOML[("<workspace>/.lgtm/mise.toml")]
+    MISE_SVC --> TOML[("<lgtm_home>/mise.toml\n<workspace>/.lgtm/mise.toml")]
 ```
 
-- `MiseService`: Stateful service that locates or installs the `mise` binary, synchronizes `<workspace>/.lgtm/mise.toml` via `ConfigService`, trusts the generated file, and runs `mise run`, `mise install`, and `mise exec` subprocesses.
-- `GeneratedMiseFile`: Pure domain model that merges language preset tools and default tasks (`<lang>:<task>` and `<task>`) with explicit `[mise.tools]` and `[mise.tasks]` overrides and renders TOML with an LGTM header comment.
+- `MiseService`: Stateful service that locates or installs the `mise` binary, manages global (`<lgtm_home>/mise.toml`) and workspace (`<workspace>/.lgtm/mise.toml`) dev tools (`manage_dev_tools`, `add_dev_tool`, `remove_dev_tool`), trusts the generated file, and runs `mise run`, `mise install`, and `mise exec` subprocesses.
+- `GeneratedMiseFile`: Pure domain model that merges language preset tools and default tasks (`<lang>:<task>` and `<task>`) with global and project `[tools]` and `[tasks]` overrides (`add_dev_tool`, `remove_dev_tool`, `merge_existing`) and renders TOML with an LGTM header comment.
 - `MiseTaskEntry` and `MiseTaskSummary`: Serializable task representations for `.lgtm/mise.toml` persistence and CLI/UI task listing.
 - `LgtmEnvError`: Typed error enum distinguishing configuration errors, `.lgtm/mise.toml` I/O errors, missing `mise` binary errors (`MiseNotInstalled`), bootstrap failures (`MiseInstallFailed`), and command execution failures (`MiseFailed`).
 
@@ -105,10 +107,15 @@ sequenceDiagram
 | `MiseService::new` | `fn new(config_service: ConfigService) -> Self` | Create a `MiseService` searching `<lgtm_home>/bin/mise` and standard system paths. |
 | `MiseService::with_isolated_env` | `fn with_isolated_env(config_service: ConfigService, installer_url: Option<String>) -> Self` | Create an isolated `MiseService` that ignores system `PATH` and installs from `installer_url`. |
 | `MiseService::get_managed_mise_binary_path` | `fn get_managed_mise_binary_path(&self) -> PathBuf` | Return `<lgtm_home>/bin/mise` (`mise.exe` on Windows). |
+| `MiseService::get_global_mise_path` | `fn get_global_mise_path(&self) -> PathBuf` | Return the path to the global managed `<lgtm_home>/mise.toml` file. |
+| `MiseService::get_managed_mise_path` | `fn get_managed_mise_path(workspace_root: &Path) -> PathBuf` | Return the path to `<workspace>/.lgtm/mise.toml`. |
 | `MiseService::find_mise_binary` | `fn find_mise_binary(&self) -> Option<PathBuf>` | Locate a usable `mise` binary and verify it with `mise --version`. |
 | `MiseService::is_mise_installed` | `fn is_mise_installed(&self) -> bool` | Return `true` when `find_mise_binary` resolves a working binary. |
 | `MiseService::ensure_mise_binary` | `fn ensure_mise_binary(&self) -> Result<PathBuf>` | Return an existing `mise` binary or install it into `<lgtm_home>/bin/mise`. |
 | `MiseService::install_mise_binary` | `fn install_mise_binary(&self) -> Result<PathBuf>` | Download and install `mise` into `<lgtm_home>/bin/mise` and verify `--version`. |
+| `MiseService::manage_dev_tools` | `fn manage_dev_tools(&self, workspace_root: Option<&Path>) -> Result<GeneratedMiseFile>` | Synchronize and return the global (`None`) or workspace (`Some(workspace_root)`) `mise.toml` dev tools and tasks. |
+| `MiseService::add_dev_tool` | `fn add_dev_tool(&self, workspace_root: Option<&Path>, tool: &str, version: &str) -> Result<GeneratedMiseFile>` | Add or update `tool = version` in the global or workspace `mise.toml` file. |
+| `MiseService::remove_dev_tool` | `fn remove_dev_tool(&self, workspace_root: Option<&Path>, tool: &str) -> Result<GeneratedMiseFile>` | Remove `tool` from the global or workspace `mise.toml` file. |
 | `MiseService::sync_workspace_mise` | `fn sync_workspace_mise(&self, workspace_root: &Path) -> Result<PathBuf>` | Ensure `.lgtm/` and `.git/info/exclude` exist and write `<workspace>/.lgtm/mise.toml`. |
 | `MiseService::get_tasks` | `fn get_tasks(&self, workspace_root: &Path) -> Result<Vec<MiseTaskSummary>>` | Synchronize `.lgtm/mise.toml` and return sorted task summaries. |
 | `MiseService::run_task` | `fn run_task(&self, workspace_root: &Path, task: &str, args: &[String]) -> Result<i32>` | Synchronize `.lgtm/mise.toml`, bootstrap `mise` if needed, and run `mise run <task>`. |
@@ -132,9 +139,9 @@ libs/lgtm-env/
 │   │   └── mise.rs            GeneratedMiseFile, MiseTaskEntry, MiseTaskSummary, and TOML rendering
 │   └── services/
 │       ├── mod.rs
-│       └── mise.rs            MiseService binary discovery, auto-installer, .lgtm/mise.toml sync, and task/tool runner
+│       └── mise.rs            MiseService binary discovery, auto-installer, mise.toml dev tool management, and task/tool runner
 └── tests/
-    └── mise.rs                BDD integration suite for mise presence, installation, error handling, and task execution
+    └── mise.rs                BDD integration suite for mise presence, installation, dev tool management, and task execution
 ```
 
 ### Subprocess isolation and working directory preservation

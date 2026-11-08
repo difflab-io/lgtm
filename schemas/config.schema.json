@@ -1,0 +1,433 @@
+{
+  "$defs": {
+    "AppearanceSettings": {
+      "additionalProperties": false,
+      "description": "Resolved appearance settings section (`appearance.*`).",
+      "properties": {
+        "theme": {
+          "$ref": "#/$defs/ThemeMode",
+          "default": "system",
+          "description": "Preferred application color theme (`system`, `light`, or `dark`)."
+        }
+      },
+      "type": "object"
+    },
+    "EditorSettings": {
+      "additionalProperties": false,
+      "description": "Resolved code editor settings section (`editor.*`).",
+      "properties": {
+        "lineWrapping": {
+          "$ref": "#/$defs/LineWrap",
+          "default": "auto",
+          "description": "Line wrapping mode inside the code editor (`\"off\"`, `\"auto\"`, or a column width; `\"auto\"` by default)."
+        }
+      },
+      "type": "object"
+    },
+    "LanguageConfig": {
+      "description": "Language server and Mise tool preset for a single programming language.",
+      "properties": {
+        "args": {
+          "default": [],
+          "description": "Command-line arguments passed to the language server executable.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "description": "Executable name or path for the language server.",
+          "type": "string"
+        },
+        "default_tasks": {
+          "additionalProperties": {
+            "$ref": "#/$defs/MiseTaskConfig"
+          },
+          "default": {},
+          "description": "Default Mise tasks synthesized when this language is detected in a workspace.",
+          "type": "object"
+        },
+        "enabled": {
+          "description": "Whether this language preset is active.",
+          "type": "boolean"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Extra environment variables passed to the language server process.",
+          "type": "object"
+        },
+        "extensions": {
+          "description": "File extensions (without leading dots) mapped to this language.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "initialization_options": {
+          "description": "Optional JSON payload forwarded as `initializationOptions` during the LSP `initialize` handshake."
+        },
+        "mise_tools": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Mise tool specifications required to run this language server.",
+          "type": "object"
+        },
+        "root_markers": {
+          "description": "Marker files or directories that identify the language's project root.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "enabled",
+        "extensions",
+        "root_markers",
+        "mise_tools",
+        "command"
+      ],
+      "type": "object"
+    },
+    "LineWrap": {
+      "anyOf": [
+        {
+          "const": "off",
+          "description": "Disable line wrapping (`off`).",
+          "type": "string"
+        },
+        {
+          "const": "auto",
+          "description": "Wrap lines automatically at the editor viewport width (`auto`).",
+          "type": "string"
+        },
+        {
+          "description": "Fixed character column width at which lines wrap.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      ],
+      "description": "Line wrapping mode persisted under `editor.lineWrapping` (`\"off\"`, `\"auto\"`, or a column width)."
+    },
+    "LspSettings": {
+      "additionalProperties": false,
+      "description": "Settings controlling LSP server startup, automatic tool installation, and request timeouts (`lsp.*`).",
+      "properties": {
+        "autoInstall": {
+          "default": true,
+          "description": "Whether missing language server binaries should be installed via `mise install`.",
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": true,
+          "description": "Whether LSP integration is enabled for workspaces.",
+          "type": "boolean"
+        },
+        "requestTimeoutMs": {
+          "default": 15000,
+          "description": "Maximum duration in milliseconds to wait for an LSP JSON-RPC response.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "MiseTaskConfig": {
+      "anyOf": [
+        {
+          "description": "Shorthand shell command string.",
+          "type": "string"
+        },
+        {
+          "description": "Detailed task with an optional description and shell command.",
+          "properties": {
+            "description": {
+              "description": "Optional human-readable task summary.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "run": {
+              "description": "Shell command executed by `mise run`.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "A default Mise task definition for a language preset, represented as either a shell string or a detailed record."
+    },
+    "ThemeMode": {
+      "description": "Supported color theme preferences persisted under `appearance.theme`.",
+      "oneOf": [
+        {
+          "const": "system",
+          "description": "Follow the operating system color scheme.",
+          "type": "string"
+        },
+        {
+          "const": "light",
+          "description": "Force the light color scheme.",
+          "type": "string"
+        },
+        {
+          "const": "dark",
+          "description": "Force the dark color scheme.",
+          "type": "string"
+        }
+      ]
+    },
+    "WorkspaceSettings": {
+      "additionalProperties": false,
+      "description": "Resolved workspace history settings section (`workspace.*`).",
+      "properties": {
+        "activeRoot": {
+          "description": "Last active workspace root directory path.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "recentRoots": {
+          "description": "Recently opened workspace root directory paths.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Complete resolved LGTM configuration combining built-in presets, global `~/.lgtm/config.json`, and project `<workspace>/.lgtm/config.json`.",
+  "properties": {
+    "$schema": {
+      "description": "Optional JSON Schema reference URI for editor intelligence.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "appearance": {
+      "$ref": "#/$defs/AppearanceSettings",
+      "default": {
+        "theme": "system"
+      },
+      "description": "Appearance and theme settings (`appearance.*`)."
+    },
+    "editor": {
+      "$ref": "#/$defs/EditorSettings",
+      "default": {
+        "lineWrapping": "auto"
+      },
+      "description": "Code editor display settings (`editor.*`)."
+    },
+    "languages": {
+      "additionalProperties": {
+        "$ref": "#/$defs/LanguageConfig"
+      },
+      "default": {
+        "go": {
+          "args": [],
+          "command": "gopls",
+          "default_tasks": {
+            "check": {
+              "description": "Vet Go packages",
+              "run": "go vet ./..."
+            },
+            "test": {
+              "description": "Run Go tests",
+              "run": "go test ./..."
+            }
+          },
+          "enabled": true,
+          "env": {},
+          "extensions": [
+            "go"
+          ],
+          "mise_tools": {
+            "gopls": "latest"
+          },
+          "root_markers": [
+            "go.mod"
+          ]
+        },
+        "javascript": {
+          "args": [
+            "--stdio"
+          ],
+          "command": "typescript-language-server",
+          "default_tasks": {},
+          "enabled": true,
+          "env": {},
+          "extensions": [
+            "js",
+            "jsx",
+            "mjs",
+            "cjs"
+          ],
+          "mise_tools": {
+            "node": "lts",
+            "npm:typescript": "latest",
+            "npm:typescript-language-server": "latest"
+          },
+          "root_markers": [
+            "package.json",
+            "jsconfig.json"
+          ]
+        },
+        "json": {
+          "args": [
+            "--stdio"
+          ],
+          "command": "vscode-json-language-server",
+          "default_tasks": {},
+          "enabled": true,
+          "env": {},
+          "extensions": [
+            "json",
+            "jsonc"
+          ],
+          "initialization_options": {
+            "provideFormatter": true
+          },
+          "mise_tools": {
+            "node": "22",
+            "npm:vscode-langservers-extracted": "latest"
+          },
+          "root_markers": []
+        },
+        "markdown": {
+          "args": [
+            "server"
+          ],
+          "command": "marksman",
+          "default_tasks": {},
+          "enabled": true,
+          "env": {},
+          "extensions": [
+            "md",
+            "markdown",
+            "mdx"
+          ],
+          "mise_tools": {
+            "marksman": "latest"
+          },
+          "root_markers": [
+            ".marksman.toml"
+          ]
+        },
+        "python": {
+          "args": [
+            "--stdio"
+          ],
+          "command": "pyright-langserver",
+          "default_tasks": {
+            "check": {
+              "description": "Typecheck Python project with Pyright",
+              "run": "pyright"
+            }
+          },
+          "enabled": true,
+          "env": {},
+          "extensions": [
+            "py",
+            "pyi"
+          ],
+          "mise_tools": {
+            "node": "lts",
+            "npm:pyright": "latest"
+          },
+          "root_markers": [
+            "pyproject.toml",
+            "requirements.txt"
+          ]
+        },
+        "rust": {
+          "args": [],
+          "command": "rust-analyzer",
+          "default_tasks": {
+            "check": {
+              "description": "Typecheck Rust workspace",
+              "run": "cargo check"
+            },
+            "test": {
+              "description": "Run Rust tests",
+              "run": "cargo test"
+            }
+          },
+          "enabled": true,
+          "env": {},
+          "extensions": [
+            "rs"
+          ],
+          "mise_tools": {
+            "rust-analyzer": "latest"
+          },
+          "root_markers": [
+            "Cargo.toml"
+          ]
+        },
+        "typescript": {
+          "args": [
+            "--stdio"
+          ],
+          "command": "typescript-language-server",
+          "default_tasks": {
+            "check": {
+              "description": "Typecheck TypeScript project",
+              "run": "tsc --noEmit"
+            }
+          },
+          "enabled": true,
+          "env": {},
+          "extensions": [
+            "ts",
+            "tsx",
+            "mts",
+            "cts"
+          ],
+          "mise_tools": {
+            "node": "lts",
+            "npm:typescript": "latest",
+            "npm:typescript-language-server": "latest"
+          },
+          "root_markers": [
+            "tsconfig.json",
+            "package.json"
+          ]
+        }
+      },
+      "description": "Per-language LSP server and Mise toolchain definitions keyed by language ID (`languages.*`).",
+      "type": "object"
+    },
+    "lsp": {
+      "$ref": "#/$defs/LspSettings",
+      "default": {
+        "autoInstall": true,
+        "enabled": true,
+        "requestTimeoutMs": 15000
+      },
+      "description": "Global LSP lifecycle and timeout settings (`lsp.*`)."
+    },
+    "workspace": {
+      "$ref": "#/$defs/WorkspaceSettings",
+      "default": {},
+      "description": "Workspace history and active folder settings (`workspace.*`)."
+    }
+  },
+  "title": "LgtmConfig",
+  "type": "object"
+}

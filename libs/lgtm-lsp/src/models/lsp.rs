@@ -2,10 +2,11 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use specta::Type;
 use url::Url;
 
 /// Lifecycle state of a managed language server session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "lowercase")]
 pub enum LspServerStatus {
     /// The language server process is launching or completing its `initialize` handshake.
@@ -19,7 +20,7 @@ pub enum LspServerStatus {
 }
 
 /// Snapshot of a language server's status and aggregate diagnostic counts within a workspace.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LspServerStatusEvent {
     /// Canonical root directory of the workspace.
@@ -41,7 +42,7 @@ pub struct LspServerStatusEvent {
 }
 
 /// Severity level of an LSP diagnostic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "lowercase")]
 pub enum LspDiagnosticSeverity {
     /// Compile or type error (`severity = 1`).
@@ -55,7 +56,7 @@ pub enum LspDiagnosticSeverity {
 }
 
 /// A single diagnostic normalized to both UTF-16 flat editor offsets and 0-based line/character coordinates.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LspDiagnostic {
     /// Start offset in UTF-16 code units from the beginning of the document.
@@ -81,7 +82,7 @@ pub struct LspDiagnostic {
 }
 
 /// Diagnostics published by a language server for a single workspace file.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LspFileDiagnosticsEvent {
     /// Canonical root directory of the workspace.
@@ -95,7 +96,7 @@ pub struct LspFileDiagnosticsEvent {
 }
 
 /// Hover documentation and optional highlight range returned for a document offset.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LspHoverResult {
     /// Formatted Markdown or plain-text hover contents.
@@ -107,7 +108,7 @@ pub struct LspHoverResult {
 }
 
 /// A target source location returned by `textDocument/definition`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LspLocation {
     /// Workspace-relative path of the target file.
@@ -123,7 +124,7 @@ pub struct LspLocation {
 }
 
 /// Complete snapshot of all active language servers and file diagnostics for a workspace.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LspWorkspaceSnapshot {
     /// Canonical root directory of the workspace.
@@ -135,7 +136,7 @@ pub struct LspWorkspaceSnapshot {
 }
 
 /// Read-only formatted text buffer summarizing workspace LSP servers and diagnostics.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LspDiagnosticsBuffer {
     /// Display title for the read-only buffer tab.
@@ -305,7 +306,13 @@ pub(crate) fn render_diagnostics_buffer(
         let rel_path = Path::new(path)
             .strip_prefix(workspace_root)
             .map(|rel| rel.display().to_string())
-            .unwrap_or_else(|_| path.clone());
+            .unwrap_or_else(|_| {
+                if Path::new(path).ends_with(".lgtm/config.json") {
+                    "~/.lgtm/config.json".to_string()
+                } else {
+                    path.clone()
+                }
+            });
         for diag in diags {
             matching_entries += 1;
             let severity_label = match diag.severity {

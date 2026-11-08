@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use crate::error::{LgtmConfigError, Result};
-use crate::models::config::{LanguageConfig, LgtmConfig};
+use crate::models::config::{LanguageConfig, LgtmConfig, LgtmConfigPatch, ResolvedConfigSnapshot};
 
 /// Environment variable passing the startup workspace directory from `lgtm-cli` to `lgtm-desktop`.
 pub const LGTM_WORKSPACE_ENV: &str = "LGTM_WORKSPACE";
@@ -10,23 +10,29 @@ pub const LGTM_WORKSPACE_ENV: &str = "LGTM_WORKSPACE";
 /// Environment variable overriding the `lgtm-desktop` binary path or executable name.
 pub const LGTM_DESKTOP_BIN_ENV: &str = "LGTM_DESKTOP_BIN";
 
-/// Resolves global and workspace-level LGTM configuration and workspace `.lgtm/` directory layout.
+#[derive(Debug, Clone, Copy)]
+enum ConfigScope {
+    Global,
+    Project,
+}
+
+/// Resolves global (`~/.lgtm/config.json`) and workspace (`<workspace>/.lgtm/config.json`) configuration, JSON Schema files, and `.lgtm/` directory layout.
 #[derive(Debug, Clone, Default)]
 pub struct ConfigService {
     global_config_override: Option<PathBuf>,
 }
 
 impl ConfigService {
-    /// Creates a `ConfigService` that resolves the global config from `LGTM_HOME` or `~/.lgtm/config.toml`.
+    /// Creates a `ConfigService` that resolves the global config from `LGTM_HOME` or `~/.lgtm/config.json`.
     pub fn new() -> Self {
         Self {
             global_config_override: None,
         }
     }
 
-    /// Creates a `ConfigService` rooted at `<home>/.lgtm/config.toml`.
+    /// Creates a `ConfigService` rooted at `<home>/.lgtm/config.json`.
     pub fn from_home(home: PathBuf) -> Self {
-        Self::with_global_config_path(home.join(".lgtm").join("config.toml"))
+        Self::with_global_config_path(home.join(".lgtm").join("config.json"))
     }
 
     /// Creates a `ConfigService` with an explicit global configuration file path.
@@ -57,22 +63,16 @@ impl ConfigService {
             .join(".lgtm")
     }
 
-    /// Returns the resolved path to the global `.lgtm/config.toml` file.
+    /// Returns the resolved path to the global `.lgtm/config.json` file.
     pub fn get_global_config_path(&self) -> PathBuf {
-        if let Some(override_path) = &self.global_config_override {
-            return override_path.clone();
-        }
-        self.get_lgtm_home_dir().join("config.toml")
+        self.global_config_override
+            .clone()
+            .unwrap_or_else(|| self.get_lgtm_home_dir().join("config.json"))
     }
 
-    /// Returns the project configuration path (`<workspace>/.lgtm/config.toml`).
+    /// Returns the project configuration path (`<workspace>/.lgtm/config.json`).
     pub fn get_project_config_path(workspace_root: &Path) -> PathBuf {
-        workspace_root.join(".lgtm").join("config.toml")
-    }
-
-    /// Returns the LGTM-managed Mise file path (`<workspace>/.lgtm/mise.toml`).
-    pub fn get_managed_mise_path(workspace_root: &Path) -> PathBuf {
-        workspace_root.join(".lgtm").join("mise.toml")
+        workspace_root.join(".lgtm").join("config.json")
     }
 
     /// Returns a designated cache file path inside `<workspace>/.lgtm/cache/<file_name>`.
@@ -80,23 +80,47 @@ impl ConfigService {
         workspace_root.join(".lgtm").join("cache").join(file_name)
     }
 
-    /// Loads and merges built-in presets, the global config, and the workspace project config.
+    /// Loads and merges built-in runtime presets, the global config, and the workspace project config.
     pub fn get_config(&self, workspace_root: &Path) -> Result<LgtmConfig> {
-        let mut config = LgtmConfig::default();
+        Ok(self.get_config_snapshot(Some(workspace_root))?.effective)
+    }
 
+    /// Loads and deep-merges nested `LgtmConfig` across built-in defaults, global `~/.lgtm/config.json`, and optional workspace `<workspace>/.lgtm/config.json`.
+    pub fn get_config_snapshot(
+        &self,
+        workspace_root: Option<&Path>,
+    ) -> Result<ResolvedConfigSnapshot> {
         let global_path = self.get_global_config_path();
-        if global_path.is_file() {
-            let overlay = Self::read_global_config_file(&global_path)?;
-            config.merge(overlay);
-        }
+        let global_patch = if global_path.is_file() {
+            Self::read_scoped_patch(ConfigScope::Global, &global_path)
+        } else {
+            LgtmConfigPatch::default()
+        };
 
-        let project_path = Self::get_project_config_path(workspace_root);
-        if project_path.is_file() {
-            let overlay = Self::read_project_config_file(&project_path)?;
-            config.merge(overlay);
-        }
+        let (project_path, project_patch) = match workspace_root {
+            Some(ws) => {
+                let p_path = Self::get_project_config_path(ws);
+                let patch = if p_path.is_file() {
+                    Some(Self::read_scoped_patch(ConfigScope::Project, &p_path))
+                } else {
+                    None
+                };
+                (p_path, patch)
+            }
+            None => (PathBuf::new(), None),
+        };
 
-        Ok(config)
+        let effective = Self::resolve_effective_config(&global_patch, project_patch.as_ref());
+        let resolved_global = std::fs::canonicalize(&global_path).unwrap_or(global_path);
+        let resolved_project = std::fs::canonicalize(&project_path).unwrap_or(project_path);
+
+        Ok(ResolvedConfigSnapshot {
+            effective,
+            global: global_patch,
+            project: project_patch,
+            global_path: resolved_global.to_string_lossy().to_string(),
+            project_path: resolved_project.to_string_lossy().to_string(),
+        })
     }
 
     /// Ensures `<workspace>/.lgtm/` exists and registers `.lgtm/` in `<git-dir>/info/exclude`.
@@ -145,7 +169,7 @@ impl ConfigService {
         (workspace_root.to_path_buf(), None)
     }
 
-    /// Scans up to two directory levels under `workspace_root` to identify enabled languages.
+    /// Scans up to two directory levels under `workspace_root` to identify enabled workspace languages.
     pub fn detect_workspace_languages(config: &LgtmConfig, workspace_root: &Path) -> Vec<String> {
         let mut detected = BTreeSet::new();
         Self::scan_directory_languages(config, workspace_root, &mut detected, 2);
@@ -235,6 +259,48 @@ impl ConfigService {
 
     // Private -----------------------------------------------------------------
 
+    fn resolve_effective_config(
+        global_patch: &LgtmConfigPatch,
+        project_patch: Option<&LgtmConfigPatch>,
+    ) -> LgtmConfig {
+        let mut config = LgtmConfig::default();
+        config.apply_patch(global_patch);
+        if let Some(proj) = project_patch {
+            config.apply_patch(proj);
+        }
+        config
+    }
+
+    fn read_scoped_patch(scope: ConfigScope, path: &Path) -> LgtmConfigPatch {
+        let raw = match std::fs::read_to_string(path) {
+            Ok(raw) => raw,
+            Err(err) => {
+                tracing::warn!(
+                    scope = ?scope,
+                    path = %path.display(),
+                    error = %err,
+                    "failed to read config file; falling back to defaults"
+                );
+                return LgtmConfigPatch::default();
+            }
+        };
+        if raw.trim().is_empty() {
+            return LgtmConfigPatch::default();
+        }
+        match serde_json::from_str::<LgtmConfigPatch>(&raw) {
+            Ok(patch) => patch,
+            Err(err) => {
+                tracing::warn!(
+                    scope = ?scope,
+                    path = %path.display(),
+                    error = %err,
+                    "config file contains invalid entries; ignoring invalid properties"
+                );
+                LgtmConfigPatch::from_str_lenient(&raw)
+            }
+        }
+    }
+
     fn scan_directory_languages(
         config: &LgtmConfig,
         dir: &Path,
@@ -259,6 +325,9 @@ impl ConfigService {
             let path = entry.path();
             if path.is_file() {
                 if let Some((lang_id, _)) = config.detect_file_language(&path) {
+                    if lang_id == "json" {
+                        continue;
+                    }
                     detected.insert(lang_id);
                 }
             } else if remaining_depth > 0 && path.is_dir() {
@@ -270,30 +339,6 @@ impl ConfigService {
                 Self::scan_directory_languages(config, &path, detected, remaining_depth - 1);
             }
         }
-    }
-
-    fn read_global_config_file(path: &Path) -> Result<LgtmConfig> {
-        let raw =
-            std::fs::read_to_string(path).map_err(|source| LgtmConfigError::GlobalConfigIo {
-                path: path.to_path_buf(),
-                source,
-            })?;
-        toml::from_str(&raw).map_err(|source| LgtmConfigError::GlobalConfigParse {
-            path: path.to_path_buf(),
-            source: Box::new(source),
-        })
-    }
-
-    fn read_project_config_file(path: &Path) -> Result<LgtmConfig> {
-        let raw =
-            std::fs::read_to_string(path).map_err(|source| LgtmConfigError::ProjectConfigIo {
-                path: path.to_path_buf(),
-                source,
-            })?;
-        toml::from_str(&raw).map_err(|source| LgtmConfigError::ProjectConfigParse {
-            path: path.to_path_buf(),
-            source: Box::new(source),
-        })
     }
 
     fn ensure_git_exclude(workspace_root: &Path) {
@@ -415,16 +460,23 @@ mod tests {
                 // Arrange
                 let temp = tempfile::tempdir().unwrap();
                 let workspace_root = temp.path();
-                let global_cfg = workspace_root.join("global.toml");
+                let global_cfg = workspace_root.join("global.json");
                 std::fs::write(
                     &global_cfg,
-                    "[lsp]\nenabled = true\nauto_install = false\nrequest_timeout_ms = 7000\n\n[mise.tools]\nfd = \"latest\"\n",
+                    r#"{
+  "lsp": {
+    "enabled": true,
+    "auto_install": false,
+    "request_timeout_ms": 7000
+  }
+}
+"#,
                 )
                 .unwrap();
                 std::fs::create_dir_all(workspace_root.join(".lgtm")).unwrap();
                 std::fs::write(
-                    workspace_root.join(".lgtm/config.toml"),
-                    "[lsp]\nenabled = true\nauto_install = true\nrequest_timeout_ms = 9000\n\n[mise.tasks.custom]\ndescription = \"Custom\"\nrun = \"echo custom\"\n",
+                    workspace_root.join(".lgtm/config.json"),
+                    "{\n  \"lsp\": {\n    \"enabled\": true,\n    \"auto_install\": true,\n    \"request_timeout_ms\": 9000\n  }\n}\n",
                 )
                 .unwrap();
                 let service = ConfigService::with_global_config_path(global_cfg);
@@ -435,8 +487,6 @@ mod tests {
                 // Assert
                 assert!(config.lsp.auto_install);
                 assert_eq!(config.lsp.request_timeout_ms, 9000);
-                assert_eq!(config.mise.tools.get("fd"), Some(&"latest".to_string()));
-                assert!(config.mise.tasks.contains_key("custom"));
             }
         }
 

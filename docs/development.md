@@ -54,7 +54,7 @@ premise run //apps/lgtm-web:dev
 premise run //apps/lgtm-desktop:dev
 ```
 
-The web task needs a running backend for RPC calls. The combined task starts both components. `//apps/lgtm-desktop:dev` launches the native Tauri desktop shell against `//apps/lgtm-web:dev`, opening `~/.lgtm/workspace` by default and allowing any folder on disk to be opened via the titlebar workspace selector.
+The web task needs a running backend for RPC calls. The combined task starts both components. `//apps/lgtm-desktop:dev` launches the native Tauri desktop shell against `//apps/lgtm-web:dev`, opening `~/.lgtm/workspace` by default, persisting nested user settings (`appearance.theme`, `workspace.activeRoot`, `workspace.recentRoots`, `editor.lineWrapping`) in `~/.lgtm/config.json`, and opening global settings in `CodeEditor` on `Cmd+,` (`Ctrl+,` on Linux/Windows).
 
 ## 3. CLI and libraries
 

@@ -7,10 +7,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::{Value, json};
 use tauri::Manager;
 
-use crate::app::{LspState, app_context, configure_builder, init_app_state};
-
-/// Callback invoked whenever a backend Tauri event should be forwarded over the stdio IPC bridge.
-pub type BridgeEventForwarder = Arc<dyn Fn(&str, Value) + Send + Sync>;
+use crate::app::{AppState, app_context, configure_builder, init_app_state};
 
 /// Headless stdio bridge service that routes newline-delimited JSON IPC invocations through Tauri's `MockRuntime`.
 pub struct IpcBridgeService {
@@ -28,13 +25,25 @@ impl IpcBridgeService {
     /// Starts the blocking stdin/stdout JSON-RPC loop against a `tauri::test::MockRuntime` application.
     pub fn run(&self) {
         let stdout_lock: Arc<Mutex<std::io::Stdout>> = Arc::new(Mutex::new(std::io::stdout()));
-        let forwarder = Self::build_event_forwarder(stdout_lock.clone());
 
         let app = configure_builder(tauri::test::mock_builder(), Some(self.home.clone()))
             .build(app_context())
             .expect("failed to build mock Tauri app for IPC bridge");
-        init_app_state(app.handle(), Some(self.home.clone()), Some(forwarder))
+        init_app_state(app.handle(), Some(self.home.clone()))
             .expect("failed to initialize IPC bridge state");
+        let forward_stdout = stdout_lock.clone();
+        app.state::<AppState>()
+            .events
+            .add_webview_sink(move |event_name, payload| {
+                let line = json!({
+                    "event": event_name,
+                    "payload": payload,
+                });
+                if let Ok(mut out) = forward_stdout.lock() {
+                    let _ = writeln!(out, "{line}");
+                    let _ = out.flush();
+                }
+            });
         let webview = app.get_webview_window("main").unwrap_or_else(|| {
             tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
                 .build()
@@ -55,23 +64,10 @@ impl IpcBridgeService {
             }
         }
 
-        app.state::<LspState>().0.shutdown_all();
+        app.state::<AppState>().lsp.shutdown_all();
     }
 
     // Private -----------------------------------------------------------------
-
-    fn build_event_forwarder(stdout_lock: Arc<Mutex<std::io::Stdout>>) -> BridgeEventForwarder {
-        Arc::new(move |event_name, payload| {
-            let line = json!({
-                "event": event_name,
-                "payload": payload,
-            });
-            if let Ok(mut out) = stdout_lock.lock() {
-                let _ = writeln!(out, "{line}");
-                let _ = out.flush();
-            }
-        })
-    }
 
     fn ipc_origin_url() -> tauri::Url {
         if cfg!(windows) {

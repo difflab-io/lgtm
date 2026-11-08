@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
-use lgtm_config::{ConfigService, LanguageConfig};
+use lgtm_config::{ConfigService, LanguageConfig, LgtmConfig};
 use lgtm_env::MiseService;
 use lsp_types::{
     DiagnosticSeverity, GotoDefinitionResponse, Hover, HoverContents, MarkedString, NumberOrString,
@@ -169,7 +169,10 @@ impl LgtmLspManager {
             return Ok(());
         }
         let canonical = Self::canonical_or_owned(workspace_root);
-        let config = self.config_service.get_config(&canonical)?;
+        let config = self
+            .config_service
+            .get_config(&canonical)
+            .unwrap_or_default();
         let detected = ConfigService::detect_workspace_languages(&config, &canonical);
         self.cache_service
             .set_workspace_config(&canonical, config.clone());
@@ -237,12 +240,10 @@ impl LgtmLspManager {
         let workspace_root = Self::canonical_or_owned(workspace_root);
         let file_path = Self::canonical_or_owned(file_path);
 
-        let Ok(config) = self
+        let config = self
             .cache_service
             .get_or_load_workspace_config(&self.config_service, &workspace_root)
-        else {
-            return (None, None);
-        };
+            .unwrap_or_default();
         let Some((language_id, lang_cfg)) = config.detect_file_language(&file_path) else {
             return (None, None);
         };
@@ -266,43 +267,44 @@ impl LgtmLspManager {
             Duration::from_millis(config.lsp.request_timeout_ms),
         );
 
-        if let Some(handle) = handle {
-            let sync_action = self.cache_service.sync_document(
-                &workspace_root,
-                &project_root,
-                &file_path,
-                &language_id,
-                content,
-            );
-            if let Some(uri) = path_to_file_uri(&file_path) {
-                match sync_action {
-                    LspDocumentSyncAction::Opened(doc) => {
-                        let _ = handle.notify(
-                            "textDocument/didOpen",
-                            json!({
-                                "textDocument": {
-                                    "uri": uri,
-                                    "languageId": doc.language_id,
-                                    "version": doc.version,
-                                    "text": doc.text,
-                                }
-                            }),
-                        );
-                    }
-                    LspDocumentSyncAction::Changed(doc) => {
-                        let _ = handle.notify(
-                            "textDocument/didChange",
-                            json!({
-                                "textDocument": {
-                                    "uri": uri,
-                                    "version": doc.version,
-                                },
-                                "contentChanges": [{ "text": doc.text }],
-                            }),
-                        );
-                    }
-                    LspDocumentSyncAction::Unchanged(_) => {}
+        let sync_action = self.cache_service.sync_document(
+            &workspace_root,
+            &project_root,
+            &file_path,
+            &language_id,
+            content,
+        );
+
+        if let Some(handle) = handle
+            && let Some(uri) = path_to_file_uri(&file_path)
+        {
+            match sync_action {
+                LspDocumentSyncAction::Opened(doc) => {
+                    let _ = handle.notify(
+                        "textDocument/didOpen",
+                        json!({
+                            "textDocument": {
+                                "uri": uri,
+                                "languageId": doc.language_id,
+                                "version": doc.version,
+                                "text": doc.text,
+                            }
+                        }),
+                    );
                 }
+                LspDocumentSyncAction::Changed(doc) => {
+                    let _ = handle.notify(
+                        "textDocument/didChange",
+                        json!({
+                            "textDocument": {
+                                "uri": uri,
+                                "version": doc.version,
+                            },
+                            "contentChanges": [{ "text": doc.text }],
+                        }),
+                    );
+                }
+                LspDocumentSyncAction::Unchanged(_) => {}
             }
         }
 
@@ -326,29 +328,23 @@ impl LgtmLspManager {
         let file_path = Self::canonical_or_owned(file_path);
 
         if let Some(sync_action) = self.cache_service.update_open_document(&file_path, content) {
-            match sync_action {
-                LspDocumentSyncAction::Changed(doc) => {
-                    let key = LspSessionKey::new(
-                        &doc.workspace_root,
-                        &doc.language_id,
-                        &doc.project_root,
-                    );
-                    if let (Some(handle), Some(uri)) =
-                        (self.get_server(&key), path_to_file_uri(&file_path))
-                    {
-                        handle.notify(
-                            "textDocument/didChange",
-                            json!({
-                                "textDocument": {
-                                    "uri": uri,
-                                    "version": doc.version,
-                                },
-                                "contentChanges": [{ "text": content }],
-                            }),
-                        )?;
-                    }
+            if let LspDocumentSyncAction::Changed(doc) = sync_action {
+                let key =
+                    LspSessionKey::new(&doc.workspace_root, &doc.language_id, &doc.project_root);
+                if let (Some(handle), Some(uri)) =
+                    (self.get_server(&key), path_to_file_uri(&file_path))
+                {
+                    handle.notify(
+                        "textDocument/didChange",
+                        json!({
+                            "textDocument": {
+                                "uri": uri,
+                                "version": doc.version,
+                            },
+                            "contentChanges": [{ "text": content }],
+                        }),
+                    )?;
                 }
-                LspDocumentSyncAction::Unchanged(_) | LspDocumentSyncAction::Opened(_) => {}
             }
             return Ok(());
         }
@@ -440,6 +436,9 @@ impl LgtmLspManager {
 
         let (from, to) = match hover.range {
             Some(range) => {
+                if range.start.line != range.end.line {
+                    return Ok(None);
+                }
                 let (_, _, _, _, start_offset, end_offset) = Self::map_lsp_range(&text, &range);
                 (Some(start_offset), Some(end_offset))
             }
@@ -630,9 +629,33 @@ impl LgtmLspManager {
     }
 
     fn to_workspace_relative(workspace_root: &Path, path: &Path) -> String {
-        path.strip_prefix(workspace_root)
-            .map(|rel| rel.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_else(|_| path.to_string_lossy().to_string())
+        if let Ok(rel) = path.strip_prefix(workspace_root) {
+            return rel.to_string_lossy().replace('\\', "/");
+        }
+        if path.ends_with(".lgtm/config.json") {
+            return "~/.lgtm/config.json".to_string();
+        }
+        path.to_string_lossy().to_string()
+    }
+
+    fn enrich_schema_markdown_descriptions(value: &mut Value) {
+        match value {
+            Value::Object(map) => {
+                if let Some(Value::String(desc)) = map.get("description").cloned() {
+                    map.entry("markdownDescription".to_string())
+                        .or_insert(Value::String(desc));
+                }
+                for child in map.values_mut() {
+                    Self::enrich_schema_markdown_descriptions(child);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    Self::enrich_schema_markdown_descriptions(item);
+                }
+            }
+            _ => {}
+        }
     }
 
     fn warmup_workspace_language(
@@ -991,6 +1014,32 @@ impl LgtmLspManager {
         }
 
         session.notify("initialized", json!({}))?;
+        if language_id == "json" {
+            let mut schema = LgtmConfig::json_schema();
+            Self::enrich_schema_markdown_descriptions(&mut schema);
+            let _ = session.notify(
+                "workspace/didChangeConfiguration",
+                json!({
+                    "settings": {
+                        "json": {
+                            "validate": { "enable": true },
+                            "schemas": [
+                                {
+                                    "url": lgtm_config::DEFAULT_SCHEMA_URL,
+                                    "fileMatch": [
+                                        "/.lgtm/config.json",
+                                        "*/.lgtm/config.json",
+                                        ".lgtm/config.json",
+                                        "config.json"
+                                    ],
+                                    "schema": schema
+                                }
+                            ]
+                        }
+                    }
+                }),
+            );
+        }
         Ok(session)
     }
 
@@ -1152,7 +1201,11 @@ impl LgtmLspManager {
                 return Some((handle, doc.text));
             }
         }
-        let content = std::fs::read_to_string(file_path).ok()?;
+        let content = self
+            .cache_service
+            .get_document(file_path)
+            .map(|doc| doc.text)
+            .or_else(|| std::fs::read_to_string(file_path).ok())?;
         let _ = self.open_or_sync_file(workspace_root, file_path, &content);
         let doc = self.cache_service.get_document(file_path)?;
         let key = LspSessionKey::new(&doc.workspace_root, &doc.language_id, &doc.project_root);
@@ -1161,7 +1214,7 @@ impl LgtmLspManager {
     }
 
     fn format_hover_contents(contents: &HoverContents) -> String {
-        match contents {
+        let raw = match contents {
             HoverContents::Scalar(marked) => Self::format_marked_string(marked),
             HoverContents::Array(items) => items
                 .iter()
@@ -1170,7 +1223,44 @@ impl LgtmLspManager {
                 .collect::<Vec<_>>()
                 .join("\n\n"),
             HoverContents::Markup(markup) => markup.value.clone(),
+        };
+        Self::unescape_markdown_punctuation(&raw)
+    }
+
+    fn unescape_markdown_punctuation(input: &str) -> String {
+        let mut out = String::with_capacity(input.len());
+        let mut chars = input.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '\\'
+                && let Some(&next) = chars.peek()
+                && matches!(
+                    next,
+                    '\\' | '`'
+                        | '*'
+                        | '_'
+                        | '{'
+                        | '}'
+                        | '['
+                        | ']'
+                        | '('
+                        | ')'
+                        | '<'
+                        | '>'
+                        | '#'
+                        | '+'
+                        | '-'
+                        | '.'
+                        | '!'
+                        | '"'
+                )
+            {
+                out.push(next);
+                chars.next();
+                continue;
+            }
+            out.push(ch);
         }
+        out
     }
 
     fn format_marked_string(marked: &MarkedString) -> String {
