@@ -14,15 +14,14 @@ use lgtm_lsp::{
 };
 use tauri::{Manager, State};
 
+use lgtm_desktop::{
+    DiffFileEntry, DiffService, DiffWorkspaceSnapshot, FileContent, FileDiffContent, LspService,
+    Result, ReviewMode, ReviewService, WorkspaceListing, WorkspaceNode, WorkspaceService, error,
+};
+
 use crate::{
-    error::{Result, error},
     events::{AppEvent, AppEvents, FileOpenedEvent},
     menus::{build_app_menu, handle_menu_event},
-    models::{
-        DiffFileEntry, DiffWorkspaceSnapshot, FileContent, FileDiffContent, ReviewMode,
-        WorkspaceListing, WorkspaceNode,
-    },
-    services::{DiffService, LspService, ReviewService, WorkspaceService},
 };
 
 /// Combined desktop host state managed by Tauri across all IPC command handlers.
