@@ -845,8 +845,8 @@ export class HotkeyService {
     return [
       {
         value: 'write',
-        command: 'w',
-        aliases: ['write', 'save'],
+        command: 'write',
+        aliases: ['w', 'save'],
         label: 'Save File',
         description: 'Flush pending changes and save the active file',
         group: 'File',
@@ -857,8 +857,8 @@ export class HotkeyService {
       },
       {
         value: 'write-all',
-        command: 'wa',
-        aliases: ['write-all', 'save-all'],
+        command: 'write-all',
+        aliases: ['wa', 'save-all'],
         label: 'Save All',
         description: 'Flush all pending file saves',
         group: 'File',
@@ -869,8 +869,8 @@ export class HotkeyService {
       },
       {
         value: 'quit-tab',
-        command: 'q',
-        aliases: ['close', 'bd', 'buffer-close'],
+        command: 'quit',
+        aliases: ['q', 'close', 'bd', 'buffer-close'],
         label: 'Close Active Tab',
         description: 'Close the active editor tab',
         group: 'Buffer',
@@ -880,20 +880,9 @@ export class HotkeyService {
         },
       },
       {
-        value: 'write-quit',
-        command: 'wq',
-        aliases: ['write-quit'],
-        label: 'Save and Close Tab',
-        description: 'Save pending changes and close the active editor tab',
-        group: 'File',
-        onSelect: () => {
-          void this.workspace.flushSave().then(() => this.workspace.closeActiveTab())
-        },
-      },
-      {
         value: 'buffer-next',
-        command: 'bn',
-        aliases: ['bnext', 'tab-next'],
+        command: 'buffer-next',
+        aliases: ['bn', 'bnext', 'tab-next'],
         label: 'Next Tab',
         description: 'Cycle to the next open editor tab',
         group: 'Buffer',
@@ -904,8 +893,8 @@ export class HotkeyService {
       },
       {
         value: 'buffer-prev',
-        command: 'bp',
-        aliases: ['bprev', 'tab-prev'],
+        command: 'buffer-prev',
+        aliases: ['bp', 'bprev', 'tab-prev'],
         label: 'Previous Tab',
         description: 'Cycle to the previous open editor tab',
         group: 'Buffer',
@@ -980,8 +969,8 @@ export class HotkeyService {
       },
       {
         value: 'goto-definition',
-        command: 'gd',
-        aliases: ['definition', 'goto-definition'],
+        command: 'goto-definition',
+        aliases: ['gd', 'definition'],
         label: 'Go to Definition',
         description: 'Jump to the LSP definition at the current cursor position',
         group: 'LSP',
@@ -1028,8 +1017,8 @@ export class HotkeyService {
       },
       {
         value: 'diagnostic-next',
-        command: 'dn',
-        aliases: ['diagnostic-next', 'lnext'],
+        command: 'diagnostic-next',
+        aliases: ['dn', 'lnext'],
         label: 'Next Diagnostic',
         description: 'Jump to the next inline diagnostic in the active file',
         group: 'LSP',
@@ -1040,8 +1029,8 @@ export class HotkeyService {
       },
       {
         value: 'diagnostic-prev',
-        command: 'dp',
-        aliases: ['diagnostic-prev', 'lprev'],
+        command: 'diagnostic-prev',
+        aliases: ['dp', 'lprev'],
         label: 'Previous Diagnostic',
         description: 'Jump to the previous inline diagnostic in the active file',
         group: 'LSP',

@@ -68,6 +68,6 @@ Press `Space` in `normal` or `select` mode to open the WhichKey popup:
 
 ### Command Menu and Command Palette
 
-- Press `:` in `normal` mode to open the bottom `CommandMenu` bar (`:w`, `:wa`, `:q`, `:wq`, `:bn`, `:bp`, `:bd`, `:new`, `:mkdir`, `:workspace`, `:settings`, `:project-settings`, `:gd`, `:hover`, `:signature`, `:complete`, `:dn`, `:dp`, `:diagnostics`, `:lsp-restart`, `:theme`, `:command-style`, `:preset`, `:leader-only`, `:pane-outline`, `:click-to-insert`, `:wrap`, `:lsp-mode`, `:keybindings`).
+- Press `:` in `normal` mode to open the bottom `CommandMenu` bar (`:write` / `:w`, `:write-all` / `:wa`, `:quit` / `:q` / `:bd`, `:buffer-next` / `:bn`, `:buffer-prev` / `:bp`, `:new`, `:mkdir`, `:sidebar`, `:config`, `:config-project`, `:goto-definition` / `:gd`, `:hover`, `:signature`, `:complete`, `:diagnostic-next` / `:dn`, `:diagnostic-prev` / `:dp`, `:diagnostics`, `:lsp-restart`, `:theme`, `:command-style`, `:preset`, `:leader-only`, `:pane-outline`, `:click-to-insert`, `:wrap`, `:lsp-mode`, `:keybindings`).
 - Press `Mod+k` (`Cmd+k` on macOS, `Ctrl+k` on Linux/Windows) to open the configured command surface (`keybindings.commandStyle`: `"menu"` by default, or `"palette"` for the centered fuzzy `CommandPalette` modal).
 - Toggle or switch any preference directly from `CommandMenu` or `CommandPalette` without editing JSON by hand.
