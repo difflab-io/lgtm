@@ -400,12 +400,24 @@ test.describe('Given WhichKey and the command surfaces', { tag: ['@desktop', '@k
         await entry(page, 'same.md').click()
         await page.locator('.cm-content').focus()
         await page.keyboard.press('Escape')
+        await expect(page.getByRole('button', { name: /Open Command/i })).toHaveCount(0)
+        expect(
+          await page.evaluate(
+            () => document.documentElement.scrollHeight <= document.documentElement.clientHeight,
+          ),
+        ).toBe(true)
 
         // Act: press : in normal mode to open CommandMenu
         await page.keyboard.press(':')
 
         // Assert
         await expect(commandMenu(page)).toBeVisible()
+        await expect(commandMenu(page)).toHaveAttribute('data-size', 'sm')
+        expect(
+          await page.evaluate(
+            () => document.documentElement.scrollHeight <= document.documentElement.clientHeight,
+          ),
+        ).toBe(true)
 
         // Act: close CommandMenu with Escape
         await page.keyboard.press('Escape')
