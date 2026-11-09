@@ -293,7 +293,7 @@
         <ContentPane {workspace} {hotkeys} />
       </Row>
     </SidebarProvider>
-    <CommandMenu size="sm" hotkey={false} showShortcuts />
+    <CommandMenu size="sm" hotkey={false} />
     <CommandPalette size="sm" hotkey={false} />
   </CommandProvider>
   <WhichKey />
