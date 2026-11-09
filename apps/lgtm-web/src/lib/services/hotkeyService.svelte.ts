@@ -846,7 +846,8 @@ export class HotkeyService {
       {
         value: 'write',
         command: 'write',
-        aliases: ['w', 'save'],
+        aliases: ['w'],
+        keywords: ['save'],
         label: 'Save File',
         description: 'Flush pending changes and save the active file',
         group: 'File',
@@ -858,7 +859,8 @@ export class HotkeyService {
       {
         value: 'write-all',
         command: 'write-all',
-        aliases: ['wa', 'save-all'],
+        aliases: ['wa'],
+        keywords: ['save-all'],
         label: 'Save All',
         description: 'Flush all pending file saves',
         group: 'File',
@@ -870,7 +872,8 @@ export class HotkeyService {
       {
         value: 'quit-tab',
         command: 'quit',
-        aliases: ['q', 'close', 'bd', 'buffer-close'],
+        aliases: ['q', 'bd'],
+        keywords: ['close', 'buffer-close'],
         label: 'Close Active Tab',
         description: 'Close the active editor tab',
         group: 'Buffer',
@@ -882,7 +885,8 @@ export class HotkeyService {
       {
         value: 'buffer-next',
         command: 'buffer-next',
-        aliases: ['bn', 'bnext', 'tab-next'],
+        aliases: ['bn'],
+        keywords: ['bnext', 'tab-next'],
         label: 'Next Tab',
         description: 'Cycle to the next open editor tab',
         group: 'Buffer',
@@ -894,7 +898,8 @@ export class HotkeyService {
       {
         value: 'buffer-prev',
         command: 'buffer-prev',
-        aliases: ['bp', 'bprev', 'tab-prev'],
+        aliases: ['bp'],
+        keywords: ['bprev', 'tab-prev'],
         label: 'Previous Tab',
         description: 'Cycle to the previous open editor tab',
         group: 'Buffer',
@@ -906,7 +911,7 @@ export class HotkeyService {
       {
         value: 'new-file',
         command: 'new',
-        aliases: ['new-file'],
+        keywords: ['new-file'],
         label: 'New File',
         description: 'Create a new file in the workspace',
         group: 'File',
@@ -918,7 +923,7 @@ export class HotkeyService {
       {
         value: 'new-folder',
         command: 'mkdir',
-        aliases: ['new-folder'],
+        keywords: ['new-folder'],
         label: 'New Folder',
         description: 'Create a new folder in the workspace',
         group: 'File',
@@ -931,7 +936,7 @@ export class HotkeyService {
       {
         value: 'toggle-sidebar',
         command: 'sidebar',
-        aliases: ['explorer', 'tree'],
+        keywords: ['explorer', 'tree'],
         label: 'Toggle Workspace Sidebar',
         description: 'Show or hide the workspace explorer sidebar',
         group: 'Workspace',
@@ -943,7 +948,7 @@ export class HotkeyService {
       {
         value: 'open-config',
         command: 'config',
-        aliases: ['settings', 'preferences'],
+        keywords: ['settings', 'preferences'],
         label: 'Open Global Settings (config.json)',
         description: 'Open ~/.lgtm/config.json in an editor tab',
         group: 'Preferences',
@@ -955,7 +960,7 @@ export class HotkeyService {
       {
         value: 'open-project-config',
         command: 'config-project',
-        aliases: ['settings-project'],
+        keywords: ['settings-project'],
         label: 'Open Project Settings (.lgtm/config.json)',
         description: 'Open .lgtm/config.json in an editor tab',
         group: 'Preferences',
@@ -970,7 +975,8 @@ export class HotkeyService {
       {
         value: 'goto-definition',
         command: 'goto-definition',
-        aliases: ['gd', 'definition'],
+        aliases: ['gd'],
+        keywords: ['definition'],
         label: 'Go to Definition',
         description: 'Jump to the LSP definition at the current cursor position',
         group: 'LSP',
@@ -982,7 +988,8 @@ export class HotkeyService {
       {
         value: 'lsp-hover',
         command: 'hover',
-        aliases: ['doc', 'K'],
+        aliases: ['K'],
+        keywords: ['doc'],
         label: 'Hover Documentation',
         description: 'Show LSP hover documentation at the current cursor position',
         group: 'LSP',
@@ -994,7 +1001,8 @@ export class HotkeyService {
       {
         value: 'lsp-signature-help',
         command: 'signature',
-        aliases: ['sig', 'signature-help'],
+        aliases: ['sig'],
+        keywords: ['signature-help'],
         label: 'Signature Help',
         description: 'Show LSP function signature help at the current cursor position',
         group: 'LSP',
@@ -1006,7 +1014,7 @@ export class HotkeyService {
       {
         value: 'lsp-complete',
         command: 'complete',
-        aliases: ['completion', 'intellisense'],
+        keywords: ['completion', 'intellisense'],
         label: 'Trigger Autocomplete',
         description: 'Open autocomplete suggestions at the current cursor position',
         group: 'LSP',
@@ -1018,7 +1026,8 @@ export class HotkeyService {
       {
         value: 'diagnostic-next',
         command: 'diagnostic-next',
-        aliases: ['dn', 'lnext'],
+        aliases: ['dn'],
+        keywords: ['lnext'],
         label: 'Next Diagnostic',
         description: 'Jump to the next inline diagnostic in the active file',
         group: 'LSP',
@@ -1030,7 +1039,8 @@ export class HotkeyService {
       {
         value: 'diagnostic-prev',
         command: 'diagnostic-prev',
-        aliases: ['dp', 'lprev'],
+        aliases: ['dp'],
+        keywords: ['lprev'],
         label: 'Previous Diagnostic',
         description: 'Jump to the previous inline diagnostic in the active file',
         group: 'LSP',
@@ -1042,7 +1052,8 @@ export class HotkeyService {
       {
         value: 'diagnostics',
         command: 'diagnostics',
-        aliases: ['diag', 'problems'],
+        aliases: ['diag'],
+        keywords: ['problems'],
         label: 'Open Workspace Diagnostics',
         description: 'Open the workspace LSP diagnostics buffer',
         group: 'LSP',
@@ -1054,7 +1065,7 @@ export class HotkeyService {
       {
         value: 'lsp-restart',
         command: 'lsp-restart',
-        aliases: ['restart-lsp'],
+        keywords: ['restart-lsp'],
         label: 'Restart Language Server',
         description: 'Restart active language servers for this workspace',
         group: 'LSP',
@@ -1066,7 +1077,8 @@ export class HotkeyService {
       {
         value: 'theme',
         command: 'theme',
-        aliases: ['colorscheme'],
+        aliases: ['t'],
+        keywords: ['colorscheme'],
         label: 'Theme',
         description: 'Switch color theme (dark, light, or system)',
         group: 'Preferences',
@@ -1108,7 +1120,7 @@ export class HotkeyService {
       {
         value: 'command-style',
         command: 'command-style',
-        aliases: ['cmdstyle'],
+        keywords: ['cmdstyle'],
         label: 'Command Surface Style',
         description: 'Choose whether Mod+k opens CommandMenu or CommandPalette',
         group: 'Preferences',
@@ -1139,7 +1151,8 @@ export class HotkeyService {
       {
         value: 'preset',
         command: 'preset',
-        aliases: ['keymap', 'keybinds'],
+        aliases: ['k'],
+        keywords: ['keymap', 'keybinds'],
         label: 'Keybinding Preset',
         description: 'Switch modal editing grammar (helix, vim, or kakoune)',
         group: 'Preferences',
@@ -1212,7 +1225,7 @@ export class HotkeyService {
       {
         value: 'wrap',
         command: 'wrap',
-        aliases: ['line-wrap'],
+        keywords: ['line-wrap'],
         label: 'Editor Line Wrapping',
         description: 'Configure editor line wrapping (auto, off, or column width)',
         group: 'Preferences',
@@ -1281,7 +1294,8 @@ export class HotkeyService {
       {
         value: 'keybindings-help',
         command: 'keybindings',
-        aliases: ['keys', 'help'],
+        aliases: ['keys'],
+        keywords: ['help'],
         label: 'Explore Keybindings',
         description: 'Open the searchable WhichKeyExplorer modal',
         group: 'Help',

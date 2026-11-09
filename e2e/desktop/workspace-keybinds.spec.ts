@@ -413,6 +413,11 @@ test.describe('Given WhichKey and the command surfaces', { tag: ['@desktop', '@k
         // Assert
         await expect(commandMenu(page)).toBeVisible()
         await expect(commandMenu(page)).toHaveAttribute('data-size', 'sm')
+        await expect(
+          commandMenu(page)
+            .locator('[data-testid="command-menu-item"][data-value="write"]')
+            .getByTestId('command-menu-item-aliases'),
+        ).toHaveText('w')
         expect(
           await page.evaluate(
             () => document.documentElement.scrollHeight <= document.documentElement.clientHeight,
