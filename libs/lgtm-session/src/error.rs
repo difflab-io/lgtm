@@ -10,17 +10,13 @@ pub enum LgtmSessionError {
     #[error("{0}")]
     Project(#[from] lgtm_project::LgtmProjectError),
 
-    /// Target project was not found in the session.
+    /// Target project or worktree was not found in the session.
     #[error("{0}")]
     NotFound(String),
 
     /// Session JSON serialization or deserialization error.
     #[error("session serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
-
-    /// Underlying filesystem or utility error.
-    #[error("{0}")]
-    Utils(#[from] lgtm_rsutils::RsUtilsError),
 
     /// Direct filesystem I/O error.
     #[error("filesystem error: {0}")]

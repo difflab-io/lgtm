@@ -2,13 +2,14 @@
 
 use std::{
     fs,
+    io::ErrorKind,
     path::{Path, PathBuf},
     process::Command,
 };
 
 use lgtm_rsutils::{
-    RsUtilsError, add_worktree, atomic_write, compute_repo_slug, get_current_branch,
-    list_worktrees, remove_worktree, resolve_git_paths,
+    add_worktree, atomic_write, get_current_branch, list_worktrees, remove_worktree,
+    resolve_git_paths,
 };
 use tempfile::TempDir;
 
@@ -79,10 +80,6 @@ mod given_a_git_repository {
                 get_current_branch(&created.path).as_deref(),
                 Some("feature/one")
             );
-            assert_eq!(
-                compute_repo_slug(&main_repo).unwrap(),
-                compute_repo_slug(&created.path).unwrap()
-            );
             assert_eq!(worktrees.len(), 2);
             assert!(worktrees[0].is_main);
             assert!(!worktrees[1].is_main);
@@ -107,8 +104,8 @@ mod given_a_git_repository {
             remove_worktree(&main_repo, &created.path, true).unwrap();
 
             // Assert
-            assert!(matches!(dup_err, RsUtilsError::BranchAlreadyCheckedOut(_)));
-            assert!(matches!(dirty_err, RsUtilsError::DirtyWorktree(_)));
+            assert_eq!(dup_err.kind(), ErrorKind::AlreadyExists);
+            assert_eq!(dirty_err.kind(), ErrorKind::WouldBlock);
             assert!(!created.path.exists());
         }
     }

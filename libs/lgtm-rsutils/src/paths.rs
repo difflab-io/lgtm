@@ -1,56 +1,13 @@
-//! Repository slug hashing, branch-to-directory slug formatting, and atomic file writes.
+//! Generic branch-to-directory slug formatting and atomic file writes.
 
 use std::{
     fs,
-    io::Write,
-    path::{Path, PathBuf},
+    io::{Result, Write},
+    path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use sha2::{Digest, Sha256};
-
-use crate::{error::Result, git::resolve_git_paths};
-
-/// Resolves the default LGTM home directory (`$LGTM_HOME` if set and non-empty, otherwise `~/.lgtm`).
-pub fn default_lgtm_home() -> PathBuf {
-    if let Ok(home) = std::env::var("LGTM_HOME")
-        && !home.trim().is_empty()
-    {
-        return PathBuf::from(home.trim());
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".lgtm")
-}
-
-/// Computes a deterministic, filesystem-safe `<repo-name>-<12-hex-chars>` slug for a repository's shared `common_git_dir`.
-pub fn compute_repo_slug(git_dir_or_worktree: &Path) -> Result<String> {
-    let resolved = resolve_git_paths(git_dir_or_worktree)?;
-    let repo_name = resolved
-        .main_root
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("repo")
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-                ch
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>();
-
-    let mut hasher = Sha256::new();
-    hasher.update(resolved.common_git_dir.to_string_lossy().as_bytes());
-    let digest = hasher.finalize();
-    let full_hex = format!("{digest:x}");
-    let short_hash = &full_hex[..12];
-
-    Ok(format!("{repo_name}-{short_hash}"))
-}
-
-/// Converts a Git branch name into a lowercase hyphenated directory slug matching Herdr (`~/.lgtm/worktrees/<project>/<branch-slug>`).
+/// Converts a Git branch name into a lowercase hyphenated directory slug.
 pub fn branch_to_path_slug(branch: &str) -> String {
     let trimmed = branch.trim();
     let stripped = trimmed.strip_prefix("worktree/").unwrap_or(trimmed);
@@ -88,7 +45,7 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     let file_name = path
         .file_name()
         .and_then(|s| s.to_str())
-        .unwrap_or("state.json");
+        .unwrap_or("state.tmp");
     let tmp_path = path.with_file_name(format!(".{file_name}.{}.{nanos}.tmp", std::process::id()));
 
     let mut file = fs::OpenOptions::new()

@@ -2,8 +2,10 @@
 
 use std::{
     fs,
+    io::Write,
     path::{Path, PathBuf},
     process::Command,
+    sync::{Arc, Mutex},
 };
 
 use lgtm_rsutils::add_worktree;
@@ -11,105 +13,304 @@ use lgtm_session::{
     LgtmSessionError, SessionService, SidebarWidget, TabCandidate, WorkspaceStatePatch,
 };
 use tempfile::TempDir;
+use tracing_subscriber::fmt::MakeWriter;
+use uuid::Uuid;
 
 // fixtures --------------------------------------------------------------------
 
-fn init_git_repo(dir: &Path, name: &str) -> PathBuf {
-    let repo = dir.join(name);
-    fs::create_dir_all(&repo).unwrap();
-    Command::new("git")
-        .arg("-C")
-        .arg(&repo)
-        .args(["init", "-b", "main"])
-        .output()
-        .unwrap();
-    Command::new("git")
-        .arg("-C")
-        .arg(&repo)
-        .args(["config", "user.name", "Test User"])
-        .output()
-        .unwrap();
-    Command::new("git")
-        .arg("-C")
-        .arg(&repo)
-        .args(["config", "user.email", "test@example.com"])
-        .output()
-        .unwrap();
-    fs::write(repo.join("README.md"), "# Repo\n").unwrap();
-    Command::new("git")
-        .arg("-C")
-        .arg(&repo)
-        .args(["add", "README.md"])
-        .output()
-        .unwrap();
-    Command::new("git")
-        .arg("-C")
-        .arg(&repo)
-        .args(["commit", "-m", "Initial commit"])
-        .output()
-        .unwrap();
-    fs::canonicalize(repo).unwrap()
+/// Shared in-memory buffer writer passed to `tracing_subscriber` to capture verbose logs during each test.
+#[derive(Clone, Default)]
+struct BufferWriter {
+    buffer: Arc<Mutex<Vec<u8>>>,
+}
+
+impl Write for BufferWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.buffer.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> MakeWriter<'a> for BufferWriter {
+    type Writer = Self;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+/// Isolated session test fixture with `.lgtm/sessions`, `.lgtm/worktrees`, `.herdr/worktrees`, and a Git repository:
+///
+/// ```text
+/// <tmp>/
+/// ├── .lgtm/
+/// │   ├── sessions/
+/// │   │   └── default.json         (Persisted Session JSON)
+/// │   └── worktrees/
+/// │       └── lgtm/
+/// │           └── <branch-slug>/   (WorktreeSource::Managed)
+/// ├── .herdr/
+/// │   └── worktrees/
+/// │       └── lgtm/
+/// │           └── <branch-slug>/   (WorktreeSource::External)
+/// └── lgtm/                        (Project.root_path, branch = "main")
+///     ├── .git/
+///     └── README.md
+/// ```
+struct SessionTestFixture {
+    tmp: TempDir,
+    lgtm_home: PathBuf,
+    service: SessionService,
+    logs: BufferWriter,
+}
+
+impl SessionTestFixture {
+    /// Creates an empty isolated session fixture with no persisted `default.json` file yet.
+    fn empty() -> Self {
+        let tmp = TempDir::new().unwrap();
+        let lgtm_home = tmp.path().join(".lgtm");
+        let service = SessionService::new(Some(lgtm_home.clone()));
+        Self {
+            tmp,
+            lgtm_home,
+            service,
+            logs: BufferWriter::default(),
+        }
+    }
+
+    /// Initializes a primary Git repository (`<tmp>/<name>`) on `main` with an initial commit:
+    ///
+    /// ```text
+    /// <tmp>/<name>/
+    /// ├── .git/          (HEAD -> refs/heads/main)
+    /// └── README.md
+    /// ```
+    fn init_git_repo(&self, name: &str) -> PathBuf {
+        let repo = self.tmp.path().join(name);
+        fs::create_dir_all(&repo).unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["init", "-b", "main"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["config", "user.name", "Test User"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        fs::write(repo.join("README.md"), "# Repo\n").unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["commit", "-m", "Initial commit"])
+            .output()
+            .unwrap();
+        fs::canonicalize(repo).unwrap()
+    }
+
+    /// Runs `f` inside a verbose `TRACE`-level `tracing` subscriber scope.
+    fn with_verbose_logger<R>(&self, f: impl FnOnce() -> R) -> R {
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::TRACE)
+            .with_ansi(false)
+            .without_time()
+            .with_writer(self.logs.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, f)
+    }
+
+    /// Writes initial state, final state, and captured verbose logs/errors to `libs/lgtm-session/test-outputs/<suite>/<case>.log`.
+    fn write_artifact(&self, suite: &str, case: &str, initial_state: &str, final_state: &str) {
+        let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("test-outputs")
+            .join(suite);
+        fs::create_dir_all(&out_dir).unwrap();
+        let captured_logs = String::from_utf8_lossy(&self.logs.buffer.lock().unwrap()).into_owned();
+        let artifact = format!(
+            "=== INITIAL STATE ===\n{initial_state}\n\n=== FINAL STATE ===\n{final_state}\n\n=== LOGS & ERRORS ===\n{captured_logs}"
+        );
+        fs::write(out_dir.join(format!("{case}.log")), artifact).unwrap();
+    }
 }
 
 // tests -----------------------------------------------------------------------
 
-mod given_a_default_session {
+mod given_no_session_exists {
     use super::*;
 
-    mod when_opening_projects_and_saving_workspace_tabs {
+    mod when_loading_or_mutating_missing_projects {
         use super::*;
 
         #[test]
-        fn should_persist_projects_collapsed_state_and_only_edited_or_last_opened_tabs() {
+        fn should_return_empty_default_session_and_reject_unknown_project_ids() {
             // Arrange
-            let tmp = TempDir::new().unwrap();
-            let lgtm_home = tmp.path().join(".lgtm");
-            let repo = init_git_repo(tmp.path(), "lgtm");
-            let service = SessionService::new(Some(lgtm_home.clone()));
+            let fixture = SessionTestFixture::empty();
+            let session_file = fixture.lgtm_home.join("sessions").join("default.json");
+            let unknown_id = Uuid::new_v4();
+            let initial_state = format!("session_file_exists: {}", session_file.exists());
 
             // Act
-            let opened = service.open_workspace("default", &repo).unwrap();
+            let (empty_session, collapse_err, remove_err) = fixture.with_verbose_logger(|| {
+                let empty = fixture.service.get_session("default").unwrap();
+                let collapse_err = fixture
+                    .service
+                    .set_project_collapsed("default", unknown_id, true)
+                    .expect_err("unknown project id should fail");
+                let remove_err = fixture
+                    .service
+                    .remove_project("default", unknown_id)
+                    .expect_err("unknown project id should fail");
+                (empty, collapse_err, remove_err)
+            });
+
+            // Assert
+            assert_eq!(empty_session.id, "default");
+            assert_eq!(empty_session.sidebar_widget, SidebarWidget::Explorer);
+            assert!(empty_session.active_workspace_root.is_empty());
+            assert!(empty_session.projects.is_empty());
+            assert!(empty_session.workspaces.is_empty());
+            assert!(matches!(collapse_err, LgtmSessionError::NotFound(_)));
+            assert!(matches!(remove_err, LgtmSessionError::NotFound(_)));
+
+            let final_state = serde_json::to_string_pretty(&empty_session).unwrap();
+            fixture.write_artifact(
+                "given_no_session_exists",
+                "should_return_empty_default_session_and_reject_unknown_project_ids",
+                &initial_state,
+                &final_state,
+            );
+        }
+    }
+}
+
+mod given_no_project_exists_in_session {
+    use super::*;
+
+    mod when_opening_a_workspace_directory {
+        use super::*;
+
+        #[test]
+        fn should_register_project_activate_workspace_and_persist_session_file() {
+            // Arrange
+            let fixture = SessionTestFixture::empty();
+            let repo = fixture.init_git_repo("lgtm");
+            let initial_session = fixture.service.get_session("default").unwrap();
+            let initial_state = serde_json::to_string_pretty(&initial_session).unwrap();
+
+            // Act
+            let opened = fixture
+                .with_verbose_logger(|| fixture.service.open_workspace("default", &repo).unwrap());
+
+            // Assert
+            assert_eq!(opened.projects.len(), 1);
+            assert_eq!(opened.projects[0].name, "lgtm");
+            assert_eq!(opened.projects[0].branch.as_deref(), Some("main"));
+            assert_eq!(opened.active_workspace_root, repo.to_string_lossy());
+            assert!(
+                opened
+                    .workspaces
+                    .contains_key(repo.to_string_lossy().as_ref())
+            );
+            assert!(
+                fixture
+                    .lgtm_home
+                    .join("sessions")
+                    .join("default.json")
+                    .is_file()
+            );
+
+            let final_state = serde_json::to_string_pretty(&opened).unwrap();
+            fixture.write_artifact(
+                "given_no_project_exists_in_session",
+                "should_register_project_activate_workspace_and_persist_session_file",
+                &initial_state,
+                &final_state,
+            );
+        }
+    }
+}
+
+mod given_a_project_exists_in_session {
+    use super::*;
+
+    mod when_creating_worktrees_and_saving_workspace_tabs {
+        use super::*;
+
+        #[test]
+        fn should_retain_only_edited_and_last_opened_tabs_and_persist_sidebar_and_collapsed_state()
+        {
+            // Arrange
+            let fixture = SessionTestFixture::empty();
+            let repo = fixture.init_git_repo("lgtm");
+            let opened = fixture.service.open_workspace("default", &repo).unwrap();
             let project_id = opened.projects[0].id;
-            let with_wt = service
-                .create_project_worktree("default", project_id, "worktree/feature-tabs", None)
-                .unwrap();
-            let wt_path = with_wt.active_workspace_root.clone();
-            service
-                .save_workspace_state(
-                    "default",
-                    WorkspaceStatePatch {
-                        workspace_root: wt_path.clone(),
-                        tabs: vec![
-                            TabCandidate {
-                                path: "README.md".to_owned(),
-                                title: "README.md".to_owned(),
-                                edited: false,
-                                last_opened: false,
-                            },
-                            TabCandidate {
-                                path: "src/edited.rs".to_owned(),
-                                title: "edited.rs".to_owned(),
-                                edited: true,
-                                last_opened: false,
-                            },
-                            TabCandidate {
-                                path: "src/active.rs".to_owned(),
-                                title: "active.rs".to_owned(),
-                                edited: false,
-                                last_opened: true,
-                            },
-                        ],
-                        expanded_dirs: vec!["src".to_owned()],
-                        sidebar_widget: Some(SidebarWidget::Projects),
-                    },
-                )
-                .unwrap();
-            let collapsed = service
-                .set_project_collapsed("default", project_id, true)
-                .unwrap();
-            let reloaded = SessionService::new(Some(lgtm_home))
-                .get_session("default")
-                .unwrap();
+            let initial_state = serde_json::to_string_pretty(&opened).unwrap();
+
+            // Act
+            let (collapsed, reloaded, wt_path) = fixture.with_verbose_logger(|| {
+                let with_wt = fixture
+                    .service
+                    .create_project_worktree("default", project_id, "worktree/feature-tabs", None)
+                    .unwrap();
+                let wt_path = with_wt.active_workspace_root.clone();
+                fixture
+                    .service
+                    .save_workspace_state(
+                        "default",
+                        WorkspaceStatePatch {
+                            workspace_root: wt_path.clone(),
+                            tabs: vec![
+                                TabCandidate {
+                                    path: "README.md".to_owned(),
+                                    title: "README.md".to_owned(),
+                                    edited: false,
+                                    last_opened: false,
+                                },
+                                TabCandidate {
+                                    path: "src/edited.rs".to_owned(),
+                                    title: "edited.rs".to_owned(),
+                                    edited: true,
+                                    last_opened: false,
+                                },
+                                TabCandidate {
+                                    path: "src/active.rs".to_owned(),
+                                    title: "active.rs".to_owned(),
+                                    edited: false,
+                                    last_opened: true,
+                                },
+                            ],
+                            expanded_dirs: vec!["src".to_owned()],
+                            sidebar_widget: Some(SidebarWidget::Projects),
+                        },
+                    )
+                    .unwrap();
+                let collapsed = fixture
+                    .service
+                    .set_project_collapsed("default", project_id, true)
+                    .unwrap();
+                let reloaded = SessionService::new(Some(fixture.lgtm_home.clone()))
+                    .get_session("default")
+                    .unwrap();
+                (collapsed, reloaded, wt_path)
+            });
 
             // Assert
             assert!(collapsed.projects[0].collapsed);
@@ -123,46 +324,140 @@ mod given_a_default_session {
             );
             assert_eq!(ws_state.tabs.len(), 2);
             assert_eq!(ws_state.tabs[0].path, "src/edited.rs");
+            assert!(ws_state.tabs[0].is_edited());
             assert_eq!(ws_state.tabs[1].path, "src/active.rs");
+            assert!(ws_state.tabs[1].is_last_opened());
+
+            let final_state = serde_json::to_string_pretty(&reloaded).unwrap();
+            fixture.write_artifact(
+                "given_a_project_exists_in_session",
+                "should_retain_only_edited_and_last_opened_tabs_and_persist_sidebar_and_collapsed_state",
+                &initial_state,
+                &final_state,
+            );
         }
     }
 
-    mod when_removing_managed_and_external_worktrees {
+    mod when_updating_projects_and_renaming_worktrees {
         use super::*;
 
         #[test]
-        fn should_delete_managed_worktree_storage_and_only_detach_external_worktree() {
+        fn should_persist_custom_project_name_icon_and_color_and_rename_worktree_without_changing_branch()
+         {
             // Arrange
-            let tmp = TempDir::new().unwrap();
-            let lgtm_home = tmp.path().join(".lgtm");
-            let repo = init_git_repo(tmp.path(), "lgtm");
-            let ext_dir = tmp
+            let fixture = SessionTestFixture::empty();
+            let repo = fixture.init_git_repo("lgtm");
+            let opened = fixture.service.open_workspace("default", &repo).unwrap();
+            let project_id = opened.projects[0].id;
+            let with_wt = fixture
+                .service
+                .create_project_worktree("default", project_id, "worktree/feature-rename", None)
+                .unwrap();
+            let wt_path = PathBuf::from(&with_wt.active_workspace_root);
+            let initial_state = serde_json::to_string_pretty(&with_wt).unwrap();
+
+            // Act
+            let (reloaded, missing_wt_err) = fixture.with_verbose_logger(|| {
+                fixture
+                    .service
+                    .update_project_appearance(
+                        "default",
+                        project_id,
+                        Some("LGTM Core".to_owned()),
+                        Some("rocket".to_owned()),
+                        Some("violet".to_owned()),
+                    )
+                    .unwrap();
+                fixture
+                    .service
+                    .rename_project_worktree("default", project_id, &wt_path, "Auth Refactor")
+                    .unwrap();
+                let missing_wt_err = fixture
+                    .service
+                    .rename_project_worktree(
+                        "default",
+                        project_id,
+                        Path::new("/nonexistent/worktree"),
+                        "Missing",
+                    )
+                    .expect_err("renaming nonexistent worktree should fail");
+                let reloaded = SessionService::new(Some(fixture.lgtm_home.clone()))
+                    .get_session("default")
+                    .unwrap();
+                (reloaded, missing_wt_err)
+            });
+
+            // Assert
+            assert!(matches!(missing_wt_err, LgtmSessionError::NotFound(_)));
+            assert_eq!(reloaded.projects[0].name, "LGTM Core");
+            assert_eq!(reloaded.projects[0].icon.as_deref(), Some("rocket"));
+            assert_eq!(reloaded.projects[0].color.as_deref(), Some("violet"));
+            assert_eq!(reloaded.projects[0].worktrees[0].name, "Auth Refactor");
+            assert_eq!(
+                reloaded.projects[0].worktrees[0].branch.as_deref(),
+                Some("worktree/feature-rename")
+            );
+
+            let final_state = serde_json::to_string_pretty(&reloaded).unwrap();
+            fixture.write_artifact(
+                "given_a_project_exists_in_session",
+                "should_persist_custom_project_name_icon_and_color_and_rename_worktree_without_changing_branch",
+                &initial_state,
+                &final_state,
+            );
+        }
+    }
+
+    mod when_deleting_worktrees_and_removing_projects {
+        use super::*;
+
+        #[test]
+        fn should_delete_managed_worktree_storage_detach_external_worktrees_and_remove_project_state()
+         {
+            // Arrange
+            let fixture = SessionTestFixture::empty();
+            let repo = fixture.init_git_repo("lgtm");
+            let ext_dir = fixture
+                .tmp
                 .path()
                 .join(".herdr")
                 .join("worktrees")
                 .join("lgtm")
                 .join("feature-ext");
             let ext_entry = add_worktree(&repo, &ext_dir, "worktree/feature-ext", None).unwrap();
-            let service = SessionService::new(Some(lgtm_home));
-            let s1 = service.open_workspace("default", &ext_entry.path).unwrap();
+            let s1 = fixture
+                .service
+                .open_workspace("default", &ext_entry.path)
+                .unwrap();
             let project_id = s1.projects[0].id;
-            let s2 = service
+            let s2 = fixture
+                .service
                 .create_project_worktree("default", project_id, "worktree/feature-mgd", None)
                 .unwrap();
             let mgd_path = PathBuf::from(&s2.active_workspace_root);
             fs::write(mgd_path.join("untracked.txt"), "dirty").unwrap();
+            let initial_state = serde_json::to_string_pretty(&s2).unwrap();
 
             // Act
-            let dirty_err = service
-                .remove_project_worktree("default", project_id, &mgd_path, false)
-                .expect_err("dirty managed worktree should require force");
-            let s3 = service
-                .remove_project_worktree("default", project_id, &mgd_path, true)
-                .unwrap();
-            let s4 = service
-                .remove_project_worktree("default", project_id, &ext_entry.path, false)
-                .unwrap();
-            let s5 = service.remove_project("default", project_id).unwrap();
+            let (dirty_err, s3, s4, s5) = fixture.with_verbose_logger(|| {
+                let dirty_err = fixture
+                    .service
+                    .remove_project_worktree("default", project_id, &mgd_path, false)
+                    .expect_err("dirty managed worktree should require force");
+                let s3 = fixture
+                    .service
+                    .remove_project_worktree("default", project_id, &mgd_path, true)
+                    .unwrap();
+                let s4 = fixture
+                    .service
+                    .remove_project_worktree("default", project_id, &ext_entry.path, false)
+                    .unwrap();
+                let s5 = fixture
+                    .service
+                    .remove_project("default", project_id)
+                    .unwrap();
+                (dirty_err, s3, s4, s5)
+            });
 
             // Assert
             assert!(matches!(
@@ -176,6 +471,14 @@ mod given_a_default_session {
             assert!(s5.projects.is_empty());
             assert!(s5.workspaces.is_empty());
             assert!(s5.active_workspace_root.is_empty());
+
+            let final_state = serde_json::to_string_pretty(&s5).unwrap();
+            fixture.write_artifact(
+                "given_a_project_exists_in_session",
+                "should_delete_managed_worktree_storage_detach_external_worktrees_and_remove_project_state",
+                &initial_state,
+                &final_state,
+            );
         }
     }
 }

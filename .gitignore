@@ -95,5 +95,7 @@ target/
 # Generated Neovim help index
 /apps/lgtm.nvim/doc/tags
 
-# Generated E2E CLI outputs
+# Generated E2E CLI and integration test outputs
 /e2e/outputs/
+/test-outputs/
+**/test-outputs/

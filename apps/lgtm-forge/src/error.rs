@@ -46,8 +46,8 @@ impl From<DbError> for Error {
     }
 }
 
-impl From<lgtm_rsutils::RsUtilsError> for Error {
-    fn from(error: lgtm_rsutils::RsUtilsError) -> Self {
+impl From<std::io::Error> for Error {
+    fn from(error: std::io::Error) -> Self {
         Self::Invalid(error.to_string())
     }
 }

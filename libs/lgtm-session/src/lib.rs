@@ -7,10 +7,10 @@ mod services;
 
 pub use error::LgtmSessionError;
 pub use error::Result;
-pub use models::session::PersistedTab;
 pub use models::session::Session;
 pub use models::session::SidebarWidget;
-pub use models::session::TabCandidate;
-pub use models::session::WorkspaceSessionState;
-pub use models::session::WorkspaceStatePatch;
+pub use models::tab::PersistedTab;
+pub use models::tab::TabCandidate;
+pub use models::workspace::WorkspaceSessionState;
+pub use models::workspace::WorkspaceStatePatch;
 pub use services::session::SessionService;

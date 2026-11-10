@@ -1,10 +1,49 @@
-//! General filesystem path, LGTM home, and agent descriptor utilities.
+//! General filesystem path, LGTM home, repository slug, and agent descriptor utilities.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use lgtm_rsutils::default_lgtm_home;
+use sha2::{Digest, Sha256};
 
 use crate::error::{Error, Result};
+
+/// Resolves the default LGTM home directory (`$LGTM_HOME` if set and non-empty, otherwise `~/.lgtm`).
+pub fn default_lgtm_home() -> PathBuf {
+    if let Ok(home) = std::env::var("LGTM_HOME")
+        && !home.trim().is_empty()
+    {
+        return PathBuf::from(home.trim());
+    }
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".lgtm")
+}
+
+/// Computes a deterministic, filesystem-safe `<repo-name>-<12-hex-chars>` slug for a repository's shared `common_git_dir`.
+pub fn compute_repo_slug(git_dir_or_worktree: &Path) -> Result<String> {
+    let resolved = lgtm_rsutils::resolve_git_paths(git_dir_or_worktree)?;
+    let repo_name = resolved
+        .main_root
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("repo")
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+
+    let mut hasher = Sha256::new();
+    hasher.update(resolved.common_git_dir.to_string_lossy().as_bytes());
+    let digest = hasher.finalize();
+    let full_hex = format!("{digest:x}");
+    let short_hash = &full_hex[..12];
+
+    Ok(format!("{repo_name}-{short_hash}"))
+}
 
 /// Resolve the default root directory (`~/.lgtm/snapshots` or `$LGTM_HOME/snapshots`) for local snapshot repositories.
 pub fn default_snapshots_root() -> PathBuf {
@@ -59,8 +98,9 @@ pub fn parse_agent_descriptor(raw: &str) -> Result<(String, String, String)> {
         "google"
     } else {
         "custom"
-    };
-    Ok((trimmed.to_owned(), provider.to_owned(), trimmed.to_owned()))
+    }
+    .to_owned();
+    Ok((trimmed.to_owned(), provider, trimmed.to_owned()))
 }
 
 // tests -----------------------------------------------------------------------

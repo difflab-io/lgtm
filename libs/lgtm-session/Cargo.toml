@@ -9,6 +9,7 @@ publish = false
 license = "Apache-2.0"
 
 [dependencies]
+lgtm-config = { path = "../lgtm-config" }
 lgtm-project = { path = "../lgtm-project" }
 lgtm-rsutils = { path = "../lgtm-rsutils" }
 serde = { version = "1", features = ["derive"] }
@@ -20,3 +21,4 @@ uuid = { version = "1", features = ["v4", "v5", "serde"] }
 
 [dev-dependencies]
 tempfile = "3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

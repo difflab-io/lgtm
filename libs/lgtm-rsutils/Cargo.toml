@@ -3,15 +3,13 @@ name = "lgtm-rsutils"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
-description = "Stateless Git path resolution, worktree CLI, slug hashing, atomic file write, and URL normalization utilities for LGTM."
+description = "Domain-agnostic Git, path slug, atomic file write, and URL normalization extension utilities."
 repository = "https://github.com/difflab-io/lgtm"
 publish = false
 license = "Apache-2.0"
 
 [dependencies]
-dirs = "6"
-sha2 = "0.10"
-thiserror = "2"
+gix = { version = "0.70", default-features = false, features = ["basic"] }
 url = "2"
 
 [dev-dependencies]

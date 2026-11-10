@@ -1,45 +1,57 @@
 //! Remote Git repository URL normalization and `<owner>/<repo>` extraction.
 
-use url::Url;
+use std::io::{Error, ErrorKind, Result};
 
-use crate::error::{Result, RsUtilsError};
+use url::Url;
 
 /// Normalizes a Git remote URL (SSH or HTTPS) into a canonical `https://<host>/<owner>/<repo>` URL.
 pub fn normalize_repository_url(raw_remote: &str) -> Result<String> {
     let trimmed = raw_remote.trim();
     if trimmed.is_empty() {
-        return Err(RsUtilsError::Invalid(
-            "repository_url must not be empty".to_owned(),
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "repository_url must not be empty",
         ));
     }
 
     if let Some(rest) = trimmed.strip_prefix("git@") {
         let (host, path) = rest.split_once(':').ok_or_else(|| {
-            RsUtilsError::Invalid(format!("invalid SSH remote address '{trimmed}'"))
+            Error::new(
+                ErrorKind::InvalidInput,
+                format!("invalid SSH remote address '{trimmed}'"),
+            )
         })?;
         let clean_path = path.trim_start_matches('/').trim_end_matches(".git");
         if clean_path.split('/').count() < 2 {
-            return Err(RsUtilsError::Invalid(format!(
-                "repository_url '{trimmed}' must include owner and repository name"
-            )));
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!("repository_url '{trimmed}' must include owner and repository name"),
+            ));
         }
         return Ok(format!("https://{host}/{clean_path}"));
     }
 
     let parsed = Url::parse(trimmed).map_err(|err| {
-        RsUtilsError::Invalid(format!("invalid repository_url '{trimmed}': {err}"))
+        Error::new(
+            ErrorKind::InvalidInput,
+            format!("invalid repository_url '{trimmed}': {err}"),
+        )
     })?;
     let scheme = match parsed.scheme() {
         "http" | "https" => parsed.scheme(),
         "ssh" => "https",
         other => {
-            return Err(RsUtilsError::Invalid(format!(
-                "unsupported repository_url scheme '{other}'"
-            )));
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!("unsupported repository_url scheme '{other}'"),
+            ));
         }
     };
     let host = parsed.host_str().ok_or_else(|| {
-        RsUtilsError::Invalid(format!("repository_url '{trimmed}' is missing a host"))
+        Error::new(
+            ErrorKind::InvalidInput,
+            format!("repository_url '{trimmed}' is missing a host"),
+        )
     })?;
     let clean_path = parsed
         .path()
@@ -52,9 +64,10 @@ pub fn normalize_repository_url(raw_remote: &str) -> Result<String> {
         .count()
         < 2
     {
-        return Err(RsUtilsError::Invalid(format!(
-            "repository_url '{trimmed}' must include owner and repository name"
-        )));
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            format!("repository_url '{trimmed}' must include owner and repository name"),
+        ));
     }
     Ok(format!("{scheme}://{host}/{clean_path}"))
 }
@@ -63,19 +76,37 @@ pub fn normalize_repository_url(raw_remote: &str) -> Result<String> {
 pub fn parse_github_owner_repo(repository_url: &str) -> Result<(String, String)> {
     let normalized = normalize_repository_url(repository_url)?;
     let parsed = Url::parse(&normalized).map_err(|err| {
-        RsUtilsError::Invalid(format!("invalid repository_url '{normalized}': {err}"))
+        Error::new(
+            ErrorKind::InvalidInput,
+            format!("invalid repository_url '{normalized}': {err}"),
+        )
     })?;
     let mut segments = parsed
         .path_segments()
-        .ok_or_else(|| RsUtilsError::Invalid(format!("invalid repository_url '{normalized}'")))?
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidInput,
+                format!("invalid repository_url '{normalized}'"),
+            )
+        })?
         .filter(|segment| !segment.is_empty());
     let owner = segments
         .next()
-        .ok_or_else(|| RsUtilsError::Invalid(format!("missing owner in '{normalized}'")))?
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidInput,
+                format!("missing owner in '{normalized}'"),
+            )
+        })?
         .to_owned();
     let repo = segments
         .next()
-        .ok_or_else(|| RsUtilsError::Invalid(format!("missing repository name in '{normalized}'")))?
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidInput,
+                format!("missing repository name in '{normalized}'"),
+            )
+        })?
         .to_owned();
     Ok((owner, repo))
 }

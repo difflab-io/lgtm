@@ -9,11 +9,11 @@ use std::{
 };
 
 use common::TestContext;
+use lgtm_forge::utils::compute_repo_slug;
 use lgtm_forge::{
     models::{IdentityKind, ReviewGroupBy, ReviewOutcome, SessionState},
     services::{CreateCommentInput, UpdateCommentInput},
 };
-use lgtm_rsutils::compute_repo_slug;
 
 // fixtures --------------------------------------------------------------------
 

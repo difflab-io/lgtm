@@ -1,54 +1,11 @@
-//! Domain models representing projects, linked Git worktrees, and worktree ownership.
+//! Domain model representing a primary repository or folder checkout and its open linked worktrees.
+
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Ownership classification determining whether LGTM manages and deletes a worktree's disk storage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "snake_case")]
-pub enum WorktreeSource {
-    /// Created and owned by LGTM under `~/.lgtm/worktrees/<project>/<branch-slug>`.
-    Managed,
-    /// Created outside `~/.lgtm/worktrees` (such as `~/.herdr/worktrees/<project>/<branch-slug>`).
-    External,
-}
-
-/// Linked Git worktree checkout grouped underneath a parent [`Project`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct Worktree {
-    /// Canonical filesystem path of the linked worktree directory.
-    pub path: String,
-    /// Display label for the worktree (branch name stripped of `worktree/`, or directory basename).
-    pub name: String,
-    /// Checked-out Git branch name, if not detached.
-    pub branch: Option<String>,
-    /// Whether this worktree's disk storage is managed by LGTM or external.
-    pub source: WorktreeSource,
-}
-
-impl Worktree {
-    /// Constructs a linked worktree model and normalizes its display label from `branch` or `path`.
-    pub fn new(path: String, branch: Option<String>, source: WorktreeSource) -> Self {
-        let name = branch
-            .as_deref()
-            .map(|b| b.strip_prefix("worktree/").unwrap_or(b).to_owned())
-            .filter(|b| !b.is_empty())
-            .unwrap_or_else(|| {
-                std::path::Path::new(&path)
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or(&path)
-                    .to_owned()
-            });
-        Self {
-            path,
-            name,
-            branch,
-            source,
-        }
-    }
-}
+use crate::models::worktree::Worktree;
 
 /// Primary repository or folder checkout and its open linked Git worktrees.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -65,6 +22,12 @@ pub struct Project {
     pub branch: Option<String>,
     /// Canonical shared `.git` directory path (`commondir`), if `root_path` is a Git repository.
     pub git_common_dir: Option<String>,
+    /// Optional custom icon identifier for `ProjectsPane` (defaults to `"box"` in the UI when `None`).
+    #[serde(default)]
+    pub icon: Option<String>,
+    /// Optional custom color token identifier for `ProjectsPane` (defaults to neutral foreground when `None`).
+    #[serde(default)]
+    pub color: Option<String>,
     /// Whether child worktrees are collapsed in `ProjectsPane`.
     pub collapsed: bool,
     /// Open linked Git worktrees attached underneath this project.
@@ -80,17 +43,15 @@ impl Project {
         worktrees: Vec<Worktree>,
     ) -> Self {
         let id = Uuid::new_v5(&Uuid::NAMESPACE_URL, root_path.as_bytes());
-        let name = std::path::Path::new(&root_path)
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or(&root_path)
-            .to_owned();
+        let name = Self::default_name(&root_path);
         Self {
             id,
             name,
             root_path,
             branch,
             git_common_dir,
+            icon: None,
+            color: None,
             collapsed: false,
             worktrees,
         }
@@ -98,20 +59,71 @@ impl Project {
 
     // Public ------------------------------------------------------------------
 
+    /// Computes the default display name for a project from its directory basename.
+    pub fn default_name(root_path: &str) -> String {
+        Path::new(root_path)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(root_path)
+            .to_owned()
+    }
+
     /// Returns whether `workspace_root` matches this project's `root_path` or one of its open `worktrees`.
     pub fn contains_workspace(&self, workspace_root: &str) -> bool {
         self.root_path == workspace_root
             || self.worktrees.iter().any(|wt| wt.path == workspace_root)
     }
 
-    /// Inserts or updates a linked worktree in `self.worktrees`, preserving existing order.
+    /// Updates custom `name`, `icon`, and `color` appearance properties on this project.
+    pub fn update_appearance(
+        &mut self,
+        name: Option<String>,
+        icon: Option<String>,
+        color: Option<String>,
+    ) {
+        if let Some(raw_name) = name {
+            let trimmed = raw_name.trim();
+            self.name = if trimmed.is_empty() {
+                Self::default_name(&self.root_path)
+            } else {
+                trimmed.to_owned()
+            };
+        }
+        self.icon = icon.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
+        self.color = color.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
+    }
+
+    /// Renames the display label of `worktree_path` without changing its Git branch name, returning `true` if found.
+    pub fn rename_worktree(&mut self, worktree_path: &str, name: &str) -> bool {
+        let Some(worktree) = self
+            .worktrees
+            .iter_mut()
+            .find(|wt| wt.path == worktree_path)
+        else {
+            return false;
+        };
+        let trimmed = name.trim();
+        worktree.name = if trimmed.is_empty() {
+            Worktree::default_name(&worktree.path, worktree.branch.as_deref())
+        } else {
+            trimmed.to_owned()
+        };
+        true
+    }
+
+    /// Inserts or updates a linked worktree in `self.worktrees`, preserving existing order and any custom worktree section name.
     pub fn upsert_worktree(&mut self, worktree: Worktree) {
         if let Some(existing) = self
             .worktrees
             .iter_mut()
             .find(|wt| wt.path == worktree.path)
         {
-            *existing = worktree;
+            if existing.has_custom_name() {
+                existing.branch = worktree.branch;
+                existing.source = worktree.source;
+            } else {
+                *existing = worktree;
+            }
         } else {
             self.worktrees.push(worktree);
         }

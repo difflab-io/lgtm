@@ -11,15 +11,16 @@ use lgtm_lsp::{
     LspServerStatusEvent, LspSignatureHelp, LspWorkspaceSnapshot,
 };
 use lgtm_session::{Session, SessionService, WorkspaceStatePatch};
+use lgtm_workspace::{
+    FileContent, Result, WorkspaceListing, WorkspaceNode, WorkspaceService, error,
+};
 use tauri::{Manager, State};
 use uuid::Uuid;
 
 use crate::{
-    error::{Result, error},
     events::{AppEvent, AppEvents, FileOpenedEvent},
     menus::{build_app_menu, handle_menu_event},
-    models::{FileContent, WorkspaceListing, WorkspaceNode},
-    services::{LspService, WorkspaceService},
+    services::LspService,
 };
 
 /// Combined desktop host state managed by Tauri across all IPC command handlers.
@@ -170,6 +171,8 @@ pub fn commands<R: tauri::Runtime>(invoke: tauri::ipc::Invoke<R>) -> bool {
         session_get,
         session_save,
         project_set_collapsed,
+        project_update_appearance,
+        project_rename_worktree,
         project_create_worktree,
         project_remove_worktree,
         project_remove,
@@ -207,6 +210,8 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             session_get,
             session_save,
             project_set_collapsed,
+            project_update_appearance,
+            project_rename_worktree,
             project_create_worktree,
             project_remove_worktree,
             project_remove,
@@ -660,6 +665,57 @@ pub async fn project_set_collapsed(
         let id = Uuid::parse_str(project_id.trim())
             .map_err(|err| error("invalidProject", err.to_string()))?;
         let session = session_service.set_project_collapsed("default", id, collapsed)?;
+        events.dispatch(AppEvent::SessionUpdated(session.clone()));
+        Ok(session)
+    })
+    .await
+    .map_err(|e| error("io", e.to_string()))?
+}
+
+/// Updates custom `name`, `icon`, and `color` metadata for `project_id` in the `default` session.
+#[tauri::command]
+#[specta::specta]
+pub async fn project_update_appearance(
+    state: State<'_, AppState>,
+    project_id: String,
+    name: Option<String>,
+    icon: Option<String>,
+    color: Option<String>,
+) -> Result<Session> {
+    let session_service = state.session.clone();
+    let events = state.events.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let id = Uuid::parse_str(project_id.trim())
+            .map_err(|err| error("invalidProject", err.to_string()))?;
+        let session =
+            session_service.update_project_appearance("default", id, name, icon, color)?;
+        events.dispatch(AppEvent::SessionUpdated(session.clone()));
+        Ok(session)
+    })
+    .await
+    .map_err(|e| error("io", e.to_string()))?
+}
+
+/// Renames a worktree display label under `project_id` without changing its Git branch name.
+#[tauri::command]
+#[specta::specta]
+pub async fn project_rename_worktree(
+    state: State<'_, AppState>,
+    project_id: String,
+    worktree_path: String,
+    name: String,
+) -> Result<Session> {
+    let session_service = state.session.clone();
+    let events = state.events.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let id = Uuid::parse_str(project_id.trim())
+            .map_err(|err| error("invalidProject", err.to_string()))?;
+        let session = session_service.rename_project_worktree(
+            "default",
+            id,
+            std::path::Path::new(worktree_path.trim()),
+            &name,
+        )?;
         events.dispatch(AppEvent::SessionUpdated(session.clone()));
         Ok(session)
     })

@@ -5,9 +5,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use lgtm_rsutils::compute_repo_slug;
-
-use crate::{error::Result, extensions::gitoxide, utils::default_snapshots_root};
+use crate::{
+    error::Result,
+    extensions::gitoxide,
+    utils::{compute_repo_slug, default_snapshots_root},
+};
 
 /// Local shadow repository manager that isolates `--local` staging, commits, and blob reads under `~/.lgtm/snapshots/$repoSlug`.
 #[derive(Clone, Debug)]

@@ -8,6 +8,6 @@ mod services;
 pub use error::LgtmProjectError;
 pub use error::Result;
 pub use models::project::Project;
-pub use models::project::Worktree;
-pub use models::project::WorktreeSource;
+pub use models::worktree::Worktree;
+pub use models::worktree::WorktreeSource;
 pub use services::project::ProjectService;

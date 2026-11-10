@@ -1,15 +1,21 @@
 //! Service resolving project roots and managing LGTM-owned and external Git worktrees.
 
-use std::path::{Path, PathBuf};
+use std::{
+    io::ErrorKind,
+    path::{Path, PathBuf},
+};
 
+use lgtm_config::ConfigService;
 use lgtm_rsutils::{
-    RsUtilsError, add_worktree, branch_to_path_slug, default_lgtm_home, get_current_branch,
-    remove_worktree, resolve_git_paths,
+    add_worktree, branch_to_path_slug, get_current_branch, remove_worktree, resolve_git_paths,
 };
 
 use crate::{
     error::{LgtmProjectError, Result},
-    models::project::{Project, Worktree, WorktreeSource},
+    models::{
+        project::Project,
+        worktree::{Worktree, WorktreeSource},
+    },
 };
 
 /// Resolves project checkouts and manages `~/.lgtm/worktrees/<project>/<branch-slug>` worktrees.
@@ -21,7 +27,7 @@ pub struct ProjectService {
 impl ProjectService {
     /// Creates a project service storing managed worktrees under `<lgtm_home>/worktrees` (or `~/.lgtm/worktrees`).
     pub fn new(lgtm_home: Option<PathBuf>) -> Self {
-        let base = lgtm_home.unwrap_or_else(default_lgtm_home);
+        let base = lgtm_home.unwrap_or_else(|| ConfigService::new().get_lgtm_home_dir());
         Self {
             worktrees_root: base.join("worktrees"),
         }
@@ -32,12 +38,14 @@ impl ProjectService {
     /// Resolves any directory path into its parent [`Project`] (primary checkout) and optional linked [`Worktree`].
     pub fn resolve_project(&self, path: &Path) -> Result<(Project, Option<Worktree>)> {
         let canonical = std::fs::canonicalize(path).map_err(|err| {
+            tracing::warn!(path = %path.display(), error = %err, "failed to canonicalize project path");
             LgtmProjectError::InvalidPath(format!(
                 "failed to resolve project path '{}': {err}",
                 path.display()
             ))
         })?;
         if !canonical.is_dir() {
+            tracing::warn!(path = %canonical.display(), "project path is not a directory");
             return Err(LgtmProjectError::InvalidPath(format!(
                 "'{}' is not a directory.",
                 canonical.display()
@@ -59,42 +67,65 @@ impl ProjectService {
                 let source = self.classify_worktree(&project.name, &resolved.worktree_root);
                 let worktree = Worktree::new(wt_path_str, wt_branch, source);
                 project.upsert_worktree(worktree.clone());
-                tracing::debug!(
+                tracing::info!(
                     project = %project.name,
                     worktree = %worktree.path,
+                    source = ?worktree.source,
                     "resolved linked git worktree under parent project"
                 );
                 return Ok((project, Some(worktree)));
             }
+            tracing::info!(
+                project = %project.name,
+                root_path = %project.root_path,
+                branch = ?project.branch,
+                "resolved primary git project checkout"
+            );
             return Ok((project, None));
         }
 
         let root_str = canonical.to_string_lossy().into_owned();
         let project = Project::new(root_str, None, None, Vec::new());
+        tracing::info!(
+            project = %project.name,
+            root_path = %project.root_path,
+            "resolved non-git directory project"
+        );
         Ok((project, None))
     }
 
-    /// Refreshes branch labels, reclassifies `WorktreeSource`, and prunes worktrees whose directories no longer exist.
+    /// Refreshes branch labels, reclassifies `WorktreeSource`, and prunes worktrees whose directories no longer exist while preserving custom worktree section names.
     pub fn refresh_project(&self, project: &mut Project) -> Result<()> {
         let root_path = Path::new(&project.root_path);
         if root_path.is_dir() {
             project.branch = get_current_branch(root_path);
         }
-        let project_name = project.name.clone();
+        let dir_name = Project::default_name(&project.root_path);
         project.worktrees.retain(|wt| Path::new(&wt.path).is_dir());
         for wt in &mut project.worktrees {
             let wt_path = Path::new(&wt.path);
             let branch = get_current_branch(wt_path);
-            let source = self.classify_worktree(&project_name, wt_path);
-            *wt = Worktree::new(wt.path.clone(), branch, source);
+            let source = self.classify_worktree(&dir_name, wt_path);
+            if wt.has_custom_name() {
+                wt.branch = branch;
+                wt.source = source;
+            } else {
+                *wt = Worktree::new(wt.path.clone(), branch, source);
+            }
         }
+        tracing::debug!(
+            project = %project.name,
+            worktree_count = project.worktrees.len(),
+            "refreshed project branch and worktree metadata"
+        );
         Ok(())
     }
 
     /// Computes the managed checkout path (`~/.lgtm/worktrees/<project>/<branch-slug>`) for `branch`.
     pub fn get_worktree_path(&self, project: &Project, branch: &str) -> PathBuf {
         let slug = branch_to_path_slug(branch);
-        self.worktrees_root.join(&project.name).join(slug)
+        let dir_name = Project::default_name(&project.root_path);
+        self.worktrees_root.join(dir_name).join(slug)
     }
 
     /// Creates a `Managed` Git worktree under `~/.lgtm/worktrees/<project>/<branch-slug>` for `project`.
@@ -106,6 +137,7 @@ impl ProjectService {
     ) -> Result<Worktree> {
         let root_path = Path::new(&project.root_path);
         if project.git_common_dir.is_none() && !root_path.join(".git").exists() {
+            tracing::warn!(project = %project.name, "cannot create worktree on non-git project");
             return Err(LgtmProjectError::NotGitRepository(format!(
                 "'{}' is not a Git repository.",
                 project.name
@@ -113,25 +145,31 @@ impl ProjectService {
         }
         let target_dir = self.get_worktree_path(project, branch);
         if target_dir.exists() {
+            tracing::warn!(target = %target_dir.display(), "managed worktree path already exists");
             return Err(LgtmProjectError::CheckoutPathExists(format!(
                 "Worktree path '{}' already exists.",
                 target_dir.display()
             )));
         }
-        let created =
-            add_worktree(root_path, &target_dir, branch, base_ref).map_err(|err| match err {
-                RsUtilsError::Invalid(msg) => LgtmProjectError::InvalidBranch(msg),
-                RsUtilsError::BranchAlreadyCheckedOut(msg) => {
-                    LgtmProjectError::BranchAlreadyCheckedOut(msg)
+        let created = add_worktree(root_path, &target_dir, branch, base_ref).map_err(|err| {
+            tracing::warn!(project = %project.name, branch = %branch, error = %err, "failed to create git worktree");
+            match err.kind() {
+                ErrorKind::InvalidInput => LgtmProjectError::InvalidBranch(err.to_string()),
+                ErrorKind::AlreadyExists => {
+                    LgtmProjectError::BranchAlreadyCheckedOut(err.to_string())
                 }
-                other => LgtmProjectError::Git(other.to_string()),
-            })?;
+                _ => LgtmProjectError::Git(err.to_string()),
+            }
+        })?;
         let path_str = created.path.to_string_lossy().into_owned();
-        Ok(Worktree::new(
-            path_str,
-            created.branch,
-            WorktreeSource::Managed,
-        ))
+        let worktree = Worktree::new(path_str, created.branch, WorktreeSource::Managed);
+        tracing::info!(
+            project = %project.name,
+            worktree = %worktree.path,
+            branch = ?worktree.branch,
+            "created managed git worktree"
+        );
+        Ok(worktree)
     }
 
     /// Deletes disk storage for a `Managed` worktree via `git worktree remove`, or returns [`LgtmProjectError::ExternalWorktree`] for `External` worktrees.
@@ -148,19 +186,43 @@ impl ProjectService {
             .iter()
             .find(|wt| Path::new(&wt.path) == canonical || Path::new(&wt.path) == worktree_path)
             .map(|wt| wt.source)
-            .unwrap_or_else(|| self.classify_worktree(&project.name, &canonical));
+            .unwrap_or_else(|| {
+                let dir_name = Project::default_name(&project.root_path);
+                self.classify_worktree(&dir_name, &canonical)
+            });
 
         if source == WorktreeSource::External {
+            tracing::warn!(
+                project = %project.name,
+                worktree = %canonical.display(),
+                "rejected disk deletion for external worktree"
+            );
             return Err(LgtmProjectError::ExternalWorktree(format!(
                 "External worktree '{}' is not managed by LGTM and cannot be deleted from disk.",
                 canonical.display()
             )));
         }
 
-        remove_worktree(Path::new(&project.root_path), &canonical, force).map_err(|err| match err {
-            RsUtilsError::DirtyWorktree(msg) => LgtmProjectError::DirtyWorktree(msg),
-            other => LgtmProjectError::Git(other.to_string()),
-        })
+        remove_worktree(Path::new(&project.root_path), &canonical, force).map_err(|err| {
+            tracing::warn!(
+                project = %project.name,
+                worktree = %canonical.display(),
+                force,
+                error = %err,
+                "failed to remove managed git worktree"
+            );
+            match err.kind() {
+                ErrorKind::WouldBlock => LgtmProjectError::DirtyWorktree(err.to_string()),
+                _ => LgtmProjectError::Git(err.to_string()),
+            }
+        })?;
+        tracing::info!(
+            project = %project.name,
+            worktree = %canonical.display(),
+            force,
+            "removed managed git worktree from disk"
+        );
+        Ok(())
     }
 
     // Private -----------------------------------------------------------------

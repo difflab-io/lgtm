@@ -1,3 +1,5 @@
+//! Domain model for UTF-8 file contents, SHA-256 content revision digests, and LSP status enrichment.
+
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use specta::Type;
