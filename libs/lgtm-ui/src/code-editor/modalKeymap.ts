@@ -622,15 +622,12 @@ export function createCodeMirrorModalTarget(
             const startLine = doc.lineAt(range.from)
             const curEndLine = doc.lineAt(range.to)
             const alreadyFullLine =
-              !range.empty &&
-              range.from === startLine.from &&
-              (range.to === curEndLine.to || range.to === Math.min(doc.length, curEndLine.to + 1))
+              !range.empty && range.from === startLine.from && range.to === curEndLine.to
             const targetEndLineNum = alreadyFullLine
               ? Math.min(doc.lines, curEndLine.number + steps)
               : Math.min(doc.lines, startLine.number + steps - 1)
             const endLine = doc.line(targetEndLineNum)
-            const to = Math.min(doc.length, endLine.to + (endLine.number < doc.lines ? 1 : 0))
-            return EditorSelection.range(startLine.from, to)
+            return EditorSelection.range(startLine.from, endLine.to)
           }
           case 'docStart': {
             return extend ? EditorSelection.range(anchor, 0) : EditorSelection.cursor(0)

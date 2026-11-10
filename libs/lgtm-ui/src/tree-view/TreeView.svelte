@@ -39,6 +39,7 @@
   // Replace the cache so collections also update for branches created after mount.
   let loaded = $state.raw<Record<string, TreeNode[]>>({})
   let errors = $state<Record<string, string>>({})
+  let pendingChildFocusParent = $state<string | null>(null)
   const id = $props.id()
 
   // Derived -------------------------------------------------------------------
@@ -79,6 +80,15 @@
           try {
             const children = await loadChildren(node)
             loaded = { ...loaded, [node.value]: children }
+            if (pendingChildFocusParent === node.value) {
+              pendingChildFocusParent = null
+              const firstChild = children[0]?.value
+              if (firstChild) {
+                void tick().then(() => {
+                  tree().focus(firstChild)
+                })
+              }
+            }
             return children
           } catch (error) {
             errors[node.value] = error instanceof Error ? error.message : String(error)
@@ -429,7 +439,10 @@
       const idx = visible.findIndex((n) => n.value === nodeValue)
       const child = visible[idx + 1]
       if (child && child.value.startsWith(`${nodeValue}/`)) {
+        pendingChildFocusParent = null
         tree().focus(child.value)
+      } else if (!loaded[nodeValue]) {
+        pendingChildFocusParent = nodeValue
       }
     }
     return true

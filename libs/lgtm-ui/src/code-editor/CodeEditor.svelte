@@ -172,7 +172,8 @@
       borderColor: 'var(--color-border, #2e2e2e)',
     },
     '.cm-activeLine, &.cm-editor .cm-activeLine': {
-      backgroundColor: 'var(--cm-active-line-bg, var(--color-muted, #1a1a1a))',
+      backgroundColor:
+        'color-mix(in srgb, var(--cm-active-line-bg, var(--color-muted, #1a1a1a)) 45%, transparent)',
     },
     '.cm-activeLineGutter, &.cm-editor .cm-activeLineGutter': {
       backgroundColor: 'var(--color-background, #101010)',

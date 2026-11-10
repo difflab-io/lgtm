@@ -73,7 +73,9 @@
                 class={rowClass}
                 title={node.description ?? node.value}
                 data-which-key-target=""
-                data-pane-focus-target={state().selected || isDefaultFocusTarget ? '' : undefined}
+                data-pane-focus-target={state().focused || state().selected || isDefaultFocusTarget
+                  ? ''
+                  : undefined}
                 data-tree-node-value={node.value}
                 data-tree-node-branch="true"
               >
@@ -126,7 +128,9 @@
                 : (node.displayLabel ?? node.label)}
               title={node.value}
               data-which-key-target=""
-              data-pane-focus-target={state().selected || isDefaultFocusTarget ? '' : undefined}
+              data-pane-focus-target={state().focused || state().selected || isDefaultFocusTarget
+                ? ''
+                : undefined}
               data-tree-node-value={node.value}
               data-tree-node-branch="false"
             >

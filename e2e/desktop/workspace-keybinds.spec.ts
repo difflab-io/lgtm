@@ -59,6 +59,7 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@keybinds'] },
         const drafts = entry(page, 'Drafts')
         const draftsControl = drafts.getByRole('button', { name: 'Drafts', exact: true })
         await draftsControl.focus()
+        await expect(draftsControl).toHaveCSS('border-radius', '0px')
 
         // Act: expand Drafts with l, move into Drafts/one.md with l, and open with Enter
         await page.keyboard.press('l')
@@ -137,7 +138,9 @@ test.describe('Given an open file in the code editor', { tag: ['@desktop', '@key
 
         // Act
         await page.keyboard.press('l')
+        await expect(entry(page, 'Drafts/one.md')).toBeVisible()
         await page.keyboard.press('l')
+        await expect(entry(page, 'Drafts/one.md')).toBeFocused()
         await page.keyboard.press('Enter')
 
         // Assert

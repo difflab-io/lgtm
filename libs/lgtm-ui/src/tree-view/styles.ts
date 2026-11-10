@@ -13,13 +13,13 @@ export const treeViewIndentGuideBase =
 export const treeViewRowVariants = cva(
   cn(
     sidebarMenuButtonVariants({ size: 'sm' }),
-    'helical-tree-row h-6 cursor-pointer py-0 ps-[calc(10px_+_(var(--depth)_-_1)_*_16px)] text-xs data-[selected]:bg-sidebar-accent data-[selected]:text-sidebar-accent-foreground',
+    'helical-tree-row h-6 cursor-pointer rounded-none py-0 ps-[calc(10px_+_(var(--depth)_-_1)_*_16px)] text-xs outline-none focus:bg-sidebar-accent focus:text-sidebar-accent-foreground focus:ring-1 focus:ring-inset focus:ring-sidebar-ring focus-visible:bg-sidebar-accent focus-visible:text-sidebar-accent-foreground focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-sidebar-ring data-[selected]:bg-sidebar-accent data-[selected]:text-sidebar-accent-foreground',
   ),
 )
 
 export const treeViewRenameInputBase = cn(
   inputVariants({ size: 'sm' }),
-  'h-5.5 rounded-xs border-sidebar-ring bg-background px-0.75 text-inherit shadow-none focus-visible:ring-1 aria-invalid:ring-1 aria-invalid:ring-destructive/20 data-invalid:ring-1 data-invalid:ring-destructive/20',
+  'h-5.5 rounded-none border-sidebar-ring bg-background px-0.75 text-inherit shadow-none focus-visible:ring-1 aria-invalid:ring-1 aria-invalid:ring-destructive/20 data-invalid:ring-1 data-invalid:ring-destructive/20',
 )
 
 export const treeViewMessageVariants = cva('tree-message mx-3 my-1 text-[11px]', {
