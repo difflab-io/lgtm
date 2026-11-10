@@ -135,6 +135,13 @@ export interface WorkspaceClient {
   sessionGet?(sessionId?: string): Promise<Session>
   sessionSave?(patch: WorkspaceStatePatch): Promise<Session>
   projectSetCollapsed?(projectId: string, collapsed: boolean): Promise<Session>
+  projectUpdateAppearance?(
+    projectId: string,
+    name?: string | null,
+    icon?: string | null,
+    color?: string | null,
+  ): Promise<Session>
+  projectRenameWorktree?(projectId: string, worktreePath: string, name: string): Promise<Session>
   projectCreateWorktree?(projectId: string, branch: string, baseRef?: string): Promise<Session>
   projectRemoveWorktree?(projectId: string, worktreePath: string, force?: boolean): Promise<Session>
   projectRemove?(projectId: string): Promise<Session>
@@ -215,6 +222,14 @@ export const workspaceClient: WorkspaceClient = {
   sessionSave: (patch: WorkspaceStatePatch) => commands.sessionSave(patch),
   projectSetCollapsed: (projectId: string, collapsed: boolean) =>
     commands.projectSetCollapsed(projectId, collapsed),
+  projectUpdateAppearance: (
+    projectId: string,
+    name?: string | null,
+    icon?: string | null,
+    color?: string | null,
+  ) => commands.projectUpdateAppearance(projectId, name ?? null, icon ?? null, color ?? null),
+  projectRenameWorktree: (projectId: string, worktreePath: string, name: string) =>
+    commands.projectRenameWorktree(projectId, worktreePath, name),
   projectCreateWorktree: (projectId: string, branch: string, baseRef?: string) =>
     commands.projectCreateWorktree(projectId, branch, baseRef ?? null),
   projectRemoveWorktree: (projectId: string, worktreePath: string, force?: boolean) =>

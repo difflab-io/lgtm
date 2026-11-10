@@ -7,10 +7,12 @@ export interface TreeNode {
   label: string
   description?: string
   branch?: boolean
+  renamable?: boolean
   children?: TreeNode[]
 }
 
 export interface TreeViewProps {
+  version?: number
   refresh?: { path: string; version: number }
   pendingNode?: TreeNode
   parentValue?: string

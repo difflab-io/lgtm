@@ -51,6 +51,10 @@ export const commands = {
 	sessionSave: (patch: WorkspaceStatePatch) => __TAURI_INVOKE<Session>("session_save", { patch }),
 	/**  Collapses or expands child worktrees for `project_id` in the `default` session. */
 	projectSetCollapsed: (projectId: string, collapsed: boolean) => __TAURI_INVOKE<Session>("project_set_collapsed", { projectId, collapsed }),
+	/**  Updates custom `name`, `icon`, and `color` metadata for `project_id` in the `default` session. */
+	projectUpdateAppearance: (projectId: string, name: string | null, icon: string | null, color: string | null) => __TAURI_INVOKE<Session>("project_update_appearance", { projectId, name, icon, color }),
+	/**  Renames a worktree display label under `project_id` without changing its Git branch name. */
+	projectRenameWorktree: (projectId: string, worktreePath: string, name: string) => __TAURI_INVOKE<Session>("project_rename_worktree", { projectId, worktreePath, name }),
 	/**  Creates a `Managed` Git worktree under `~/.lgtm/worktrees/<project>/<branch-slug>` and attaches it to the `default` session. */
 	projectCreateWorktree: (projectId: string, branch: string, baseRef: string | null) => __TAURI_INVOKE<Session>("project_create_worktree", { projectId, branch, baseRef }),
 	/**  Removes a worktree from `project_id` (deleting disk storage when `Managed` and only detaching when `External`). */
@@ -417,7 +421,7 @@ description?: string | null;
 /**  Shell command executed by `mise run`. */
 run: string };
 
-/**  Editor tab persisted in [`WorkspaceSessionState`] after passing the retention filter. */
+/**  Editor tab persisted in [`crate::WorkspaceSessionState`] after passing the retention filter. */
 export type PersistedTab = {
 	/**  Workspace-relative file path or config path. */
 	path: string,
@@ -441,6 +445,10 @@ export type Project = {
 	branch: string | null,
 	/**  Canonical shared `.git` directory path (`commondir`), if `root_path` is a Git repository. */
 	gitCommonDir: string | null,
+	/**  Optional custom icon identifier for `ProjectsPane` (defaults to `"box"` in the UI when `None`). */
+	icon?: string | null,
+	/**  Optional custom color token identifier for `ProjectsPane` (defaults to neutral foreground when `None`). */
+	color?: string | null,
 	/**  Whether child worktrees are collapsed in `ProjectsPane`. */
 	collapsed: boolean,
 	/**  Open linked Git worktrees attached underneath this project. */
@@ -482,7 +490,7 @@ export type SidebarWidget =
 /**  Open projects and collapsible worktrees tree (`ProjectsPane.svelte`). */
 "projects";
 
-/**  Candidate editor tab evaluated against the session retention filter (`edited || last_opened`). */
+/**  Candidate editor tab evaluated against the session retention policy (`edited || last_opened`). */
 export type TabCandidate = {
 	/**  Workspace-relative file path or config path (`~/.lgtm/config.json` / `.lgtm/config.json`). */
 	path: string,
@@ -569,7 +577,7 @@ export type WorkspaceStatePatch = {
 	sidebarWidget: SidebarWidget | null,
 };
 
-/**  Linked Git worktree checkout grouped underneath a parent [`Project`]. */
+/**  Linked Git worktree checkout grouped underneath a parent [`crate::Project`]. */
 export type Worktree = {
 	/**  Canonical filesystem path of the linked worktree directory. */
 	path: string,

@@ -63,10 +63,26 @@ export class HotkeyService {
     ),
     'Mod+b': leaf(
       'Mod+b',
-      'Toggle Sidebar',
+      'Toggle Explorer Dock',
       'Workspace',
       'workspace.toggleExplorer',
-      'Toggle the left sidebar open or closed',
+      'Toggle the widget dock pane open or closed',
+      ['normal', 'select', 'insert'],
+    ),
+    'Mod+Shift+b': leaf(
+      'Mod+Shift+b',
+      'Toggle Projects Dock',
+      'Projects',
+      'projects.show',
+      'Toggle the Projects dock pane open or closed',
+      ['normal', 'select', 'insert'],
+    ),
+    'Mod+Shift+B': leaf(
+      'Mod+Shift+B',
+      'Toggle Projects Dock',
+      'Projects',
+      'projects.show',
+      'Toggle the Projects dock pane open or closed',
       ['normal', 'select', 'insert'],
     ),
     'Mod+,': leaf(
@@ -132,10 +148,10 @@ export class HotkeyService {
         ),
         e: leaf(
           'e',
-          'Toggle Sidebar',
+          'Toggle Explorer Dock',
           'Workspace',
           'workspace.toggleExplorer',
-          'Toggle the left sidebar',
+          'Toggle the widget dock pane open or closed',
         ),
         p: {
           key: 'p',
@@ -146,17 +162,17 @@ export class HotkeyService {
           children: {
             p: leaf(
               'p',
-              'Projects View',
+              'Toggle Projects Dock',
               'Projects',
               'projects.show',
-              'Switch the left sidebar to ProjectsPane',
+              'Toggle the Projects dock pane open or closed',
             ),
             e: leaf(
               'e',
-              'Explorer View',
+              'Toggle Explorer Dock',
               'Projects',
               'projects.showExplorer',
-              'Switch the left sidebar to WorkspaceExplorer',
+              'Toggle the widget dock pane open or closed',
             ),
             a: leaf(
               'a',
@@ -282,10 +298,10 @@ export class HotkeyService {
       {
         value: 'projects',
         command: 'projects',
-        label: 'Show Projects Pane',
-        description: 'Switch the left sidebar to the Projects and Worktrees tree',
+        label: 'Toggle Projects Dock',
+        description: 'Toggle the Projects and Worktrees dock pane open or closed',
         group: 'Projects',
-        shortcut: ['Space', 'p', 'p'],
+        shortcut: ['Mod+Shift+B'],
         onSelect: () => {
           this.showSidebarMode('projects')
         },
@@ -293,10 +309,10 @@ export class HotkeyService {
       {
         value: 'explorer',
         command: 'explorer',
-        label: 'Show Workspace Explorer',
-        description: 'Switch the left sidebar to the active workspace file tree',
+        label: 'Toggle Explorer Dock',
+        description: 'Toggle the active workspace widget dock pane open or closed',
         group: 'Projects',
-        shortcut: ['Space', 'p', 'e'],
+        shortcut: ['Mod+B'],
         onSelect: () => {
           this.showSidebarMode('explorer')
         },
@@ -406,10 +422,10 @@ export class HotkeyService {
     return true
   }
 
-  /** Toggles the left sidebar and moves focus to it when opened. */
+  /** Toggles the Explorer widget pane and moves focus to it when opened. */
   toggleExplorer(): boolean {
-    this.sidebarOpen = !this.sidebarOpen
-    if (this.sidebarOpen) {
+    this.workspace.toggleExplorerPane()
+    if (this.workspace.explorerOpen) {
       void tick().then(() => {
         getDocumentWhichKeyController()?.focusPane('workspace')
       })
@@ -417,13 +433,23 @@ export class HotkeyService {
     return true
   }
 
-  /** Switches the left sidebar between `explorer` and `projects` and focuses the sidebar pane. */
+  /** Toggles the `explorer` or `projects` dock pane independently and focuses it when opened. */
   showSidebarMode(mode: 'explorer' | 'projects'): boolean {
-    if (!this.sidebarOpen) this.sidebarOpen = true
-    this.workspace.setSidebarWidget(mode)
-    void tick().then(() => {
-      getDocumentWhichKeyController()?.focusPane('workspace')
-    })
+    if (mode === 'projects') {
+      this.workspace.toggleProjectsPane()
+      if (this.workspace.projectsOpen) {
+        void tick().then(() => {
+          getDocumentWhichKeyController()?.focusPane('projects')
+        })
+      }
+    } else {
+      this.workspace.toggleExplorerPane()
+      if (this.workspace.explorerOpen) {
+        void tick().then(() => {
+          getDocumentWhichKeyController()?.focusPane('workspace')
+        })
+      }
+    }
     return true
   }
 

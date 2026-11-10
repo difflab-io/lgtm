@@ -8,15 +8,15 @@
 
 ### Functional
 
-- Reactive workspace and editor state (`WorkspaceService`): Browse workspace directories, manage open file and read-only diagnostics tabs, debounce editor buffer saves (`150ms`), open global (`~/.lgtm/config.json`) and local (`.lgtm/config.json`) configuration files as standard editor tabs (`Cmd+,` and `Cmd+Shift+,`), refresh clean config tabs on external updates, and flush pending saves on tab switch, workspace switch, or application exit.
-- Language server status, diagnostics, and navigation (`LspService`): Track per-language server readiness (`Starting`, `Ready`, `Unavailable`, `Stopped`) and file diagnostics (`lsp-status` and `lsp-diagnostics` events), forward live buffer edits (`lsp_did_change`), resolve hover documentation (`lsp_hover`) and go-to-definition locations (`lsp_goto_definition`), and open or refresh read-only diagnostics buffer tabs.
-- File-driven and command-driven user settings (`SettingsService`): Load the resolved configuration snapshot (`config_get`), apply scoped partial updates (`config_update`), react to live `config-updated` events emitted whenever `~/.lgtm/config.json` or `<workspace>/.lgtm/config.json` is saved, synchronize the active color theme (`system`, `light`, `dark`), expose editor (`lineWrapping`) and modal keybinding (`commandStyle`, `preset`, `leaderOnly`, `paneOutline`, `clickToInsert`) preferences, and persist recent workspace roots in `localStorage`.
-- Modal keybindings and command surfaces (`HotkeyService`): Register app-level `WhichKey` leader bindings (`Space`), global shortcuts (`Mod+k`, `Mod+,`, `Mod+Shift+,`), and the hierarchical `CommandNode[]` catalog shared by `CommandMenu` (`:` and `Mod+k` when `commandStyle == "menu"`) and `CommandPalette` (`Mod+k` when `commandStyle == "palette"`). See [Modal keybindings architecture](keybindings.md).
+- Browse workspace directories and projects, manage open file and read-only diagnostics tabs, debounce editor buffer saves (`150ms`), open global (`~/.lgtm/config.json`) and local (`.lgtm/config.json`) configuration files as standard editor tabs (`Mod+,` and `Mod+Shift+,`), and flush pending saves on tab switch, workspace switch, or application exit.
+- Track per-language server readiness (`Starting`, `Ready`, `Unavailable`, `Stopped`) and file diagnostics, forward live buffer edits, resolve hover documentation and go-to-definition locations, and open or refresh read-only diagnostics buffer tabs.
+- Load and live-reload user settings from `~/.lgtm/config.json` and `<workspace>/.lgtm/config.json`, synchronize the active color theme (`system`, `light`, `dark`) with the document root and native Tauri window chrome, expose editor preferences (`lineWrapping`), and persist recent workspace roots.
+- Provide modal keybindings, `WhichKey` leader chords (`Space`), a searchable keybinding explorer (`Space ?`), a command palette and colon command menu (`Mod+K` and `:`), independent dock pane toggles (`Mod+B` for the Explorer widget dock and `Mod+Shift+B` for the Projects dock), and pane-scoped `TreeView` navigation and actions.
 
 ### Non-Functional
 
-- Single-responsibility services: Keep `WorkspaceService`, `LspService`, and `SettingsService` focused on their respective domains; wire cross-service event subscriptions (`lsp-status`, `lsp-diagnostics`, `config-updated`, `workspace-quit-requested`) and keyboard shortcuts in `Shell.svelte`.
-- Generated IPC type parity: Consume Specta-generated TypeScript bindings (`src/lib/gen/bindings.ts`) inside `WorkspaceClient` so frontend services and Rust Tauri commands share compile-time contract checks.
+- Keep each frontend service focused on a single domain and wire cross-service event subscriptions and keyboard shortcuts in the top-level shell entrypoint.
+- Enforce compile-time IPC contract parity between frontend services and Rust Tauri commands.
 
 ## Design
 
@@ -79,8 +79,9 @@ flowchart TB
     SET_SVC --> WS_CLIENT
 ```
 
-- `Shell.svelte`: Application entry point that instantiates `WorkspaceService`, `LspService`, and `SettingsService`, subscribes to Tauri backend events (`lsp-status`, `lsp-diagnostics`, `config-updated`, `workspace-quit-requested`), synchronizes OS/window color scheme media queries with `SettingsService.theme`, and binds global shortcuts (`Cmd+,` for global config, `Cmd+Shift+,` for local project config).
-- `WorkspaceService` (`workspaceService.svelte.ts`): Owns the active workspace tree, expanded directories, open editor tabs, dirty buffer tracking, and `150ms` debounced save timer; delegates LSP notifications to `LspService` and loads initial settings through `SettingsService`.
+- `Shell.svelte`: Application entry point that instantiates `WorkspaceService`, `LspService`, `SettingsService`, and `HotkeyService`, mounts `<WhichKey>` and `<CommandSurface>` from `@cloudvoyant/helical-svelte`, keeps `#projects-dock-pane` (`ProjectsPane.svelte`, `180px`) and `#explorer-dock-pane` (`WorkspaceExplorer.svelte`, `236px`) mounted via `hidden` inside the left dock, subscribes to Tauri backend events (`lsp-status`, `lsp-diagnostics`, `config-updated`, `session-updated`, `workspace-quit-requested`), and synchronizes OS/window color scheme media queries with `SettingsService.theme`.
+- `HotkeyService` (`hotkeyService.svelte.ts`): Registers the application keymap (`Mod+S`, `Mod+K`, `Mod+B` for the Explorer widget dock, `Mod+Shift+B` for the Projects dock, `Mod+,`, `Mod+Shift+,`, `:`, and `Space` leader chords) and shared `CommandNode` catalog (`:projects`, `:explorer`, `:project-add`, `:worktree-new`, `:worktree-remove`, `:write`, `:settings`, `:settings-project`) with Helical UI's `WhichKeyController`.
+- `WorkspaceService` (`workspaceService.svelte.ts`): Owns the active workspace tree, expanded directories, independent `projectsOpen` and `explorerOpen` dock states, open editor tabs, dirty buffer tracking, and `150ms` debounced save timer; delegates LSP notifications to `LspService` and loads initial settings through `SettingsService`.
 - `LspService` (`lspService.svelte.ts`): Owns reactive language server status maps and per-file UTF-16 diagnostic arrays, formats status indicators for `LspStatusMenu.svelte`, and queries hover/definition/diagnostics buffers via `WorkspaceClient`.
 - `SettingsService` (`settingsService.svelte.ts`): Owns the latest `ResolvedConfigSnapshot` from `lgtm-config`, derives `theme` (`ThemeMode`), `lineWrapping` (`LineWrap`), `activeRoot`, and `recentRoots`, and updates `knownRoots` in `localStorage`.
 - `WorkspaceClient` (`workspaceClient.ts`): Defines the transport-agnostic `WorkspaceClient` interface and `TauriWorkspaceClient` implementation over `@tauri-apps/api/core` and `src/lib/gen/bindings.ts`.
@@ -179,7 +180,9 @@ flowchart TD
 | `SettingsService.update` | `update(patch: LgtmConfigPatch, scope?: ConfigScope): Promise<ResolvedConfigSnapshot>` | Persist a partial `LgtmConfigPatch` to global or project `config.json` via `config_update` and apply the returned snapshot. |
 | `SettingsService.handleUpdated` | `handleUpdated(next: ResolvedConfigSnapshot): void` | Apply a live `config-updated` event payload when `~/.lgtm/config.json` or `.lgtm/config.json` is saved. |
 | `SettingsService.rememberRoot` | `rememberRoot(root: string): void` | Prepend `root` to `knownRoots` and persist the MRU list to `localStorage`. |
-| `HotkeyService.keymap` / `commandItems` | `readonly keymap: Record<string, WhichKeyNode>` / `get commandItems(): CommandNode[]` | Return the `WhichKey` binding tree and reactive hierarchical `CommandMenu` / `CommandPalette` command catalog. |
+| `HotkeyService.toggleExplorer` | `toggleExplorer(): boolean` | Toggle the Explorer widget dock pane (`#explorer-dock-pane`, `Mod+B` / `Space e`) and focus `workspace` when opened. |
+| `HotkeyService.showSidebarMode` | `showSidebarMode(mode: 'explorer' \| 'projects'): boolean` | Independently toggle the Projects dock (`#projects-dock-pane`, `Mod+Shift+B` / `Space p p`) or Explorer widget dock (`#explorer-dock-pane`, `Mod+B` / `Space p e`) and focus the opened pane. |
+| `HotkeyService.openConfiguredCommandSurface` / `openColonCommandMenu` | `openConfiguredCommandSurface(): boolean` / `openColonCommandMenu(): boolean` | Open the Helical UI `CommandMenu` / `CommandPalette` (`Mod+K` or `Space :`) or the bottom-docked colon `CommandMenu` (`:`). |
 
 ## References
 

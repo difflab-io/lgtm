@@ -81,14 +81,15 @@
                   if (!selectableBranches) return
                   if (
                     event.target instanceof Element &&
-                    (event.target.closest('[data-branch-toggle]') ||
-                      event.target.closest('[data-part="node-rename-input"]'))
+                    event.target.closest('[data-part="node-rename-input"]')
                   ) {
                     return
                   }
                   event.preventDefault()
                   event.stopPropagation()
-                  onselect?.(node.value)
+                  event.stopImmediatePropagation()
+                  if (state().expanded) tree().collapse([node.value])
+                  else tree().expand([node.value])
                 }}
               >
                 <div class="flex min-w-0 flex-1 items-center gap-1.5">
@@ -105,12 +106,6 @@
                     aria-label={state().expanded
                       ? `Collapse ${node.label}`
                       : `Expand ${node.label}`}
-                    onclick={(event) => {
-                      event.preventDefault()
-                      event.stopPropagation()
-                      if (state().expanded) tree().collapse([node.value])
-                      else tree().expand([node.value])
-                    }}
                   >
                     {#if state().expanded}
                       <ChevronDown size={12} strokeWidth={1.5} />
@@ -137,10 +132,7 @@
           {#if errors[node.value]}<p class={treeViewMessageVariants()} role="alert">
               {errors[node.value]} Expand to retry.
             </p>{/if}
-          <ArkTreeView.BranchContent
-            class={treeViewBranchContentBase}
-            hidden={selectableBranches ? (node.children?.length ?? 0) === 0 : undefined}
-          >
+          <ArkTreeView.BranchContent class={treeViewBranchContentBase}>
             <ArkTreeView.BranchIndentGuide class={treeViewIndentGuideBase} />
             {#each node.children ?? [] as child, index (child.value)}
               <TreeNodeView

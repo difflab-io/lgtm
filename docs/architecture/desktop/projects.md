@@ -157,6 +157,8 @@ sequenceDiagram
 | `session_get` | UI -> Host | `(sessionId?: string) -> Session` | Load `~/.lgtm/sessions/default.json` (including `sidebar_widget`, `projects`, and per-workspace `WorkspaceSessionState`). |
 | `session_save` | UI -> Host | `(patch: WorkspaceStatePatch) -> Session` | Save the active `sidebar_widget`, `expanded_dirs`, and filtered `edited \|\| last_opened` tabs for a workspace to `default.json`. |
 | `project_set_collapsed` | UI -> Host | `(projectId: string, collapsed: boolean) -> Session` | Collapse or expand the linked worktrees under a project in `default.json`. |
+| `project_update_appearance` | UI -> Host | `(projectId: string, name?: string \| null, icon?: string \| null, color?: string \| null) -> Session` | Update a project's custom display name, icon, and color in `default.json`. |
+| `project_rename_worktree` | UI -> Host | `(worktreePath: string, name: string) -> Session` | Rename a worktree section's display label in `default.json` without changing its Git branch or checkout path. |
 | `project_create_worktree` | UI -> Host | `(projectId: string, branch: string, baseRef?: string) -> Session` | Create a `Managed` Git worktree under `~/.lgtm/worktrees/<project>/<branch-slug>` and attach it to the session, or return a typed creation error. |
 | `project_remove_worktree` | UI -> Host | `(projectId: string, worktreePath: string, force?: boolean) -> Session` | Remove a worktree from the session, deleting checkout storage on disk when `WorktreeSource::Managed` (or returning a `dirty_worktree` error when `force` is false). |
 | `project_remove` | UI -> Host | `(projectId: string) -> Session` | Remove a project and its workspace states from the `default` session. |
@@ -176,11 +178,12 @@ apps/
 └── lgtm-web/src/lib/
     ├── clients/workspaceClient.ts     Adds session_* and project_* IPC bindings
     ├── services/
+    │   ├── hotkeyService.svelte.ts    Registers global shortcuts (Mod+Shift+B, Mod+B), WhichKey leader chords, and CommandMenu items
     │   └── workspaceService.svelte.ts Owns active workspace file tree, tabs (tab.edited), per-workspace cache, and session/project state
     └── components/
-        ├── Shell.svelte               Swaps WorkspaceExplorer and ProjectsPane in the left Sidebar slot
-        ├── ContentPane.svelte         Renders the bottom-left Explorer / Projects status-bar toggle snippet
-        └── ProjectsPane.svelte        Renders compact collapsible project branches, worktree items, and context menus via TreeView
+        ├── Shell.svelte               Mounts independent #projects-dock-pane and #explorer-dock-pane in the left dock and renders the SidebarFooter icon switcher
+        ├── ContentPane.svelte         Renders the active workspace editor tabs, CodeEditor, and bottom status bar
+        └── ProjectsPane.svelte        Renders compact collapsible project branches, worktree items, context menus, and modal dialogs
 ```
 
 ### Tab Retention State Machine

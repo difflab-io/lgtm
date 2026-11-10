@@ -14,6 +14,7 @@
 
   // Props ---------------------------------------------------------------------
   let {
+    version,
     nodes,
     showHidden = $bindable(false),
     renameValue,
@@ -64,8 +65,9 @@
     collection,
     selectedValue: selected ? [selected] : [],
     ...(expandedValue !== undefined ? { expandedValue } : {}),
+    expandOnClick: !selectableBranches,
     selectionMode: 'single',
-    canRename: () => Boolean(onrename),
+    canRename: (node) => Boolean(onrename) && node.renamable !== false,
     onExpandedChange: ({ expandedValue: next }) => {
       onExpandedChange?.(next)
     },
@@ -115,6 +117,14 @@
     },
   }))
   // Lifecycle -----------------------------------------------------------------
+  let lastVersion: number | undefined
+  $effect(() => {
+    if (version !== undefined && version !== lastVersion) {
+      lastVersion = version
+      loaded = {}
+      errors = {}
+    }
+  })
   $effect(() => {
     const request = refresh
     if (request && loadChildren) {
@@ -134,6 +144,7 @@
   $effect(() => {
     const dirs = expandedValue
     const loader = loadChildren
+    const _v = version
     if (!dirs?.length || !loader) return
     const missing = [...dirs]
       .filter((dir) => !(dir in untrack(() => loaded)))
@@ -318,6 +329,8 @@
         action: ({ event }) => {
           const item = event ? resolveTreeItemTarget(event) : null
           if (!item || !onrename) return false
+          const node = collection.findNode(item.nodeValue)
+          if (!node || node.renamable === false) return false
           getDocumentWhichKeyController(rootEl?.ownerDocument)?.setMode('insert')
           tree().startRenaming(item.nodeValue)
           return true
@@ -332,6 +345,8 @@
         action: ({ event }) => {
           const item = event ? resolveTreeItemTarget(event) : null
           if (!item || !onrename) return false
+          const node = collection.findNode(item.nodeValue)
+          if (!node || node.renamable === false) return false
           getDocumentWhichKeyController(rootEl?.ownerDocument)?.setMode('insert')
           tree().startRenaming(item.nodeValue)
           return true
@@ -543,12 +558,7 @@
 </script>
 
 <div bind:this={rootEl} class={cn(treeViewRootBase, className)}>
-  <ArkTreeView.RootProvider
-    value={tree}
-    class={treeViewRootBase}
-    lazyMount={!selectableBranches}
-    unmountOnExit={!selectableBranches}
-  >
+  <ArkTreeView.RootProvider value={tree} class={treeViewRootBase}>
     <ArkTreeView.Tree aria-label={label} class={treeViewListBase}>
       {#each collection.rootNode.children ?? [] as node, index (node.value)}
         <TreeNodeView

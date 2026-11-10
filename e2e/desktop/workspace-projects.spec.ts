@@ -25,17 +25,72 @@ test.describe('Given a session with open projects', { tag: ['@desktop', '@projec
 
   test.describe('When toggling Explorer and Projects in the footer bar', () => {
     test(
-      'should swap the left sidebar between WorkspaceExplorer and ProjectsPane and persist sidebarWidget across reload',
+      'should toggle the narrow Projects dock pane alongside WorkspaceExplorer without re-rendering and persist sidebarWidget across reload',
       { tag: '@smoke' },
       async ({ page, workspace }) => {
         // Arrange
-        const explorerBtn = page.getByRole('button', { name: 'Explorer view', exact: true })
-        const projectsBtn = page.getByRole('button', { name: 'Projects view', exact: true })
+        const sidebarFooter = page.locator('#workspace-sidebar [data-sidebar="footer"]')
+        const footerButtons = sidebarFooter.locator('button')
+        const firstButtonLabel = await footerButtons.nth(0).getAttribute('aria-label')
+        const secondButtonLabel = await footerButtons.nth(1).getAttribute('aria-label')
+        const explorerBtn = sidebarFooter.getByRole('button', {
+          name: 'Explorer view',
+          exact: true,
+        })
+        const projectsBtn = sidebarFooter.getByRole('button', {
+          name: 'Projects view',
+          exact: true,
+        })
         await expect(explorerBtn).toHaveAttribute('aria-pressed', 'true')
+        await expect(projectsBtn).toHaveAttribute('aria-pressed', 'false')
+        await expect(explorerBtn).toHaveText('')
+        await expect(projectsBtn).toHaveText('')
         await expect(page.getByRole('tree', { name: 'Workspace files' })).toBeVisible()
+        await page.evaluate(() => {
+          const el = document.querySelector('#explorer-dock-pane [role="tree"]')
+          if (el) (el as HTMLElement).dataset.instanceMarker = 'persisted-explorer'
+        })
 
         // Act
         await projectsBtn.click()
+        const projectsWidth = await page
+          .getByTestId('projects-dock-pane')
+          .evaluate((el) => el.getBoundingClientRect().width)
+        const explorerWidth = await page
+          .getByTestId('explorer-dock-pane')
+          .evaluate((el) => el.getBoundingClientRect().width)
+        await page.evaluate(() => {
+          const el = document.querySelector('#projects-dock-pane [role="tree"]')
+          if (el) (el as HTMLElement).dataset.instanceMarker = 'persisted-projects'
+        })
+        await projectsBtn.click()
+        await projectsBtn.click()
+        await page.keyboard.press('ControlOrMeta+b')
+        const projectsStillVisibleOnSidebarToggle = await page
+          .getByRole('tree', { name: 'Projects' })
+          .isVisible()
+        const explorerHiddenOnSidebarToggle = !(await page
+          .getByRole('tree', { name: 'Workspace files' })
+          .isVisible())
+        await page.keyboard.press('ControlOrMeta+b')
+        await page.keyboard.press('ControlOrMeta+Shift+B')
+        const projectsHiddenOnProjectsShortcut = !(await page
+          .getByRole('tree', { name: 'Projects' })
+          .isVisible())
+        const explorerStillVisibleOnProjectsShortcut = await page
+          .getByRole('tree', { name: 'Workspace files' })
+          .isVisible()
+        await page.keyboard.press('ControlOrMeta+Shift+B')
+        const projectsMarkerAfterToggle = await page.evaluate(
+          () =>
+            (document.querySelector('#projects-dock-pane [role="tree"]') as HTMLElement | null)
+              ?.dataset.instanceMarker ?? null,
+        )
+        const explorerMarkerAfterToggle = await page.evaluate(
+          () =>
+            (document.querySelector('#explorer-dock-pane [role="tree"]') as HTMLElement | null)
+              ?.dataset.instanceMarker ?? null,
+        )
         await expect
           .poll(async () => {
             const sessionRaw = await readFile(
@@ -48,8 +103,19 @@ test.describe('Given a session with open projects', { tag: ['@desktop', '@projec
         await page.reload()
 
         // Assert
+        expect(firstButtonLabel).toBe('Projects view')
+        expect(secondButtonLabel).toBe('Explorer view')
+        expect(projectsWidth).toBeLessThan(explorerWidth)
+        expect(projectsStillVisibleOnSidebarToggle).toBe(true)
+        expect(explorerHiddenOnSidebarToggle).toBe(true)
+        expect(projectsHiddenOnProjectsShortcut).toBe(true)
+        expect(explorerStillVisibleOnProjectsShortcut).toBe(true)
+        expect(projectsMarkerAfterToggle).toBe('persisted-projects')
+        expect(explorerMarkerAfterToggle).toBe('persisted-explorer')
         await expect(projectsBtn).toHaveAttribute('aria-pressed', 'true')
+        await expect(explorerBtn).toHaveAttribute('aria-pressed', 'true')
         await expect(page.getByRole('tree', { name: 'Projects' })).toBeVisible()
+        await expect(page.getByRole('tree', { name: 'Workspace files' })).toBeVisible()
         await expect(page.getByRole('button', { name: 'Add project', exact: true })).toBeVisible()
       },
     )
@@ -61,7 +127,7 @@ test.describe('Given a project with linked worktrees', { tag: ['@desktop', '@pro
 
   test.describe('When collapsing and expanding the project branch in TreeView', () => {
     test(
-      'should collapse and expand child worktree items using ArkTreeView.Branch while keeping an active linked worktree visible',
+      'should collapse and expand child worktree items using ArkTreeView.Branch without switching the active workspace',
       { tag: '@smoke' },
       async ({ page, workspace }) => {
         // Arrange
@@ -89,31 +155,46 @@ test.describe('Given a project with linked worktrees', { tag: ['@desktop', '@pro
         const projectItem = entry(page, repoDir)
         const wtOneItem = entry(page, wtOne)
         const wtTwoItem = entry(page, wtTwo)
+        const activeBeforeCollapse = workspace.root
 
         // Act
+        await projectItem.locator('[data-part="branch-control"]').click()
+        await wtOneItem.waitFor({ state: 'hidden' })
+        await wtTwoItem.waitFor({ state: 'hidden' })
+        const wtOneHiddenWhenRowCollapsed = !(await wtOneItem.isVisible())
+        await projectItem.locator('[data-part="branch-control"]').click()
+        await wtOneItem.waitFor({ state: 'visible' })
         await projectItem
           .getByRole('button', { name: `Collapse ${basename(repoDir)}`, exact: true })
           .click()
-        await wtOneItem.waitFor({ state: 'detached' })
-        const wtOneHiddenWhenCollapsed = (await wtOneItem.count()) === 0
-        const wtTwoVisibleWhenActive = await wtTwoItem.isVisible()
-        await projectItem.locator('[data-part="branch-control"]').first().click()
-        await wtTwoItem.waitFor({ state: 'detached' })
-        const wtTwoHiddenAfterPrimarySelected = (await wtTwoItem.count()) === 0
+        await wtOneItem.waitFor({ state: 'hidden' })
+        await wtTwoItem.waitFor({ state: 'hidden' })
+        const wtOneHiddenWhenCollapsed = !(await wtOneItem.isVisible())
+        const wtTwoHiddenWhenCollapsed = !(await wtTwoItem.isVisible())
+        const activeAfterCollapse = workspace.root
         await projectItem
           .getByRole('button', { name: `Expand ${basename(repoDir)}`, exact: true })
           .click()
+        await wtOneItem.waitFor({ state: 'visible' })
+        await projectItem.locator('[data-part="branch-control"]').click({ button: 'right' })
+        await page.getByRole('menuitem', { name: 'Collapse Worktrees', exact: true }).click()
+        await wtOneItem.waitFor({ state: 'hidden' })
+        const hiddenAfterContextCollapse = !(await wtOneItem.isVisible())
+        await projectItem.locator('[data-part="branch-control"]').click({ button: 'right' })
+        await page.getByRole('menuitem', { name: 'Expand Worktrees', exact: true }).click()
 
         // Assert
+        expect(wtOneHiddenWhenRowCollapsed).toBe(true)
         expect(wtOneHiddenWhenCollapsed).toBe(true)
-        expect(wtTwoVisibleWhenActive).toBe(true)
-        expect(wtTwoHiddenAfterPrimarySelected).toBe(true)
+        expect(wtTwoHiddenWhenCollapsed).toBe(true)
+        expect(activeAfterCollapse).toBe(activeBeforeCollapse)
+        expect(hiddenAfterContextCollapse).toBe(true)
         await expect(wtOneItem).toBeVisible()
         await expect(wtTwoItem).toBeVisible()
       },
     )
 
-    test('should open the right-click ContextMenu on project and worktree nodes for New Worktree, Remove Worktree, and Remove Project', async ({
+    test('should open the right-click ContextMenu on project and worktree nodes for New Worktree, Edit, Rename Worktree, Remove Worktree, and Remove Project', async ({
       page,
       workspace,
     }) => {
@@ -131,17 +212,64 @@ test.describe('Given a project with linked worktrees', { tag: ['@desktop', '@pro
 
       const projectItem = entry(page, repoDir)
       const wtItem = entry(page, wtExt)
+      const defaultIcon = await projectItem
+        .locator('[data-project-icon]')
+        .getAttribute('data-project-icon')
 
       // Act
+      await projectItem.locator('[data-part="branch-control"]').click({ button: 'right' })
+      await page.getByRole('menuitem', { name: 'Edit', exact: true }).click()
+      const editDialog = page.getByRole('dialog', { name: 'Edit Project' })
+      await editDialog.waitFor({ state: 'visible' })
+      const closeButtonVisible = await editDialog
+        .getByRole('button', { name: 'Close', exact: true })
+        .isVisible()
+      await editDialog
+        .getByRole('textbox', { name: 'Project name', exact: true })
+        .fill('Renamed Project')
+      await editDialog.getByRole('radio', { name: 'Color Violet', exact: true }).click()
+      await editDialog.getByRole('radio', { name: 'Icon Rocket', exact: true }).click()
+      await editDialog.getByRole('button', { name: 'Save', exact: true }).click()
+      await editDialog.waitFor({ state: 'hidden' })
+      const updatedProjectLabel = await projectItem.locator('[data-part="branch-text"]').innerText()
+      const updatedIcon = await projectItem
+        .locator('[data-project-icon]')
+        .getAttribute('data-project-icon')
+      const updatedColor = await projectItem
+        .locator('[data-project-color]')
+        .getAttribute('data-project-color')
+
+      await wtItem.click({ button: 'right' })
+      await page.getByRole('menuitem', { name: 'Rename Worktree' }).click()
+      const renameInput = wtItem.getByRole('textbox', { name: 'Name', exact: true })
+      await renameInput.fill('Custom Worktree Section')
+      await renameInput.press('Enter')
+      await page.getByRole('treeitem', { name: /Custom Worktree Section/ }).waitFor()
+      const renamedLabel = await wtItem.innerText()
+      const sessionAfterRename = await readFile(
+        join(workspace.lgtmHomeDir, 'sessions/default.json'),
+        'utf8',
+      )
+
       await wtItem.click({ button: 'right' })
       await page.getByRole('menuitem', { name: 'Remove Worktree', exact: true }).click()
       const removeDialog = page.getByRole('dialog', { name: 'Remove Worktree' })
       await removeDialog.getByRole('button', { name: 'Remove worktree', exact: true }).click()
       await removeDialog.waitFor({ state: 'hidden' })
+      await wtItem.waitFor({ state: 'detached' })
       await projectItem.click({ button: 'right' })
       await page.getByRole('menuitem', { name: 'Remove Project', exact: true }).click()
 
       // Assert
+      expect(defaultIcon).toBe('box')
+      expect(closeButtonVisible).toBe(true)
+      expect(updatedProjectLabel).toContain('Renamed Project')
+      expect(updatedIcon).toBe('rocket')
+      expect(updatedColor).toBe('violet')
+      expect(renamedLabel).toContain('Custom Worktree Section')
+      expect(sessionAfterRename).toContain('"name": "Renamed Project"')
+      expect(sessionAfterRename).toContain('"name": "Custom Worktree Section"')
+      expect(sessionAfterRename).toContain('"branch": "feature/wt-ext"')
       await expect(wtItem).toHaveCount(0)
       await expect(projectItem).toHaveCount(0)
       expect(await exists(wtExt)).toBe(true)
@@ -300,7 +428,6 @@ test.describe(
           await entry(page, 'alpha.md').click()
           await page.getByRole('button', { name: 'Projects view', exact: true }).click()
           await entry(page, firstRoot).click()
-          await page.getByRole('button', { name: 'Explorer view', exact: true }).click()
           await page.reload()
 
           // Assert

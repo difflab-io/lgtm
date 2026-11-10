@@ -12,6 +12,7 @@
 
 <TreeView
   label="Workspace files"
+  version={workspace.treeVersion}
   nodes={workspace.nodes}
   renameValue={workspace.pendingEntry?.path}
   pendingNode={workspace.pendingNode}

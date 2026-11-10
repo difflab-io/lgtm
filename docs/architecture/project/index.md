@@ -11,7 +11,8 @@
 - Resolve any directory path to its parent project root checkout and target worktree.
 - Represent each project by its primary checkout and list open linked Git worktrees underneath it.
 - Group any opened Git worktree under its parent project automatically.
-- Collapse and expand a project's linked worktrees while keeping an active linked worktree visible when collapsed.
+- Collapse and expand a project's linked worktrees in the sidebar.
+- Customize a project's icon and color, and preserve custom worktree display names across refreshes without modifying Git branch names.
 - Create new managed Git worktrees from a project primary checkout using an existing or new branch name, and surface clear errors when creation fails.
 - Distinguish LGTM-managed worktrees from external worktrees so removing a managed worktree deletes its disk checkout (with dirty-checkout confirmation) while removing an external worktree only detaches it from the sidebar.
 
@@ -48,8 +49,8 @@ flowchart TB
     GIT --> FS[("Main Repository Checkout (.git)\nManaged: ~/.lgtm/worktrees/<project>/<branch-slug>\nExternal: ~/.herdr/worktrees/<project>/<branch-slug>")]
 ```
 
-- `ProjectService`: Resolves paths into `Project` and `Worktree` models, refreshes branch metadata, discovers external worktrees, and creates or removes managed worktrees under `~/.lgtm/worktrees/<project>/<branch-slug>` using the same `<project>/<branch-slug>` directory convention as Herdr.
-- `Project`: Represents the primary repository checkout (`id`, `name`, `root_path`, `branch`, `git_common_dir`, `collapsed`, and child `worktrees`).
+- `ProjectService`: Resolves paths into `Project` and `Worktree` models, refreshes branch metadata while preserving custom worktree labels, discovers external worktrees, and creates or removes managed worktrees under `~/.lgtm/worktrees/<project>/<branch-slug>` using the same `<project>/<branch-slug>` directory convention as Herdr.
+- `Project`: Represents the primary repository checkout (`id`, `name`, `root_path`, `branch`, `git_common_dir`, `icon`, `color`, `collapsed`, and child `worktrees`).
 - `Worktree`: Represents a linked Git worktree checkout (`path`, `name`, `branch`, `source`) grouped under a `Project`.
 - `WorktreeSource`: Classifies a linked worktree as `Managed` (created under `~/.lgtm/worktrees/<project>/<branch-slug>`, where LGTM owns and deletes the checkout storage on removal) or `External` (created outside `~/.lgtm/worktrees`, such as `~/.herdr/worktrees/<project>/<branch-slug>`, where LGTM never deletes disk storage).
 
@@ -63,6 +64,8 @@ classDiagram
         +String root_path
         +Option~String~ branch
         +Option~String~ git_common_dir
+        +Option~String~ icon
+        +Option~String~ color
         +bool collapsed
         +Vec~Worktree~ worktrees
     }
@@ -72,6 +75,8 @@ classDiagram
         +String name
         +Option~String~ branch
         +WorktreeSource source
+        +default_name() String
+        +has_custom_name() bool
     }
 
     class WorktreeSource {
