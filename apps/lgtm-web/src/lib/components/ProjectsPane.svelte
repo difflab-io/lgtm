@@ -285,16 +285,10 @@
         </DialogDescription>
       </DialogHeader>
       <div class="flex flex-col gap-2.5">
-        {#if workspace.removeWorktreeConfirm.source === 'managed'}
-          <p class="text-[11px] leading-snug text-muted-foreground">
-            This managed worktree will be deleted from disk ({workspace.removeWorktreeConfirm
-              .worktreePath}).
-          </p>
-        {:else}
-          <p class="text-[11px] leading-snug text-muted-foreground">
-            This external worktree will be detached from the session without deleting files on disk.
-          </p>
-        {/if}
+        <p class="text-[11px] leading-snug text-muted-foreground">
+          This managed worktree will be deleted from disk ({workspace.removeWorktreeConfirm
+            .worktreePath}).
+        </p>
         {#if workspace.removeWorktreeConfirm.error}
           <p class="text-[11px] leading-snug text-warn" role="alert">
             {workspace.removeWorktreeConfirm.error}

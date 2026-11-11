@@ -8,7 +8,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use lgtm_rsutils::add_worktree;
 use lgtm_session::{
     LgtmSessionError, SessionService, SidebarWidget, TabCandidate, WorkspaceStatePatch,
 };
@@ -43,7 +42,7 @@ impl<'a> MakeWriter<'a> for BufferWriter {
     }
 }
 
-/// Isolated session test fixture with `.lgtm/sessions`, `.lgtm/worktrees`, `.herdr/worktrees`, and a Git repository:
+/// Isolated session test fixture with `.lgtm/sessions`, `.lgtm/worktrees`, and a Git repository:
 ///
 /// ```text
 /// <tmp>/
@@ -52,11 +51,7 @@ impl<'a> MakeWriter<'a> for BufferWriter {
 /// │   │   └── default.json         (Persisted Session JSON)
 /// │   └── worktrees/
 /// │       └── lgtm/
-/// │           └── <branch-slug>/   (WorktreeSource::Managed)
-/// ├── .herdr/
-/// │   └── worktrees/
-/// │       └── lgtm/
-/// │           └── <branch-slug>/   (WorktreeSource::External)
+/// │           └── <branch-slug>/   (Managed Worktree)
 /// └── lgtm/                        (Project.root_path, branch = "main")
 ///     ├── .git/
 ///     └── README.md
@@ -412,23 +407,11 @@ mod given_a_project_exists_in_session {
         use super::*;
 
         #[test]
-        fn should_delete_managed_worktree_storage_detach_external_worktrees_and_remove_project_state()
-         {
+        fn should_delete_managed_worktree_storage_and_remove_project_state() {
             // Arrange
             let fixture = SessionTestFixture::empty();
             let repo = fixture.init_git_repo("lgtm");
-            let ext_dir = fixture
-                .tmp
-                .path()
-                .join(".herdr")
-                .join("worktrees")
-                .join("lgtm")
-                .join("feature-ext");
-            let ext_entry = add_worktree(&repo, &ext_dir, "worktree/feature-ext", None).unwrap();
-            let s1 = fixture
-                .service
-                .open_workspace("default", &ext_entry.path)
-                .unwrap();
+            let s1 = fixture.service.open_workspace("default", &repo).unwrap();
             let project_id = s1.projects[0].id;
             let s2 = fixture
                 .service
@@ -439,7 +422,7 @@ mod given_a_project_exists_in_session {
             let initial_state = serde_json::to_string_pretty(&s2).unwrap();
 
             // Act
-            let (dirty_err, s3, s4, s5) = fixture.with_verbose_logger(|| {
+            let (dirty_err, s3, s4) = fixture.with_verbose_logger(|| {
                 let dirty_err = fixture
                     .service
                     .remove_project_worktree("default", project_id, &mgd_path, false)
@@ -450,13 +433,9 @@ mod given_a_project_exists_in_session {
                     .unwrap();
                 let s4 = fixture
                     .service
-                    .remove_project_worktree("default", project_id, &ext_entry.path, false)
-                    .unwrap();
-                let s5 = fixture
-                    .service
                     .remove_project("default", project_id)
                     .unwrap();
-                (dirty_err, s3, s4, s5)
+                (dirty_err, s3, s4)
             });
 
             // Assert
@@ -466,16 +445,15 @@ mod given_a_project_exists_in_session {
             ));
             assert!(!mgd_path.exists());
             assert_eq!(s3.active_workspace_root, repo.to_string_lossy().as_ref());
-            assert!(s4.projects[0].worktrees.is_empty());
-            assert!(ext_entry.path.exists());
-            assert!(s5.projects.is_empty());
-            assert!(s5.workspaces.is_empty());
-            assert!(s5.active_workspace_root.is_empty());
+            assert!(s3.projects[0].worktrees.is_empty());
+            assert!(s4.projects.is_empty());
+            assert!(s4.workspaces.is_empty());
+            assert!(s4.active_workspace_root.is_empty());
 
-            let final_state = serde_json::to_string_pretty(&s5).unwrap();
+            let final_state = serde_json::to_string_pretty(&s4).unwrap();
             fixture.write_artifact(
                 "given_a_project_exists_in_session",
-                "should_delete_managed_worktree_storage_detach_external_worktrees_and_remove_project_state",
+                "should_delete_managed_worktree_storage_and_remove_project_state",
                 &initial_state,
                 &final_state,
             );

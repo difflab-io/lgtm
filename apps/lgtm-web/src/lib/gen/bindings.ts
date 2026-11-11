@@ -57,7 +57,7 @@ export const commands = {
 	projectRenameWorktree: (projectId: string, worktreePath: string, name: string) => __TAURI_INVOKE<Session>("project_rename_worktree", { projectId, worktreePath, name }),
 	/**  Creates a `Managed` Git worktree under `~/.lgtm/worktrees/<project>/<branch-slug>` and attaches it to the `default` session. */
 	projectCreateWorktree: (projectId: string, branch: string, baseRef: string | null) => __TAURI_INVOKE<Session>("project_create_worktree", { projectId, branch, baseRef }),
-	/**  Removes a worktree from `project_id` (deleting disk storage when `Managed` and only detaching when `External`). */
+	/**  Removes a managed worktree from `project_id` and deletes its checkout directory on disk. */
 	projectRemoveWorktree: (projectId: string, worktreePath: string, force: boolean | null) => __TAURI_INVOKE<Session>("project_remove_worktree", { projectId, worktreePath, force }),
 	/**  Removes `project_id` and its remembered workspace states from the `default` session. */
 	projectRemove: (projectId: string) => __TAURI_INVOKE<Session>("project_remove", { projectId }),
@@ -577,22 +577,13 @@ export type WorkspaceStatePatch = {
 	sidebarWidget: SidebarWidget | null,
 };
 
-/**  Linked Git worktree checkout grouped underneath a parent [`crate::Project`]. */
+/**  Managed Git worktree checkout grouped underneath a parent [`crate::Project`]. */
 export type Worktree = {
-	/**  Canonical filesystem path of the linked worktree directory. */
+	/**  Canonical filesystem path of the managed worktree directory. */
 	path: string,
 	/**  Display label for the worktree (branch name stripped of `worktree/`, or directory basename). */
 	name: string,
 	/**  Checked-out Git branch name, if not detached. */
 	branch: string | null,
-	/**  Whether this worktree's disk storage is managed by LGTM or external. */
-	source: WorktreeSource,
 };
-
-/**  Ownership classification determining whether LGTM manages and deletes a worktree's disk storage. */
-export type WorktreeSource = 
-/**  Created and owned by LGTM under `~/.lgtm/worktrees/<project>/<branch-slug>`. */
-"managed" | 
-/**  Created outside `~/.lgtm/worktrees` (such as `~/.herdr/worktrees/<project>/<branch-slug>`). */
-"external";
 

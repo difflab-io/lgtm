@@ -8,8 +8,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use lgtm_project::{LgtmProjectError, Project, ProjectService, WorktreeSource};
-use lgtm_rsutils::add_worktree;
+use lgtm_project::{LgtmProjectError, Project, ProjectService};
 use tempfile::TempDir;
 use tracing_subscriber::fmt::MakeWriter;
 
@@ -40,18 +39,14 @@ impl<'a> MakeWriter<'a> for BufferWriter {
     }
 }
 
-/// Isolated project test fixture with temporary `.lgtm/worktrees`, `.herdr/worktrees`, and an optional Git repository:
+/// Isolated project test fixture with temporary `.lgtm/worktrees` and an optional Git repository:
 ///
 /// ```text
 /// <tmp>/
 /// ├── .lgtm/
 /// │   └── worktrees/
 /// │       └── lgtm/
-/// │           └── <branch-slug>/   (WorktreeSource::Managed)
-/// ├── .herdr/
-/// │   └── worktrees/
-/// │       └── lgtm/
-/// │           └── <branch-slug>/   (WorktreeSource::External)
+/// │           └── <branch-slug>/   (Managed Worktree)
 /// └── lgtm/                        (Project.root_path, branch = "main")
 ///     ├── .git/
 ///     └── README.md
@@ -206,48 +201,48 @@ mod given_no_project_exists {
 mod given_a_git_project_exists {
     use super::*;
 
-    mod when_resolving_primary_and_external_worktrees {
+    mod when_resolving_primary_and_managed_worktrees {
         use super::*;
 
         #[test]
-        fn should_group_linked_worktrees_under_parent_project_and_classify_ownership() {
+        fn should_group_managed_worktrees_under_parent_project() {
             // Arrange
             let fixture = ProjectTestFixture::empty();
             let main_repo = fixture.init_git_repo("lgtm");
-            let herdr_wt = fixture
-                .tmp
-                .path()
-                .join(".herdr")
-                .join("worktrees")
-                .join("lgtm")
-                .join("feature-herdr");
-            let ext_entry =
-                add_worktree(&main_repo, &herdr_wt, "worktree/feature-herdr", None).unwrap();
+            let (primary_project, _) = fixture.service.resolve_project(&main_repo).unwrap();
+            let created_wt = fixture
+                .service
+                .create_worktree(&primary_project, "worktree/feature-managed", None)
+                .unwrap();
             let initial_state = format!(
-                "main_repo: {}\nexternal_worktree: {}",
+                "main_repo: {}\nmanaged_worktree: {}",
                 main_repo.display(),
-                ext_entry.path.display()
+                created_wt.path
             );
 
             // Act
-            let (project_from_ext, resolved_ext) = fixture
-                .with_verbose_logger(|| fixture.service.resolve_project(&ext_entry.path).unwrap());
+            let (project_from_wt, resolved_wt) = fixture.with_verbose_logger(|| {
+                fixture
+                    .service
+                    .resolve_project(Path::new(&created_wt.path))
+                    .unwrap()
+            });
 
             // Assert
             assert_eq!(
-                project_from_ext.root_path,
+                project_from_wt.root_path,
                 main_repo.to_string_lossy().as_ref()
             );
-            assert_eq!(project_from_ext.branch.as_deref(), Some("main"));
-            assert!(project_from_ext.contains_workspace(&ext_entry.path.to_string_lossy()));
-            let ext_wt = resolved_ext.expect("should return linked worktree");
-            assert_eq!(ext_wt.source, WorktreeSource::External);
-            assert_eq!(ext_wt.name, "feature-herdr");
+            assert_eq!(project_from_wt.branch.as_deref(), Some("main"));
+            assert!(project_from_wt.contains_workspace(&created_wt.path));
+            let wt = resolved_wt.expect("should return managed worktree");
+            assert_eq!(wt.name, "feature-managed");
+            assert_eq!(wt.branch.as_deref(), Some("worktree/feature-managed"));
 
-            let final_state = serde_json::to_string_pretty(&project_from_ext).unwrap();
+            let final_state = serde_json::to_string_pretty(&project_from_wt).unwrap();
             fixture.write_artifact(
                 "given_a_git_project_exists",
-                "should_group_linked_worktrees_under_parent_project_and_classify_ownership",
+                "should_group_managed_worktrees_under_parent_project",
                 &initial_state,
                 &final_state,
             );
@@ -285,7 +280,6 @@ mod given_a_git_project_exists {
             project.upsert_worktree(managed_wt.clone());
 
             // Assert
-            assert_eq!(managed_wt.source, WorktreeSource::Managed);
             assert_eq!(managed_wt.name, "feature-managed");
             assert_eq!(
                 managed_wt.branch.as_deref(),
@@ -361,13 +355,10 @@ mod given_a_git_project_exists {
         use super::*;
 
         #[test]
-        fn should_require_force_for_dirty_managed_worktree_and_reject_deleting_external_worktrees()
-        {
+        fn should_require_force_for_dirty_managed_worktree_and_remove_when_forced() {
             // Arrange
             let fixture = ProjectTestFixture::empty();
             let main_repo = fixture.init_git_repo("lgtm");
-            let ext_dir = fixture.tmp.path().join("external-wt");
-            let ext_entry = add_worktree(&main_repo, &ext_dir, "feature/external", None).unwrap();
             let (mut project, _) = fixture.service.resolve_project(&main_repo).unwrap();
             let managed = fixture
                 .service
@@ -378,7 +369,7 @@ mod given_a_git_project_exists {
             let initial_state = serde_json::to_string_pretty(&project).unwrap();
 
             // Act
-            let (dirty_err, ext_err) = fixture.with_verbose_logger(|| {
+            let dirty_err = fixture.with_verbose_logger(|| {
                 let dirty_err = fixture
                     .service
                     .remove_worktree(&project, Path::new(&managed.path), false)
@@ -387,25 +378,19 @@ mod given_a_git_project_exists {
                     .service
                     .remove_worktree(&project, Path::new(&managed.path), true)
                     .unwrap();
-                let ext_err = fixture
-                    .service
-                    .remove_worktree(&project, &ext_entry.path, true)
-                    .expect_err("external worktree disk deletion should be rejected");
                 fixture.service.refresh_project(&mut project).unwrap();
-                (dirty_err, ext_err)
+                dirty_err
             });
 
             // Assert
             assert!(matches!(dirty_err, LgtmProjectError::DirtyWorktree(_)));
             assert!(!Path::new(&managed.path).exists());
             assert!(project.worktrees.is_empty());
-            assert!(matches!(ext_err, LgtmProjectError::ExternalWorktree(_)));
-            assert!(ext_entry.path.exists());
 
             let final_state = serde_json::to_string_pretty(&project).unwrap();
             fixture.write_artifact(
                 "given_a_git_project_exists",
-                "should_require_force_for_dirty_managed_worktree_and_reject_deleting_external_worktrees",
+                "should_require_force_for_dirty_managed_worktree_and_remove_when_forced",
                 &initial_state,
                 &final_state,
             );

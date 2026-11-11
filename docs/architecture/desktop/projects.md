@@ -11,7 +11,7 @@
 - Restore the previous session on startup, including the active sidebar view, open projects, open worktrees, and active workspace.
 - Remember each project checkout and worktree state separately, including modified tabs, the last active tab, and expanded explorer folders.
 - Switch between a project primary checkout and its worktrees immediately by swapping active state on a single mounted editor and explorer view.
-- Create, attach, or remove project worktrees, deleting disk storage for LGTM-managed worktrees while only detaching external worktrees from the session.
+- Create, attach, or remove project worktrees under `~/.lgtm/worktrees/<project>/<branch-slug>`, deleting worktree disk storage on removal (with dirty-checkout confirmation).
 - Save pending file changes and session state before the application window closes.
 
 ### Non-Functional
@@ -159,8 +159,8 @@ sequenceDiagram
 | `project_set_collapsed` | UI -> Host | `(projectId: string, collapsed: boolean) -> Session` | Collapse or expand the linked worktrees under a project in `default.json`. |
 | `project_update_appearance` | UI -> Host | `(projectId: string, name?: string \| null, icon?: string \| null, color?: string \| null) -> Session` | Update a project's custom display name, icon, and color in `default.json`. |
 | `project_rename_worktree` | UI -> Host | `(worktreePath: string, name: string) -> Session` | Rename a worktree section's display label in `default.json` without changing its Git branch or checkout path. |
-| `project_create_worktree` | UI -> Host | `(projectId: string, branch: string, baseRef?: string) -> Session` | Create a `Managed` Git worktree under `~/.lgtm/worktrees/<project>/<branch-slug>` and attach it to the session, or return a typed creation error. |
-| `project_remove_worktree` | UI -> Host | `(projectId: string, worktreePath: string, force?: boolean) -> Session` | Remove a worktree from the session, deleting checkout storage on disk when `WorktreeSource::Managed` (or returning a `dirty_worktree` error when `force` is false). |
+| `project_create_worktree` | UI -> Host | `(projectId: string, branch: string, baseRef?: string) -> Session` | Create a Git worktree under `~/.lgtm/worktrees/<project>/<branch-slug>` and attach it to the session, or return a typed creation error. |
+| `project_remove_worktree` | UI -> Host | `(projectId: string, worktreePath: string, force?: boolean) -> Session` | Remove a worktree from the session and delete its checkout storage on disk (or return a `dirty_worktree` error when `force` is false). |
 | `project_remove` | UI -> Host | `(projectId: string) -> Session` | Remove a project and its workspace states from the `default` session. |
 | `session-updated` | Host -> UI | `Session` | Push updated session state to the webview when native menus, CLI `lgtm open`, or `workspace_open` change the active workspace. |
 

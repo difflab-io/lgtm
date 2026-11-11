@@ -56,7 +56,6 @@ export interface RemoveWorktreeConfirmState {
   projectName: string
   worktreePath: string
   worktreeName: string
-  source: 'managed' | 'external'
   requiresForce: boolean
   submitting: boolean
   error: string | null
@@ -75,6 +74,7 @@ export interface CustomizeProjectDialogState {
 interface CachedWorkspaceSnapshot {
   root: string
   entries: WorkspaceNode[]
+  dirEntries: Record<string, WorkspaceNode[]>
   listed: Record<string, WorkspaceNode>
   tabs: WorkspaceTab[]
   activeTabId: string | null
@@ -171,6 +171,7 @@ export class WorkspaceService {
   worktreeDialog = $state<WorktreeDialogState | null>(null)
   removeWorktreeConfirm = $state<RemoveWorktreeConfirmState | null>(null)
   customizeProjectDialog = $state<CustomizeProjectDialogState | null>(null)
+  private dirEntries = $state<Record<string, WorkspaceNode[]>>({})
   private listed = $state<Record<string, WorkspaceNode>>({})
   private workspaceCache = new Map<string, CachedWorkspaceSnapshot>()
   private sessionHydratedRoots = new Set<string>()
@@ -351,7 +352,7 @@ export class WorkspaceService {
         children: allWorktrees.map((wt) => ({
           value: wt.path,
           label: wt.name,
-          description: wt.branch ? `${wt.branch} · ${wt.source}` : wt.source,
+          description: wt.branch ?? wt.path,
           branch: false,
           renamable: true,
         })),
@@ -382,7 +383,7 @@ export class WorkspaceService {
       ...(this.pendingEntry && !this.pendingParent
         ? [new WorkspaceNodeViewModel(this.pendingEntry).toTreeNode()]
         : []),
-      ...this.entries.map((entry) => new WorkspaceNodeViewModel(entry).toTreeNode()),
+      ...this.entries.map((entry) => this.toTreeNodeWithChildren(entry)),
     ]
   }
 
@@ -609,7 +610,7 @@ export class WorkspaceService {
     }
   }
 
-  /** Opens the removal confirmation modal for `worktreePath` under `projectId` (or detaches an external worktree). */
+  /** Opens the removal confirmation modal for `worktreePath` under `projectId`. */
   promptRemoveWorktree(projectId: string, worktreePath: string) {
     const project = this.projects.find((p) => p.id === projectId || p.rootPath === projectId)
     const worktree = project?.worktrees.find((wt) => wt.path === worktreePath)
@@ -619,7 +620,6 @@ export class WorkspaceService {
       projectName: project.name,
       worktreePath: worktree.path,
       worktreeName: worktree.name,
-      source: worktree.source,
       requiresForce: false,
       submitting: false,
       error: null,
@@ -631,7 +631,7 @@ export class WorkspaceService {
     this.removeWorktreeConfirm = null
   }
 
-  /** Executes worktree removal (`Managed` deletes `~/.lgtm/worktrees/...`, `External` detaches from session). */
+  /** Executes managed worktree removal (`~/.lgtm/worktrees/...`). */
   async confirmRemoveWorktree(force = false) {
     const confirm = this.removeWorktreeConfirm
     if (!confirm || confirm.submitting || !this.client.projectRemoveWorktree) return
@@ -784,7 +784,10 @@ export class WorkspaceService {
         this.sessionHydratedRoots.add(this.root)
         const wsState = session.workspaces?.[this.root]
         if (wsState) {
-          this.expandedDirs = [...(wsState.expandedDirs ?? [])]
+          const dirs = [...(wsState.expandedDirs ?? [])]
+          await this.preloadExpandedDirs(dirs)
+          if (!this.active) return
+          this.expandedDirs = dirs
           if (this.tabs.length === 0 && (wsState.tabs ?? []).length > 0) {
             await this.restorePersistedTabs(wsState.tabs)
           }
@@ -870,6 +873,7 @@ export class WorkspaceService {
       this.settings.rememberRoot(result.root)
       this.entries = result.entries
       if (switchedCached) {
+        this.dirEntries = switchedCached.dirEntries
         this.listed = switchedCached.listed
         this.tabs = switchedCached.tabs
         this.activeTabId = switchedCached.activeTabId
@@ -878,6 +882,7 @@ export class WorkspaceService {
         this.selectionOffset = switchedCached.selectionOffset
         this.expandedDirs = switchedCached.expandedDirs
       } else if (!fileOpenedDuringInit) {
+        this.dirEntries = {}
         this.listed = {}
         this.tabs = []
         this.activeTabId = null
@@ -933,7 +938,9 @@ export class WorkspaceService {
     const items = await this.client.list(node.value)
     if (!this.active) return []
     for (const entry of items) this.listed[entry.path] = entry
-    return items.map((entry) => new WorkspaceNodeViewModel(entry).toTreeNode())
+    this.dirEntries = { ...this.dirEntries, [node.value]: items }
+    this.saveCurrentWorkspaceToCache(this.root)
+    return items.map((entry) => this.toTreeNodeWithChildren(entry))
   }
 
   /** Selects and opens a file node from the sidebar tree by its workspace-relative path. */
@@ -1384,6 +1391,7 @@ export class WorkspaceService {
         }
         try {
           this.entries = await this.client.list('')
+          await this.preloadExpandedDirs(this.expandedDirs, true)
         } catch (error) {
           this.creationError = errorMessage(error)
         }
@@ -1428,6 +1436,7 @@ export class WorkspaceService {
       }
       try {
         this.entries = await this.client.list('')
+        await this.preloadExpandedDirs(this.expandedDirs, true)
       } catch (error) {
         this.creationError = errorMessage(error)
       }
@@ -1503,6 +1512,7 @@ export class WorkspaceService {
     return {
       root: this.root,
       entries: [...this.entries],
+      dirEntries: { ...this.dirEntries },
       listed: { ...this.listed },
       tabs: retainedTabs,
       activeTabId: activeTab?.id ?? null,
@@ -1538,6 +1548,7 @@ export class WorkspaceService {
     this.pendingParent = ''
     this.root = cached.root
     this.entries = cached.entries
+    this.dirEntries = cached.dirEntries
     this.listed = cached.listed
     this.tabs = cached.tabs
     this.activeTabId = cached.activeTabId
@@ -1548,6 +1559,43 @@ export class WorkspaceService {
     this.lsp.reset()
     this.treeVersion++
     this.fileVersion++
+  }
+
+  private toTreeNodeWithChildren(entry: WorkspaceNode): TreeNode {
+    const node = new WorkspaceNodeViewModel(entry).toTreeNode()
+    if (entry.kind === 'directory' && this.dirEntries[entry.path]) {
+      return {
+        ...node,
+        children: this.dirEntries[entry.path]!.map((child) => this.toTreeNodeWithChildren(child)),
+      }
+    }
+    return node
+  }
+
+  private async preloadExpandedDirs(dirs: string[], forceRefresh = false) {
+    if (dirs.length === 0) return
+    const targets = forceRefresh ? dirs : dirs.filter((dir) => !(dir in this.dirEntries))
+    if (targets.length === 0) return
+    const results = await Promise.all(
+      targets.map(async (dir) => {
+        try {
+          const items = await this.client.list(dir)
+          return { dir, items }
+        } catch {
+          return null
+        }
+      }),
+    )
+    if (!this.active) return
+    const nextDirEntries = forceRefresh ? {} : { ...this.dirEntries }
+    for (const res of results) {
+      if (!res) continue
+      nextDirEntries[res.dir] = res.items
+      for (const item of res.items) {
+        this.listed[item.path] = item
+      }
+    }
+    this.dirEntries = nextDirEntries
   }
 
   private async refreshWorkspaceInBackground(path: string) {

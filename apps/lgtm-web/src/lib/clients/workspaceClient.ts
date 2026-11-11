@@ -46,7 +46,6 @@ import {
   type WorkspaceSettingsPatch,
   type WorkspaceStatePatch,
   type Worktree,
-  type WorktreeSource,
 } from '../gen/bindings'
 
 export type {
@@ -92,7 +91,6 @@ export type {
   WorkspaceSettingsPatch,
   WorkspaceStatePatch,
   Worktree,
-  WorktreeSource,
 }
 
 export interface WorkspaceNode {

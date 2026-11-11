@@ -39,7 +39,6 @@ impl From<lgtm_project::LgtmProjectError> for WorkspaceError {
             LgtmProjectError::CheckoutPathExists(msg) => error("checkoutPathExists", msg),
             LgtmProjectError::NotGitRepository(msg) => error("notGitRepository", msg),
             LgtmProjectError::DirtyWorktree(msg) => error("dirtyWorktree", msg),
-            LgtmProjectError::ExternalWorktree(msg) => error("externalWorktree", msg),
             LgtmProjectError::InvalidPath(msg) => error("invalidWorkspace", msg),
             LgtmProjectError::Git(msg) => error("git", msg),
         }

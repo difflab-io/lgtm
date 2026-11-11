@@ -72,7 +72,7 @@
         >{/if}
     </div>
   {:else if workspace.fileContent && (workspace.selected || workspace.activeTab)}
-    <div class="flex min-h-0 flex-1 flex-col overflow-auto">
+    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
       {#key workspace.fileVersion}
         <CodeEditor
           bind:this={editorRef}

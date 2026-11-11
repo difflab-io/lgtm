@@ -26,10 +26,6 @@ pub enum LgtmProjectError {
     #[error("{0}")]
     DirtyWorktree(String),
 
-    /// External worktrees cannot have their disk storage deleted by LGTM.
-    #[error("{0}")]
-    ExternalWorktree(String),
-
     /// Invalid project or worktree path.
     #[error("{0}")]
     InvalidPath(String),

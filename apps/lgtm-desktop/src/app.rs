@@ -746,7 +746,7 @@ pub async fn project_create_worktree(
     .map_err(|e| error("io", e.to_string()))?
 }
 
-/// Removes a worktree from `project_id` (deleting disk storage when `Managed` and only detaching when `External`).
+/// Removes a managed worktree from `project_id` and deletes its checkout directory on disk.
 #[tauri::command]
 #[specta::specta]
 pub async fn project_remove_worktree(

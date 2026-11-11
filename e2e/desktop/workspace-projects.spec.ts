@@ -1,4 +1,4 @@
-import { test, expect, entry, exists, createGitRepo, createExternalWorktree } from './fixtures'
+import { test, expect, entry, exists, createGitRepo, createGitWorktree } from './fixtures'
 import { readFile, realpath, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 
@@ -135,15 +135,15 @@ test.describe('Given a project with linked worktrees', { tag: ['@desktop', '@pro
         const repoDir = await createGitRepo(join(rawDir, 'alpha-repo'), {
           'README.md': '# Alpha\n',
         })
-        const extBase = await workspace.createExternalDir()
-        const wtOne = await createExternalWorktree(
+        const wtBase = join(workspace.lgtmHomeDir, 'worktrees', 'alpha-repo')
+        const wtOne = await createGitWorktree(
           repoDir,
-          join(extBase, 'wt-one'),
+          join(wtBase, 'feature-wt-one'),
           'feature/wt-one',
         )
-        const wtTwo = await createExternalWorktree(
+        const wtTwo = await createGitWorktree(
           repoDir,
-          join(extBase, 'wt-two'),
+          join(wtBase, 'feature-wt-two'),
           'feature/wt-two',
         )
 
@@ -203,15 +203,19 @@ test.describe('Given a project with linked worktrees', { tag: ['@desktop', '@pro
       const repoDir = await createGitRepo(join(rawDir, 'ctx-repo'), {
         'README.md': '# Ctx\n',
       })
-      const extBase = await workspace.createExternalDir()
-      const wtExt = await createExternalWorktree(repoDir, join(extBase, 'wt-ext'), 'feature/wt-ext')
+      const wtBase = join(workspace.lgtmHomeDir, 'worktrees', 'ctx-repo')
+      const wtManaged = await createGitWorktree(
+        repoDir,
+        join(wtBase, 'feature-wt-ctx'),
+        'feature/wt-ctx',
+      )
 
       await page.getByRole('button', { name: 'Projects view', exact: true }).click()
       await openFolderViaPicker(page, workspace, repoDir)
-      await openFolderViaPicker(page, workspace, wtExt)
+      await openFolderViaPicker(page, workspace, wtManaged)
 
       const projectItem = entry(page, repoDir)
-      const wtItem = entry(page, wtExt)
+      const wtItem = entry(page, wtManaged)
       const defaultIcon = await projectItem
         .locator('[data-project-icon]')
         .getAttribute('data-project-icon')
@@ -269,10 +273,10 @@ test.describe('Given a project with linked worktrees', { tag: ['@desktop', '@pro
       expect(renamedLabel).toContain('Custom Worktree Section')
       expect(sessionAfterRename).toContain('"name": "Renamed Project"')
       expect(sessionAfterRename).toContain('"name": "Custom Worktree Section"')
-      expect(sessionAfterRename).toContain('"branch": "feature/wt-ext"')
+      expect(sessionAfterRename).toContain('"branch": "feature/wt-ctx"')
       await expect(wtItem).toHaveCount(0)
       await expect(projectItem).toHaveCount(0)
-      expect(await exists(wtExt)).toBe(true)
+      expect(await exists(wtManaged)).toBe(false)
       expect(await exists(repoDir)).toBe(true)
     })
   })
@@ -281,7 +285,7 @@ test.describe('Given a project with linked worktrees', { tag: ['@desktop', '@pro
 test.describe('Given a Git project', { tag: ['@desktop', '@projects'] }, () => {
   test.use({ initialWorkspace: 'existing' })
 
-  test.describe('When creating and removing managed worktrees from ProjectsPane', () => {
+  test.describe('When creating and removing worktrees from ProjectsPane', () => {
     test(
       'should preview ~/.lgtm/worktrees/<project>/<branch-slug>, create the worktree, and switch to it',
       { tag: '@smoke' },
@@ -345,7 +349,7 @@ test.describe('Given a Git project', { tag: ['@desktop', '@projects'] }, () => {
       )
     })
 
-    test('should delete managed worktree storage on removal with force confirmation when dirty while only detaching external worktrees', async ({
+    test('should delete worktree storage on removal with force confirmation when dirty', async ({
       page,
       workspace,
     }) => {

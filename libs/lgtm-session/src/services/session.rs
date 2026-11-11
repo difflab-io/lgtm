@@ -6,7 +6,7 @@ use std::{
 };
 
 use lgtm_config::ConfigService;
-use lgtm_project::{LgtmProjectError, Project, ProjectService, WorktreeSource};
+use lgtm_project::{Project, ProjectService};
 use lgtm_rsutils::atomic_write;
 use uuid::Uuid;
 
@@ -207,7 +207,7 @@ impl SessionService {
         Ok(session)
     }
 
-    /// Removes `worktree_path` from `project_id`, deleting disk storage when `WorktreeSource::Managed` and detaching without disk deletion when `External`.
+    /// Removes `worktree_path` from `project_id` and deletes its managed checkout directory on disk.
     pub fn remove_project_worktree(
         &self,
         session_id: &str,
@@ -221,24 +221,13 @@ impl SessionService {
         let canonical_str = canonical.to_string_lossy().into_owned();
         let raw_str = worktree_path.to_string_lossy().into_owned();
 
-        let (parent_root, source) = {
+        let parent_root = {
             let project = find_project_mut(&mut session, project_id)?;
-            let source = project
-                .worktrees
-                .iter()
-                .find(|wt| wt.path == canonical_str || wt.path == raw_str)
-                .map(|wt| wt.source)
-                .unwrap_or(WorktreeSource::External);
-            if source == WorktreeSource::Managed {
-                match self.projects.remove_worktree(project, &canonical, force) {
-                    Ok(()) | Err(LgtmProjectError::ExternalWorktree(_)) => {}
-                    Err(err) => return Err(err.into()),
-                }
-            }
+            self.projects.remove_worktree(project, &canonical, force)?;
             project
                 .worktrees
                 .retain(|wt| wt.path != canonical_str && wt.path != raw_str);
-            (project.root_path.clone(), source)
+            project.root_path.clone()
         };
 
         session.workspaces.remove(&canonical_str);
@@ -250,7 +239,7 @@ impl SessionService {
         }
 
         self.write_session(&session)?;
-        tracing::info!(session_id = %session.id, %project_id, source = ?source, "removed project worktree from session");
+        tracing::info!(session_id = %session.id, %project_id, "removed project worktree from session");
         Ok(session)
     }
 

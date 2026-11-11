@@ -12,7 +12,7 @@
 - Track the active workspace directory and the active left sidebar view.
 - Remember state separately for each project checkout and each worktree, including its active tab, tabs modified during the session, and expanded file-explorer directories.
 - Retain only tabs modified during the session and the last active tab when a workspace is saved or switched.
-- Delete worktree disk storage when removing a managed worktree, and only detach the sidebar entry when removing an external worktree.
+- Delete worktree disk storage when removing a worktree from a project.
 
 ### Non-Functional
 
@@ -38,7 +38,7 @@ flowchart TB
     end
 
     subgraph ProjectLib["libs/lgtm-project"]
-        PROJ["ProjectService, Project, Worktree, WorktreeSource"]
+        PROJ["ProjectService, Project, Worktree"]
     end
 
     subgraph RsUtils["libs/lgtm-rsutils"]
@@ -85,7 +85,6 @@ erDiagram
         string path PK "Linked worktree directory path"
         string name "Worktree branch label"
         string branch "Checked-out Git branch"
-        WorktreeSource source "Managed (~/.lgtm/worktrees) | External (~/.herdr/worktrees)"
     }
 
     WORKSPACE_SESSION_STATE {
@@ -151,12 +150,12 @@ flowchart LR
 | `SessionService::get_session` | `fn get_session(&self, session_id: &str) -> Result<Session>` | Load `~/.lgtm/sessions/<session_id>.json` or initialize the `default` session. |
 | `SessionService::open_workspace` | `fn open_workspace(&self, session_id: &str, path: &Path) -> Result<Session>` | Resolve `path` via `lgtm-project`, upsert its parent `Project` and `Worktree`, and set `active_workspace_root`. |
 | `SessionService::save_workspace_state` | `fn save_workspace_state(&self, session_id: &str, patch: WorkspaceStatePatch) -> Result<Session>` | Filter `patch.tabs` to `edited \|\| last_opened`, update `workspaces[patch.workspace_root]` and optional `sidebar_widget`, and write `default.json`. |
-| `SessionService::create_project_worktree` | `fn create_project_worktree(&self, session_id: &str, project_id: Uuid, branch: &str, base_ref: Option<&str>) -> Result<Session>` | Create a `Managed` worktree at `~/.lgtm/worktrees/<project>/<branch-slug>`, attach it to `Session`, and activate it. |
+| `SessionService::create_project_worktree` | `fn create_project_worktree(&self, session_id: &str, project_id: Uuid, branch: &str, base_ref: Option<&str>) -> Result<Session>` | Create a worktree at `~/.lgtm/worktrees/<project>/<branch-slug>`, attach it to `Session`, and activate it. |
 | `SessionService::set_project_collapsed` | `fn set_project_collapsed(&self, session_id: &str, project_id: Uuid, collapsed: bool) -> Result<Session>` | Persist the collapsed or expanded worktree state for a project in `Session`. |
-| `SessionService::update_project_appearance` | `fn update_project_appearance(&self, session_id: &str, project_id: Uuid, icon: Option<String>, color: Option<String>) -> Result<Session>` | Persist a project's custom icon and color in `Session`. |
-| `SessionService::rename_project_worktree` | `fn rename_project_worktree(&self, session_id: &str, worktree_path: &Path, name: &str) -> Result<Session>` | Update a worktree's display label in `Session` without changing its Git branch or checkout path. |
-| `SessionService::remove_project_worktree` | `fn remove_project_worktree(&self, session_id: &str, project_id: Uuid, worktree_path: &Path, force: bool) -> Result<Session>` | Remove the worktree from `Session` and delete disk storage only when `WorktreeSource::Managed`. |
-| `SessionService::remove_project` | `fn remove_project(&self, session_id: &str, project_id: Uuid) -> Result<Session>` | Remove a project and its workspace states from `Session` without deleting `External` worktrees. |
+| `SessionService::update_project_appearance` | `fn update_project_appearance(&self, session_id: &str, project_id: Uuid, name: Option<String>, icon: Option<String>, color: Option<String>) -> Result<Session>` | Persist a project's custom name, icon, and color in `Session`. |
+| `SessionService::rename_project_worktree` | `fn rename_project_worktree(&self, session_id: &str, project_id: Uuid, worktree_path: &Path, name: &str) -> Result<Session>` | Update a worktree's display label in `Session` without changing its Git branch or checkout path. |
+| `SessionService::remove_project_worktree` | `fn remove_project_worktree(&self, session_id: &str, project_id: Uuid, worktree_path: &Path, force: bool) -> Result<Session>` | Remove the worktree from `Session` and delete its disk storage. |
+| `SessionService::remove_project` | `fn remove_project(&self, session_id: &str, project_id: Uuid) -> Result<Session>` | Remove a project and its workspace states from `Session`. |
 
 ## Implementation
 

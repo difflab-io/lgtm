@@ -120,7 +120,6 @@ impl Project {
         {
             if existing.has_custom_name() {
                 existing.branch = worktree.branch;
-                existing.source = worktree.source;
             } else {
                 *existing = worktree;
             }

@@ -146,24 +146,45 @@
     const loader = loadChildren
     const _v = version
     if (!dirs?.length || !loader) return
+    const currentLoaded = untrack(() => loaded)
     const missing = [...dirs]
-      .filter((dir) => !(dir in untrack(() => loaded)))
+      .filter(
+        (dir) => !(dir in currentLoaded) && !untrack(() => collection.findNode(dir)?.children),
+      )
       .sort((a, b) => a.split('/').length - b.split('/').length)
     if (missing.length === 0) return
     void (async () => {
-      for (const dir of missing) {
-        if (dir in loaded) continue
-        try {
-          const node = collection.findNode(dir) ?? {
-            value: dir,
-            label: dir.split('/').at(-1) ?? dir,
-            branch: true,
+      const results = await Promise.all(
+        missing.map(async (dir) => {
+          try {
+            const node = untrack(() => collection.findNode(dir)) ?? {
+              value: dir,
+              label: dir.split('/').at(-1) ?? dir,
+              branch: true,
+            }
+            const children = await loader(node)
+            return { dir, children, error: null as string | null }
+          } catch (error) {
+            return {
+              dir,
+              children: null,
+              error: error instanceof Error ? error.message : String(error),
+            }
           }
-          const children = await loader(node)
-          loaded = { ...loaded, [dir]: children }
-        } catch (error) {
-          errors[dir] = error instanceof Error ? error.message : String(error)
+        }),
+      )
+      const nextLoaded: Record<string, TreeNode[]> = {}
+      let hasLoaded = false
+      for (const item of results) {
+        if (item.children) {
+          nextLoaded[item.dir] = item.children
+          hasLoaded = true
+        } else if (item.error) {
+          errors[item.dir] = item.error
         }
+      }
+      if (hasLoaded) {
+        loaded = { ...loaded, ...nextLoaded }
       }
     })()
   })

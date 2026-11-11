@@ -594,7 +594,7 @@ export async function createGitRepo(
   return canonical
 }
 
-export async function createExternalWorktree(
+export async function createGitWorktree(
   repoDir: string,
   worktreeDir: string,
   branch: string,

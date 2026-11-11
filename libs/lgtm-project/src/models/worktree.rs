@@ -1,41 +1,24 @@
-//! Domain models representing linked Git worktrees and worktree disk ownership.
+//! Domain model representing a managed Git worktree checkout under a [`crate::Project`].
 
 use serde::{Deserialize, Serialize};
 
-/// Ownership classification determining whether LGTM manages and deletes a worktree's disk storage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "snake_case")]
-pub enum WorktreeSource {
-    /// Created and owned by LGTM under `~/.lgtm/worktrees/<project>/<branch-slug>`.
-    Managed,
-    /// Created outside `~/.lgtm/worktrees` (such as `~/.herdr/worktrees/<project>/<branch-slug>`).
-    External,
-}
-
-/// Linked Git worktree checkout grouped underneath a parent [`crate::Project`].
+/// Managed Git worktree checkout grouped underneath a parent [`crate::Project`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Worktree {
-    /// Canonical filesystem path of the linked worktree directory.
+    /// Canonical filesystem path of the managed worktree directory.
     pub path: String,
     /// Display label for the worktree (branch name stripped of `worktree/`, or directory basename).
     pub name: String,
     /// Checked-out Git branch name, if not detached.
     pub branch: Option<String>,
-    /// Whether this worktree's disk storage is managed by LGTM or external.
-    pub source: WorktreeSource,
 }
 
 impl Worktree {
-    /// Constructs a linked worktree model and normalizes its display label from `branch` or `path`.
-    pub fn new(path: String, branch: Option<String>, source: WorktreeSource) -> Self {
+    /// Constructs a managed worktree model and normalizes its display label from `branch` or `path`.
+    pub fn new(path: String, branch: Option<String>) -> Self {
         let name = Self::default_name(&path, branch.as_deref());
-        Self {
-            path,
-            name,
-            branch,
-            source,
-        }
+        Self { path, name, branch }
     }
 
     // Public ------------------------------------------------------------------
