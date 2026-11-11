@@ -18,6 +18,10 @@ export type {
 export { default as CodeEditor } from './code-editor/CodeEditor.svelte'
 export {
   clearEditorCursorTooltip,
+  codeEditorHighlightStyle,
+  codeEditorLspExtension,
+  codeEditorTheme,
+  codeEditorThemeExtension,
   createCodeMirrorModalTarget,
   dismissEditorIntellisense,
   editorCursorTooltipField,
@@ -26,11 +30,22 @@ export {
   gotoNextEditorDiagnostic,
   gotoPrevEditorDiagnostic,
   hasEditorIntellisenseActive,
+  lspOptionsFacet,
+  modalEditorExtension,
+  modalOptionsFacet,
+  modalStateField,
+  resolveLanguageExtension,
   scrollEditorAlign,
   scrollEditorHalfPage,
+  setModalStateEffect,
   showEditorHoverTooltip,
   showEditorSignatureHelpTooltip,
+  toCodeMirrorDiagnostics,
+  toLineWrappingExtension,
   triggerEditorCompletion,
+  type CodeEditorLspOptions,
+  type ModalEditorExtensionOptions,
+  type ModalEditorStateValue,
 } from './code-editor/modalKeymap'
 export type {
   CodeEditorCompletionItem,

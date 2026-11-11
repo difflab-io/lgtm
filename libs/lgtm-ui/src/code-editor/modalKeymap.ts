@@ -1,129 +1,207 @@
-import { closeCompletion, completionStatus, startCompletion } from '@codemirror/autocomplete'
-import { redo, undo } from '@codemirror/commands'
-import { forEachDiagnostic, type Diagnostic } from '@codemirror/lint'
+import { closeCompletion, completionStatus } from '@codemirror/autocomplete'
+import { indentWithTab, redo, undo } from '@codemirror/commands'
+import { indentUnit } from '@codemirror/language'
 import {
+  CharCategory,
   EditorSelection,
+  Facet,
   StateEffect,
   StateField,
+  type Extension,
   type SelectionRange,
   type Text,
 } from '@codemirror/state'
-import { EditorView, showTooltip, type Tooltip } from '@codemirror/view'
-import type {
-  KeybindingPreset,
-  KeymapMode,
-  ModalEditorTarget,
-  ModalMotion,
-  ModalOperator,
-  ModalSelectionTransform,
-  ModalTextObjectSpec,
+import { EditorView, ViewPlugin, keymap, type ViewUpdate } from '@codemirror/view'
+import {
+  getDocumentWhichKeyController,
+  registerModalEditor,
+  type KeybindingPreset,
+  type KeymapMode,
+  type ModalEditorTarget,
+  type ModalMotion,
+  type ModalOperator,
+  type ModalSelectionTransform,
+  type ModalTextObjectSpec,
 } from '@cloudvoyant/helical-ui'
-import { renderMarkdownToDom } from './markdown'
-import { codeEditorHoverTooltipVariants } from './styles'
-import type { CodeEditorHoverResult, CodeEditorSignatureHelp } from './types'
+import { clearEditorCursorTooltip, hasEditorIntellisenseActive } from './lspExtension'
 
-const setEditorCursorTooltipEffect = StateEffect.define<Tooltip | null>()
+export {
+  clearEditorCursorTooltip,
+  codeEditorLspExtension,
+  dismissEditorIntellisense,
+  editorCursorTooltipField,
+  gotoFirstEditorDiagnostic,
+  gotoLastEditorDiagnostic,
+  gotoNextEditorDiagnostic,
+  gotoPrevEditorDiagnostic,
+  hasEditorIntellisenseActive,
+  lspOptionsFacet,
+  showEditorHoverTooltip,
+  showEditorSignatureHelpTooltip,
+  toCodeMirrorDiagnostics,
+  triggerEditorCompletion,
+  type CodeEditorLspOptions,
+} from './lspExtension'
+
+export {
+  codeEditorHighlightStyle,
+  codeEditorTheme,
+  codeEditorThemeExtension,
+  resolveLanguageExtension,
+  toLineWrappingExtension,
+} from './themeExtension'
 
 /**
- * CodeMirror state field hosting keyboard-triggered hover, signature-help, and diagnostic tooltips.
+ * Configuration options for [`modalEditorExtension`].
  */
-export const editorCursorTooltipField = StateField.define<Tooltip | null>({
+export interface ModalEditorExtensionOptions {
+  /** Whether clicking inside the editor switches `normal` mode to `insert` mode. */
+  clickToInsert?: boolean
+  /** Whether the editor is currently read-only. */
+  readOnly?: boolean
+}
+
+/**
+ * Snapshot of the active modal mode and preset stored in [`modalStateField`].
+ */
+export interface ModalEditorStateValue {
+  /** Active modal mode (`normal`, `insert`, `select`, or `jump`). */
+  mode: KeymapMode
+  /** Active keybinding preset (`helix`, `vim`, or `kakoune`). */
+  preset: KeybindingPreset
+}
+
+/**
+ * State effect dispatched when the active modal mode or preset changes.
+ */
+export const setModalStateEffect = StateEffect.define<ModalEditorStateValue>()
+
+/**
+ * CodeMirror 6 state field tracking the active modal editing mode and preset.
+ */
+export const modalStateField = StateField.define<ModalEditorStateValue>({
   create() {
-    return null
+    return { mode: 'normal', preset: 'helix' }
   },
   update(value, tr) {
     for (const effect of tr.effects) {
-      if (effect.is(setEditorCursorTooltipEffect)) {
+      if (effect.is(setModalStateEffect)) {
         return effect.value
       }
     }
-    if (tr.docChanged || tr.selection) {
-      return null
-    }
     return value
   },
-  provide: (field) => showTooltip.from(field),
+})
+
+/**
+ * CodeMirror 6 facet configuring pointer and read-only behavior for [`modalEditorExtension`].
+ */
+export const modalOptionsFacet = Facet.define<
+  ModalEditorExtensionOptions,
+  Required<ModalEditorExtensionOptions>
+>({
+  combine(values) {
+    const merged = Object.assign({ clickToInsert: true, readOnly: false }, ...values)
+    return {
+      clickToInsert: Boolean(merged.clickToInsert),
+      readOnly: Boolean(merged.readOnly),
+    }
+  },
 })
 
 let lastYankedText = ''
 
-function isWordChar(ch: string): boolean {
-  return /[A-Za-z0-9_]/.test(ch)
-}
-
-function isWhitespace(ch: string): boolean {
-  return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r'
-}
-
-function charKind(ch: string): 'word' | 'space' | 'punct' {
-  if (!ch || isWhitespace(ch)) return 'space'
-  if (isWordChar(ch)) return 'word'
+function charKind(
+  ch: string,
+  categorize?: (char: string) => CharCategory,
+): 'word' | 'space' | 'punct' {
+  if (!ch || ch === '\n' || ch === '\r') return 'space'
+  if (categorize) {
+    const cat = categorize(ch)
+    if (cat === CharCategory.Space) return 'space'
+    if (cat === CharCategory.Word) return 'word'
+    return 'punct'
+  }
+  if (ch === ' ' || ch === '\t') return 'space'
+  if (/[A-Za-z0-9_]/.test(ch)) return 'word'
   return 'punct'
 }
 
-function stepWordForward(doc: Text, pos: number): { from: number; to: number } {
+function stepWordForward(
+  doc: Text,
+  pos: number,
+  categorize?: (char: string) => CharCategory,
+): { from: number; to: number } {
   const text = doc.toString()
   const len = text.length
   let i = Math.max(0, Math.min(len, pos))
   if (i >= len) return { from: len, to: len }
 
-  const startKind = charKind(text[i] ?? '')
+  const startKind = charKind(text[i] ?? '', categorize)
   if (startKind !== 'space') {
-    while (i < len && charKind(text[i] ?? '') === startKind) {
+    while (i < len && charKind(text[i] ?? '', categorize) === startKind) {
       i += 1
     }
   }
-  while (i < len && charKind(text[i] ?? '') === 'space') {
+  while (i < len && charKind(text[i] ?? '', categorize) === 'space') {
     i += 1
   }
   const wordStart = i
   if (i >= len) {
     return { from: pos, to: len }
   }
-  const targetKind = charKind(text[i] ?? '')
-  while (i < len && charKind(text[i] ?? '') === targetKind) {
+  const targetKind = charKind(text[i] ?? '', categorize)
+  while (i < len && charKind(text[i] ?? '', categorize) === targetKind) {
     i += 1
   }
   return { from: wordStart, to: i }
 }
 
-function stepWordEnd(doc: Text, pos: number): { from: number; to: number } {
+function stepWordEnd(
+  doc: Text,
+  pos: number,
+  categorize?: (char: string) => CharCategory,
+): { from: number; to: number } {
   const text = doc.toString()
   const len = text.length
   let i = Math.max(0, Math.min(len, pos))
   if (i >= len) return { from: len, to: len }
 
-  if (i < len && charKind(text[i] ?? '') !== 'space') {
-    const nextKind = charKind(text[i + 1] ?? '')
-    if (nextKind !== charKind(text[i] ?? '')) {
+  if (i < len && charKind(text[i] ?? '', categorize) !== 'space') {
+    const nextKind = charKind(text[i + 1] ?? '', categorize)
+    if (nextKind !== charKind(text[i] ?? '', categorize)) {
       i += 1
     }
   }
-  while (i < len && charKind(text[i] ?? '') === 'space') {
+  while (i < len && charKind(text[i] ?? '', categorize) === 'space') {
     i += 1
   }
   const wordStart = i
   if (i >= len) return { from: pos, to: len }
-  const kind = charKind(text[i] ?? '')
-  while (i < len && charKind(text[i] ?? '') === kind) {
+  const kind = charKind(text[i] ?? '', categorize)
+  while (i < len && charKind(text[i] ?? '', categorize) === kind) {
     i += 1
   }
   return { from: wordStart, to: i }
 }
 
-function stepWordBackward(doc: Text, pos: number): { from: number; to: number } {
+function stepWordBackward(
+  doc: Text,
+  pos: number,
+  categorize?: (char: string) => CharCategory,
+): { from: number; to: number } {
   const text = doc.toString()
   const len = text.length
   let i = Math.max(0, Math.min(len, pos))
   if (i <= 0) return { from: 0, to: 0 }
 
   i -= 1
-  while (i > 0 && charKind(text[i] ?? '') === 'space') {
+  while (i > 0 && charKind(text[i] ?? '', categorize) === 'space') {
     i -= 1
   }
   const wordEnd = i + 1
-  const kind = charKind(text[i] ?? '')
-  while (i > 0 && charKind(text[i - 1] ?? '') === kind) {
+  const kind = charKind(text[i] ?? '', categorize)
+  while (i > 0 && charKind(text[i - 1] ?? '', categorize) === kind) {
     i -= 1
   }
   return { from: i, to: wordEnd }
@@ -148,18 +226,19 @@ function findWordObject(
   doc: Text,
   pos: number,
   around: boolean,
+  categorize?: (char: string) => CharCategory,
 ): { from: number; to: number } | null {
   const line = doc.lineAt(pos)
   const text = line.text
   if (text.length === 0) return null
   const offset = Math.min(Math.max(0, pos - line.from), Math.max(0, text.length - 1))
-  const kind = charKind(text[offset] ?? '')
+  const kind = charKind(text[offset] ?? '', categorize)
   let start = offset
   let end = offset + 1
-  while (start > 0 && charKind(text[start - 1] ?? '') === kind) {
+  while (start > 0 && charKind(text[start - 1] ?? '', categorize) === kind) {
     start -= 1
   }
-  while (end < text.length && charKind(text[end] ?? '') === kind) {
+  while (end < text.length && charKind(text[end] ?? '', categorize) === kind) {
     end += 1
   }
   if (around) {
@@ -302,227 +381,6 @@ export function scrollEditorHalfPage(
 }
 
 /**
- * Returns whether an autocomplete menu or keyboard-triggered tooltip is currently active in `view`.
- */
-export function hasEditorIntellisenseActive(view: EditorView | null | undefined): boolean {
-  if (!view) return false
-  return (
-    completionStatus(view.state) === 'active' ||
-    Boolean(view.state.field(editorCursorTooltipField, false))
-  )
-}
-
-/**
- * Clears any active keyboard-triggered cursor tooltip in `view`.
- */
-export function clearEditorCursorTooltip(view: EditorView | null | undefined): boolean {
-  if (!view) return false
-  const active = view.state.field(editorCursorTooltipField, false)
-  if (!active) return false
-  view.dispatch({ effects: setEditorCursorTooltipEffect.of(null) })
-  return true
-}
-
-/**
- * Dismisses any active autocomplete menu or keyboard-triggered cursor tooltip in `view`.
- */
-export function dismissEditorIntellisense(view: EditorView | null | undefined): boolean {
-  if (!view) return false
-  if (completionStatus(view.state) !== null) {
-    closeCompletion(view)
-    return true
-  }
-  return clearEditorCursorTooltip(view)
-}
-
-/**
- * Explicitly starts CodeMirror autocompletion at the current cursor position in `view`.
- */
-export function triggerEditorCompletion(view: EditorView | null | undefined): boolean {
-  if (!view || view.state.readOnly) return false
-  return startCompletion(view)
-}
-
-function buildCursorTooltip(
-  view: EditorView,
-  createDom: () => HTMLElement,
-  options?: { pos?: number; end?: number },
-): Tooltip {
-  const docLen = view.state.doc.length
-  const rawPos = options?.pos ?? view.state.selection.main.head
-  const pos = Math.max(0, Math.min(docLen, rawPos))
-  const rawEnd =
-    options?.end !== undefined ? Math.max(pos, Math.min(docLen, options.end)) : undefined
-  const sameLine =
-    rawEnd === undefined ||
-    view.state.doc.lineAt(pos).number === view.state.doc.lineAt(rawEnd).number
-  const end = sameLine ? rawEnd : undefined
-  return {
-    pos,
-    ...(end !== undefined ? { end } : {}),
-    above: true,
-    create() {
-      return { dom: createDom() }
-    },
-  }
-}
-
-/**
- * Displays a keyboard-triggered hover documentation tooltip at the cursor in `view`.
- */
-export function showEditorHoverTooltip(
-  view: EditorView | null | undefined,
-  hover: CodeEditorHoverResult,
-): boolean {
-  if (!view || !hover.contents.trim()) return false
-  const tooltip = buildCursorTooltip(
-    view,
-    () => {
-      const dom = document.createElement('div')
-      dom.className = codeEditorHoverTooltipVariants()
-      dom.setAttribute('data-slot', 'code-editor-hover')
-      dom.appendChild(renderMarkdownToDom(hover.contents))
-      return dom
-    },
-    { pos: hover.from ?? view.state.selection.main.head, end: hover.to },
-  )
-  view.dispatch({ effects: setEditorCursorTooltipEffect.of(tooltip) })
-  return true
-}
-
-/**
- * Displays a keyboard-triggered signature help tooltip at the cursor in `view`.
- */
-export function showEditorSignatureHelpTooltip(
-  view: EditorView | null | undefined,
-  help: CodeEditorSignatureHelp,
-): boolean {
-  if (!view || help.signatures.length === 0) return false
-  const sig = help.signatures[help.activeSignature] ?? help.signatures[0]
-  if (!sig) return false
-  const markdownParts = [`\`\`\`\n${sig.label}\n\`\`\``]
-  if (sig.documentation?.trim()) {
-    markdownParts.push(sig.documentation.trim())
-  }
-  const markdown = markdownParts.join('\n\n---\n\n')
-  const tooltip = buildCursorTooltip(view, () => {
-    const dom = document.createElement('div')
-    dom.className = codeEditorHoverTooltipVariants()
-    dom.setAttribute('data-slot', 'code-editor-signature-help')
-    dom.appendChild(renderMarkdownToDom(markdown))
-    return dom
-  })
-  view.dispatch({ effects: setEditorCursorTooltipEffect.of(tooltip) })
-  return true
-}
-
-interface IndexedDiagnostic {
-  diagnostic: Diagnostic
-  from: number
-  to: number
-}
-
-function collectEditorDiagnostics(view: EditorView): IndexedDiagnostic[] {
-  const items: IndexedDiagnostic[] = []
-  forEachDiagnostic(view.state, (diagnostic, from, to) => {
-    items.push({ diagnostic, from, to })
-  })
-  items.sort((a, b) => a.from - b.from || a.to - b.to)
-  return items
-}
-
-function dispatchDiagnosticJump(view: EditorView, target: IndexedDiagnostic): boolean {
-  const tooltip = buildCursorTooltip(
-    view,
-    () => {
-      const dom = document.createElement('div')
-      dom.className = codeEditorHoverTooltipVariants()
-      dom.setAttribute('data-slot', 'code-editor-diagnostic-tooltip')
-      const messageEl = document.createElement('div')
-      messageEl.setAttribute('data-slot', 'code-editor-diagnostic-message')
-      messageEl.appendChild(renderMarkdownToDom(target.diagnostic.message))
-      dom.appendChild(messageEl)
-      return dom
-    },
-    { pos: target.from, end: target.to },
-  )
-  view.dispatch({
-    selection: { anchor: target.from, head: target.to },
-    scrollIntoView: true,
-    effects: setEditorCursorTooltipEffect.of(tooltip),
-  })
-  return true
-}
-
-/**
- * Jumps to the next inline diagnostic in `view` (`count` steps forward, wrapping around).
- */
-export function gotoNextEditorDiagnostic(view: EditorView | null | undefined, count = 1): boolean {
-  if (!view) return false
-  const items = collectEditorDiagnostics(view)
-  if (items.length === 0) return false
-  const sel = view.state.selection.main
-  let firstIdx = items.findIndex(
-    (item) => item.from > sel.from || (item.from === sel.from && item.to > sel.to),
-  )
-  if (firstIdx === -1) {
-    firstIdx = 0
-  }
-  const steps = Math.max(1, count) - 1
-  const target = items[(firstIdx + steps) % items.length]
-  if (!target) return false
-  return dispatchDiagnosticJump(view, target)
-}
-
-/**
- * Jumps to the previous inline diagnostic in `view` (`count` steps backward, wrapping around).
- */
-export function gotoPrevEditorDiagnostic(view: EditorView | null | undefined, count = 1): boolean {
-  if (!view) return false
-  const items = collectEditorDiagnostics(view)
-  if (items.length === 0) return false
-  const sel = view.state.selection.main
-  let firstIdx = -1
-  for (let i = items.length - 1; i >= 0; i -= 1) {
-    const item = items[i]!
-    if (item.from < sel.from || (item.from === sel.from && item.to < sel.to)) {
-      firstIdx = i
-      break
-    }
-  }
-  if (firstIdx === -1) {
-    firstIdx = items.length - 1
-  }
-  const steps = Math.max(1, count) - 1
-  const targetIdx = (((firstIdx - steps) % items.length) + items.length) % items.length
-  const target = items[targetIdx]
-  if (!target) return false
-  return dispatchDiagnosticJump(view, target)
-}
-
-/**
- * Jumps to the first inline diagnostic in `view`.
- */
-export function gotoFirstEditorDiagnostic(view: EditorView | null | undefined): boolean {
-  if (!view) return false
-  const items = collectEditorDiagnostics(view)
-  const target = items[0]
-  if (!target) return false
-  return dispatchDiagnosticJump(view, target)
-}
-
-/**
- * Jumps to the last inline diagnostic in `view`.
- */
-export function gotoLastEditorDiagnostic(view: EditorView | null | undefined): boolean {
-  if (!view) return false
-  const items = collectEditorDiagnostics(view)
-  const target = items[items.length - 1]
-  if (!target) return false
-  return dispatchDiagnosticJump(view, target)
-}
-
-/**
  * Creates a Helical UI `ModalEditorTarget` backed by a CodeMirror 6 `EditorView`.
  */
 export function createCodeMirrorModalTarget(
@@ -537,6 +395,7 @@ export function createCodeMirrorModalTarget(
       if (!view) return false
       const { state } = view
       const { doc, selection } = state
+      const categorize = state.charCategorizer(selection.main.head)
       const steps = Math.max(1, options.count || 1)
       const isSelectionFirst = options.preset === 'helix' || options.preset === 'kakoune'
       const extend = options.mode === 'select'
@@ -568,7 +427,7 @@ export function createCodeMirrorModalTarget(
             let cur = head
             let span = { from: head, to: head }
             for (let s = 0; s < steps; s += 1) {
-              span = stepWordForward(doc, cur)
+              span = stepWordForward(doc, cur, categorize)
               cur = span.to
             }
             if (extend) return EditorSelection.range(anchor, span.to)
@@ -579,7 +438,7 @@ export function createCodeMirrorModalTarget(
             let cur = head
             let span = { from: head, to: head }
             for (let s = 0; s < steps; s += 1) {
-              span = stepWordEnd(doc, cur)
+              span = stepWordEnd(doc, cur, categorize)
               cur = span.to
             }
             if (extend) return EditorSelection.range(anchor, span.to)
@@ -590,7 +449,7 @@ export function createCodeMirrorModalTarget(
             let cur = head
             let span = { from: head, to: head }
             for (let s = 0; s < steps; s += 1) {
-              span = stepWordBackward(doc, cur)
+              span = stepWordBackward(doc, cur, categorize)
               cur = span.from
             }
             if (extend) return EditorSelection.range(anchor, span.from)
@@ -604,9 +463,7 @@ export function createCodeMirrorModalTarget(
             for (let s = 0; s < steps; s += 1) {
               cur = stepParagraph(doc, cur, dir)
             }
-            if (extend) return EditorSelection.range(anchor, cur)
-            if (isSelectionFirst) return EditorSelection.range(head, cur)
-            return EditorSelection.cursor(cur)
+            return extend ? EditorSelection.range(anchor, cur) : EditorSelection.cursor(cur)
           }
           case 'lineStart': {
             const line = doc.lineAt(head)
@@ -651,6 +508,7 @@ export function createCodeMirrorModalTarget(
       const view = getView()
       if (!view) return false
       const { doc, selection } = view.state
+      const categorize = view.state.charCategorizer(selection.main.head)
       const around = spec.startsWith('a')
       const kind = spec[1]
       let changed = false
@@ -658,7 +516,7 @@ export function createCodeMirrorModalTarget(
       const nextRanges = selection.ranges.map((range) => {
         let match: { from: number; to: number } | null = null
         if (kind === 'w') {
-          match = findWordObject(doc, range.head, around)
+          match = findWordObject(doc, range.head, around, categorize)
         } else if (kind === 'p') {
           match = findParagraphObject(doc, range.head, around)
         } else if (kind === 'c' || kind === 'n') {
@@ -860,7 +718,7 @@ export function createCodeMirrorModalTarget(
       return false
     },
 
-    setModalState(modalState: { mode: KeymapMode; preset: KeybindingPreset }): void {
+    setModalState(modalState: ModalEditorStateValue): void {
       const view = getView()
       if (!view) return
       const prevMode = view.dom.dataset.modalMode
@@ -880,4 +738,74 @@ export function createCodeMirrorModalTarget(
       return hasEditorIntellisenseActive(getView())
     },
   }
+}
+
+const modalEditorViewPlugin = ViewPlugin.fromClass(
+  class {
+    private readonly unregister: () => void
+
+    constructor(private readonly view: EditorView) {
+      const target = createCodeMirrorModalTarget(() => this.view)
+      const registrationRoot = this.view.dom.parentElement ?? this.view.dom
+      this.unregister = registerModalEditor(registrationRoot, target)
+      const controller = getDocumentWhichKeyController(this.view.dom.ownerDocument)
+      if (controller) {
+        const wkState = controller.getState()
+        target.setModalState({ mode: wkState.mode, preset: wkState.preset })
+      } else {
+        target.setModalState({ mode: 'normal', preset: 'helix' })
+      }
+    }
+
+    update(update: ViewUpdate) {
+      const next = update.state.field(modalStateField, false)
+      if (
+        next &&
+        update.transactions.some((tr) => tr.effects.some((e) => e.is(setModalStateEffect)))
+      ) {
+        this.view.dom.dataset.modalMode = next.mode
+        this.view.dom.dataset.modalPreset = next.preset
+      }
+    }
+
+    destroy() {
+      this.unregister()
+    }
+  },
+)
+
+const modalEditorDomHandlers = EditorView.domEventHandlers({
+  mousedown(event, view) {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey) return false
+    const { clickToInsert, readOnly } = view.state.facet(modalOptionsFacet)
+    if (clickToInsert && !readOnly && !view.state.readOnly) {
+      const controller = getDocumentWhichKeyController(view.dom.ownerDocument)
+      if (controller && controller.getState().mode === 'normal') {
+        controller.setMode('insert')
+      }
+    }
+    return false
+  },
+  beforeinput(event, view) {
+    const modalMode = view.dom.dataset.modalMode
+    if (modalMode && modalMode !== 'insert') {
+      event.preventDefault()
+      return true
+    }
+    return false
+  },
+})
+
+/**
+ * Returns the CodeMirror 6 extension integrating Helical UI modal editing (`normal`, `select`, `insert`, `jump`), `Tab`/`Shift-Tab` indentation, and pointer/input guards.
+ */
+export function modalEditorExtension(options: ModalEditorExtensionOptions = {}): Extension {
+  return [
+    modalOptionsFacet.of(options),
+    modalStateField,
+    modalEditorViewPlugin,
+    modalEditorDomHandlers,
+    indentUnit.of('  '),
+    keymap.of([indentWithTab]),
+  ]
 }

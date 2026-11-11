@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte'
-  import { Button, WhichKeyMode, useOptionalPaneRegistration } from '@cloudvoyant/helical-svelte'
+  import { Button, Pane, WhichKeyMode } from '@cloudvoyant/helical-svelte'
   import { CodeEditor, Tabs } from 'lgtm-ui'
   import { ChevronRight, FileText } from 'lucide-svelte'
   import type { HotkeyService } from '../services/hotkeyService.svelte'
@@ -15,19 +15,17 @@
   let { workspace, hotkeys }: ContentPaneProps = $props()
 
   // State ---------------------------------------------------------------------
-  let mainEl = $state<HTMLElement | null>(null)
   let editorRef = $state<{ focus: () => void }>()
-  const pane = useOptionalPaneRegistration(
-    () => mainEl,
-    () => ({
-      paneId: 'editor',
-      paneTitle: 'Editor',
-      paneOrder: 2,
-      defaultTitle: 'Editor',
-    }),
-  )
 
   // Derived -------------------------------------------------------------------
+  const paneClass = $derived(
+    [
+      'document-pane relative flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground outline-none',
+      workspace.settings.paneOutline
+        ? 'data-[pane-active=true]:ring-1 data-[pane-active=true]:ring-ring/40 data-[pane-active=true]:ring-inset'
+        : 'ring-0 data-[pane-active=true]:ring-0',
+    ].join(' '),
+  )
   const editorDiagnostics = $derived(
     workspace.activeDiagnostics.map((diag) => ({
       from: diag.from,
@@ -46,15 +44,13 @@
   })
 </script>
 
-<main
-  bind:this={mainEl}
-  {...pane.dataAttributes}
-  tabindex="-1"
-  class={[
-    'document-pane relative flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground outline-none',
-    workspace.settings.paneOutline &&
-      'data-[pane-active=true]:ring-1 data-[pane-active=true]:ring-ring/40 data-[pane-active=true]:ring-inset',
-  ]}
+<Pane
+  paneId="editor"
+  paneTitle="Editor"
+  paneOrder={2}
+  role="main"
+  tabindex={-1}
+  class={paneClass}
   aria-label="File viewer"
 >
   {#if workspace.tabItems.length > 0}
@@ -157,4 +153,4 @@
       >
     </div>
   </footer>
-</main>
+</Pane>

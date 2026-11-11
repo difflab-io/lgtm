@@ -22,6 +22,7 @@ export interface TreeViewProps {
   icon?: Snippet<[TreeNode, boolean]>
   getLabel?: (node: TreeNode) => string
   nodes: TreeNode[]
+  showHidden?: boolean
   selected?: string | null
   onselect?: (value: string) => void
   loadChildren?: (node: TreeNode) => Promise<TreeNode[]>

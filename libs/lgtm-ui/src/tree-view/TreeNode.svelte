@@ -3,7 +3,6 @@
   import { Folder, FolderOpen, FileText } from 'lucide-svelte'
   import ContextMenu from '../context-menu/ContextMenu.svelte'
   import { TreeView as ArkTreeView, useTreeViewContext } from '@ark-ui/svelte/tree-view'
-  import { getDocumentWhichKeyController } from '@cloudvoyant/helical-ui'
   import {
     treeViewListBase,
     treeViewBranchContentBase,
@@ -43,7 +42,6 @@
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         if (value === 'rename') {
-          getDocumentWhichKeyController()?.setMode('insert')
           tree().startRenaming(node.value)
         } else onaction?.(node.value, value)
       }),
@@ -76,8 +74,6 @@
                 data-pane-focus-target={state().focused || state().selected || isDefaultFocusTarget
                   ? ''
                   : undefined}
-                data-tree-node-value={node.value}
-                data-tree-node-branch="true"
               >
                 {@render nodeIcon(true, state().expanded)}
                 <ArkTreeView.BranchText class={treeViewLabelBase} hidden={state().renaming}
@@ -85,6 +81,7 @@
                 >
                 <ArkTreeView.NodeRenameInput
                   aria-label="Name"
+                  data-colon-command=""
                   class={treeViewRenameInputBase}
                   aria-invalid={Boolean(renameErrors[node.value])}
                   data-invalid={renameErrors[node.value] ? '' : undefined}
@@ -131,8 +128,6 @@
               data-pane-focus-target={state().focused || state().selected || isDefaultFocusTarget
                 ? ''
                 : undefined}
-              data-tree-node-value={node.value}
-              data-tree-node-branch="false"
             >
               {@render nodeIcon(false)}
               <ArkTreeView.ItemText class={treeViewLabelBase} hidden={state().renaming}
@@ -140,6 +135,7 @@
               >
               <ArkTreeView.NodeRenameInput
                 aria-label="Name"
+                data-colon-command=""
                 class={treeViewRenameInputBase}
                 aria-invalid={Boolean(renameErrors[node.value])}
                 data-invalid={renameErrors[node.value] ? '' : undefined}

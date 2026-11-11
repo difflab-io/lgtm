@@ -87,25 +87,34 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@keybinds'] },
     )
 
     test(
-      'should create, rename, and delete entries in the workspace tree using a, r, and d',
+      'should create, rename, delete, and toggle hidden entries in the workspace tree using a, r, d, and Shift+H',
       { tag: '@smoke' },
       async ({ page, workspace }) => {
         // Arrange
         const sameNode = entry(page, 'same.md')
         await sameNode.focus()
 
+        // Assert: hidden dotfile is hidden by default, then toggled visible/hidden with Shift+H
+        await expect(entry(page, '.gitignore')).toHaveCount(0)
+        await page.keyboard.press('Shift+H')
+        await expect(entry(page, '.gitignore')).toBeVisible()
+        await page.keyboard.press('Shift+H')
+        await expect(entry(page, '.gitignore')).toHaveCount(0)
+
         // Act: create new file with a
+        await sameNode.focus()
         await page.keyboard.press('a')
 
         // Assert
         await expect(entry(page, 'Untitled.md')).toBeVisible()
         expect(await exists(join(workspace.root, 'Untitled.md'))).toBe(true)
 
-        // Act: rename Untitled.md with r
+        // Act: rename Untitled.md with r (without switching the editor mode badge to insert)
         await entry(page, 'Untitled.md').focus()
         await page.keyboard.press('r')
         const renameInput = page.getByRole('textbox', { name: 'Name', exact: true })
         await expect(renameInput).toBeFocused()
+        await expect(modeBadge(page)).toHaveAttribute('data-mode', 'normal')
         await renameInput.fill('KeybindCreated.md')
         await renameInput.press('Enter')
 
@@ -183,6 +192,12 @@ test.describe('Given an open file in the code editor', { tag: ['@desktop', '@key
 
         // Assert
         await expect(editorContent).toContainText('PlainPlain text note.')
+
+        // Act: traverse paragraphs with } and { in normal mode without selecting whole paragraphs
+        await page.keyboard.press('}')
+        await expect(page.locator('.cm-selectionBackground')).toHaveCount(0)
+        await page.keyboard.press('{')
+        await expect(page.locator('.cm-selectionBackground')).toHaveCount(0)
       },
     )
 

@@ -339,6 +339,7 @@ export const test = base.extend<{
         await writeFile(join(initialRoot, 'Drafts/two.md'), '# Two\n\nSecond file.\n')
         await writeFile(join(initialRoot, 'same.md'), '# Markdown\n')
         await writeFile(join(initialRoot, 'notes.txt'), 'Plain text note.\n')
+        await writeFile(join(initialRoot, '.gitignore'), 'target/\n')
       } else if (initialWorkspace === 'default-seeded') {
         await mkdir(initialRoot, { recursive: true })
         await writeFile(join(initialRoot, 'hello.py'), 'def hello_world():\n    BROKEN()\n', 'utf8')

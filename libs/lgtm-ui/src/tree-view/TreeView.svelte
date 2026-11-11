@@ -15,6 +15,7 @@
   // Props ---------------------------------------------------------------------
   let {
     nodes,
+    showHidden = $bindable(false),
     renameValue,
     onrename,
     oncancel,
@@ -45,7 +46,11 @@
   // Derived -------------------------------------------------------------------
   const collection = $derived(
     createTreeCollection<TreeNode>({
-      rootNode: { value: '__root__', label, children: nodes.map(hydrate) },
+      rootNode: {
+        value: '__root__',
+        label,
+        children: nodes.filter(isVisibleNode).map(hydrate),
+      },
       nodeToValue: (node) => node.value,
       nodeToString: (node) => node.label,
       nodeToChildrenCount: (node) => (node.branch ? (node.children?.length ?? 1) : undefined),
@@ -64,12 +69,10 @@
         try {
           await onrename(value, label)
           clearRename(value)
-          getDocumentWhichKeyController(rootEl?.ownerDocument)?.setMode('normal')
         } catch (error) {
           renameErrors[value] = error instanceof Error ? error.message : String(error)
           attempts[value] = label
           await tick()
-          getDocumentWhichKeyController(rootEl?.ownerDocument)?.setMode('insert')
           tree().startRenaming(value)
         }
       })()
@@ -125,7 +128,6 @@
     if (value)
       void tick().then(() => {
         if (parent) tree().expand([parent])
-        getDocumentWhichKeyController(rootEl?.ownerDocument)?.setMode('insert')
         tree().startRenaming(value)
       })
   })
@@ -244,6 +246,26 @@
           return item ? collapseOrFocusParent(item.nodeValue, item.isBranch) : false
         },
       },
+      H: {
+        key: 'H',
+        label: 'Toggle Hidden Items',
+        mode: 'normal',
+        hidden: true,
+        when: () => isNormalTreeReady(),
+        action: ({ event }) => {
+          const item = event ? resolveTreeItemTarget(event) : null
+          if (!item) return false
+          showHidden = !showHidden
+          void tick().then(() => {
+            const visible = tree()
+              .getVisibleNodes()
+              .map((v) => v.node)
+            const next = visible.find((n) => n.value === item.nodeValue) ?? visible[0]
+            if (next) tree().focus(next.value)
+          })
+          return true
+        },
+      },
       ArrowLeft: {
         key: 'ArrowLeft',
         label: 'Collapse Folder',
@@ -285,7 +307,6 @@
         action: ({ event }) => {
           const item = event ? resolveTreeItemTarget(event) : null
           if (!item || !onrename) return false
-          getDocumentWhichKeyController(rootEl?.ownerDocument)?.setMode('insert')
           tree().startRenaming(item.nodeValue)
           return true
         },
@@ -299,7 +320,6 @@
         action: ({ event }) => {
           const item = event ? resolveTreeItemTarget(event) : null
           if (!item || !onrename) return false
-          getDocumentWhichKeyController(rootEl?.ownerDocument)?.setMode('insert')
           tree().startRenaming(item.nodeValue)
           return true
         },
@@ -390,17 +410,18 @@
       return null
     }
     const itemEl =
-      target.closest<HTMLElement>('[data-tree-node-value]') ??
+      target.closest<HTMLElement>('[data-which-key-target][data-value]') ??
       (target === paneEl || target.getAttribute('role') === 'tree'
-        ? (rootEl?.querySelector<HTMLElement>('[data-pane-focus-target][data-tree-node-value]') ??
-          rootEl?.querySelector<HTMLElement>('[data-tree-node-value]'))
+        ? (rootEl?.querySelector<HTMLElement>(
+            '[data-pane-focus-target][data-which-key-target][data-value]',
+          ) ?? rootEl?.querySelector<HTMLElement>('[data-which-key-target][data-value]'))
         : null)
     if (!itemEl) return null
-    const nodeValue = itemEl.dataset.treeNodeValue
+    const nodeValue = itemEl.dataset.value
     if (!nodeValue) return null
     return {
       nodeValue,
-      isBranch: itemEl.dataset.treeNodeBranch === 'true',
+      isBranch: Boolean(collection.findNode(nodeValue)?.branch),
     }
   }
 
@@ -462,6 +483,14 @@
     delete renameErrors[value]
     delete attempts[value]
   }
+  function isVisibleNode(node: TreeNode): boolean {
+    return (
+      showHidden ||
+      !node.label.startsWith('.') ||
+      node.value === pendingNode?.value ||
+      node.value === renameValue
+    )
+  }
   function hydrate(node: TreeNode): TreeNode {
     const base = loaded[node.value] ?? node.children
     const children =
@@ -470,7 +499,7 @@
       ...node,
       displayLabel: getLabel(node),
       label: attempts[node.value] ?? node.label,
-      children: children?.map(hydrate),
+      children: children?.filter(isVisibleNode).map(hydrate),
     }
   }
 </script>
@@ -490,7 +519,6 @@
           }}
           oncancel={(value) => {
             clearRename(value)
-            getDocumentWhichKeyController(rootEl?.ownerDocument)?.setMode('normal')
             oncancel?.(value)
           }}
           {contextItems}

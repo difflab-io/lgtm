@@ -1,4 +1,14 @@
 import { describe, expect, test } from 'bun:test'
+import { EditorState } from '@codemirror/state'
+import {
+  codeEditorLspExtension,
+  codeEditorThemeExtension,
+  lspOptionsFacet,
+  modalEditorExtension,
+  modalOptionsFacet,
+  modalStateField,
+  setModalStateEffect,
+} from './code-editor/modalKeymap'
 import { codeEditorHoverTooltipVariants, codeEditorRootVariants } from './code-editor/styles'
 import { contextMenuItemVariants } from './context-menu/styles'
 import { menuIndicatorVariants, menuItemVariants } from './menu/styles'
@@ -35,5 +45,31 @@ describe('When importing lgtm-ui Helical style variants', () => {
     expect(menuItemClass).toContain('rounded-none')
     expect(statusDotClass).toContain('bg-emerald-500')
     expect(themeToggleClass).toContain('helical-theme-toggle')
+  })
+})
+
+describe('When composing CodeEditor CodeMirror 6 extensions', () => {
+  test('should initialize facets and modal state field and update modal state via effects', () => {
+    // Arrange
+    const onhover = async () => null
+    const state = EditorState.create({
+      doc: 'fn main() {}\n',
+      extensions: [
+        codeEditorThemeExtension(),
+        modalEditorExtension({ clickToInsert: false, readOnly: true }),
+        codeEditorLspExtension({ onhover }),
+      ],
+    })
+
+    // Act
+    const updated = state.update({
+      effects: setModalStateEffect.of({ mode: 'select', preset: 'vim' }),
+    }).state
+
+    // Assert
+    expect(state.field(modalStateField)).toEqual({ mode: 'normal', preset: 'helix' })
+    expect(state.facet(modalOptionsFacet)).toEqual({ clickToInsert: false, readOnly: true })
+    expect(state.facet(lspOptionsFacet).onhover).toBe(onhover)
+    expect(updated.field(modalStateField)).toEqual({ mode: 'select', preset: 'vim' })
   })
 })
