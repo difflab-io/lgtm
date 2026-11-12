@@ -18,14 +18,6 @@
   let editorRef = $state<{ focus: () => void }>()
 
   // Derived -------------------------------------------------------------------
-  const paneClass = $derived(
-    [
-      'document-pane relative flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground outline-none',
-      workspace.settings.paneOutline
-        ? 'data-[pane-active=true]:ring-1 data-[pane-active=true]:ring-ring/40 data-[pane-active=true]:ring-inset'
-        : 'ring-0 data-[pane-active=true]:ring-0',
-    ].join(' '),
-  )
   const editorDiagnostics = $derived(
     workspace.activeDiagnostics.map((diag) => ({
       from: diag.from,
@@ -50,7 +42,10 @@
   paneOrder={2}
   role="main"
   tabindex={-1}
-  class={paneClass}
+  class="document-pane relative flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground outline-none {workspace
+    .settings.paneOutline
+    ? 'data-[pane-active=true]:ring-1 data-[pane-active=true]:ring-ring/40 data-[pane-active=true]:ring-inset'
+    : 'ring-0 data-[pane-active=true]:ring-0'}"
   aria-label="File viewer"
 >
   {#if workspace.tabItems.length > 0}

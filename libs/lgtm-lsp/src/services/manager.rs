@@ -260,6 +260,14 @@ impl LgtmLspManager {
         let project_root = Self::canonical_or_owned(&project_root);
         let key = LspSessionKey::new(&workspace_root, &language_id, &project_root);
 
+        let sync_action = self.cache_service.sync_document(
+            &workspace_root,
+            &project_root,
+            &file_path,
+            &language_id,
+            content,
+        );
+
         let handle = self.ensure_session(
             &workspace_root,
             &project_root,
@@ -267,14 +275,6 @@ impl LgtmLspManager {
             &language_config,
             config.lsp.auto_install,
             Duration::from_millis(config.lsp.request_timeout_ms),
-        );
-
-        let sync_action = self.cache_service.sync_document(
-            &workspace_root,
-            &project_root,
-            &file_path,
-            &language_id,
-            content,
         );
 
         if let Some(handle) = handle

@@ -1,12 +1,15 @@
 import { describe, expect, test } from 'bun:test'
-import { EditorState } from '@codemirror/state'
+import { EditorSelection, EditorState } from '@codemirror/state'
 import {
   codeEditorLspExtension,
   codeEditorThemeExtension,
   lspOptionsFacet,
+  modalClipboardField,
   modalEditorExtension,
   modalOptionsFacet,
   modalStateField,
+  resolveEditorSymbolOffset,
+  setModalClipboardEffect,
   setModalStateEffect,
 } from './code-editor/modalKeymap'
 import { codeEditorHoverTooltipVariants, codeEditorRootVariants } from './code-editor/styles'
@@ -63,13 +66,32 @@ describe('When composing CodeEditor CodeMirror 6 extensions', () => {
 
     // Act
     const updated = state.update({
-      effects: setModalStateEffect.of({ mode: 'select', preset: 'vim' }),
+      effects: [
+        setModalStateEffect.of({ mode: 'select', preset: 'vim' }),
+        setModalClipboardEffect.of('fn main() {}'),
+      ],
     }).state
 
     // Assert
     expect(state.field(modalStateField)).toEqual({ mode: 'normal', preset: 'helix' })
+    expect(state.field(modalClipboardField)).toBe('')
     expect(state.facet(modalOptionsFacet)).toEqual({ clickToInsert: false, readOnly: true })
     expect(state.facet(lspOptionsFacet).onhover).toBe(onhover)
     expect(updated.field(modalStateField)).toEqual({ mode: 'select', preset: 'vim' })
+    expect(updated.field(modalClipboardField)).toBe('fn main() {}')
+  })
+
+  test('should resolve the symbol offset inside a forward word selection in selection-first presets', () => {
+    // Arrange
+    const state = EditorState.create({
+      doc: 'let total = helper(1, 2);\n',
+      selection: EditorSelection.single(12, 18),
+    })
+
+    // Act
+    const offset = resolveEditorSymbolOffset(state)
+
+    // Assert
+    expect(offset).toBe(12)
   })
 })

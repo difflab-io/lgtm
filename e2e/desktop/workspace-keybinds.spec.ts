@@ -1,18 +1,4 @@
-import {
-  test,
-  expect,
-  entry,
-  createFile,
-  renameEntry,
-  exists,
-  modeBadge,
-  whichKeyPanel,
-  whichKeyExplorer,
-  commandMenu,
-  commandMenuInput,
-  commandPalette,
-  commandPaletteInput,
-} from './fixtures'
+import { test, expect, entry, createFile, renameEntry, exists } from './fixtures'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -114,7 +100,10 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@keybinds'] },
         await page.keyboard.press('r')
         const renameInput = page.getByRole('textbox', { name: 'Name', exact: true })
         await expect(renameInput).toBeFocused()
-        await expect(modeBadge(page)).toHaveAttribute('data-mode', 'normal')
+        await expect(page.getByTestId('which-key-mode-badge')).toHaveAttribute(
+          'data-mode',
+          'normal',
+        )
         await renameInput.fill('KeybindCreated.md')
         await renameInput.press('Enter')
 
@@ -153,7 +142,7 @@ test.describe('Given an open file in the code editor', { tag: ['@desktop', '@key
         await page.keyboard.press('Enter')
 
         // Assert
-        const badge = modeBadge(page)
+        const badge = page.getByTestId('which-key-mode-badge')
         await expect(badge).toBeVisible()
         await expect(badge).toHaveAttribute('data-mode', 'normal')
         await expect(badge).toHaveAttribute('data-preset', 'helix')
@@ -172,7 +161,10 @@ test.describe('Given an open file in the code editor', { tag: ['@desktop', '@key
         await expect(editorContent).toContainText('Plain text note.')
         await editorContent.focus()
         await page.keyboard.press('Escape')
-        await expect(modeBadge(page)).toHaveAttribute('data-mode', 'normal')
+        await expect(page.getByTestId('which-key-mode-badge')).toHaveAttribute(
+          'data-mode',
+          'normal',
+        )
 
         // Act: go to start of document (gg), select inner word (miw), and delete (d)
         await page.keyboard.press('g')
@@ -240,50 +232,55 @@ test.describe('Given an open file in the code editor', { tag: ['@desktop', '@key
         await expect(editorContent).toContainText('# Markdown')
         await editorContent.focus()
         await page.keyboard.press('Escape')
-        await expect(modeBadge(page)).toHaveAttribute('data-mode', 'normal')
+        const badge = page.getByTestId('which-key-mode-badge')
+        await expect(badge).toHaveAttribute('data-mode', 'normal')
 
         // Act: open line below with o, type text in insert mode, and return to normal mode on Escape
         await page.keyboard.press('o')
-        await expect(modeBadge(page)).toHaveAttribute('data-mode', 'insert')
+        await expect(badge).toHaveAttribute('data-mode', 'insert')
         await page.keyboard.type('Modal line.')
         await page.keyboard.press('Escape')
 
         // Assert
-        await expect(modeBadge(page)).toHaveAttribute('data-mode', 'normal')
+        await expect(badge).toHaveAttribute('data-mode', 'normal')
         await expect(editorContent).toContainText('Modal line.')
         await expect
           .poll(() => readFile(join(workspace.root, 'same.md'), 'utf8'))
           .toContain('Modal line.')
       },
     )
+  })
+
+  test.describe('When using LSP keybindings in the code editor', () => {
+    test.beforeEach(async ({ page, workspace }) => {
+      await createFile(page)
+      await renameEntry(page, 'Untitled.md', 'intellisense.rs')
+      await entry(page, 'same.md').click()
+      await writeFile(
+        join(workspace.root, 'intellisense.rs'),
+        'pub fn helper(x: i32, y: i32) -> i32 {\n    BROKEN();\n    42\n}\n',
+        'utf8',
+      )
+      await entry(page, 'intellisense.rs').click()
+      await expect(page.locator('.cm-lintRange-error')).toBeVisible()
+      await page.locator('.cm-content').focus()
+      await page.keyboard.press('Escape')
+      await expect(page.getByTestId('which-key-mode-badge')).toHaveAttribute('data-mode', 'normal')
+    })
 
     test(
-      'should trigger LSP hover with K, navigate diagnostics with ]d and [d, show signature help, and complete with Ctrl+Space',
+      'should show and dismiss LSP hover tooltip with K and Space k',
       { tag: '@smoke' },
-      async ({ page, workspace }) => {
+      async ({ page }) => {
         // Arrange
-        await createFile(page)
-        await renameEntry(page, 'Untitled.md', 'intellisense.rs')
-        await entry(page, 'same.md').click()
-        await writeFile(
-          join(workspace.root, 'intellisense.rs'),
-          'pub fn helper(x: i32, y: i32) -> i32 {\n    BROKEN();\n    42\n}\n',
-          'utf8',
-        )
-        await entry(page, 'intellisense.rs').click()
-        const editorContent = page.locator('.cm-content')
-        await expect(page.locator('.cm-lintRange-error')).toBeVisible()
-        await editorContent.focus()
-        await page.keyboard.press('Escape')
-        await expect(modeBadge(page)).toHaveAttribute('data-mode', 'normal')
+        const hoverTooltip = page.locator('[data-slot="code-editor-hover"]')
 
-        // Act: press K in normal mode to open LSP hover tooltip at cursor, then also verify Helix Space k
+        // Act: press K in normal mode at top of file
         await page.keyboard.press('g')
         await page.keyboard.press('g')
         await page.keyboard.press('Shift+K')
 
-        // Assert: hover tooltip is visible and Escape dismisses it in normal mode
-        const hoverTooltip = page.locator('[data-slot="code-editor-hover"]')
+        // Assert
         await expect(hoverTooltip).toBeVisible()
         await expect(hoverTooltip).toContainText('pub fn helper() -> i32')
         await page.keyboard.press('Escape')
@@ -292,20 +289,46 @@ test.describe('Given an open file in the code editor', { tag: ['@desktop', '@key
         // Act: press Space k (Helix hover) to open LSP hover tooltip again
         await page.keyboard.press('Space')
         await page.keyboard.press('k')
+
+        // Assert
         await expect(hoverTooltip).toBeVisible()
         await page.keyboard.press('Escape')
         await expect(hoverTooltip).toBeHidden()
+      },
+    )
 
-        // Act: press ]d to jump to next diagnostic and show diagnostic tooltip
+    test(
+      'should jump to diagnostics and show diagnostic tooltip with ]d and [d',
+      { tag: '@smoke' },
+      async ({ page }) => {
+        // Arrange
+        const diagTooltip = page.locator('[data-slot="code-editor-diagnostic-tooltip"]')
+
+        // Act: press ]d to jump to next diagnostic
         await page.keyboard.press(']')
         await page.keyboard.press('d')
 
         // Assert
-        const diagTooltip = page.locator('[data-slot="code-editor-diagnostic-tooltip"]')
         await expect(diagTooltip).toBeVisible()
         await expect(diagTooltip).toContainText('cannot find value BROKEN in this scope')
         await page.keyboard.press('Escape')
         await expect(diagTooltip).toBeHidden()
+
+        // Act: press [d to jump to previous diagnostic
+        await page.keyboard.press('[')
+        await page.keyboard.press('d')
+
+        // Assert
+        await expect(diagTooltip).toBeVisible()
+      },
+    )
+
+    test(
+      'should show and dismiss LSP signature help with Space l s',
+      { tag: '@smoke' },
+      async ({ page }) => {
+        // Arrange
+        const sigTooltip = page.locator('[data-slot="code-editor-signature-help"]')
 
         // Act: press Space l s to open signature help at cursor
         await page.keyboard.press('Space')
@@ -313,39 +336,51 @@ test.describe('Given an open file in the code editor', { tag: ['@desktop', '@key
         await page.keyboard.press('s')
 
         // Assert
-        const sigTooltip = page.locator('[data-slot="code-editor-signature-help"]')
         await expect(sigTooltip).toBeVisible()
         await expect(sigTooltip).toContainText('fn helper(x: i32, y: i32) -> i32')
         await page.keyboard.press('Escape')
         await expect(sigTooltip).toBeHidden()
+      },
+    )
 
-        // Act: open line below (o) into insert mode, trigger completion with Control+Space, dismiss with Control+e while staying in insert mode, then accept with Control+y and return to normal mode on Escape
+    test(
+      'should trigger, cancel with Escape or Control+e, and accept with Control+y autocomplete suggestions',
+      { tag: '@smoke' },
+      async ({ page }) => {
+        // Arrange
+        const editorContent = page.locator('.cm-content')
+        const badge = page.getByTestId('which-key-mode-badge')
+        const completionListbox = page.locator('.cm-tooltip-autocomplete [role="listbox"]')
+
+        // Act: open line below (o) into insert mode and trigger completion with Control+Space
         await page.keyboard.press('o')
-        await expect(modeBadge(page)).toHaveAttribute('data-mode', 'insert')
+        await expect(badge).toHaveAttribute('data-mode', 'insert')
         await page.keyboard.type('hel')
         await page.keyboard.press('Control+Space')
-        const completionListbox = page.locator('.cm-tooltip-autocomplete [role="listbox"]')
+
+        // Assert: autocomplete opens and Escape dismisses it while keeping insert mode active
         await expect(completionListbox).toBeVisible()
         await expect(completionListbox).toContainText('helper_value')
-
-        // Pressing Escape or Control+e dismisses autocomplete while keeping insert mode active
         await page.keyboard.press('Escape')
         await expect(completionListbox).toBeHidden()
-        await expect(modeBadge(page)).toHaveAttribute('data-mode', 'insert')
+        await expect(badge).toHaveAttribute('data-mode', 'insert')
 
-        // Re-open autocomplete, dismiss with Control+e (Vim Compl-cancel), then re-open and accept with Control+y
+        // Act: re-open autocomplete and dismiss with Control+e (Vim Compl-cancel)
         await page.keyboard.press('Control+Space')
         await expect(completionListbox).toBeVisible()
         await page.keyboard.press('Control+e')
         await expect(completionListbox).toBeHidden()
-        await expect(modeBadge(page)).toHaveAttribute('data-mode', 'insert')
+        await expect(badge).toHaveAttribute('data-mode', 'insert')
 
+        // Act: re-open autocomplete, accept with Control+y, and exit insert mode with Escape
         await page.keyboard.press('Control+Space')
         await expect(completionListbox).toBeVisible()
         await page.keyboard.press('Control+y')
+
+        // Assert
         await expect(editorContent).toContainText('helper_value()')
         await page.keyboard.press('Escape')
-        await expect(modeBadge(page)).toHaveAttribute('data-mode', 'normal')
+        await expect(badge).toHaveAttribute('data-mode', 'normal')
       },
     )
   })
@@ -363,20 +398,22 @@ test.describe('Given WhichKey and the command surfaces', { tag: ['@desktop', '@k
         await entry(page, 'same.md').click()
         await page.locator('.cm-content').focus()
         await page.keyboard.press('Escape')
+        const panel = page.getByTestId('which-key-panel')
+        const explorer = page.getByTestId('which-key-explorer')
 
         // Act: press Space to open WhichKey popup
         await page.keyboard.press('Space')
 
         // Assert
-        await expect(whichKeyPanel(page)).toBeVisible()
-        await expect(whichKeyPanel(page)).toContainText('File')
+        await expect(panel).toBeVisible()
+        await expect(panel).toContainText('File')
 
         // Act: press f then s to save file and close WhichKey
         await page.keyboard.press('f')
         await page.keyboard.press('s')
 
         // Assert
-        await expect(whichKeyPanel(page)).toBeHidden()
+        await expect(panel).toBeHidden()
 
         // Act: press Space then e to toggle sidebar closed
         await page.keyboard.press('Space')
@@ -400,24 +437,25 @@ test.describe('Given WhichKey and the command surfaces', { tag: ['@desktop', '@k
         await page.keyboard.press('?')
 
         // Assert
-        await expect(whichKeyExplorer(page)).toBeVisible()
+        await expect(explorer).toBeVisible()
 
         // Act: press Escape to close WhichKeyExplorer
         await page.keyboard.press('Escape')
 
         // Assert
-        await expect(whichKeyExplorer(page)).toBeHidden()
+        await expect(explorer).toBeHidden()
       },
     )
 
     test(
-      'should open CommandMenu by default on : and Mod+k and switch Mod+k to CommandPalette when commandStyle is palette',
+      'should open CommandMenu on : and close on Escape',
       { tag: '@smoke' },
       async ({ page }) => {
         // Arrange
         await entry(page, 'same.md').click()
         await page.locator('.cm-content').focus()
         await page.keyboard.press('Escape')
+        const menu = page.getByTestId('command-menu')
         await expect(page.getByRole('button', { name: /Open Command/i })).toHaveCount(0)
         expect(
           await page.evaluate(
@@ -429,10 +467,10 @@ test.describe('Given WhichKey and the command surfaces', { tag: ['@desktop', '@k
         await page.keyboard.press(':')
 
         // Assert
-        await expect(commandMenu(page)).toBeVisible()
-        await expect(commandMenu(page)).toHaveAttribute('data-size', 'sm')
+        await expect(menu).toBeVisible()
+        await expect(menu).toHaveAttribute('data-size', 'sm')
         await expect(
-          commandMenu(page)
+          menu
             .locator('[data-testid="command-menu-item"][data-value="write"]')
             .getByTestId('command-menu-item-aliases'),
         ).toHaveText('w')
@@ -446,32 +484,47 @@ test.describe('Given WhichKey and the command surfaces', { tag: ['@desktop', '@k
         await page.keyboard.press('Escape')
 
         // Assert
-        await expect(commandMenu(page)).toBeHidden()
+        await expect(menu).toBeHidden()
+      },
+    )
+
+    test(
+      'should open CommandMenu on Mod+k by default and switch Mod+k to CommandPalette when commandStyle is palette',
+      { tag: '@smoke' },
+      async ({ page }) => {
+        // Arrange
+        await entry(page, 'same.md').click()
+        await page.locator('.cm-content').focus()
+        await page.keyboard.press('Escape')
+        const menu = page.getByTestId('command-menu')
+        const menuInput = page.getByTestId('command-menu-input')
+        const palette = page.getByTestId('command-palette')
+        const paletteInput = page.getByTestId('command-palette-input')
 
         // Act: press Meta+k to open default CommandMenu and switch command-style to palette
         await page.keyboard.press('Meta+k')
-        await expect(commandMenu(page)).toBeVisible()
-        await commandMenuInput(page).fill('command-style palette')
-        await commandMenuInput(page).press('Enter')
+        await expect(menu).toBeVisible()
+        await menuInput.fill('command-style palette')
+        await menuInput.press('Enter')
 
         // Assert
-        await expect(commandMenu(page)).toBeHidden()
+        await expect(menu).toBeHidden()
 
         // Act: press Meta+k again
         await page.keyboard.press('Meta+k')
 
         // Assert: Meta+k now opens CommandPalette
-        await expect(commandPalette(page)).toBeVisible()
+        await expect(palette).toBeVisible()
 
         // Act: close CommandPalette and press :
-        await commandPaletteInput(page).press('Escape')
-        await expect(commandPalette(page)).toBeHidden()
+        await paletteInput.press('Escape')
+        await expect(palette).toBeHidden()
         await page.keyboard.press(':')
 
         // Assert: : still opens CommandMenu
-        await expect(commandMenu(page)).toBeVisible()
+        await expect(menu).toBeVisible()
         await page.keyboard.press('Escape')
-        await expect(commandMenu(page)).toBeHidden()
+        await expect(menu).toBeHidden()
       },
     )
   })

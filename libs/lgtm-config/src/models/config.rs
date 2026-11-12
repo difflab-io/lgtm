@@ -613,102 +613,47 @@ impl LgtmConfigPatch {
 
     /// Returns whether this patch carries no leaf overrides.
     pub fn is_empty(&self) -> bool {
-        let appearance_empty = self.appearance.as_ref().is_none_or(|a| a.theme.is_none());
-        let workspace_empty = self
-            .workspace
+        self.appearance
             .as_ref()
-            .is_none_or(|w| w.active_root.is_none() && w.recent_roots.is_none());
-        let editor_empty = self
-            .editor
-            .as_ref()
-            .is_none_or(|e| e.line_wrapping.is_none());
-        let keybindings_empty = self.keybindings.as_ref().is_none_or(|k| {
-            k.command_style.is_none()
-                && k.preset.is_none()
-                && k.leader_only.is_none()
-                && k.pane_outline.is_none()
-                && k.click_to_insert.is_none()
-        });
-        let lsp_empty = self.lsp.as_ref().is_none_or(|l| {
-            l.enabled.is_none() && l.auto_install.is_none() && l.request_timeout_ms.is_none()
-        });
-        let languages_empty = self.languages.as_ref().is_none_or(BTreeMap::is_empty);
-
-        appearance_empty
-            && workspace_empty
-            && editor_empty
-            && keybindings_empty
-            && lsp_empty
-            && languages_empty
+            .is_none_or(|v| v == &AppearanceSettingsPatch::default())
+            && self
+                .workspace
+                .as_ref()
+                .is_none_or(|v| v == &WorkspaceSettingsPatch::default())
+            && self
+                .editor
+                .as_ref()
+                .is_none_or(|v| v == &EditorSettingsPatch::default())
+            && self
+                .keybindings
+                .as_ref()
+                .is_none_or(|v| v == &KeybindingSettingsPatch::default())
+            && self
+                .lsp
+                .as_ref()
+                .is_none_or(|v| v == &LspSettingsPatch::default())
+            && self.languages.as_ref().is_none_or(BTreeMap::is_empty)
     }
 
     /// Deep-merges `overlay` leaf fields into `self`.
     pub fn merge_patch(&mut self, overlay: Self) {
-        if let Some(schema) = overlay.schema {
-            self.schema = Some(schema);
-        }
-        if let Some(app_overlay) = overlay.appearance {
-            let target = self
-                .appearance
-                .get_or_insert_with(AppearanceSettingsPatch::default);
-            if let Some(theme) = app_overlay.theme {
-                target.theme = Some(theme);
+        let (Ok(serde_json::Value::Object(mut base)), Ok(serde_json::Value::Object(over))) =
+            (serde_json::to_value(&*self), serde_json::to_value(overlay))
+        else {
+            return;
+        };
+        for (section, value) in over {
+            match (base.get_mut(&section), value) {
+                (Some(serde_json::Value::Object(target)), serde_json::Value::Object(entries)) => {
+                    target.extend(entries);
+                }
+                (_, other) => {
+                    base.insert(section, other);
+                }
             }
         }
-        if let Some(ws_overlay) = overlay.workspace {
-            let target = self
-                .workspace
-                .get_or_insert_with(WorkspaceSettingsPatch::default);
-            if let Some(active_root) = ws_overlay.active_root {
-                target.active_root = Some(active_root);
-            }
-            if let Some(recent_roots) = ws_overlay.recent_roots {
-                target.recent_roots = Some(recent_roots);
-            }
-        }
-        if let Some(ed_overlay) = overlay.editor {
-            let target = self.editor.get_or_insert_with(EditorSettingsPatch::default);
-            if let Some(line_wrapping) = ed_overlay.line_wrapping {
-                target.line_wrapping = Some(line_wrapping);
-            }
-        }
-        if let Some(kb_overlay) = overlay.keybindings {
-            let target = self
-                .keybindings
-                .get_or_insert_with(KeybindingSettingsPatch::default);
-            if let Some(command_style) = kb_overlay.command_style {
-                target.command_style = Some(command_style);
-            }
-            if let Some(preset) = kb_overlay.preset {
-                target.preset = Some(preset);
-            }
-            if let Some(leader_only) = kb_overlay.leader_only {
-                target.leader_only = Some(leader_only);
-            }
-            if let Some(pane_outline) = kb_overlay.pane_outline {
-                target.pane_outline = Some(pane_outline);
-            }
-            if let Some(click_to_insert) = kb_overlay.click_to_insert {
-                target.click_to_insert = Some(click_to_insert);
-            }
-        }
-        if let Some(lsp_overlay) = overlay.lsp {
-            let target = self.lsp.get_or_insert_with(LspSettingsPatch::default);
-            if let Some(enabled) = lsp_overlay.enabled {
-                target.enabled = Some(enabled);
-            }
-            if let Some(auto_install) = lsp_overlay.auto_install {
-                target.auto_install = Some(auto_install);
-            }
-            if let Some(request_timeout_ms) = lsp_overlay.request_timeout_ms {
-                target.request_timeout_ms = Some(request_timeout_ms);
-            }
-        }
-        if let Some(langs_overlay) = overlay.languages {
-            let target = self.languages.get_or_insert_with(BTreeMap::new);
-            for (k, v) in langs_overlay {
-                target.insert(k, v);
-            }
+        if let Ok(merged) = serde_json::from_value(serde_json::Value::Object(base)) {
+            *self = merged;
         }
     }
 
@@ -717,162 +662,43 @@ impl LgtmConfigPatch {
         let Some(proj) = project else {
             return (self.clone(), Self::default());
         };
+        let (Ok(serde_json::Value::Object(patch_map)), Ok(serde_json::Value::Object(proj_map))) =
+            (serde_json::to_value(self), serde_json::to_value(proj))
+        else {
+            return (self.clone(), Self::default());
+        };
 
-        let mut global_out = Self::default();
-        let mut project_out = Self::default();
+        let mut global_map = serde_json::Map::new();
+        let mut project_map = serde_json::Map::new();
 
-        if let Some(app) = &self.appearance
-            && let Some(theme) = app.theme
-        {
-            let out = if proj.appearance.as_ref().and_then(|a| a.theme).is_some() {
-                &mut project_out
-            } else {
-                &mut global_out
-            };
-            out.appearance
-                .get_or_insert_with(AppearanceSettingsPatch::default)
-                .theme = Some(theme);
-        }
-
-        if let Some(ws) = &self.workspace {
-            let proj_ws = proj.workspace.as_ref();
-            if let Some(active_root) = &ws.active_root {
-                let out = if proj_ws.and_then(|w| w.active_root.as_ref()).is_some() {
-                    &mut project_out
-                } else {
-                    &mut global_out
-                };
-                out.workspace
-                    .get_or_insert_with(WorkspaceSettingsPatch::default)
-                    .active_root = Some(active_root.clone());
+        for (section, value) in patch_map {
+            if section == "$schema" {
+                continue;
             }
-            if let Some(recent_roots) = &ws.recent_roots {
-                let out = if proj_ws.and_then(|w| w.recent_roots.as_ref()).is_some() {
-                    &mut project_out
-                } else {
-                    &mut global_out
-                };
-                out.workspace
-                    .get_or_insert_with(WorkspaceSettingsPatch::default)
-                    .recent_roots = Some(recent_roots.clone());
+            if let serde_json::Value::Object(entries) = value {
+                let proj_section = proj_map
+                    .get(&section)
+                    .and_then(serde_json::Value::as_object);
+                for (key, leaf) in entries {
+                    let target = if proj_section.is_some_and(|m| m.contains_key(&key)) {
+                        &mut project_map
+                    } else {
+                        &mut global_map
+                    };
+                    if let serde_json::Value::Object(sec) = target
+                        .entry(section.clone())
+                        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
+                    {
+                        sec.insert(key, leaf);
+                    }
+                }
             }
         }
 
-        if let Some(ed) = &self.editor
-            && let Some(line_wrapping) = ed.line_wrapping
-        {
-            let out = if proj.editor.as_ref().and_then(|e| e.line_wrapping).is_some() {
-                &mut project_out
-            } else {
-                &mut global_out
-            };
-            out.editor
-                .get_or_insert_with(EditorSettingsPatch::default)
-                .line_wrapping = Some(line_wrapping);
-        }
-
-        if let Some(kb) = &self.keybindings {
-            let proj_kb = proj.keybindings.as_ref();
-            if let Some(command_style) = kb.command_style {
-                let out = if proj_kb.and_then(|k| k.command_style).is_some() {
-                    &mut project_out
-                } else {
-                    &mut global_out
-                };
-                out.keybindings
-                    .get_or_insert_with(KeybindingSettingsPatch::default)
-                    .command_style = Some(command_style);
-            }
-            if let Some(preset) = kb.preset {
-                let out = if proj_kb.and_then(|k| k.preset).is_some() {
-                    &mut project_out
-                } else {
-                    &mut global_out
-                };
-                out.keybindings
-                    .get_or_insert_with(KeybindingSettingsPatch::default)
-                    .preset = Some(preset);
-            }
-            if let Some(leader_only) = kb.leader_only {
-                let out = if proj_kb.and_then(|k| k.leader_only).is_some() {
-                    &mut project_out
-                } else {
-                    &mut global_out
-                };
-                out.keybindings
-                    .get_or_insert_with(KeybindingSettingsPatch::default)
-                    .leader_only = Some(leader_only);
-            }
-            if let Some(pane_outline) = kb.pane_outline {
-                let out = if proj_kb.and_then(|k| k.pane_outline).is_some() {
-                    &mut project_out
-                } else {
-                    &mut global_out
-                };
-                out.keybindings
-                    .get_or_insert_with(KeybindingSettingsPatch::default)
-                    .pane_outline = Some(pane_outline);
-            }
-            if let Some(click_to_insert) = kb.click_to_insert {
-                let out = if proj_kb.and_then(|k| k.click_to_insert).is_some() {
-                    &mut project_out
-                } else {
-                    &mut global_out
-                };
-                out.keybindings
-                    .get_or_insert_with(KeybindingSettingsPatch::default)
-                    .click_to_insert = Some(click_to_insert);
-            }
-        }
-
-        if let Some(lsp) = &self.lsp {
-            let proj_lsp = proj.lsp.as_ref();
-            if let Some(enabled) = lsp.enabled {
-                let out = if proj_lsp.and_then(|l| l.enabled).is_some() {
-                    &mut project_out
-                } else {
-                    &mut global_out
-                };
-                out.lsp
-                    .get_or_insert_with(LspSettingsPatch::default)
-                    .enabled = Some(enabled);
-            }
-            if let Some(auto_install) = lsp.auto_install {
-                let out = if proj_lsp.and_then(|l| l.auto_install).is_some() {
-                    &mut project_out
-                } else {
-                    &mut global_out
-                };
-                out.lsp
-                    .get_or_insert_with(LspSettingsPatch::default)
-                    .auto_install = Some(auto_install);
-            }
-            if let Some(request_timeout_ms) = lsp.request_timeout_ms {
-                let out = if proj_lsp.and_then(|l| l.request_timeout_ms).is_some() {
-                    &mut project_out
-                } else {
-                    &mut global_out
-                };
-                out.lsp
-                    .get_or_insert_with(LspSettingsPatch::default)
-                    .request_timeout_ms = Some(request_timeout_ms);
-            }
-        }
-
-        if let Some(langs) = &self.languages {
-            let proj_langs = proj.languages.as_ref();
-            for (k, v) in langs {
-                let out = if proj_langs.is_some_and(|m| m.contains_key(k)) {
-                    &mut project_out
-                } else {
-                    &mut global_out
-                };
-                out.languages
-                    .get_or_insert_with(BTreeMap::new)
-                    .insert(k.clone(), v.clone());
-            }
-        }
-
+        let global_out =
+            serde_json::from_value(serde_json::Value::Object(global_map)).unwrap_or_default();
+        let project_out =
+            serde_json::from_value(serde_json::Value::Object(project_map)).unwrap_or_default();
         (global_out, project_out)
     }
 

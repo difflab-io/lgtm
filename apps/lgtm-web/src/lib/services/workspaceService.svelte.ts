@@ -294,7 +294,12 @@ export class WorkspaceService {
   /** Reads a file from the workspace, opens or activates its tab, and optionally positions the cursor at `targetOffset`. */
   async openFile(entry: WorkspaceNode, targetOffset?: number, focus = false) {
     const tabId = `file:${entry.path}`
-    if (this.activeTabId === tabId && this.fileContent && targetOffset === undefined) {
+    if (this.activeTabId === tabId && this.fileContent) {
+      if (targetOffset !== undefined) {
+        this.selectionOffset = null
+        await Promise.resolve()
+        this.selectionOffset = targetOffset
+      }
       this.focusRequest++
       return
     }

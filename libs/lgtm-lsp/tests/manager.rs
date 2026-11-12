@@ -104,6 +104,7 @@ impl ManagerFixture {
         }
     }
 
+    // TODO: Move polling helpers to rsutils once available.
     fn wait_for_snapshot<F>(&self, predicate: F) -> LspWorkspaceSnapshot
     where
         F: Fn(&LspWorkspaceSnapshot) -> bool,
@@ -172,6 +173,14 @@ mod given_a_workspace_with_a_configured_language_server {
             );
             let initial_snapshot = fixture.wait_for_snapshot(|snap| {
                 snap.servers.first().is_some_and(|srv| srv.error_count >= 1)
+            });
+            let hover_offset = BROKEN_RUST_SOURCE.find("helper(count").unwrap() as u32 + 2;
+            let _ = fixture.wait_for(|| {
+                fixture
+                    .manager
+                    .get_hover(&fixture.workspace_root, &src_file, hover_offset)
+                    .ok()
+                    .flatten()
             });
 
             // Act: fix the error on disk + did_save and wait for diagnostics to clear

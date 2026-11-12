@@ -10,10 +10,12 @@ import {
   type WhichKeyNode,
 } from '@cloudvoyant/helical-ui'
 import {
+  gotoEditorSection,
   gotoFirstEditorDiagnostic,
   gotoLastEditorDiagnostic,
   gotoNextEditorDiagnostic,
   gotoPrevEditorDiagnostic,
+  resolveEditorSymbolOffset,
   scrollEditorAlign,
   scrollEditorHalfPage,
   showEditorHoverTooltip,
@@ -26,8 +28,6 @@ import type {
   ConfigScope,
   KeybindPreset,
   LgtmConfigPatch,
-  LineWrap,
-  ThemeMode,
 } from '../clients/workspaceClient'
 import type { WorkspaceService } from './workspaceService.svelte'
 
@@ -772,15 +772,35 @@ export class HotkeyService {
     'lsp.hover': () => this.hoverAtCursor(),
     'lsp.signatureHelp': () => this.signatureHelpAtCursor(),
     'lsp.triggerCompletion': () => this.triggerCompletionAtCursor(),
-    'lsp.nextDiagnostic': (ctx: KeymapCommandContext) => this.nextDiagnostic(ctx.count),
-    'lsp.prevDiagnostic': (ctx: KeymapCommandContext) => this.prevDiagnostic(ctx.count),
-    'lsp.firstDiagnostic': () => this.firstDiagnostic(),
-    'lsp.lastDiagnostic': () => this.lastDiagnostic(),
+    'lsp.nextDiagnostic': (ctx: KeymapCommandContext) =>
+      this.activeEditorView ? gotoNextEditorDiagnostic(this.activeEditorView, ctx.count) : false,
+    'lsp.prevDiagnostic': (ctx: KeymapCommandContext) =>
+      this.activeEditorView ? gotoPrevEditorDiagnostic(this.activeEditorView, ctx.count) : false,
+    'lsp.firstDiagnostic': () =>
+      this.activeEditorView ? gotoFirstEditorDiagnostic(this.activeEditorView) : false,
+    'lsp.lastDiagnostic': () =>
+      this.activeEditorView ? gotoLastEditorDiagnostic(this.activeEditorView) : false,
     'lsp.diagnostics': () => {
       void this.workspace.openDiagnosticsBuffer()
       return true
     },
     'lsp.restart': () => this.restartLanguageServers(),
+    'section.next': (ctx: KeymapCommandContext) =>
+      this.activeEditorView && this.isEditorActive()
+        ? gotoEditorSection(this.activeEditorView, 1, ctx.count)
+        : false,
+    'section.prev': (ctx: KeymapCommandContext) =>
+      this.activeEditorView && this.isEditorActive()
+        ? gotoEditorSection(this.activeEditorView, -1, ctx.count)
+        : false,
+    'focus.nextBlock': (ctx: KeymapCommandContext) =>
+      this.activeEditorView && this.isEditorActive()
+        ? gotoEditorSection(this.activeEditorView, 1, ctx.count)
+        : false,
+    'focus.prevBlock': (ctx: KeymapCommandContext) =>
+      this.activeEditorView && this.isEditorActive()
+        ? gotoEditorSection(this.activeEditorView, -1, ctx.count)
+        : false,
     'view.center': () => {
       if (this.activeEditorView && this.isEditorActive()) {
         return scrollEditorAlign(this.activeEditorView, 'center')
@@ -823,21 +843,27 @@ export class HotkeyService {
       }
       return false
     },
-    'settings.theme.dark': () => this.setTheme('dark'),
-    'settings.theme.light': () => this.setTheme('light'),
-    'settings.theme.system': () => this.setTheme('system'),
+    'settings.theme.dark': () => this.applySettingsPatch({ appearance: { theme: 'dark' } }),
+    'settings.theme.light': () => this.applySettingsPatch({ appearance: { theme: 'light' } }),
+    'settings.theme.system': () => this.applySettingsPatch({ appearance: { theme: 'system' } }),
     'settings.commandStyle.menu': () => this.setCommandStyle('menu'),
     'settings.commandStyle.palette': () => this.setCommandStyle('palette'),
     'settings.toggleLeaderOnly': () => this.setLeaderOnly(!this.workspace.settings.leaderOnly),
-    'settings.togglePaneOutline': () => this.setPaneOutline(!this.workspace.settings.paneOutline),
+    'settings.togglePaneOutline': () =>
+      this.applySettingsPatch({
+        keybindings: { paneOutline: !this.workspace.settings.paneOutline },
+      }),
     'settings.toggleClickToInsert': () =>
-      this.setClickToInsert(!this.workspace.settings.clickToInsert),
-    'settings.wrap.auto': () => this.setLineWrapping('auto'),
-    'settings.wrap.off': () => this.setLineWrapping('off'),
-    'settings.wrap.80': () => this.setLineWrapping(80),
-    'settings.wrap.100': () => this.setLineWrapping(100),
-    'settings.wrap.120': () => this.setLineWrapping(120),
-    'settings.toggleLsp': () => this.setLspEnabled(!this.workspace.settings.lspEnabled),
+      this.applySettingsPatch({
+        keybindings: { clickToInsert: !this.workspace.settings.clickToInsert },
+      }),
+    'settings.wrap.auto': () => this.applySettingsPatch({ editor: { lineWrapping: 'auto' } }),
+    'settings.wrap.off': () => this.applySettingsPatch({ editor: { lineWrapping: 'off' } }),
+    'settings.wrap.80': () => this.applySettingsPatch({ editor: { lineWrapping: 80 } }),
+    'settings.wrap.100': () => this.applySettingsPatch({ editor: { lineWrapping: 100 } }),
+    'settings.wrap.120': () => this.applySettingsPatch({ editor: { lineWrapping: 120 } }),
+    'settings.toggleLsp': () =>
+      this.applySettingsPatch({ lsp: { enabled: !this.workspace.settings.lspEnabled } }),
   }
 
   /** Hierarchical command catalog shared by `CommandMenu` and `CommandPalette`. */
@@ -1033,7 +1059,7 @@ export class HotkeyService {
         group: 'LSP',
         shortcut: [']', 'd'],
         onSelect: () => {
-          this.nextDiagnostic(1)
+          if (this.activeEditorView) gotoNextEditorDiagnostic(this.activeEditorView, 1)
         },
       },
       {
@@ -1046,7 +1072,7 @@ export class HotkeyService {
         group: 'LSP',
         shortcut: ['[', 'd'],
         onSelect: () => {
-          this.prevDiagnostic(1)
+          if (this.activeEditorView) gotoPrevEditorDiagnostic(this.activeEditorView, 1)
         },
       },
       {
@@ -1091,7 +1117,7 @@ export class HotkeyService {
             description: 'Use dark color theme',
             active: this.workspace.settings.theme === 'dark',
             onSelect: () => {
-              this.setTheme('dark')
+              this.applySettingsPatch({ appearance: { theme: 'dark' } })
             },
           },
           {
@@ -1101,7 +1127,7 @@ export class HotkeyService {
             description: 'Use light color theme',
             active: this.workspace.settings.theme === 'light',
             onSelect: () => {
-              this.setTheme('light')
+              this.applySettingsPatch({ appearance: { theme: 'light' } })
             },
           },
           {
@@ -1112,7 +1138,7 @@ export class HotkeyService {
             description: 'Follow OS appearance setting',
             active: this.workspace.settings.theme === 'system',
             onSelect: () => {
-              this.setTheme('system')
+              this.applySettingsPatch({ appearance: { theme: 'system' } })
             },
           },
         ],
@@ -1208,7 +1234,7 @@ export class HotkeyService {
         shortcut: 'Space u o',
         current: this.workspace.settings.paneOutline,
         apply: (next) => {
-          this.setPaneOutline(next)
+          this.applySettingsPatch({ keybindings: { paneOutline: next } })
         },
       }),
       booleanSettingCommand({
@@ -1219,7 +1245,7 @@ export class HotkeyService {
         shortcut: 'Space u i',
         current: this.workspace.settings.clickToInsert,
         apply: (next) => {
-          this.setClickToInsert(next)
+          this.applySettingsPatch({ keybindings: { clickToInsert: next } })
         },
       }),
       {
@@ -1238,7 +1264,7 @@ export class HotkeyService {
             label: 'Auto (Viewport Width)',
             active: this.workspace.settings.lineWrapping === 'auto',
             onSelect: () => {
-              this.setLineWrapping('auto')
+              this.applySettingsPatch({ editor: { lineWrapping: 'auto' } })
             },
           },
           {
@@ -1247,7 +1273,7 @@ export class HotkeyService {
             label: 'Off (No Wrapping)',
             active: this.workspace.settings.lineWrapping === 'off',
             onSelect: () => {
-              this.setLineWrapping('off')
+              this.applySettingsPatch({ editor: { lineWrapping: 'off' } })
             },
           },
           {
@@ -1256,7 +1282,7 @@ export class HotkeyService {
             label: '80 Columns',
             active: this.workspace.settings.lineWrapping === 80,
             onSelect: () => {
-              this.setLineWrapping(80)
+              this.applySettingsPatch({ editor: { lineWrapping: 80 } })
             },
           },
           {
@@ -1265,7 +1291,7 @@ export class HotkeyService {
             label: '100 Columns',
             active: this.workspace.settings.lineWrapping === 100,
             onSelect: () => {
-              this.setLineWrapping(100)
+              this.applySettingsPatch({ editor: { lineWrapping: 100 } })
             },
           },
           {
@@ -1274,7 +1300,7 @@ export class HotkeyService {
             label: '120 Columns',
             active: this.workspace.settings.lineWrapping === 120,
             onSelect: () => {
-              this.setLineWrapping(120)
+              this.applySettingsPatch({ editor: { lineWrapping: 120 } })
             },
           },
         ],
@@ -1288,7 +1314,7 @@ export class HotkeyService {
         shortcut: 'Space u l',
         current: this.workspace.settings.lspEnabled,
         apply: (next) => {
-          this.setLspEnabled(next)
+          this.applySettingsPatch({ lsp: { enabled: next } })
         },
       }),
       {
@@ -1359,35 +1385,10 @@ export class HotkeyService {
     return this.applySettingsPatch({ keybindings: { leaderOnly } }, scope)
   }
 
-  /** Persists a `paneOutline` change to `config.json`. */
-  setPaneOutline(paneOutline: boolean, scope?: ConfigScope | null): boolean {
-    return this.applySettingsPatch({ keybindings: { paneOutline } }, scope)
-  }
-
-  /** Persists a `clickToInsert` change to `config.json`. */
-  setClickToInsert(clickToInsert: boolean, scope?: ConfigScope | null): boolean {
-    return this.applySettingsPatch({ keybindings: { clickToInsert } }, scope)
-  }
-
   /** Persists a `commandStyle` change (`menu` or `palette`) to `config.json`. */
   setCommandStyle(commandStyle: CommandStyle, scope?: ConfigScope | null): boolean {
     this.commandStyleOverride = null
     return this.applySettingsPatch({ keybindings: { commandStyle } }, scope)
-  }
-
-  /** Persists a color `theme` change (`dark`, `light`, or `system`) to `config.json`. */
-  setTheme(theme: ThemeMode, scope?: ConfigScope | null): boolean {
-    return this.applySettingsPatch({ appearance: { theme } }, scope)
-  }
-
-  /** Persists an editor `lineWrapping` change (`auto`, `off`, or column count) to `config.json`. */
-  setLineWrapping(lineWrapping: LineWrap, scope?: ConfigScope | null): boolean {
-    return this.applySettingsPatch({ editor: { lineWrapping } }, scope)
-  }
-
-  /** Persists an `lsp.enabled` change to `config.json`. */
-  setLspEnabled(enabled: boolean, scope?: ConfigScope | null): boolean {
-    return this.applySettingsPatch({ lsp: { enabled } }, scope)
   }
 
   private get controller() {
@@ -1403,7 +1404,7 @@ export class HotkeyService {
 
   private gotoDefinitionAtCursor(): boolean {
     if (!this.activeEditorView || !this.workspace.selected) return false
-    const pos = this.activeEditorView.state.selection.main.head
+    const pos = resolveEditorSymbolOffset(this.activeEditorView.state)
     void this.workspace.gotoDefinition(pos)
     return true
   }
@@ -1411,7 +1412,7 @@ export class HotkeyService {
   private hoverAtCursor(): boolean {
     const view = this.activeEditorView
     if (!view || !this.workspace.selected) return false
-    const pos = view.state.selection.main.head
+    const pos = resolveEditorSymbolOffset(view.state)
     void this.workspace.requestHover(pos).then((hover) => {
       if (hover && this.activeEditorView === view) {
         showEditorHoverTooltip(view, hover)
@@ -1423,7 +1424,7 @@ export class HotkeyService {
   private signatureHelpAtCursor(): boolean {
     const view = this.activeEditorView
     if (!view || !this.workspace.selected) return false
-    const pos = view.state.selection.main.head
+    const pos = resolveEditorSymbolOffset(view.state)
     void this.workspace.requestSignatureHelp(pos).then((help) => {
       if (help && this.activeEditorView === view) {
         showEditorSignatureHelpTooltip(view, help)
@@ -1451,30 +1452,6 @@ export class HotkeyService {
     }
     run()
     return true
-  }
-
-  private nextDiagnostic(count = 1): boolean {
-    const view = this.activeEditorView
-    if (!view) return false
-    return gotoNextEditorDiagnostic(view, count)
-  }
-
-  private prevDiagnostic(count = 1): boolean {
-    const view = this.activeEditorView
-    if (!view) return false
-    return gotoPrevEditorDiagnostic(view, count)
-  }
-
-  private firstDiagnostic(): boolean {
-    const view = this.activeEditorView
-    if (!view) return false
-    return gotoFirstEditorDiagnostic(view)
-  }
-
-  private lastDiagnostic(): boolean {
-    const view = this.activeEditorView
-    if (!view) return false
-    return gotoLastEditorDiagnostic(view)
   }
 
   private restartLanguageServers(): boolean {

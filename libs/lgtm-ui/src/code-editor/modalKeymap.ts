@@ -1,9 +1,10 @@
 import { closeCompletion, completionStatus } from '@codemirror/autocomplete'
 import { indentWithTab, redo, undo } from '@codemirror/commands'
-import { indentUnit } from '@codemirror/language'
+import { indentUnit, matchBrackets, syntaxTree } from '@codemirror/language'
 import {
   CharCategory,
   EditorSelection,
+  type EditorState,
   Facet,
   StateEffect,
   StateField,
@@ -109,7 +110,64 @@ export const modalOptionsFacet = Facet.define<
   },
 })
 
-let lastYankedText = ''
+/**
+ * State effect dispatched when modal yank, delete, change, or DOM copy updates the modal clipboard register.
+ */
+export const setModalClipboardEffect = StateEffect.define<string>()
+
+/**
+ * CodeMirror 6 state field holding the active modal yank/paste clipboard register.
+ */
+export const modalClipboardField = StateField.define<string>({
+  create() {
+    return ''
+  },
+  update(value, tr) {
+    for (const effect of tr.effects) {
+      if (effect.is(setModalClipboardEffect)) {
+        return effect.value
+      }
+    }
+    return value
+  },
+})
+
+const modalClipboardDomHandlers = EditorView.domEventHandlers({
+  copy(_event, view) {
+    const { doc, selection } = view.state
+    const chunks = selection.ranges
+      .filter((r) => !r.empty)
+      .map((r) => doc.sliceString(r.from, r.to))
+    if (chunks.length > 0) {
+      view.dispatch({ effects: setModalClipboardEffect.of(chunks.join('\n')) })
+    }
+    return false
+  },
+  cut(_event, view) {
+    const { doc, selection } = view.state
+    const chunks = selection.ranges
+      .filter((r) => !r.empty)
+      .map((r) => doc.sliceString(r.from, r.to))
+    if (chunks.length > 0) {
+      view.dispatch({ effects: setModalClipboardEffect.of(chunks.join('\n')) })
+    }
+    return false
+  },
+})
+
+/**
+ * Returns the CodeMirror 6 extension managing the modal yank/paste clipboard register and DOM `copy`/`cut` synchronization.
+ */
+export function modalClipboardExtension(): Extension {
+  return [modalClipboardField, modalClipboardDomHandlers]
+}
+
+function writeClipboardRegister(view: EditorView, text: string): void {
+  view.dispatch({ effects: setModalClipboardEffect.of(text) })
+  if (text && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    void navigator.clipboard.writeText(text).catch(() => {})
+  }
+}
 
 function charKind(
   ch: string,
@@ -127,31 +185,52 @@ function charKind(
   return 'punct'
 }
 
+function charKindAt(
+  doc: Text,
+  pos: number,
+  categorize?: (char: string) => CharCategory,
+): 'word' | 'space' | 'punct' {
+  if (pos < 0 || pos >= doc.length) return 'space'
+  const line = doc.lineAt(pos)
+  if (pos === line.to) return 'space'
+  return charKind(line.text[pos - line.from] ?? '', categorize)
+}
+
 function stepWordForward(
   doc: Text,
   pos: number,
   categorize?: (char: string) => CharCategory,
 ): { from: number; to: number } {
-  const text = doc.toString()
-  const len = text.length
+  const len = doc.length
   let i = Math.max(0, Math.min(len, pos))
   if (i >= len) return { from: len, to: len }
 
-  const startKind = charKind(text[i] ?? '', categorize)
+  const startKind = charKindAt(doc, i, categorize)
   if (startKind !== 'space') {
-    while (i < len && charKind(text[i] ?? '', categorize) === startKind) {
+    const line = doc.lineAt(i)
+    while (i < line.to && charKind(line.text[i - line.from] ?? '', categorize) === startKind) {
       i += 1
     }
   }
-  while (i < len && charKind(text[i] ?? '', categorize) === 'space') {
-    i += 1
+  while (i < len && charKindAt(doc, i, categorize) === 'space') {
+    const line = doc.lineAt(i)
+    while (i < line.to && charKind(line.text[i - line.from] ?? '', categorize) === 'space') {
+      i += 1
+    }
+    if (i === line.to && i < len) {
+      i += 1
+    }
   }
   const wordStart = i
   if (i >= len) {
     return { from: pos, to: len }
   }
-  const targetKind = charKind(text[i] ?? '', categorize)
-  while (i < len && charKind(text[i] ?? '', categorize) === targetKind) {
+  const targetLine = doc.lineAt(i)
+  const targetKind = charKind(targetLine.text[i - targetLine.from] ?? '', categorize)
+  while (
+    i < targetLine.to &&
+    charKind(targetLine.text[i - targetLine.from] ?? '', categorize) === targetKind
+  ) {
     i += 1
   }
   return { from: wordStart, to: i }
@@ -162,24 +241,31 @@ function stepWordEnd(
   pos: number,
   categorize?: (char: string) => CharCategory,
 ): { from: number; to: number } {
-  const text = doc.toString()
-  const len = text.length
+  const len = doc.length
   let i = Math.max(0, Math.min(len, pos))
   if (i >= len) return { from: len, to: len }
 
-  if (i < len && charKind(text[i] ?? '', categorize) !== 'space') {
-    const nextKind = charKind(text[i + 1] ?? '', categorize)
-    if (nextKind !== charKind(text[i] ?? '', categorize)) {
+  const curKind = charKindAt(doc, i, categorize)
+  if (curKind !== 'space' && charKindAt(doc, i + 1, categorize) !== curKind) {
+    i += 1
+  }
+  while (i < len && charKindAt(doc, i, categorize) === 'space') {
+    const line = doc.lineAt(i)
+    while (i < line.to && charKind(line.text[i - line.from] ?? '', categorize) === 'space') {
+      i += 1
+    }
+    if (i === line.to && i < len) {
       i += 1
     }
   }
-  while (i < len && charKind(text[i] ?? '', categorize) === 'space') {
-    i += 1
-  }
   const wordStart = i
   if (i >= len) return { from: pos, to: len }
-  const kind = charKind(text[i] ?? '', categorize)
-  while (i < len && charKind(text[i] ?? '', categorize) === kind) {
+  const targetLine = doc.lineAt(i)
+  const kind = charKind(targetLine.text[i - targetLine.from] ?? '', categorize)
+  while (
+    i < targetLine.to &&
+    charKind(targetLine.text[i - targetLine.from] ?? '', categorize) === kind
+  ) {
     i += 1
   }
   return { from: wordStart, to: i }
@@ -190,18 +276,30 @@ function stepWordBackward(
   pos: number,
   categorize?: (char: string) => CharCategory,
 ): { from: number; to: number } {
-  const text = doc.toString()
-  const len = text.length
+  const len = doc.length
   let i = Math.max(0, Math.min(len, pos))
   if (i <= 0) return { from: 0, to: 0 }
 
   i -= 1
-  while (i > 0 && charKind(text[i] ?? '', categorize) === 'space') {
-    i -= 1
+  while (i > 0 && charKindAt(doc, i, categorize) === 'space') {
+    const line = doc.lineAt(i)
+    if (i === line.to && i > line.from) {
+      i -= 1
+    }
+    while (i > line.from && charKind(line.text[i - line.from] ?? '', categorize) === 'space') {
+      i -= 1
+    }
+    if (i === line.from && charKind(line.text[0] ?? '', categorize) === 'space' && i > 0) {
+      i -= 1
+    }
   }
   const wordEnd = i + 1
-  const kind = charKind(text[i] ?? '', categorize)
-  while (i > 0 && charKind(text[i - 1] ?? '', categorize) === kind) {
+  const targetLine = doc.lineAt(i)
+  const kind = charKind(targetLine.text[i - targetLine.from] ?? '', categorize)
+  while (
+    i > targetLine.from &&
+    charKind(targetLine.text[i - 1 - targetLine.from] ?? '', categorize) === kind
+  ) {
     i -= 1
   }
   return { from: i, to: wordEnd }
@@ -212,14 +310,32 @@ function stepParagraph(doc: Text, pos: number, dir: 1 | -1): number {
   let lineNum = line.number
   const isBlank = (n: number) => doc.line(n).text.trim().length === 0
 
-  while (lineNum >= 1 && lineNum <= doc.lines && isBlank(lineNum)) {
-    lineNum += dir
+  if (dir > 0) {
+    while (lineNum <= doc.lines && !isBlank(lineNum)) {
+      lineNum += 1
+    }
+    while (lineNum <= doc.lines && isBlank(lineNum)) {
+      lineNum += 1
+    }
+    if (lineNum > doc.lines) return doc.length
+    return doc.line(lineNum).from
   }
-  while (lineNum >= 1 && lineNum <= doc.lines && !isBlank(lineNum)) {
-    lineNum += dir
+
+  if (pos > line.from && !isBlank(lineNum)) {
+    while (lineNum > 1 && !isBlank(lineNum - 1)) {
+      lineNum -= 1
+    }
+    return doc.line(lineNum).from
   }
-  const clamped = Math.max(1, Math.min(doc.lines, lineNum))
-  return dir > 0 ? doc.line(clamped).to : doc.line(clamped).from
+  lineNum -= 1
+  while (lineNum >= 1 && isBlank(lineNum)) {
+    lineNum -= 1
+  }
+  while (lineNum > 1 && !isBlank(lineNum - 1)) {
+    lineNum -= 1
+  }
+  if (lineNum < 1) return 0
+  return doc.line(lineNum).from
 }
 
 function findWordObject(
@@ -282,11 +398,47 @@ function findParagraphObject(
   return { from, to }
 }
 
+const STRUCTURAL_NODE_PATTERN =
+  /FencedCode|CodeBlock|Block|StatementBlock|ObjectExpression|ArrayExpression|Function|Method|Class|Interface|Enum|Struct|Impl|Trait|Module/
+
 function findCodeblockOrBracketObject(
-  doc: Text,
+  state: EditorState,
   pos: number,
   around: boolean,
 ): { from: number; to: number } | null {
+  const { doc } = state
+  const tree = syntaxTree(state)
+  let node = tree.resolveInner(pos, 0)
+  while (node.parent) {
+    if (STRUCTURAL_NODE_PATTERN.test(node.name) && node.to > node.from) {
+      if (node.name === 'FencedCode' || node.name === 'CodeBlock') {
+        const startLine = doc.lineAt(node.from).number
+        const endLine = doc.lineAt(node.to).number
+        if (around || endLine <= startLine + 1) {
+          return { from: node.from, to: node.to }
+        }
+        return {
+          from: doc.line(startLine + 1).from,
+          to: doc.line(endLine - 1).to,
+        }
+      }
+      if (around) {
+        return { from: node.from, to: node.to }
+      }
+      const firstChar = doc.sliceString(node.from, node.from + 1)
+      const lastChar = doc.sliceString(Math.max(node.from, node.to - 1), node.to)
+      if (
+        (firstChar === '{' && lastChar === '}') ||
+        (firstChar === '(' && lastChar === ')') ||
+        (firstChar === '[' && lastChar === ']')
+      ) {
+        return { from: node.from + 1, to: Math.max(node.from + 1, node.to - 1) }
+      }
+      return { from: node.from, to: node.to }
+    }
+    node = node.parent
+  }
+
   const currentLine = doc.lineAt(pos).number
   let openFence: number | null = null
   let closeFence: number | null = null
@@ -313,39 +465,100 @@ function findCodeblockOrBracketObject(
     return { from: doc.line(innerStart).from, to: doc.line(innerEnd).to }
   }
 
-  const text = doc.toString()
-  const pairs: Array<[string, string]> = [
-    ['{', '}'],
-    ['(', ')'],
-    ['[', ']'],
-  ]
-  for (const [openCh, closeCh] of pairs) {
-    let depth = 0
-    let openIdx = -1
-    for (let i = pos; i >= 0; i -= 1) {
-      if (text[i] === closeCh && i !== pos) depth += 1
-      else if (text[i] === openCh) {
-        if (depth === 0) {
-          openIdx = i
-          break
-        }
-        depth -= 1
+  const directMatch = matchBrackets(state, pos, 1) ?? matchBrackets(state, pos, -1)
+  if (directMatch?.matched && directMatch.end) {
+    const from = Math.min(directMatch.start.from, directMatch.end.from)
+    const to = Math.max(directMatch.start.to, directMatch.end.to)
+    return around ? { from, to } : { from: from + 1, to: Math.max(from + 1, to - 1) }
+  }
+
+  return findParagraphObject(doc, pos, around)
+}
+
+const SECTION_NODE_PATTERN =
+  /ATXHeading|SetextHeading|FencedCode|Function|Method|Class|Interface|TypeAlias|Enum|Struct|Impl|Trait|Module|ModItem|ExportDeclaration|LexicalDeclaration|VariableDeclaration|RuleSet/
+
+const SECTION_LINE_PATTERN =
+  /^(?:#{1,6}\s+|(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:pub(?:\([^)]*\))?\s+)?(?:fn|function|class|interface|type|enum|struct|impl|trait|mod|def|func)\b|\S.*\{\s*$)/
+
+function collectSectionOffsets(state: EditorState): number[] {
+  const { doc } = state
+  const offsets = new Set<number>()
+  const tree = syntaxTree(state)
+  tree.iterate({
+    enter(node) {
+      if (SECTION_NODE_PATTERN.test(node.name) && node.from < node.to) {
+        offsets.add(doc.lineAt(node.from).from)
       }
-    }
-    if (openIdx !== -1) {
-      depth = 0
-      for (let i = openIdx + 1; i < text.length; i += 1) {
-        if (text[i] === openCh) depth += 1
-        else if (text[i] === closeCh) {
-          if (depth === 0) {
-            return around ? { from: openIdx, to: i + 1 } : { from: openIdx + 1, to: i }
-          }
-          depth -= 1
-        }
-      }
+    },
+  })
+  for (let n = 1; n <= doc.lines; n += 1) {
+    const line = doc.line(n)
+    if (SECTION_LINE_PATTERN.test(line.text)) {
+      offsets.add(line.from)
     }
   }
-  return findParagraphObject(doc, pos, around)
+  return [...offsets].sort((a, b) => a - b)
+}
+
+/**
+ * Jumps to the next (`dir = 1`) or previous (`dir = -1`) structural code section, function, or heading in `view`.
+ */
+export function gotoEditorSection(
+  view: EditorView | null | undefined,
+  dir: 1 | -1,
+  count = 1,
+): boolean {
+  if (!view) return false
+  const { state } = view
+  const { doc, selection } = state
+  const steps = Math.max(1, count || 1)
+  const extend = view.dom.dataset.modalMode === 'select'
+  const sections = collectSectionOffsets(state)
+
+  let cur = selection.main.head
+  for (let s = 0; s < steps; s += 1) {
+    if (sections.length > 0) {
+      const currentLineStart = doc.lineAt(cur).from
+      const candidate =
+        dir > 0
+          ? sections.find((offset) => offset > currentLineStart)
+          : [...sections].reverse().find((offset) => offset < currentLineStart)
+      if (candidate !== undefined) {
+        cur = candidate
+        continue
+      }
+    }
+    cur = stepParagraph(doc, cur, dir)
+  }
+
+  const nextRange = extend
+    ? EditorSelection.range(selection.main.anchor, cur)
+    : EditorSelection.cursor(cur)
+  view.dispatch({
+    selection: EditorSelection.create([nextRange], 0),
+    scrollIntoView: true,
+  })
+  return true
+}
+
+/**
+ * Resolves the document offset of the symbol under the primary cursor or selection in `state`.
+ */
+export function resolveEditorSymbolOffset(state: EditorState): number {
+  const { doc, selection } = state
+  const main = selection.main
+  if (main.empty) return main.head
+  const categorize = state.charCategorizer(main.head)
+  if (main.head > main.anchor && charKindAt(doc, main.head, categorize) !== 'word') {
+    for (let pos = main.from; pos < main.to; pos += 1) {
+      if (charKindAt(doc, pos, categorize) === 'word') {
+        return pos
+      }
+    }
+    return main.from
+  }
+  return main.head
 }
 
 /**
@@ -424,22 +637,22 @@ export function createCodeMirrorModalTarget(
             return extend ? EditorSelection.range(anchor, next) : EditorSelection.cursor(next)
           }
           case 'wordForward': {
-            let cur = head
+            let cur = !extend && !range.empty && head > anchor ? head - 1 : head
             let span = { from: head, to: head }
             for (let s = 0; s < steps; s += 1) {
               span = stepWordForward(doc, cur, categorize)
-              cur = span.to
+              cur = Math.max(span.from, span.to - 1)
             }
             if (extend) return EditorSelection.range(anchor, span.to)
             if (isSelectionFirst) return EditorSelection.range(span.from, span.to)
             return EditorSelection.cursor(span.from)
           }
           case 'wordEnd': {
-            let cur = head
+            let cur = !extend && !range.empty && head > anchor ? head - 1 : head
             let span = { from: head, to: head }
             for (let s = 0; s < steps; s += 1) {
               span = stepWordEnd(doc, cur, categorize)
-              cur = span.to
+              cur = Math.max(span.from, span.to - 1)
             }
             if (extend) return EditorSelection.range(anchor, span.to)
             if (isSelectionFirst) return EditorSelection.range(span.from, span.to)
@@ -520,7 +733,7 @@ export function createCodeMirrorModalTarget(
         } else if (kind === 'p') {
           match = findParagraphObject(doc, range.head, around)
         } else if (kind === 'c' || kind === 'n') {
-          match = findCodeblockOrBracketObject(doc, range.head, around)
+          match = findCodeblockOrBracketObject(view.state, range.head, around)
         } else if (kind === 'l') {
           const line = doc.lineAt(range.head)
           if (around) {
@@ -609,10 +822,7 @@ export function createCodeMirrorModalTarget(
           return `${line.text}\n`
         })
         const yankedText = chunks.join('\n')
-        lastYankedText = yankedText
-        if (yankedText && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-          void navigator.clipboard.writeText(yankedText).catch(() => {})
-        }
+        writeClipboardRegister(view, yankedText)
         return { yankedText }
       }
 
@@ -639,19 +849,25 @@ export function createCodeMirrorModalTarget(
             changes.push({ from, to, insert: '' })
           }
         }
-        if (yankedChunks.length > 0) {
-          lastYankedText = yankedChunks.join('\n')
-        }
+        const yankedText = yankedChunks.join('\n')
         if (changes.length > 0) {
-          view.dispatch({ changes, scrollIntoView: true })
+          view.dispatch({
+            changes,
+            ...(yankedText ? { effects: setModalClipboardEffect.of(yankedText) } : {}),
+            scrollIntoView: true,
+          })
+          if (yankedText && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+            void navigator.clipboard.writeText(yankedText).catch(() => {})
+          }
         }
         return op === 'change' ? { enterInsert: true } : true
       }
 
       if (op === 'pasteAfter' || op === 'pasteBefore') {
-        if (!lastYankedText) return false
-        const repeated = lastYankedText.repeat(steps)
-        const isLinewise = lastYankedText.endsWith('\n')
+        const yankedText = state.field(modalClipboardField, false) ?? ''
+        if (!yankedText) return false
+        const repeated = yankedText.repeat(steps)
+        const isLinewise = yankedText.endsWith('\n')
         const changes = selection.ranges.map((r) => {
           if (isLinewise) {
             const line = doc.lineAt(r.head)
@@ -803,6 +1019,7 @@ export function modalEditorExtension(options: ModalEditorExtensionOptions = {}):
   return [
     modalOptionsFacet.of(options),
     modalStateField,
+    modalClipboardExtension(),
     modalEditorViewPlugin,
     modalEditorDomHandlers,
     indentUnit.of('  '),

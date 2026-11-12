@@ -54,8 +54,14 @@
     const initialReadOnly = untrack(() => readonly)
     const initialLineWrapping = untrack(() => lineWrapping)
     const initialClickToInsert = untrack(() => clickToInsert)
+    const initialSelectionOffset = untrack(() => selectionOffset)
+    const initialAnchor =
+      initialSelectionOffset !== null && initialSelectionOffset !== undefined
+        ? Math.max(0, Math.min(initialDoc.length, initialSelectionOffset))
+        : null
     const state = EditorState.create({
       doc: initialDoc,
+      ...(initialAnchor !== null ? { selection: { anchor: initialAnchor } } : {}),
       extensions: [
         basicSetup,
         EditorState.allowMultipleSelections.of(true),
