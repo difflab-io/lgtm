@@ -25,7 +25,6 @@ use crate::{
         comment::{format_body_with_disclosure, parse_body_agent_disclosure},
     },
     snapshots::SnapshotStore,
-    utils::parse_agent_descriptor,
 };
 
 /// Result of a `Commit` operation (`local == true` shadow commit or `local == false` working tree commit).
@@ -907,7 +906,7 @@ impl ReviewService {
         as_agent: Option<&str>,
     ) -> Result<Identity> {
         if let Some(raw_agent) = as_agent.filter(|s| !s.trim().is_empty()) {
-            let (name, provider, model) = parse_agent_descriptor(raw_agent)?;
+            let (name, provider, model) = Identity::parse_agent_descriptor(raw_agent)?;
             let row = self
                 .database
                 .identities

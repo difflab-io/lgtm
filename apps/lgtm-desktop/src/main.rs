@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+pub mod commands;
 pub mod events;
 pub mod menus;
 pub mod services;

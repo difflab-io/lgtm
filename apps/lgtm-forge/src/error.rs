@@ -52,6 +52,12 @@ impl From<std::io::Error> for Error {
     }
 }
 
+impl From<lgtm_config::LgtmConfigError> for Error {
+    fn from(error: lgtm_config::LgtmConfigError) -> Self {
+        Self::Invalid(error.to_string())
+    }
+}
+
 impl From<Error> for connectrpc::ConnectError {
     fn from(error: Error) -> Self {
         match error {

@@ -57,9 +57,13 @@ flowchart TB
     subgraph Services["Reactive Services (src/lib/services)"]
         HOTKEY_SVC["HotkeyService (hotkeyService.svelte.ts)"]
         WS_SVC["WorkspaceService (workspaceService.svelte.ts)"]
+        PROJ_SVC["ProjectService (projectService.svelte.ts)"]
+        SESS_SVC["SessionService (sessionService.svelte.ts)"]
         LSP_SVC["LspService (lspService.svelte.ts)"]
         SET_SVC["SettingsService (settingsService.svelte.ts)"]
         HOTKEY_SVC --> WS_SVC
+        WS_SVC --> PROJ_SVC
+        WS_SVC --> SESS_SVC
         WS_SVC --> LSP_SVC
         WS_SVC --> SET_SVC
     end

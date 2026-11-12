@@ -9,9 +9,8 @@ use std::{
 };
 
 use common::TestContext;
-use lgtm_forge::utils::compute_repo_slug;
 use lgtm_forge::{
-    models::{IdentityKind, ReviewGroupBy, ReviewOutcome, SessionState},
+    models::{IdentityKind, ReviewContext, ReviewGroupBy, ReviewOutcome, SessionState},
     services::{CreateCommentInput, UpdateCommentInput},
 };
 
@@ -303,8 +302,9 @@ mod given_linked_git_worktrees {
             .unwrap();
 
             // Act (When creating local reviews in both worktrees)
-            let slug_primary = compute_repo_slug(Path::new(&ctx.git_dir)).unwrap();
-            let slug_worktree = compute_repo_slug(Path::new(&wt_second_str)).unwrap();
+            let slug_primary = ReviewContext::compute_repo_slug(Path::new(&ctx.git_dir)).unwrap();
+            let slug_worktree =
+                ReviewContext::compute_repo_slug(Path::new(&wt_second_str)).unwrap();
             let (review_a, _) = ctx
                 .service
                 .create_review(&ctx.git_dir, true, None)

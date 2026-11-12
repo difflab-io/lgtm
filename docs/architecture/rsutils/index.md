@@ -29,12 +29,9 @@ flowchart TB
     SESSION["lgtm-session (SessionService)"]
 
     subgraph RsUtils["libs/lgtm-rsutils"]
-        GIT["git\n(resolve_git_paths, list_worktrees, add_worktree, remove_worktree)"]
-        PATHS["paths & url\n(compute_repo_slug, branch_to_path_slug, normalize_repository_url, atomic_write)"]
-        ERR["RsUtilsError"]
+        GIT["git\n(resolve_git_paths, list_worktrees, add_worktree, remove_worktree, normalize_repository_url, parse_github_owner_repo)"]
+        PATHS["paths\n(branch_to_path_slug, atomic_write)"]
         GIT --> PATHS
-        GIT --> ERR
-        PATHS --> ERR
     end
 
     FORGE --> RsUtils
@@ -43,9 +40,8 @@ flowchart TB
     GIT --> FS[("Local .git, .git/worktrees/*,\nand working checkouts")]
 ```
 
-- `git`: Resolves `.git`, `gitdir`, and `commondir` paths and lists, creates, and removes `git worktree` checkouts.
-- `paths` and `url`: Computes `$repoSlug` digests, formats worktree branch slugs, normalizes repository URLs, and performs atomic temporary-file-and-rename writes.
-- `RsUtilsError`: Typed error enum for Git, filesystem, and URL validation failures.
+- `git`: Resolves `.git`, `gitdir`, and `commondir` paths, lists, creates, and removes `git worktree` checkouts, and normalizes remote Git repository URLs.
+- `paths`: Formats worktree branch slugs and performs atomic temporary-file-and-rename writes.
 
 ### Data and Control Flow
 
@@ -74,12 +70,10 @@ sequenceDiagram
 | `git::add_worktree` | `fn add_worktree(repo_root: &Path, target_dir: &Path, branch: &str, base_ref: Option<&str>) -> Result<GitWorktreeEntry>` | Create a linked Git worktree at `target_dir` (checking out `branch` if it exists locally or creating `-b <branch>` from `base_ref`). |
 | `git::remove_worktree` | `fn remove_worktree(repo_root: &Path, worktree_dir: &Path, force: bool) -> Result<()>` | Remove a linked Git worktree (`git worktree remove [--force]`), classify dirty-checkout errors, and clean up leftover directories when forced. |
 | `git::get_current_branch` | `fn get_current_branch(path: &Path) -> Option<String>` | Return the checked-out short branch name for `path`, or `None` when detached or unavailable. |
-| `paths::default_lgtm_home` | `fn default_lgtm_home() -> PathBuf` | Resolve `$LGTM_HOME` if set and non-empty, otherwise `~/.lgtm`. |
-| `paths::compute_repo_slug` | `fn compute_repo_slug(git_dir_or_worktree: &Path) -> Result<String>` | Compute `<repo-name>-<6-byte-sha256>` from the canonical `common_git_dir`. |
+| `git::normalize_repository_url` | `fn normalize_repository_url(raw: &str) -> Result<String>` | Normalize SSH or HTTPS Git remote URLs to `https://<host>/<owner>/<repo>`. |
+| `git::parse_github_owner_repo` | `fn parse_github_owner_repo(repository_url: &str) -> Result<(String, String)>` | Extract `(owner, repo)` from a normalized GitHub repository URL. |
 | `paths::branch_to_path_slug` | `fn branch_to_path_slug(branch: &str) -> String` | Convert a branch name into a lowercase hyphenated directory slug matching Herdr (`~/.lgtm/worktrees/<project>/<branch-slug>`). |
 | `paths::atomic_write` | `fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()>` | Write bytes to a sibling temporary file and rename it onto `path`. |
-| `url::normalize_repository_url` | `fn normalize_repository_url(raw: &str) -> Result<String>` | Normalize SSH or HTTPS Git remote URLs to `https://<host>/<owner>/<repo>`. |
-| `url::parse_github_owner_repo` | `fn parse_github_owner_repo(repository_url: &str) -> Result<(String, String)>` | Extract `(owner, repo)` from a normalized GitHub repository URL. |
 
 ## Implementation
 
@@ -91,10 +85,8 @@ libs/lgtm-rsutils/
 ├── mise.toml
 ├── src/
 │   ├── lib.rs                 Public module and type exports
-│   ├── error.rs               RsUtilsError and Result alias
-│   ├── git.rs                 Git path resolution and worktree CLI helpers
-│   ├── paths.rs               Repo slug hashing, branch slugs, and atomic file writes
-│   └── url.rs                 Repository URL normalization and owner/repo parsing
+│   ├── git.rs                 Git path resolution, worktree helpers, and repository URL normalization
+│   └── paths.rs               Branch slugs and atomic file writes
 └── tests/
     └── git_worktrees.rs       BDD integration suite for git path and worktree resolution
 ```

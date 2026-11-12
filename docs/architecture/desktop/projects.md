@@ -171,19 +171,25 @@ sequenceDiagram
 ```text
 apps/
 ├── lgtm-desktop/src/
-│   ├── app.rs                         Registers SessionService in AppState and wires session_* / project_* IPC commands
+│   ├── app.rs                         Registers AppState and wires commands::* into Tauri and Specta
+│   ├── commands/                      Thin domain IPC command modules (workspace, lsp, config, session, project)
 │   ├── events.rs                      Routes WorkspaceOpened to LspService and emits session-updated
 │   └── services/
-│       └── workspace.rs               Edits the single active checkout directory (default spot or worktree)
+│       └── lsp.rs                     Desktop language server orchestration
 └── lgtm-web/src/lib/
     ├── clients/workspaceClient.ts     Adds session_* and project_* IPC bindings
     ├── services/
     │   ├── hotkeyService.svelte.ts    Registers global shortcuts (Mod+Shift+B, Mod+B), WhichKey leader chords, and CommandMenu items
-    │   └── workspaceService.svelte.ts Owns active workspace file tree, tabs (tab.edited), per-workspace cache, and session/project state
+    │   ├── projectService.svelte.ts   Owns open projects, worktrees, project/worktree dialogs, and context actions
+    │   ├── sessionService.svelte.ts   Owns dock visibility, per-workspace cache snapshots, and session persistence
+    │   └── workspaceService.svelte.ts Owns active workspace file tree, tabs (tab.edited), and editor buffer saves
     └── components/
-        ├── Shell.svelte               Mounts independent #projects-dock-pane and #explorer-dock-pane in the left dock and renders the SidebarFooter icon switcher
+        ├── Shell.svelte               Composes Titlebar, WorkspaceDock, ContentPane, CommandMenu, and WhichKey
+        ├── Titlebar.svelte            Renders SidebarTrigger, brand, and workspace switcher Select
+        ├── WorkspaceDock.svelte       Mounts independent #projects-dock-pane and #explorer-dock-pane and DockViewSwitcher
         ├── ContentPane.svelte         Renders the active workspace editor tabs, CodeEditor, and bottom status bar
-        └── ProjectsPane.svelte        Renders compact collapsible project branches, worktree items, context menus, and modal dialogs
+        ├── ProjectsPane.svelte        Renders compact collapsible project branches, worktree items, and context menus
+        └── projects/                  Extracted NewWorktreeDialog, RemoveWorktreeDialog, EditProjectDialog, and projectAppearance
 ```
 
 ### Tab Retention State Machine

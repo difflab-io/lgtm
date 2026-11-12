@@ -1,12 +1,7 @@
 <script lang="ts">
   import { ToggleGroup } from '@ark-ui/svelte/toggle-group'
   import { cn } from '@cloudvoyant/helical-ui'
-  import { Check } from 'lucide-svelte'
-  import {
-    colorSelectorIndicatorBase,
-    colorSelectorItemVariants,
-    colorSelectorRootBase,
-  } from './styles'
+  import { colorSelectorItemVariants, colorSelectorRootBase } from './styles'
   import type { ColorSelectorProps } from './types'
 
   // Props ---------------------------------------------------------------------
@@ -39,12 +34,8 @@
       value={item.value}
       aria-label={`Color ${item.label}`}
       title={item.label}
-      class={cn(itemClasses, !item.color && 'bg-muted-foreground')}
+      class={cn(itemClasses, !item.color && 'bg-muted-foreground/70')}
       style={item.color ? `background-color: ${item.color}` : undefined}
-    >
-      {#if value === item.value}
-        <Check class={colorSelectorIndicatorBase} strokeWidth={2.75} />
-      {/if}
-    </ToggleGroup.Item>
+    />
   {/each}
 </ToggleGroup.Root>

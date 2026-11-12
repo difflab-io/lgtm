@@ -18,10 +18,24 @@ import {
   type Project,
   type Session,
   type SidebarWidget,
-  type TabCandidate,
 } from '../clients/workspaceClient'
 import { LspService } from './lspService.svelte'
+import {
+  branchToPathSlug,
+  ProjectService,
+  type CustomizeProjectDialogState,
+  type RemoveWorktreeConfirmState,
+  type WorktreeDialogState,
+} from './projectService.svelte'
+import { SessionService, type CachedWorkspaceSnapshot } from './sessionService.svelte'
 import { SettingsService } from './settingsService.svelte'
+
+export {
+  branchToPathSlug,
+  type CustomizeProjectDialogState,
+  type RemoveWorktreeConfirmState,
+  type WorktreeDialogState,
+}
 
 export interface FolderRefresh {
   path: string
@@ -40,108 +54,12 @@ export interface WorkspaceTab {
   edited?: boolean
 }
 
-/** Form and submission state for the `New Worktree` dialog in `ProjectsPane`. */
-export interface WorktreeDialogState {
-  projectId: string
-  projectName: string
-  branch: string
-  baseRef: string
-  submitting: boolean
-  error: string | null
-}
-
-/** Confirmation and force-retry state for the `Remove Worktree` dialog in `ProjectsPane`. */
-export interface RemoveWorktreeConfirmState {
-  projectId: string
-  projectName: string
-  worktreePath: string
-  worktreeName: string
-  requiresForce: boolean
-  submitting: boolean
-  error: string | null
-}
-
-/** Form state for customizing a project's icon and color in `ProjectsPane`. */
-export interface CustomizeProjectDialogState {
-  projectId: string
-  projectName: string
-  icon: string
-  color: string
-  submitting: boolean
-  error: string | null
-}
-
-interface CachedWorkspaceSnapshot {
-  root: string
-  entries: WorkspaceNode[]
-  dirEntries: Record<string, WorkspaceNode[]>
-  listed: Record<string, WorkspaceNode>
-  tabs: WorkspaceTab[]
-  activeTabId: string | null
-  selected: WorkspaceNode | null
-  fileContent: FileContent | null
-  selectionOffset: number | null
-  expandedDirs: string[]
-}
-
-const ADJECTIVES = [
-  'amber',
-  'brisk',
-  'calm',
-  'clear',
-  'crisp',
-  'focal',
-  'lunar',
-  'quiet',
-  'rapid',
-  'solar',
-]
-const NOUNS = [
-  'arch',
-  'brook',
-  'cedar',
-  'crest',
-  'delta',
-  'field',
-  'grove',
-  'haven',
-  'path',
-  'ridge',
-]
-
-function generateDefaultBranchName(): string {
-  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)] ?? 'brisk'
-  const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)] ?? 'grove'
-  const hex = Math.floor(Math.random() * 0xffff)
-    .toString(16)
-    .padStart(4, '0')
-  return `worktree/${adj}-${noun}-${hex}`
-}
-
-/** Converts a Git branch name into a filesystem-safe directory slug matching `lgtm_rsutils::paths::branch_to_path_slug`. */
-export function branchToPathSlug(branch: string): string {
-  const trimmed = branch.trim()
-  if (!trimmed) return ''
-  const stripped = trimmed.startsWith('worktree/') ? trimmed.slice('worktree/'.length) : trimmed
-  let out = ''
-  let lastWasDash = false
-  for (const ch of stripped) {
-    if (/^[a-zA-Z0-9_.]$/.test(ch)) {
-      out += ch.toLowerCase()
-      lastWasDash = false
-    } else if (!lastWasDash && out.length > 0) {
-      out += '-'
-      lastWasDash = true
-    }
-  }
-  const clean = out.replace(/-+$/g, '')
-  return clean || 'worktree'
-}
-
-/** Workspace view model coordinating file tree browsing, projects/worktrees, open tabs, debounced saves, LSP state, and settings. */
+/** Workspace view model coordinating file tree browsing, open tabs, debounced saves, and delegating to `ProjectService`, `SessionService`, `LspService`, and `SettingsService`. */
 export class WorkspaceService {
   readonly lsp: LspService
   readonly settings: SettingsService
+  readonly session: SessionService
+  readonly project: ProjectService
   defaultRoot = $state('')
   root = $state('~/.lgtm/workspace')
   entries = $state<WorkspaceNode[]>([])
@@ -163,23 +81,9 @@ export class WorkspaceService {
   tabs = $state<WorkspaceTab[]>([])
   activeTabId = $state<string | null>(null)
   selectionOffset = $state<number | null>(null)
-  sidebarWidget = $state<SidebarWidget>('explorer')
-  projectsOpen = $state(false)
-  explorerOpen = $state(true)
-  projects = $state<Project[]>([])
   expandedDirs = $state<string[]>([])
-  worktreeDialog = $state<WorktreeDialogState | null>(null)
-  removeWorktreeConfirm = $state<RemoveWorktreeConfirmState | null>(null)
-  customizeProjectDialog = $state<CustomizeProjectDialogState | null>(null)
   private dirEntries = $state<Record<string, WorkspaceNode[]>>({})
   private listed = $state<Record<string, WorkspaceNode>>({})
-  private workspaceCache = new Map<string, CachedWorkspaceSnapshot>()
-  private sessionHydratedRoots = new Set<string>()
-  private sidebarHydrated = false
-  private pendingCollapsed = new Map<string, { seq: number; collapsed: boolean }>()
-  private collapseRequestSeq = 0
-  private collapseQueue: Promise<void> = Promise.resolve()
-  private sessionSaveQueue: Promise<void> = Promise.resolve()
   private active = true
   private dirtyPath: string | null = null
   private dirtyContent: string | null = null
@@ -187,10 +91,22 @@ export class WorkspaceService {
   private inFlightSave: Promise<void> | null = null
   private openRequestSeq = 0
 
-  /** Constructs a `WorkspaceService` with its own `LspService` and `SettingsService` instances. */
+  /** Constructs a `WorkspaceService` with its own `LspService`, `SettingsService`, `SessionService`, and `ProjectService` instances. */
   constructor(private client: WorkspaceClient) {
     this.lsp = new LspService(client)
     this.settings = new SettingsService(client)
+    this.session = new SessionService(client)
+    this.project = new ProjectService(client, {
+      getRoot: () => this.root,
+      isActive: () => this.active,
+      applySession: (session) => this.applySession(session),
+      openWorkspace: (path) => this.open(path),
+      selectWorkspace: (path) => this.selectWorkspace(path),
+      evictWorkspace: (path) => this.session.evictWorkspace(path),
+      setCreationError: (message) => {
+        this.creationError = message
+      },
+    })
   }
 
   /** Returns whether a file or tree operation is currently in progress. */
@@ -287,6 +203,69 @@ export class WorkspaceService {
     return 'Idle'
   }
 
+  /** Returns the active sidebar widget (`projects` or `explorer`). */
+  get sidebarWidget(): SidebarWidget {
+    return this.session.sidebarWidget
+  }
+
+  set sidebarWidget(value: SidebarWidget) {
+    this.session.sidebarWidget = value
+  }
+
+  /** Returns whether the Projects dock pane is currently open. */
+  get projectsOpen(): boolean {
+    return this.session.projectsOpen
+  }
+
+  set projectsOpen(value: boolean) {
+    this.session.projectsOpen = value
+  }
+
+  /** Returns whether the Explorer dock pane is currently open. */
+  get explorerOpen(): boolean {
+    return this.session.explorerOpen
+  }
+
+  set explorerOpen(value: boolean) {
+    this.session.explorerOpen = value
+  }
+
+  /** Returns the list of projects in the active session. */
+  get projects(): Project[] {
+    return this.project.projects
+  }
+
+  set projects(value: Project[]) {
+    this.project.projects = value
+  }
+
+  /** Returns the active `New Worktree` dialog state, if open. */
+  get worktreeDialog(): WorktreeDialogState | null {
+    return this.project.worktreeDialog
+  }
+
+  set worktreeDialog(value: WorktreeDialogState | null) {
+    this.project.worktreeDialog = value
+  }
+
+  /** Returns the active `Remove Worktree` confirmation dialog state, if open. */
+  get removeWorktreeConfirm(): RemoveWorktreeConfirmState | null {
+    return this.project.removeWorktreeConfirm
+  }
+
+  set removeWorktreeConfirm(value: RemoveWorktreeConfirmState | null) {
+    this.project.removeWorktreeConfirm = value
+  }
+
+  /** Returns the active `Edit Project` dialog state, if open. */
+  get customizeProjectDialog(): CustomizeProjectDialogState | null {
+    return this.project.customizeProjectDialog
+  }
+
+  set customizeProjectDialog(value: CustomizeProjectDialogState | null) {
+    this.project.customizeProjectDialog = value
+  }
+
   /** Returns selectable workspace items for the titlebar workspace switcher. */
   get items() {
     const projectItems: { label: string; value: string }[] = []
@@ -330,51 +309,22 @@ export class WorkspaceService {
 
   /** Returns the project that owns the currently active workspace root, if any. */
   get activeProject(): Project | null {
-    return (
-      this.projects.find(
-        (p) => p.rootPath === this.root || (p.worktrees ?? []).some((wt) => wt.path === this.root),
-      ) ??
-      this.projects[0] ??
-      null
-    )
+    return this.project.activeProject
   }
 
   /** Builds `TreeNode` items for `ProjectsPane`. */
   get projectNodes(): TreeNode[] {
-    return this.projects.map((project) => {
-      const allWorktrees = project.worktrees ?? []
-      return {
-        value: project.rootPath,
-        label: project.name,
-        description: project.branch ?? project.rootPath,
-        branch: allWorktrees.length > 0,
-        renamable: false,
-        children: allWorktrees.map((wt) => ({
-          value: wt.path,
-          label: wt.name,
-          description: wt.branch ?? wt.path,
-          branch: false,
-          renamable: true,
-        })),
-      }
-    })
+    return this.project.projectNodes
   }
 
   /** Returns the list of expanded project root paths for `ProjectsPane`. */
   get projectExpandedValues(): string[] {
-    return this.projects
-      .filter((project) => !project.collapsed && (project.worktrees ?? []).length > 0)
-      .map((project) => project.rootPath)
+    return this.project.projectExpandedValues
   }
 
   /** Returns the live `~/.lgtm/worktrees/<project>/<branch-slug>` preview path for the `New Worktree` dialog. */
   get worktreePreviewPath(): string {
-    if (!this.worktreeDialog) return ''
-    const slug = branchToPathSlug(this.worktreeDialog.branch)
-    const project = this.projects.find((p) => p.id === this.worktreeDialog?.projectId)
-    const dirName =
-      project?.rootPath.split(/[\\/]/).filter(Boolean).at(-1) ?? this.worktreeDialog.projectName
-    return `~/.lgtm/worktrees/${dirName}/${slug || '<branch-slug>'}`
+    return this.project.worktreePreviewPath
   }
 
   /** Returns top-level tree nodes for the sidebar `TreeView`. */
@@ -396,31 +346,19 @@ export class WorkspaceService {
 
   /** Toggles the Projects dock pane independently of the Explorer widget slot and persists the choice. */
   toggleProjectsPane() {
-    this.projectsOpen = !this.projectsOpen
-    this.sidebarWidget = this.projectsOpen ? 'projects' : 'explorer'
-    this.sidebarHydrated = true
+    this.session.toggleProjectsPane()
     void this.saveCurrentWorkspaceSession()
   }
 
   /** Toggles the Explorer widget pane inside the left dock independently of the Projects pane. */
   toggleExplorerPane() {
-    this.explorerOpen = !this.explorerOpen
-    this.sidebarHydrated = true
+    this.session.toggleExplorerPane()
     void this.saveCurrentWorkspaceSession()
   }
 
   /** Opens the specified left dock pane (`projects` or `explorer`) and persists the choice. */
   setSidebarWidget(widget: SidebarWidget) {
-    if (widget === 'projects') {
-      this.projectsOpen = true
-      this.sidebarWidget = 'projects'
-    } else {
-      this.explorerOpen = true
-      if (!this.projectsOpen) {
-        this.sidebarWidget = 'explorer'
-      }
-    }
-    this.sidebarHydrated = true
+    this.session.setSidebarWidget(widget)
     void this.saveCurrentWorkspaceSession()
   }
 
@@ -432,409 +370,117 @@ export class WorkspaceService {
 
   /** Synchronizes `ProjectsPane` branch expansion changes with `SessionService::set_project_collapsed`. */
   async handleProjectExpandedChange(nextExpanded: string[]) {
-    const expandedSet = new Set(nextExpanded)
-    for (const project of this.projects) {
-      if ((project.worktrees ?? []).length === 0) continue
-      const nextCollapsed = !expandedSet.has(project.rootPath)
-      if (project.collapsed !== nextCollapsed) {
-        await this.setProjectCollapsed(project.id, nextCollapsed)
-      }
-    }
+    await this.project.handleProjectExpandedChange(nextExpanded)
   }
 
   /** Sets the collapsed state for `projectId` and persists it to the session file. */
   async setProjectCollapsed(projectId: string, collapsed: boolean) {
-    const seq = ++this.collapseRequestSeq
-    this.pendingCollapsed.set(projectId, { seq, collapsed })
-    this.projects = this.projects.map((p) => (p.id === projectId ? { ...p, collapsed } : p))
-    if (!this.client.projectSetCollapsed) {
-      this.pendingCollapsed.delete(projectId)
-      return
-    }
-    const task = this.collapseQueue.then(async () => {
-      if (this.pendingCollapsed.get(projectId)?.seq !== seq) return
-      try {
-        const session = await this.client.projectSetCollapsed!(projectId, collapsed)
-        if (this.pendingCollapsed.get(projectId)?.seq === seq) {
-          this.pendingCollapsed.delete(projectId)
-          if (this.active) this.applySession(session)
-        }
-      } catch (error) {
-        if (this.pendingCollapsed.get(projectId)?.seq === seq) {
-          this.pendingCollapsed.delete(projectId)
-          if (this.active) this.creationError = errorMessage(error)
-        }
-      }
-    })
-    this.collapseQueue = task.catch(() => {})
-    await task
+    await this.project.setProjectCollapsed(projectId, collapsed)
   }
 
   /** Opens the `New Worktree` dialog for `projectId` (or the active project). */
   openNewWorktreeDialog(projectId?: string) {
-    const project = projectId
-      ? this.projects.find((p) => p.id === projectId || p.rootPath === projectId)
-      : this.activeProject
-    if (!project) return
-    this.worktreeDialog = {
-      projectId: project.id,
-      projectName: project.name,
-      branch: generateDefaultBranchName(),
-      baseRef: project.branch ?? 'HEAD',
-      submitting: false,
-      error: null,
-    }
+    this.project.openNewWorktreeDialog(projectId)
   }
 
   /** Closes the `New Worktree` dialog. */
   closeNewWorktreeDialog() {
-    this.worktreeDialog = null
+    this.project.closeNewWorktreeDialog()
   }
 
-  /** Opens the `Customize Project` dialog for `projectId` (or the active project). */
+  /** Opens the `Edit Project` dialog for `projectId` (or the active project). */
   openCustomizeProjectDialog(projectId?: string) {
-    const project = projectId
-      ? this.projects.find((p) => p.id === projectId || p.rootPath === projectId)
-      : this.activeProject
-    if (!project) return
-    this.customizeProjectDialog = {
-      projectId: project.id,
-      projectName: project.name,
-      icon: project.icon ?? 'box',
-      color: project.color ?? 'default',
-      submitting: false,
-      error: null,
-    }
+    this.project.openCustomizeProjectDialog(projectId)
   }
 
-  /** Closes the `Customize Project` dialog. */
+  /** Closes the `Edit Project` dialog. */
   closeCustomizeProjectDialog() {
-    this.customizeProjectDialog = null
+    this.project.closeCustomizeProjectDialog()
   }
 
   /** Persists the edited `projectName`, `icon`, and `color` from the `Edit Project` dialog. */
   async submitCustomizeProject() {
-    const dialog = this.customizeProjectDialog
-    if (!dialog || dialog.submitting) return
-    const nextName = dialog.projectName.trim()
-    if (!nextName) {
-      this.customizeProjectDialog = { ...dialog, error: 'Project name cannot be empty.' }
-      return
-    }
-    const nextIcon = dialog.icon === 'box' ? null : dialog.icon
-    const nextColor = dialog.color === 'default' ? null : dialog.color
-    this.projects = this.projects.map((p) =>
-      p.id === dialog.projectId ? { ...p, name: nextName, icon: nextIcon, color: nextColor } : p,
-    )
-    if (!this.client.projectUpdateAppearance) {
-      this.customizeProjectDialog = null
-      return
-    }
-    this.customizeProjectDialog = { ...dialog, submitting: true, error: null }
-    try {
-      const session = await this.client.projectUpdateAppearance(
-        dialog.projectId,
-        nextName,
-        nextIcon,
-        nextColor,
-      )
-      if (!this.active) return
-      this.customizeProjectDialog = null
-      this.applySession(session)
-    } catch (error) {
-      if (this.active && this.customizeProjectDialog) {
-        this.customizeProjectDialog = {
-          ...this.customizeProjectDialog,
-          submitting: false,
-          error: errorMessage(error),
-        }
-      }
-    }
+    await this.project.submitCustomizeProject()
   }
 
   /** Renames a worktree section's display label in `ProjectsPane` without changing its Git branch name. */
   async renameProjectWorktree(worktreePath: string, name: string) {
-    const trimmed = name.trim()
-    if (!trimmed) throw new Error('Worktree name cannot be empty.')
-    const project = this.projects.find((p) =>
-      (p.worktrees ?? []).some((wt) => wt.path === worktreePath),
-    )
-    if (!project) throw new Error('Worktree not found.')
-    if (this.client.projectRenameWorktree) {
-      const session = await this.client.projectRenameWorktree(project.id, worktreePath, trimmed)
-      if (this.active) this.applySession(session)
-      return
-    }
-    this.projects = this.projects.map((p) =>
-      p.id === project.id
-        ? {
-            ...p,
-            worktrees: (p.worktrees ?? []).map((wt) =>
-              wt.path === worktreePath ? { ...wt, name: trimmed } : wt,
-            ),
-          }
-        : p,
-    )
+    await this.project.renameProjectWorktree(worktreePath, name)
   }
 
   /** Creates a managed Git worktree from the `New Worktree` dialog and switches to it on success. */
   async submitNewWorktree() {
-    const dialog = this.worktreeDialog
-    if (!dialog || dialog.submitting || !this.client.projectCreateWorktree) return
-    const branch = dialog.branch.trim()
-    if (!branch) {
-      this.worktreeDialog = { ...dialog, error: 'Branch name cannot be empty.' }
-      return
-    }
-    this.worktreeDialog = { ...dialog, submitting: true, error: null }
-    try {
-      const session = await this.client.projectCreateWorktree(
-        dialog.projectId,
-        branch,
-        dialog.baseRef.trim() || undefined,
-      )
-      if (!this.active) return
-      this.worktreeDialog = null
-      this.applySession(session)
-      if (session.activeWorkspaceRoot && session.activeWorkspaceRoot !== this.root) {
-        await this.open(session.activeWorkspaceRoot)
-      }
-    } catch (error) {
-      if (this.active && this.worktreeDialog) {
-        this.worktreeDialog = {
-          ...this.worktreeDialog,
-          submitting: false,
-          error: errorMessage(error),
-        }
-      }
-    }
+    await this.project.submitNewWorktree()
   }
 
   /** Opens the removal confirmation modal for `worktreePath` under `projectId`. */
   promptRemoveWorktree(projectId: string, worktreePath: string) {
-    const project = this.projects.find((p) => p.id === projectId || p.rootPath === projectId)
-    const worktree = project?.worktrees.find((wt) => wt.path === worktreePath)
-    if (!project || !worktree) return
-    this.removeWorktreeConfirm = {
-      projectId: project.id,
-      projectName: project.name,
-      worktreePath: worktree.path,
-      worktreeName: worktree.name,
-      requiresForce: false,
-      submitting: false,
-      error: null,
-    }
+    this.project.promptRemoveWorktree(projectId, worktreePath)
   }
 
   /** Cancels the pending worktree removal confirmation dialog. */
   cancelRemoveWorktree() {
-    this.removeWorktreeConfirm = null
+    this.project.cancelRemoveWorktree()
   }
 
   /** Executes managed worktree removal (`~/.lgtm/worktrees/...`). */
   async confirmRemoveWorktree(force = false) {
-    const confirm = this.removeWorktreeConfirm
-    if (!confirm || confirm.submitting || !this.client.projectRemoveWorktree) return
-    this.removeWorktreeConfirm = { ...confirm, submitting: true, error: null }
-    try {
-      const session = await this.client.projectRemoveWorktree(
-        confirm.projectId,
-        confirm.worktreePath,
-        force || confirm.requiresForce,
-      )
-      if (!this.active) return
-      this.workspaceCache.delete(confirm.worktreePath)
-      this.sessionHydratedRoots.delete(confirm.worktreePath)
-      this.removeWorktreeConfirm = null
-      this.applySession(session)
-      if (session.activeWorkspaceRoot && session.activeWorkspaceRoot !== this.root) {
-        await this.open(session.activeWorkspaceRoot)
-      }
-    } catch (error) {
-      if (!this.active || !this.removeWorktreeConfirm) return
-      const msg = errorMessage(error)
-      const isDirty =
-        (typeof error === 'object' &&
-          error !== null &&
-          'kind' in error &&
-          (error as { kind?: string }).kind === 'dirtyWorktree') ||
-        msg.toLowerCase().includes('untracked') ||
-        msg.toLowerCase().includes('modified') ||
-        msg.toLowerCase().includes('force')
-      this.removeWorktreeConfirm = {
-        ...this.removeWorktreeConfirm,
-        submitting: false,
-        requiresForce: isDirty || this.removeWorktreeConfirm.requiresForce,
-        error: msg,
-      }
-    }
+    await this.project.confirmRemoveWorktree(force)
   }
 
   /** Detaches `projectId` from the session without deleting files on disk. */
   async removeProject(projectId: string) {
-    if (!this.client.projectRemove) return
-    const project = this.projects.find((p) => p.id === projectId || p.rootPath === projectId)
-    if (!project) return
-    try {
-      const session = await this.client.projectRemove(project.id)
-      if (!this.active) return
-      this.workspaceCache.delete(project.rootPath)
-      this.sessionHydratedRoots.delete(project.rootPath)
-      this.applySession(session)
-      if (session.activeWorkspaceRoot && session.activeWorkspaceRoot !== this.root) {
-        await this.open(session.activeWorkspaceRoot)
-      }
-    } catch (error) {
-      if (this.active) this.creationError = errorMessage(error)
-    }
+    await this.project.removeProject(projectId)
   }
 
   /** Builds right-click `ContextMenu` items for a project or worktree node in `ProjectsPane`. */
   projectContextItems(node: TreeNode): ContextMenuItem[] {
-    const project = this.projects.find((p) => p.rootPath === node.value)
-    if (project) {
-      return [
-        { value: 'new-worktree', label: 'New Worktree' },
-        { value: 'customize-project', label: 'Edit' },
-        { value: 'open-primary', label: 'Open Primary Checkout' },
-        ...((project.worktrees ?? []).length > 0
-          ? [
-              {
-                value: project.collapsed ? 'expand-worktrees' : 'collapse-worktrees',
-                label: project.collapsed ? 'Expand Worktrees' : 'Collapse Worktrees',
-              },
-            ]
-          : []),
-        { value: 'remove-project', label: 'Remove Project', destructive: true },
-      ]
-    }
-    return [
-      { value: 'open-worktree', label: 'Open Worktree' },
-      { value: 'rename', label: 'Rename Worktree', shortcut: 'r' },
-      { value: 'remove-worktree', label: 'Remove Worktree', destructive: true },
-    ]
+    return this.project.projectContextItems(node)
   }
 
   /** Handles context menu and hotkey actions on project and worktree nodes in `ProjectsPane`. */
   async projectContextAction(value: string, action: string) {
-    const directProject = this.projects.find((p) => p.rootPath === value)
-    const ownerProject =
-      directProject ??
-      this.projects.find((p) => (p.worktrees ?? []).some((wt) => wt.path === value))
-    if (action === 'new-worktree' || action === 'new-file' || action === 'new-folder') {
-      this.openNewWorktreeDialog(ownerProject?.id)
-      return
-    }
-    if (action === 'customize-project' && ownerProject) {
-      this.openCustomizeProjectDialog(ownerProject.id)
-      return
-    }
-    if (action === 'open-primary' || action === 'open-worktree') {
-      await this.selectWorkspace(value)
-      return
-    }
-    if (action === 'collapse-worktrees' && directProject) {
-      await this.setProjectCollapsed(directProject.id, true)
-      return
-    }
-    if (action === 'expand-worktrees' && directProject) {
-      await this.setProjectCollapsed(directProject.id, false)
-      return
-    }
-    if (action === 'remove-project' && directProject) {
-      await this.removeProject(directProject.id)
-      return
-    }
-    if (action === 'remove-worktree' && ownerProject && !directProject) {
-      this.promptRemoveWorktree(ownerProject.id, value)
-      return
-    }
-    if (action === 'delete') {
-      if (directProject) {
-        await this.removeProject(directProject.id)
-      } else if (ownerProject) {
-        this.promptRemoveWorktree(ownerProject.id, value)
-      }
-    }
+    await this.project.projectContextAction(value, action)
   }
 
   /** Applies an incoming `Session` snapshot from the backend. */
   applySession(session: Session) {
     if (!this.active) return
-    this.projects = (session.projects ?? []).map((p) => {
-      const pending = this.pendingCollapsed.get(p.id)
-      return pending ? { ...p, collapsed: pending.collapsed } : p
-    })
-    if (!this.sidebarHydrated) {
-      this.sidebarHydrated = true
-      const nextWidget = session.sidebarWidget ?? 'explorer'
-      this.sidebarWidget = nextWidget
-      this.projectsOpen = nextWidget === 'projects'
-    }
+    this.project.applySessionProjects(session)
+    this.session.hydrateSidebarFromSession(session)
   }
 
   /** Synchronizes session state with the backend and optionally hydrates persisted tabs for `this.root`. */
   async syncSession(hydrateTabs = false) {
-    if (!this.client.sessionGet) return
-    try {
-      const session = await this.client.sessionGet()
-      if (!this.active) return
-      this.applySession(session)
-      if (hydrateTabs && !this.sessionHydratedRoots.has(this.root)) {
-        this.sessionHydratedRoots.add(this.root)
-        const wsState = session.workspaces?.[this.root]
-        if (wsState) {
-          const dirs = [...(wsState.expandedDirs ?? [])]
-          await this.preloadExpandedDirs(dirs)
-          if (!this.active) return
-          this.expandedDirs = dirs
-          if (this.tabs.length === 0 && (wsState.tabs ?? []).length > 0) {
-            await this.restorePersistedTabs(wsState.tabs)
-          }
+    const session = await this.session.fetchSession()
+    if (!session || !this.active) return
+    this.applySession(session)
+    if (hydrateTabs && !this.session.hasHydratedRoot(this.root)) {
+      this.session.markHydratedRoot(this.root)
+      const wsState = session.workspaces?.[this.root]
+      if (wsState) {
+        const dirs = [...(wsState.expandedDirs ?? [])]
+        await this.preloadExpandedDirs(dirs)
+        if (!this.active) return
+        this.expandedDirs = dirs
+        if (this.tabs.length === 0 && (wsState.tabs ?? []).length > 0) {
+          await this.restorePersistedTabs(wsState.tabs)
         }
       }
-    } catch {
-      // Session commands are optional in lightweight unit test mocks.
     }
   }
 
   /** Saves the active workspace's filtered tab candidates (`edited || lastOpened`) and expanded directories. */
   async saveCurrentWorkspaceSession(targetRoot = this.root) {
-    const saveFn = this.client.sessionSave
-    if (!saveFn) {
-      return
-    }
     const isPlaceholder = !targetRoot || this.isDefaultPlaceholderRoot(targetRoot)
     const snapshot = isPlaceholder
       ? undefined
       : targetRoot === this.root
         ? this.buildSnapshotForCurrentRoot()
-        : this.workspaceCache.get(targetRoot)
-    const candidates: TabCandidate[] = snapshot
-      ? snapshot.tabs
-          .filter((tab) => tab.kind === 'file' && Boolean(tab.path))
-          .map((tab) => ({
-            path: tab.path!,
-            title: tab.title,
-            edited: Boolean(tab.edited),
-            lastOpened: tab.id === snapshot.activeTabId,
-          }))
-      : []
-    const task = this.sessionSaveQueue.then(async () => {
-      try {
-        const session = await saveFn({
-          workspaceRoot: isPlaceholder ? '' : targetRoot,
-          tabs: candidates,
-          expandedDirs: snapshot ? snapshot.expandedDirs : [],
-          sidebarWidget: this.sidebarWidget,
-        })
-        if (this.active) this.applySession(session)
-      } catch {
-        // Ignore background session save failures.
-      }
-    })
-    this.sessionSaveQueue = task.catch(() => {})
-    await task
+        : this.session.getCachedWorkspace(targetRoot)
+    await this.session.saveWorkspaceSession(isPlaceholder ? '' : targetRoot, snapshot, (session) =>
+      this.applySession(session),
+    )
   }
 
   /** Opens the default or specified workspace directory and refreshes settings, session, and LSP state. */
@@ -848,7 +494,7 @@ export class WorkspaceService {
       void this.saveCurrentWorkspaceSession(outgoingRoot)
     }
 
-    const cached = path ? this.workspaceCache.get(path) : undefined
+    const cached = path ? this.session.getCachedWorkspace(path) : undefined
     if (cached && path) {
       this.applyCachedWorkspace(cached)
       void this.refreshWorkspaceInBackground(path)
@@ -867,7 +513,7 @@ export class WorkspaceService {
       if (!this.defaultRoot && !path && this.isDefaultWorkspaceRoot(result.root)) {
         this.defaultRoot = result.root
       }
-      const switchedCached = this.workspaceCache.get(result.root)
+      const switchedCached = this.session.getCachedWorkspace(result.root)
       const fileOpenedDuringInit = !path && this.openRequestSeq !== seqBeforeOpen
       this.root = result.root
       this.settings.rememberRoot(result.root)
@@ -1536,7 +1182,7 @@ export class WorkspaceService {
 
   private saveCurrentWorkspaceToCache(root: string) {
     if (!root || this.isDefaultPlaceholderRoot(root)) return
-    this.workspaceCache.set(root, this.buildSnapshotForCurrentRoot())
+    this.session.setCachedWorkspace(root, this.buildSnapshotForCurrentRoot())
   }
 
   private applyCachedWorkspace(cached: CachedWorkspaceSnapshot) {

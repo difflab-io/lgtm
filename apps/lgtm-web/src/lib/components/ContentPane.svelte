@@ -1,9 +1,10 @@
 <script lang="ts">
   import { tick } from 'svelte'
-  import { Button, Pane, WhichKeyMode } from '@cloudvoyant/helical-svelte'
+  import { Button, Notice, Pane } from '@cloudvoyant/helical-svelte'
   import { CodeEditor, Tabs } from 'lgtm-ui'
-  import { Box, ChevronRight, FileText, FolderTree } from 'lucide-svelte'
+  import { ChevronRight, FileText } from 'lucide-svelte'
   import type { WorkspaceService } from '../services/workspaceService.svelte'
+  import DockViewSwitcher from './DockViewSwitcher.svelte'
   import LspStatusMenu from './LspStatusMenu.svelte'
 
   // Props ---------------------------------------------------------------------
@@ -35,10 +36,11 @@
   })
 </script>
 
-<main
-  data-pane-id="editor"
-  data-pane-title="Editor"
-  class="document-pane flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground outline-none"
+<Pane
+  role="main"
+  paneId="editor"
+  paneTitle="Editor"
+  class="document-pane flex min-h-0 min-w-0 flex-1 flex-col rounded-none border-0 bg-background text-foreground shadow-none outline-none"
   aria-label="File viewer"
 >
   {#if workspace.tabItems.length > 0}
@@ -61,9 +63,9 @@
     <div
       class="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground"
     >
-      <p class="max-w-115 text-xs leading-relaxed text-warn" role="alert">
+      <Notice variant="error" class="max-w-115 text-xs">
         {workspace.openingError}
-      </p>
+      </Notice>
       {#if workspace.selected}<Button
           variant="outline"
           size="sm"
@@ -111,28 +113,7 @@
   >
     <div class="flex min-w-0 items-center gap-2.5">
       {#if !workspace.projectsOpen && !workspace.explorerOpen}
-        <div class="flex items-center gap-1" role="group" aria-label="Sidebar view">
-          <button
-            type="button"
-            aria-label="Projects view"
-            title="Projects"
-            aria-pressed="false"
-            class="inline-flex size-6 items-center justify-center rounded-none text-muted-foreground transition-colors outline-none hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
-            onclick={() => workspace.toggleProjectsPane()}
-          >
-            <Box size={13} strokeWidth={1.5} />
-          </button>
-          <button
-            type="button"
-            aria-label="Explorer view"
-            title="Explorer"
-            aria-pressed="false"
-            class="inline-flex size-6 items-center justify-center rounded-none text-muted-foreground transition-colors outline-none hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
-            onclick={() => workspace.toggleExplorerPane()}
-          >
-            <FolderTree size={13} strokeWidth={1.5} />
-          </button>
-        </div>
+        <DockViewSwitcher {workspace} />
       {/if}
       <LspStatusMenu {workspace} />
       <nav

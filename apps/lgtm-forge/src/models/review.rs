@@ -1,8 +1,9 @@
 //! Domain model for local and forge-backed code reviews.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::Path};
 
 use lgtm_rsutils::normalize_repository_url;
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
@@ -97,6 +98,38 @@ impl ReviewContext {
     /// Return true when this review is `Local`.
     pub fn is_local(&self) -> bool {
         matches!(self, Self::Local { .. })
+    }
+
+    /// Compute the deterministic `<repo-name>-<12-hex-chars>` slug for this review context's `git_dir`.
+    pub fn repo_slug(&self) -> Result<String> {
+        Self::compute_repo_slug(Path::new(self.git_dir().trim()))
+    }
+
+    /// Compute a deterministic, filesystem-safe `<repo-name>-<12-hex-chars>` slug for a repository's shared `common_git_dir`.
+    pub fn compute_repo_slug(git_dir_or_worktree: &Path) -> Result<String> {
+        let resolved = lgtm_rsutils::resolve_git_paths(git_dir_or_worktree)?;
+        let repo_name = resolved
+            .main_root
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("repo")
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                    ch
+                } else {
+                    '-'
+                }
+            })
+            .collect::<String>();
+
+        let mut hasher = Sha256::new();
+        hasher.update(resolved.common_git_dir.to_string_lossy().as_bytes());
+        let digest = hasher.finalize();
+        let full_hex = format!("{digest:x}");
+        let short_hash = &full_hex[..12];
+
+        Ok(format!("{repo_name}-{short_hash}"))
     }
 
     /// Require that this review is `ForgeBacked` before executing a remote forge operation, returning `(repository_url, pr_number, forge_id)`.
