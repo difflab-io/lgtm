@@ -78,12 +78,10 @@
         try {
           await onrename(value, label)
           clearRename(value)
-          getDocumentWhichKeyController(rootEl?.ownerDocument)?.setMode('normal')
         } catch (error) {
           renameErrors[value] = error instanceof Error ? error.message : String(error)
           attempts[value] = label
           await tick()
-          getDocumentWhichKeyController(rootEl?.ownerDocument)?.setMode('insert')
           tree().startRenaming(value)
         }
       })()
@@ -96,10 +94,10 @@
             loaded = { ...loaded, [node.value]: children }
             if (pendingChildFocusParent === node.value) {
               pendingChildFocusParent = null
-              const firstChild = children[0]?.value
+              const firstChild = children.filter(isVisibleNode)[0]?.value
               if (firstChild) {
                 void tick().then(() => {
-                  tree().focus(firstChild)
+                  focusNodeValue(firstChild)
                 })
               }
             }
@@ -194,7 +192,6 @@
     if (value)
       void tick().then(() => {
         if (parent) tree().expand([parent])
-        getDocumentWhichKeyController(rootEl?.ownerDocument)?.setMode('insert')
         tree().startRenaming(value)
       })
   })
@@ -309,6 +306,24 @@
           return item ? collapseOrFocusParent(item.nodeValue, item.isBranch) : false
         },
       },
+      H: {
+        key: 'H',
+        label: 'Toggle Hidden Items',
+        mode: 'normal',
+        hidden: true,
+        when: () => isNormalTreeReady(),
+        action: ({ event }) => {
+          const item = event ? resolveTreeItemTarget(event) : null
+          if (!item) return false
+          showHidden = !showHidden
+          void tick().then(() => {
+            const visible = getVisibleNodeValues()
+            const next = visible.includes(item.nodeValue) ? item.nodeValue : visible[0]
+            if (next) focusNodeValue(next)
+          })
+          return true
+        },
+      },
       ArrowLeft: {
         key: 'ArrowLeft',
         label: 'Collapse Folder',
@@ -352,7 +367,6 @@
           if (!item || !onrename) return false
           const node = collection.findNode(item.nodeValue)
           if (!node || node.renamable === false) return false
-          getDocumentWhichKeyController(rootEl?.ownerDocument)?.setMode('insert')
           tree().startRenaming(item.nodeValue)
           return true
         },
@@ -368,7 +382,6 @@
           if (!item || !onrename) return false
           const node = collection.findNode(item.nodeValue)
           if (!node || node.renamable === false) return false
-          getDocumentWhichKeyController(rootEl?.ownerDocument)?.setMode('insert')
           tree().startRenaming(item.nodeValue)
           return true
         },
@@ -528,8 +541,11 @@
       const visible = getVisibleNodeValues()
       const idx = visible.indexOf(nodeValue)
       const child = visible[idx + 1]
-      if (child) {
+      if (child && (selectableBranches || child.startsWith(`${nodeValue}/`))) {
+        pendingChildFocusParent = null
         focusNodeValue(child)
+      } else if (!loaded[nodeValue]) {
+        pendingChildFocusParent = nodeValue
       }
     }
     return true
@@ -595,7 +611,6 @@
           }}
           oncancel={(value) => {
             clearRename(value)
-            getDocumentWhichKeyController(rootEl?.ownerDocument)?.setMode('normal')
             oncancel?.(value)
           }}
           {contextItems}

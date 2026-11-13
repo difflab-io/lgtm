@@ -198,6 +198,7 @@ pub fn commands<R: tauri::Runtime>(invoke: tauri::ipc::Invoke<R>) -> bool {
         lsp_get_diagnostics_buffer,
         lsp_restart,
         config_get,
+        config_update,
         session_get,
         session_save,
         project_set_collapsed,
@@ -238,6 +239,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             lsp_get_diagnostics_buffer,
             lsp_restart,
             config_get,
+            config_update,
             session_get,
             session_save,
             project_set_collapsed,
@@ -334,6 +336,8 @@ mod tests {
                 assert!(generated.contains("lspSignatureHelp"));
                 assert!(generated.contains("configGet"));
                 assert!(generated.contains("configUpdate"));
+                assert!(generated.contains("sessionGet"));
+                assert!(generated.contains("projectCreateWorktree"));
             }
         }
     }

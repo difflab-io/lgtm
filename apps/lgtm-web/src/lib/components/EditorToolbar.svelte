@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { WhichKeyMode } from '@cloudvoyant/helical-svelte'
   import { ChevronRight } from 'lucide-svelte'
   import { useService } from '../services/context'
   import LspStatusMenu from './LspStatusMenu.svelte'
@@ -38,5 +39,10 @@
       {/if}
     </nav>
   </div>
-  <span class={workspace.openingError ? 'shrink-0 text-warn' : 'shrink-0'}>{workspace.status}</span>
+  <div class="flex shrink-0 items-center gap-2.5">
+    <WhichKeyMode showPreset aria-label="Editor mode" />
+    <span class={workspace.openingError ? 'shrink-0 text-warn' : 'shrink-0'}
+      >{workspace.status}</span
+    >
+  </div>
 </div>

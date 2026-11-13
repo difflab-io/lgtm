@@ -15,12 +15,19 @@
   data-testid="explorer-dock-pane"
   paneId="workspace"
   paneTitle="Workspace"
+  paneOrder={2}
   paneDisabled={!session.explorerOpen}
   collapsible="none"
   aria-hidden={!session.explorerOpen}
   inert={!session.explorerOpen ? true : undefined}
   style="width: {session.widgetWidth}px"
-  class="h-full min-h-0 shrink-0 overflow-hidden bg-sidebar outline-none"
+  class={[
+    'h-full min-h-0 shrink-0 overflow-hidden bg-sidebar outline-none',
+    workspace.settings.paneOutline &&
+      'data-[pane-active=true]:ring-1 data-[pane-active=true]:ring-ring/40 data-[pane-active=true]:ring-inset',
+  ]
+    .filter(Boolean)
+    .join(' ')}
   aria-label="Workspace Explorer"
 >
   <SidebarPaneHeader title="Workspace">
@@ -48,19 +55,11 @@
     {/snippet}
   </SidebarPaneHeader>
   <SidebarContent class="min-h-0 flex-1 overflow-y-auto">
-    {#if workspace.creationError}
-      <Notice variant="error" class="mx-3.5 my-2 text-xs">{workspace.creationError}</Notice>
-    {/if}
-    {#if workspace.loading && !workspace.entries.length}
-      <Notice variant="info" class="mx-3.5 my-2 text-xs">Opening workspace…</Notice>
-    {:else if workspace.error}
-      <Notice variant="error" class="mx-3.5 my-2 text-xs">{workspace.error}</Notice>
-      {#if workspace.client.isDesktop()}<Button
-          variant="text"
-          size="sm"
-          onclick={() => workspace.open()}>Retry</Button
-        >{/if}
-    {:else if !workspace.entries.length && !workspace.pendingEntry}
+    {#if workspace.error && workspace.client.isDesktop()}
+      <div class="mx-3.5 my-2">
+        <Button variant="text" size="sm" onclick={() => workspace.open()}>Retry</Button>
+      </div>
+    {:else if !workspace.loading && !workspace.error && !workspace.entries.length && !workspace.pendingEntry}
       <Notice variant="none" class="mx-3.5 my-2 text-xs">
         Your workspace is empty. Create your first file with New file.
       </Notice>

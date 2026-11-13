@@ -184,12 +184,14 @@ flowchart TD
 | `SettingsService.update` | `update(patch: LgtmConfigPatch, scope?: ConfigScope): Promise<ResolvedConfigSnapshot>` | Persist a partial `LgtmConfigPatch` to global or project `config.json` via `config_update` and apply the returned snapshot. |
 | `SettingsService.handleUpdated` | `handleUpdated(next: ResolvedConfigSnapshot): void` | Apply a live `config-updated` event payload when `~/.lgtm/config.json` or `.lgtm/config.json` is saved. |
 | `SettingsService.rememberRoot` | `rememberRoot(root: string): void` | Prepend `root` to `knownRoots` and persist the MRU list to `localStorage`. |
+| `HotkeyService.keymap` / `commandItems` | `readonly keymap: Record<string, WhichKeyNode>` / `get commandItems(): CommandNode[]` | Return the `WhichKey` binding tree and reactive hierarchical `CommandMenu` / `CommandPalette` command catalog. |
 | `HotkeyService.toggleExplorer` | `toggleExplorer(): boolean` | Toggle the Explorer widget dock pane (`#explorer-dock-pane`, `Mod+B` / `Space e`) and focus `workspace` when opened. |
 | `HotkeyService.showSidebarMode` | `showSidebarMode(mode: 'explorer' \| 'projects'): boolean` | Independently toggle the Projects dock (`#projects-dock-pane`, `Mod+Shift+B` / `Space p p`) or Explorer widget dock (`#explorer-dock-pane`, `Mod+B` / `Space p e`) and focus the opened pane. |
 | `HotkeyService.openConfiguredCommandSurface` / `openColonCommandMenu` | `openConfiguredCommandSurface(): boolean` / `openColonCommandMenu(): boolean` | Open the Helical UI `CommandMenu` / `CommandPalette` (`Mod+K` or `Space :`) or the bottom-docked colon `CommandMenu` (`:`). |
 
 ## References
 
+- [Modal keybindings & command surfaces (`lgtm-web` & `lgtm-ui`) architecture](keybindings.md).
 - [ProjectsPane UI component](projects-pane.md).
 - [Desktop application (`lgtm-desktop`) architecture](../desktop/index.md).
 - [Desktop project and session management](../desktop/projects.md).

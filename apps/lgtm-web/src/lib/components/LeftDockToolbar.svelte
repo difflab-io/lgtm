@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, Row } from '@cloudvoyant/helical-svelte'
+  import { Button } from '@cloudvoyant/helical-svelte'
   import { Box, FolderTree } from 'lucide-svelte'
   import type { SidebarWidget } from '../clients/workspaceClient'
   import { useService } from '../services/context'
@@ -7,6 +7,11 @@
   // State ---------------------------------------------------------------------
   const session = useService('session')
   const dockOpen = $derived(session.projectsOpen || session.explorerOpen)
+  let buttonsWidth = $state(50)
+  const minToolbarWidth = $derived(buttonsWidth + 20)
+  const toolbarWidth = $derived(
+    dockOpen ? Math.max(session.leftDockWidth, minToolbarWidth) : minToolbarWidth,
+  )
 </script>
 
 {#snippet dockModeButton(mode: SidebarWidget, label: string)}
@@ -36,16 +41,16 @@
 
 <div
   data-testid="left-dock-toolbar"
-  style={dockOpen ? `width: ${session.leftDockWidth}px` : undefined}
+  style="width: {toolbarWidth}px"
   class={[
-    'flex h-7 shrink-0 items-center justify-start gap-0.5 bg-sidebar px-2.5 py-0 transition-[width] duration-200 ease-linear',
-    dockOpen ? 'border-r border-border' : '',
+    'flex h-7 w-min min-w-min shrink-0 items-center justify-start gap-0.5 border-r border-border bg-sidebar px-2.5 py-0',
+    !session.resizing ? 'transition-[width] duration-200 ease-linear' : '',
   ].join(' ')}
   role="group"
   aria-label="Sidebar view"
 >
-  <Row class="items-center gap-0.5">
+  <div bind:offsetWidth={buttonsWidth} class="flex w-min shrink-0 items-center gap-0.5">
     {@render dockModeButton('projects', 'Projects')}
     {@render dockModeButton('explorer', 'Explorer')}
-  </Row>
+  </div>
 </div>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, Notice, Row, Sidebar, SidebarContent } from '@cloudvoyant/helical-svelte'
+  import { Button, Row, Sidebar, SidebarContent } from '@cloudvoyant/helical-svelte'
   import { FolderPlus, GitBranch } from 'lucide-svelte'
   import { useService } from '../services/context'
   import ProjectsPane from './ProjectsPane.svelte'
@@ -10,13 +10,13 @@
   const workspace = useService('workspace')
   const project = useService('project')
   const session = useService('session')
-  let resizingTarget = $state<'projects' | 'widget' | null>(null)
+  const dockOpen = $derived(session.projectsOpen || session.explorerOpen)
 
   function startResize(target: 'projects' | 'widget', event: PointerEvent) {
     event.preventDefault()
     const startX = event.clientX
     const startWidth = target === 'projects' ? session.projectsWidth : session.widgetWidth
-    resizingTarget = target
+    session.setResizing(true)
 
     function onMove(moveEvent: PointerEvent) {
       const delta = moveEvent.clientX - startX
@@ -28,7 +28,7 @@
     }
 
     function onUp() {
-      resizingTarget = null
+      session.setResizing(false)
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
@@ -40,8 +40,11 @@
 
 <Sidebar
   id="workspace-sidebar"
-  collapsible="offcanvas"
-  class="workspace-sidebar top-9 h-[calc(100dvh-64px)] overflow-hidden bg-sidebar outline-none"
+  collapsible="none"
+  class={[
+    'workspace-sidebar h-full min-h-0 w-auto shrink-0 overflow-hidden bg-sidebar outline-none',
+    dockOpen ? 'border-r border-border' : '',
+  ].join(' ')}
   aria-label="Workspace"
 >
   <Row class="min-h-0 flex-1 items-stretch gap-0 overflow-hidden">
@@ -49,7 +52,7 @@
       style="width: {session.projectsOpen ? `${session.projectsWidth}px` : '0px'}"
       class={[
         'relative h-full min-h-0 shrink-0 overflow-hidden',
-        resizingTarget === null ? 'transition-[width] duration-200 ease-linear' : '',
+        !session.resizing ? 'transition-[width] duration-200 ease-linear' : '',
         session.projectsOpen && session.explorerOpen ? 'border-r border-border' : '',
       ].join(' ')}
     >
@@ -58,6 +61,7 @@
         data-testid="projects-dock-pane"
         paneId="projects"
         paneTitle="Projects"
+        paneOrder={1}
         paneDisabled={!session.projectsOpen &&
           !project.worktreeDialog &&
           !project.newBranchDialog &&
@@ -73,7 +77,13 @@
           ? true
           : undefined}
         style="width: {session.projectsWidth}px"
-        class="h-full min-h-0 shrink-0 overflow-hidden bg-sidebar outline-none"
+        class={[
+          'h-full min-h-0 shrink-0 overflow-hidden bg-sidebar outline-none',
+          workspace.settings.paneOutline &&
+            'data-[pane-active=true]:ring-1 data-[pane-active=true]:ring-ring/40 data-[pane-active=true]:ring-inset',
+        ]
+          .filter(Boolean)
+          .join(' ')}
         aria-label="Projects"
       >
         <SidebarPaneHeader title="Projects" class="px-3">
@@ -101,9 +111,6 @@
           {/snippet}
         </SidebarPaneHeader>
         <SidebarContent class="min-h-0 flex-1 overflow-y-auto">
-          {#if workspace.creationError && !session.explorerOpen}
-            <Notice variant="error" class="mx-3.5 my-2 text-xs">{workspace.creationError}</Notice>
-          {/if}
           <ProjectsPane />
         </SidebarContent>
       </Sidebar>
@@ -123,7 +130,7 @@
       style="width: {session.explorerOpen ? `${session.widgetWidth}px` : '0px'}"
       class={[
         'relative h-full min-h-0 shrink-0 overflow-hidden',
-        resizingTarget === null ? 'transition-[width] duration-200 ease-linear' : '',
+        !session.resizing ? 'transition-[width] duration-200 ease-linear' : '',
       ].join(' ')}
     >
       <WidgetPane />

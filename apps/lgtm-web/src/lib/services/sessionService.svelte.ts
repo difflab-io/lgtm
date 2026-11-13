@@ -15,6 +15,7 @@ export class SessionService {
   explorerOpen = $state(true)
   projectsWidth = $state(180)
   widgetWidth = $state(236)
+  resizing = $state(false)
   private workspaceCache = new Map<string, CachedWorkspaceSnapshot>()
   private sessionHydratedRoots = new Set<string>()
   private sidebarHydrated = false
@@ -41,6 +42,11 @@ export class SessionService {
   /** Clamps and updates the width of the `WidgetPane` (`FileExplorer`). */
   setWidgetWidth(width: number): void {
     this.widgetWidth = Math.min(480, Math.max(160, Math.round(width)))
+  }
+
+  /** Updates whether a left-dock pane resizer is actively being dragged. */
+  setResizing(active: boolean): void {
+    this.resizing = active
   }
 
   /** Toggles the Projects dock pane independently of the Explorer widget slot. */

@@ -7,6 +7,7 @@
 
   // State ---------------------------------------------------------------------
   const workspace = useService('workspace')
+  const hotkeys = useService('hotkeys')
   let editorRef = $state<{ focus: () => void }>()
 
   // Derived -------------------------------------------------------------------
@@ -32,7 +33,12 @@
   role="main"
   paneId="editor"
   paneTitle="Editor"
-  class="document-pane flex min-h-0 min-w-0 flex-1 flex-col rounded-none border-0 bg-background text-foreground shadow-none outline-none"
+  paneOrder={3}
+  tabindex={-1}
+  class="document-pane relative flex min-h-0 min-w-0 flex-1 flex-col rounded-none border-0 bg-background text-foreground shadow-none outline-none {workspace
+    .settings.paneOutline
+    ? 'data-[pane-active=true]:ring-1 data-[pane-active=true]:ring-ring/40 data-[pane-active=true]:ring-inset'
+    : 'ring-0 data-[pane-active=true]:ring-0'}"
   aria-label="File viewer"
 >
   {#if workspace.tabItems.length > 0}
@@ -83,7 +89,7 @@
           ongotodefinition={(offset) => workspace.gotoDefinition(offset)}
           oncompletion={(offset) => workspace.requestCompletions(offset)}
           onsignaturehelp={(offset) => workspace.requestSignatureHelp(offset)}
-          onViewReady={(v) => hotkeys.setEditorView(v)}
+          onViewReady={(v) => hotkeys?.setEditorView(v)}
         />
       {/key}
     </div>

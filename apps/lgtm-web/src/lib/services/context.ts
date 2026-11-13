@@ -1,4 +1,5 @@
 import { getContext, setContext } from 'svelte'
+import type { HotkeyService } from './hotkeyService.svelte'
 import type { LspService } from './lspService.svelte'
 import type { ProjectService } from './projectService.svelte'
 import type { SessionService } from './sessionService.svelte'
@@ -14,18 +15,23 @@ export interface AppServices {
   session: SessionService
   lsp: LspService
   settings: SettingsService
+  hotkeys?: HotkeyService
 }
 
 // Public ----------------------------------------------------------------------
 
-/** Registers all domain services (`workspace`, `project`, `session`, `lsp`, `settings`) in the component tree's Svelte context. */
-export function setServicesContext(workspace: WorkspaceService): AppServices {
+/** Registers all domain services (`workspace`, `project`, `session`, `lsp`, `settings`, `hotkeys`) in the component tree's Svelte context. */
+export function setServicesContext(
+  workspace: WorkspaceService,
+  hotkeys?: HotkeyService,
+): AppServices {
   const services: AppServices = {
     workspace,
     project: workspace.project,
     session: workspace.session,
     lsp: workspace.lsp,
     settings: workspace.settings,
+    ...(hotkeys ? { hotkeys } : {}),
   }
   return setContext(SERVICES_CONTEXT_KEY, services)
 }

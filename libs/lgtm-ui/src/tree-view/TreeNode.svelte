@@ -3,7 +3,6 @@
   import { ChevronDown, ChevronRight, Folder, FolderOpen, FileText } from 'lucide-svelte'
   import ContextMenu from '../context-menu/ContextMenu.svelte'
   import { TreeView as ArkTreeView, useTreeViewContext } from '@ark-ui/svelte/tree-view'
-  import { getDocumentWhichKeyController } from '@cloudvoyant/helical-ui'
   import {
     treeViewListBase,
     treeViewBranchContentBase,
@@ -46,7 +45,6 @@
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         if (value === 'rename') {
-          getDocumentWhichKeyController()?.setMode('insert')
           tree().startRenaming(node.value)
         } else onaction?.(node.value, value)
       }),
@@ -82,6 +80,7 @@
 {#snippet renameInput()}
   <ArkTreeView.NodeRenameInput
     aria-label="Name"
+    data-colon-command=""
     class={treeViewRenameInputBase}
     aria-invalid={Boolean(renameErrors[node.value])}
     data-invalid={renameErrors[node.value] ? '' : undefined}
@@ -110,7 +109,7 @@
   {/if}
 {/snippet}
 
-{#snippet branchRow(expanded: boolean, selected: boolean, renaming: boolean)}
+{#snippet branchRow(expanded: boolean, focused: boolean, selected: boolean, renaming: boolean)}
   <ContextMenu items={contextItems?.(node) ?? []} onaction={action}>
     {#snippet children(triggerProps)}
       <ArkTreeView.BranchControl
@@ -118,7 +117,7 @@
         class={rowClass}
         title={node.description ?? node.value}
         data-which-key-target=""
-        data-pane-focus-target={selected || isDefaultFocusTarget ? '' : undefined}
+        data-pane-focus-target={focused || selected || isDefaultFocusTarget ? '' : undefined}
         data-tree-node-value={node.value}
         data-tree-node-branch="true"
         onclickcapture={(event) => handleSelectableBranchClick(event, expanded)}
@@ -136,7 +135,7 @@
   </ContextMenu>
 {/snippet}
 
-{#snippet leafRow(selected: boolean, renaming: boolean)}
+{#snippet leafRow(focused: boolean, selected: boolean, renaming: boolean)}
   <ContextMenu items={contextItems?.(node) ?? []} onaction={action}>
     {#snippet children(triggerProps)}
       <ArkTreeView.Item
@@ -147,7 +146,7 @@
           : (node.displayLabel ?? node.label)}
         title={node.value}
         data-which-key-target=""
-        data-pane-focus-target={selected || isDefaultFocusTarget ? '' : undefined}
+        data-pane-focus-target={focused || selected || isDefaultFocusTarget ? '' : undefined}
         data-tree-node-value={node.value}
         data-tree-node-branch="false"
       >
@@ -166,7 +165,7 @@
     {#snippet render(state)}
       {#if node.branch}
         <ArkTreeView.Branch aria-label={node.displayLabel ?? node.label} class={treeViewListBase}>
-          {@render branchRow(state().expanded, state().selected, state().renaming)}
+          {@render branchRow(state().expanded, state().focused, state().selected, state().renaming)}
           {#if errors[node.value]}<p class={treeViewMessageVariants()} role="alert">
               {errors[node.value]} Expand to retry.
             </p>{/if}
@@ -190,7 +189,7 @@
           </ArkTreeView.BranchContent>
         </ArkTreeView.Branch>
       {:else}
-        {@render leafRow(state().selected, state().renaming)}
+        {@render leafRow(state().focused, state().selected, state().renaming)}
       {/if}
       {#if renameErrors[node.value]}<p
           id={renameErrorId}

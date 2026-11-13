@@ -1,7 +1,8 @@
 //! Language Server Protocol (`LspService`) IPC command handlers.
 
 use lgtm_lsp::{
-    LspDiagnosticsBuffer, LspHoverResult, LspLocation, LspServerStatusEvent, LspWorkspaceSnapshot,
+    LspCompletionItem, LspDiagnosticsBuffer, LspHoverResult, LspLocation, LspServerStatusEvent,
+    LspSignatureHelp, LspWorkspaceSnapshot,
 };
 use lgtm_workspace::Result;
 use tauri::State;
@@ -61,6 +62,44 @@ pub async fn lsp_goto_definition(
                 (w.get_root()?, w.get_entry_path(&relative_path)?)
             };
             app.lsp.get_definition(&root, &file_path, offset)
+        })
+        .await
+}
+
+/// Requests code completion candidates (`textDocument/completion`) at a UTF-16 editor offset.
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_completion(
+    state: State<'_, AppState>,
+    relative_path: String,
+    offset: u32,
+) -> Result<Vec<LspCompletionItem>> {
+    state
+        .run_blocking(move |app| {
+            let (root, file_path) = {
+                let w = app.lock_workspace()?;
+                (w.get_root()?, w.get_entry_path(&relative_path)?)
+            };
+            app.lsp.get_completions(&root, &file_path, offset)
+        })
+        .await
+}
+
+/// Requests callable signature help (`textDocument/signatureHelp`) at a UTF-16 editor offset.
+#[tauri::command]
+#[specta::specta]
+pub async fn lsp_signature_help(
+    state: State<'_, AppState>,
+    relative_path: String,
+    offset: u32,
+) -> Result<Option<LspSignatureHelp>> {
+    state
+        .run_blocking(move |app| {
+            let (root, file_path) = {
+                let w = app.lock_workspace()?;
+                (w.get_root()?, w.get_entry_path(&relative_path)?)
+            };
+            app.lsp.get_signature_help(&root, &file_path, offset)
         })
         .await
 }

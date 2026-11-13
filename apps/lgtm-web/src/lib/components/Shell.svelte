@@ -1,11 +1,15 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte'
+  import { onMount, tick, untrack } from 'svelte'
+  import { getDocumentWhichKeyController } from '@cloudvoyant/helical-ui'
   import {
     CommandMenu,
     CommandPalette,
     CommandProvider,
+    createToaster,
     Row,
     SidebarProvider,
+    Toaster,
+    ToastItem,
     WhichKey,
     WhichKeyProvider,
   } from '@cloudvoyant/helical-svelte'
@@ -28,8 +32,8 @@
 
   // State ---------------------------------------------------------------------
   const workspace = untrack(() => new WorkspaceService(client))
-  const { session } = setServicesContext(workspace)
   const hotkeys = untrack(() => new HotkeyService(workspace))
+  const { session } = setServicesContext(workspace, hotkeys)
   const theme = untrack(
     () =>
       new ThemeService({
@@ -38,6 +42,13 @@
         windowBridge: client.themeWindowBridge?.(),
       }),
   )
+  const appToaster = createToaster({
+    placement: 'top-end',
+    overlap: true,
+    max: 5,
+    gap: 8,
+    offsets: { top: '2.625rem', right: '0.75rem', bottom: '0.75rem', left: '0.75rem' },
+  })
 
   // Derived -------------------------------------------------------------------
   let lastOpenSidebarWidth = $state(236)
@@ -59,10 +70,71 @@
     })
   })
 
+  $effect(() => {
+    const creationError = workspace.creationError
+    untrack(() => {
+      if (creationError) {
+        appToaster.create({
+          id: 'lgtm-creation-error',
+          title: creationError,
+          type: 'error',
+          duration: 5000,
+        })
+      } else {
+        appToaster.dismiss('lgtm-creation-error')
+      }
+    })
+  })
+
+  $effect(() => {
+    const workspaceError = workspace.error
+    untrack(() => {
+      if (workspaceError) {
+        appToaster.create({
+          id: 'lgtm-workspace-error',
+          title: workspaceError,
+          type: 'error',
+          duration: 5000,
+        })
+      } else {
+        appToaster.dismiss('lgtm-workspace-error')
+      }
+    })
+  })
+
   onMount(() => {
     let active = true
-    const unlisteners: (() => void)[] = [theme.init()]
-    void workspace.open()
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (
+        hotkeys.commandOpen &&
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === 'k'
+      ) {
+        event.preventDefault()
+        event.stopPropagation()
+        hotkeys.setCommandOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeydown, true)
+    const unlisteners: (() => void)[] = [
+      theme.init(),
+      () => window.removeEventListener('keydown', handleKeydown, true),
+    ]
+    void workspace.open().then(async () => {
+      if (!active || workspace.selected) return
+      await tick()
+      requestAnimationFrame(() => {
+        if (
+          active &&
+          !workspace.selected &&
+          (!document.activeElement || document.activeElement === document.body)
+        ) {
+          getDocumentWhichKeyController(document)?.focusPane('workspace')
+        }
+      })
+    })
     if (client.isDesktop()) {
       void client
         .registerQuitHandlers(async () => {
@@ -141,11 +213,22 @@
 </svelte:head>
 
 <WhichKeyProvider
-  preset="helix"
+  preset={workspace.settings.keybindPreset}
+  leaderOnly={workspace.settings.leaderOnly}
   storageKey="lgtm"
   scoped={false}
   keymap={hotkeys.keymap}
   commands={hotkeys.commands}
+  onPresetChange={(next) => {
+    if (workspace.settings.keybindPreset !== next) {
+      hotkeys.setPreset(next)
+    }
+  }}
+  onLeaderOnlyChange={(next) => {
+    if (workspace.settings.leaderOnly !== next) {
+      hotkeys.setLeaderOnly(next)
+    }
+  }}
 >
   <CommandProvider
     items={hotkeys.commandItems}
@@ -156,11 +239,12 @@
     <SidebarProvider
       open={session.projectsOpen || session.explorerOpen}
       onOpenChange={() => {}}
+      data-pane-outline={workspace.settings.paneOutline ? 'true' : 'false'}
       class="workspace-shell h-dvh min-h-0 flex-col gap-0 overflow-hidden"
       style="--sidebar-width: {activeSidebarWidth || lastOpenSidebarWidth}px"
     >
       <Titlebar />
-      <Row class="min-h-0 flex-1 items-stretch gap-0">
+      <Row class="min-h-0 flex-1 items-stretch gap-0 overflow-hidden">
         <LeftDock />
         <ContentPane />
       </Row>
@@ -172,19 +256,14 @@
         <EditorToolbar />
       </footer>
     </SidebarProvider>
-    <CommandMenu
-      open={(hotkeys.effectiveCommandStyle === 'menu' ||
-        hotkeys.effectiveCommandStyle === 'colon') &&
-        hotkeys.commandOpen}
-      onOpenChange={(open) => hotkeys.setCommandOpen(open)}
-      hotkey={false}
-      showShortcuts
-    />
-    <CommandPalette
-      open={hotkeys.effectiveCommandStyle === 'palette' && hotkeys.commandOpen}
-      onOpenChange={(open) => hotkeys.setCommandOpen(open)}
-      hotkey={false}
-    />
+    <CommandMenu size="sm" showAliases hotkey={false} />
+    <CommandPalette size="sm" hotkey={false} />
   </CommandProvider>
+  <Toaster toaster={appToaster}>
+    {#snippet children(toastAccessor)}
+      {@const toastData = toastAccessor()}
+      <ToastItem toast={toastData} role={toastData.type === 'error' ? 'alert' : 'status'} />
+    {/snippet}
+  </Toaster>
   <WhichKey />
 </WhichKeyProvider>
