@@ -59,11 +59,11 @@ flowchart TB
     LSP_MGR --> SERVERS["Language Server Processes (stdio JSON-RPC 2.0)"]
 ```
 
-- `app.rs` (`lgtm-desktop`): Registers a unified `AppState` (`workspace`, `config`, `lsp`, `frontend_ready`, `events`) in Tauri managed state, dispatches `workspace_*`, `lsp_*`, `config_get`, and `config_update` IPC commands onto `spawn_blocking`, emits `config-updated` when `workspace_write` or `config_update` saves a configuration file, and coordinates the `RunEvent::ExitRequested` quit handshake.
+- `app.rs` (`lgtm-desktop`): Registers a unified `AppState` (`workspace`, `config`, `lsp`, `session`, `project`, `frontend_ready`, `events`) in Tauri managed state, dispatches `workspace_*`, `lsp_*`, `config_get`, `config_update`, `session_*`, and `project_*` IPC commands onto `spawn_blocking`, emits `config-updated` when `workspace_write` or `config_update` saves a configuration file, and coordinates the `RunEvent::ExitRequested` quit handshake.
 - `services::workspace::WorkspaceService` (`lgtm-desktop`): Owns the active `Workspace` root, validates workspace-relative paths (plus `~/.lgtm/config.json` and `.lgtm/config.json`), reads global and local configuration files via `get_file_content`, and performs atomic file/folder CRUD.
 - `services::lsp::LspService` (`lgtm-desktop`): Bridges `lgtm-lsp`'s `LgtmLspManager` to the Tauri `AppHandle` (and optional E2E stdio bridge forwarder), translating `LspEvent::Status` and `LspEvent::Diagnostics` callbacks into `app_handle.emit("lsp-status", ...)` and `app_handle.emit("lsp-diagnostics", ...)`.
 - `LgtmLspManager` & `LspCacheService` (`lgtm-lsp`): Manage per-`(workspace_root, language_id, project_root)` stdio JSON-RPC 2.0 sessions, cache open UTF-8 document snapshots and diagnostics, and coordinate with `MiseService` (`lgtm-env`) and `ConfigService` (`lgtm-config`) to launch language servers.
-- `WorkspaceService`, `LspService`, `SettingsService`, & `HotkeyService` (`lgtm-web`): Reactive Svelte 5 `$state` services that manage open editor tabs, 150ms debounced auto-save (`flushSave`), live `lsp_did_change` notifications, active language server indicators, read-only diagnostics buffer tabs, modal keybindings (`WhichKeyProvider`, `CommandMenu`, `CommandPalette`), and live `config-updated` preference synchronization. See [Web frontend architecture](../web/index.md) and [Modal keybindings architecture](../web/keybindings.md).
+- `WorkspaceService`, `ProjectService`, `SessionService`, `LspService`, `SettingsService`, & `HotkeyService` (`lgtm-web`): Reactive Svelte 5 `$state` services that manage open editor tabs, 150ms debounced auto-save (`flushSave`), live `lsp_did_change` notifications, active language server indicators, read-only diagnostics buffer tabs, modal keybindings (`WhichKeyProvider`, `CommandMenu`, `CommandPalette`), and live `config-updated` preference synchronization. See [Web frontend architecture](../web/index.md) and [Modal keybindings architecture](../web/keybindings.md).
 
 ### Data and Control Flow
 
@@ -205,6 +205,11 @@ When compiled with the `e2e-bridge` feature and launched with `--ipc-bridge <hom
 ## References
 
 - [Desktop event handling & service orchestration](events.md).
+- [Desktop project and session management](projects.md).
+- [Session library (`lgtm-session`) architecture](../session/index.md).
+- [Project library (`lgtm-project`) architecture](../project/index.md).
+- [Rust utilities library (`lgtm-rsutils`) architecture](../rsutils/index.md).
+- [ProjectsPane UI component](../web/projects-pane.md).
 - [LSP library (`lgtm-lsp`) architecture](../lsp/index.md).
 - [Environment library (`lgtm-env`) architecture](../env/index.md).
 - [Configuration library (`lgtm-config`) architecture](../config/index.md).

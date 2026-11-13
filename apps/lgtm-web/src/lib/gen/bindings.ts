@@ -7,7 +7,7 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
-	/**  Opens the active or specified workspace directory and prepares workspace language servers. */
+	/**  Opens the active or specified workspace directory, updates the `default` session, and prepares workspace language servers. */
 	workspaceOpen: (path: string | null) => __TAURI_INVOKE<WorkspaceListing>("workspace_open", { path }),
 	/**  Opens a native OS folder picker dialog. */
 	workspacePickFolder: () => __TAURI_INVOKE<string | null>("workspace_pick_folder"),
@@ -47,6 +47,24 @@ export const commands = {
 	configGet: () => __TAURI_INVOKE<ResolvedConfigSnapshot>("config_get"),
 	/**  Applies a partial configuration patch to global or project `config.json` and emits `config-updated`. */
 	configUpdate: (patch: LgtmConfigPatch, scope: ConfigScope | null) => __TAURI_INVOKE<ResolvedConfigSnapshot>("config_update", { patch, scope }),
+	/**  Loads the persisted session state (`~/.lgtm/sessions/<id>.json`). */
+	sessionGet: (sessionId: string | null) => __TAURI_INVOKE<Session>("session_get", { sessionId }),
+	/**  Saves the active sidebar widget, expanded explorer folders, and filtered tabs (`edited || last_opened`) for a workspace. */
+	sessionSave: (patch: WorkspaceStatePatch) => __TAURI_INVOKE<Session>("session_save", { patch }),
+	/**  Collapses or expands child worktrees for `project_id` in the `default` session. */
+	projectSetCollapsed: (projectId: string, collapsed: boolean) => __TAURI_INVOKE<Session>("project_set_collapsed", { projectId, collapsed }),
+	/**  Updates custom `name`, `icon`, and `color` metadata for `project_id` in the `default` session. */
+	projectUpdateAppearance: (projectId: string, name: string | null, icon: string | null, color: string | null) => __TAURI_INVOKE<Session>("project_update_appearance", { projectId, name, icon, color }),
+	/**  Renames a worktree display label under `project_id` without changing its Git branch name. */
+	projectRenameWorktree: (projectId: string, worktreePath: string, name: string) => __TAURI_INVOKE<Session>("project_rename_worktree", { projectId, worktreePath, name }),
+	/**  Creates a `Managed` Git worktree under `~/.lgtm/worktrees/<project>/<branch-slug>` and attaches it to the `default` session. */
+	projectCreateWorktree: (projectId: string, branch: string, baseRef: string | null) => __TAURI_INVOKE<Session>("project_create_worktree", { projectId, branch, baseRef }),
+	/**  Removes a managed worktree from `project_id` and deletes its checkout directory on disk. */
+	projectRemoveWorktree: (projectId: string, worktreePath: string, force: boolean | null) => __TAURI_INVOKE<Session>("project_remove_worktree", { projectId, worktreePath, force }),
+	/**  Removes `project_id` and its remembered workspace states from the `default` session. */
+	projectRemove: (projectId: string) => __TAURI_INVOKE<Session>("project_remove", { projectId }),
+	/**  Switches `workspace_root` to `branch` (or creates `-b <branch>` when `create` is `true`) and returns the refreshed session. */
+	projectCheckoutBranch: (workspaceRoot: string, branch: string, create: boolean | null) => __TAURI_INVOKE<Session>("project_checkout_branch", { workspaceRoot, branch, create }),
 };
 
 /* Types */
@@ -407,6 +425,42 @@ description?: string | null;
 /**  Shell command executed by `mise run`. */
 run: string };
 
+/**  Editor tab persisted in [`crate::WorkspaceSessionState`] after passing the retention filter. */
+export type PersistedTab = {
+	/**  Workspace-relative file path or config path. */
+	path: string,
+	/**  Display title shown in the tab bar. */
+	title: string,
+	/**  Whether the tab buffer was modified during the session. */
+	edited: boolean,
+	/**  Whether the tab was the active focused tab when saved. */
+	lastOpened: boolean,
+};
+
+/**  Primary repository or folder checkout and its open linked Git worktrees. */
+export type Project = {
+	/**  Deterministic UUID derived from `root_path`. */
+	id: string,
+	/**  Repository or folder basename shown on the project row. */
+	name: string,
+	/**  Canonical path of the primary repository checkout. */
+	rootPath: string,
+	/**  Checked-out Git branch at `root_path`, if `root_path` is a Git repository. */
+	branch: string | null,
+	/**  Canonical shared `.git` directory path (`commondir`), if `root_path` is a Git repository. */
+	gitCommonDir: string | null,
+	/**  Optional custom icon identifier for `ProjectsPane` (defaults to `"box"` in the UI when `None`). */
+	icon?: string | null,
+	/**  Optional custom color token identifier for `ProjectsPane` (defaults to neutral foreground when `None`). */
+	color?: string | null,
+	/**  Whether child worktrees are collapsed in `ProjectsPane`. */
+	collapsed: boolean,
+	/**  Open linked Git worktrees attached underneath this project. */
+	worktrees: Worktree[],
+	/**  Local Git branches (`refs/heads/*`) discovered for this project. */
+	branches?: string[],
+};
+
 /**  Merged configuration snapshot together with per-scope patch trees returned to the frontend. */
 export type ResolvedConfigSnapshot = {
 	/**  Effective deep-merged configuration (project leaf overrides layered over global settings and defaults). */
@@ -419,6 +473,39 @@ export type ResolvedConfigSnapshot = {
 	globalPath: string,
 	/**  Absolute path to the active project config file. */
 	projectPath: string,
+};
+
+/**  Top-level persisted session snapshot stored at `~/.lgtm/sessions/<id>.json`. */
+export type Session = {
+	/**  Session identifier (`"default"` by default). */
+	id: string,
+	/**  Active left-sidebar widget (`Explorer` or `Projects`). */
+	sidebarWidget?: SidebarWidget,
+	/**  Canonical path of the currently active workspace checkout. */
+	activeWorkspaceRoot: string,
+	/**  Ordered list of open projects and their linked worktrees. */
+	projects?: Project[],
+	/**  Remembered editor tabs and explorer state keyed by checkout path. */
+	workspaces?: { [key in string]: WorkspaceSessionState },
+};
+
+/**  Left-sidebar widget mode persisted in a [`Session`]. */
+export type SidebarWidget = 
+/**  Active workspace file explorer (`FileExplorer.svelte`). */
+"explorer" | 
+/**  Open projects and collapsible worktrees tree (`ProjectsPane.svelte`). */
+"projects";
+
+/**  Candidate editor tab evaluated against the session retention policy (`edited || last_opened`). */
+export type TabCandidate = {
+	/**  Workspace-relative file path or config path (`~/.lgtm/config.json` / `.lgtm/config.json`). */
+	path: string,
+	/**  Display title shown in the tab bar. */
+	title: string,
+	/**  Whether the tab buffer was modified during this session. */
+	edited: boolean,
+	/**  Whether the tab was the active focused tab when the workspace was saved or switched. */
+	lastOpened: boolean,
 };
 
 /**  Supported color theme preferences persisted under `appearance.theme`. */
@@ -456,6 +543,18 @@ export type WorkspaceNode = {
 	kind: string,
 };
 
+/**  Per-checkout UI snapshot stored for a project primary checkout (`Project.root_path`) or linked worktree (`Worktree.path`). */
+export type WorkspaceSessionState = {
+	/**  Canonical path of the checkout directory. */
+	workspaceRoot: string,
+	/**  Path of the active tab when this workspace was last focused. */
+	lastOpenedTabPath: string | null,
+	/**  Expanded directory paths in `WorkspaceExplorer`. */
+	expandedDirs: string[],
+	/**  Retained editor tabs (`edited || last_opened`). */
+	tabs: PersistedTab[],
+};
+
 /**  Resolved workspace history settings section (`workspace.*`). */
 export type WorkspaceSettings = {
 	/**  Last active workspace root directory path. */
@@ -470,5 +569,27 @@ export type WorkspaceSettingsPatch = {
 	activeRoot?: string | null,
 	/**  Recently opened workspace root directory paths. */
 	recentRoots?: string[] | null,
+};
+
+/**  Patch payload submitted when saving or switching workspace UI state. */
+export type WorkspaceStatePatch = {
+	/**  Canonical path of the workspace checkout being saved. */
+	workspaceRoot: string,
+	/**  Open editor tab candidates to filter and persist. */
+	tabs: TabCandidate[],
+	/**  Expanded directory paths in `WorkspaceExplorer`. */
+	expandedDirs: string[],
+	/**  Optional updated sidebar widget selection (`Explorer` or `Projects`). */
+	sidebarWidget: SidebarWidget | null,
+};
+
+/**  Managed Git worktree checkout grouped underneath a parent [`crate::Project`]. */
+export type Worktree = {
+	/**  Canonical filesystem path of the managed worktree directory. */
+	path: string,
+	/**  Display label for the worktree (branch name stripped of `worktree/`, or directory basename). */
+	name: string,
+	/**  Checked-out Git branch name, if not detached. */
+	branch: string | null,
 };
 

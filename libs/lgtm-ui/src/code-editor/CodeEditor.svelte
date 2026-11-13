@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte'
+  import { ensureSyntaxTree } from '@codemirror/language'
   import { setDiagnostics } from '@codemirror/lint'
   import { Compartment, EditorState } from '@codemirror/state'
   import { EditorView } from '@codemirror/view'
@@ -10,7 +11,8 @@
   import { codeEditorRootVariants } from './styles'
   import {
     codeEditorThemeExtension,
-    resolveLanguageExtension,
+    getCachedLanguageExtension,
+    loadLanguageExtension,
     toLineWrappingExtension,
   } from './themeExtension'
   import type { CodeEditorProps } from './types'
@@ -47,6 +49,10 @@
   // Derived -------------------------------------------------------------------
   const rootClasses = $derived(cn(codeEditorRootVariants({ size }), className))
 
+  function warmSyntaxTree(targetView: EditorView) {
+    ensureSyntaxTree(targetView.state, targetView.state.doc.length, 100)
+  }
+
   // Lifecycle -----------------------------------------------------------------
   onMount(() => {
     if (!host) return
@@ -55,6 +61,8 @@
     const initialLineWrapping = untrack(() => lineWrapping)
     const initialClickToInsert = untrack(() => clickToInsert)
     const initialSelectionOffset = untrack(() => selectionOffset)
+    const initialTargetName = untrack(() => filename ?? label)
+    const initialLanguage = getCachedLanguageExtension(initialTargetName) ?? []
     const initialAnchor =
       initialSelectionOffset !== null && initialSelectionOffset !== undefined
         ? Math.max(0, Math.min(initialDoc.length, initialSelectionOffset))
@@ -66,7 +74,7 @@
         basicSetup,
         EditorState.allowMultipleSelections.of(true),
         codeEditorThemeExtension(),
-        languageCompartment.of([]),
+        languageCompartment.of(initialLanguage),
         lineWrappingCompartment.of(toLineWrappingExtension(initialLineWrapping)),
         readOnlyCompartment.of([
           EditorState.readOnly.of(initialReadOnly),
@@ -100,6 +108,7 @@
         }),
       ],
     })
+    ensureSyntaxTree(state, state.doc.length, 100)
     view = new EditorView({ state, parent: host })
     onViewReady?.(view)
     return () => {
@@ -115,6 +124,7 @@
       view.dispatch({
         changes: { from: 0, to: view.state.doc.length, insert: nextValue },
       })
+      warmSyntaxTree(view)
     }
   })
 
@@ -190,10 +200,17 @@
     const currentView = view
     const targetName = filename ?? label
     if (!currentView) return
+    const cached = getCachedLanguageExtension(targetName)
+    if (cached !== null) {
+      currentView.dispatch({ effects: languageCompartment.reconfigure(cached) })
+      warmSyntaxTree(currentView)
+      return
+    }
     let cancelled = false
-    void resolveLanguageExtension(targetName).then((extension) => {
+    void loadLanguageExtension(targetName).then((extension) => {
       if (!cancelled && view === currentView) {
         currentView.dispatch({ effects: languageCompartment.reconfigure(extension) })
+        warmSyntaxTree(currentView)
       }
     })
     return () => {

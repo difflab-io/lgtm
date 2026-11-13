@@ -7,10 +7,12 @@ export interface TreeNode {
   label: string
   description?: string
   branch?: boolean
+  renamable?: boolean
   children?: TreeNode[]
 }
 
 export interface TreeViewProps {
+  version?: number
   refresh?: { path: string; version: number }
   pendingNode?: TreeNode
   parentValue?: string
@@ -25,6 +27,12 @@ export interface TreeViewProps {
   showHidden?: boolean
   selected?: string | null
   onselect?: (value: string) => void
+  /** Whether branch rows can be selected directly while their chevron button toggles expansion. */
+  selectableBranches?: boolean
+  /** Controlled list of expanded branch node values. */
+  expandedValue?: string[]
+  /** Callback invoked when expanded branch node values change. */
+  onExpandedChange?: (expandedValue: string[]) => void
   loadChildren?: (node: TreeNode) => Promise<TreeNode[]>
   label?: string
   class?: string
@@ -36,6 +44,8 @@ export interface TreeNodeViewProps {
   errors: Record<string, string>
   renameErrors: Record<string, string>
   icon?: Snippet<[TreeNode, boolean]>
+  selectableBranches?: boolean
+  onselect?: (value: string) => void
   onedit?: (value: string) => void
   contextItems?: (node: TreeNode) => ContextMenuItem[]
   onaction?: (value: string, action: string) => void

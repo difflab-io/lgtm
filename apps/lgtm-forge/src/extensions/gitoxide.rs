@@ -14,10 +14,11 @@ use gix::{
     refs::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog},
 };
 
+use lgtm_rsutils::normalize_repository_url;
+
 use crate::{
     error::{Error, Result},
     extensions::git::resolve_git_paths,
-    utils::normalize_repository_url,
 };
 
 /// Resolved metadata for a local Git working checkout or linked worktree.

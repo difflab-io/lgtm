@@ -7,6 +7,7 @@
 - During alpha, update branch-introduced contracts directly without compatibility shims or duplicate fields.
 - Expose database queries and mutations only through named repository methods in [`libs/lgtm-db`](libs/lgtm-db/src/lib.rs). Keep SeaORM `Entity` and `ActiveModel` types `pub(crate)`; never expose raw connections, query builders, or raw SQL to callers.
 - Models validate, map data, and implement pure domain behavior; services own persistence orchestration, cross-scope configuration merging, transactions, and external I/O.
+- Keep [`libs/lgtm-rsutils`](libs/lgtm-rsutils/src/lib.rs) strictly limited to generic, domain-agnostic helper functions and thin wrappers over third-party crates (`gix`, `serde`, `std::fs`); never put LGTM-specific domain rules, home directory paths, repository slug conventions, or custom error enums in `lgtm-rsutils`.
 - Give each file and service a single responsibility; extract distinct capabilities into dedicated model and service modules with their own integration suites, combine host services into a single unified host state, and wire event handling and cross-service coordination in application entry points rather than emitting framework events or calling sibling services inside domain services. See [`docs/architecture/desktop/events.md`](docs/architecture/desktop/events.md).
 - Treat `LgtmConfig` in [`libs/lgtm-config`](libs/lgtm-config/src/lib.rs) as the single configuration and user-settings contract (`~/.lgtm/config.json` and `<workspace>/.lgtm/config.json`); do not split `LgtmConfig` and `UserSettings` into parallel models or service APIs. Configure preferences by editing `config.json` directly in the editor or by dispatching `LgtmConfigPatch` updates from `CommandMenu` and `CommandPalette` via `config_update`, rather than building a dedicated preferences GUI window.
 - Keep CLI review and comment commands as thin RPC clients over `lgtm-forge`. Preserve daemon and health behavior; do not embed review persistence in `lgtm-cli`.
@@ -23,6 +24,8 @@
 
 - Preserve existing documentation template headings and structure; use `NA/WIP` for unimplemented sections.
 - Centralize shared workspace path resolution and desktop executable discovery in [`libs/lgtm-config`](libs/lgtm-config/src/lib.rs) rather than duplicating configuration across `lgtm-cli` and `lgtm-desktop`.
+- Place each domain model struct (`Project`, `Worktree`, `Session`, `WorkspaceSessionState`, `PersistedTab`) in its own dedicated file under `src/models/`, keep desktop workspace models and [`WorkspaceService`](libs/lgtm-workspace/src/lib.rs) in [`libs/lgtm-workspace`](libs/lgtm-workspace/src/lib.rs) so [`libs/lgtm-session`](libs/lgtm-session/src/lib.rs) remains a thin session aggregation and persistence layer, and scope [`libs/lgtm-project`](libs/lgtm-project/src/lib.rs) worktrees strictly to LGTM-managed checkouts under `~/.lgtm/worktrees/<project>/<branch-slug>`.
+- [Proposed] Group desktop Tauri IPC command handlers by domain under `apps/lgtm-desktop/src/commands/`, keep each command handler as a thin wrapper calling `AppState::run_blocking`, flatten and namespace web components under `apps/lgtm-web/src/lib/components/` (`ProjectEditDialog`, `ProjectIconSelector`, `WorktreeNewDialog`, `WorktreeRemoveDialog`, `FileExplorer`, `LeftDock`, `WidgetPane`, `LeftDockToolbar`, `EditorToolbar`), and group frontend domain and dialog types under `apps/lgtm-web/src/lib/types/`.
 
 ## Style
 
@@ -32,7 +35,7 @@
 - Export only public API types from crate roots (`lib.rs`), formatted one `pub use` item per line.
 - Link workspace library crates through `Cargo.toml` dependencies rather than `#[path = ...]` module shims or `#[allow(dead_code)]`, and prefer standard library or crate formatting traits (such as `LowerHex` on digest outputs) over manual formatting loops.
 - Use one inherent `impl` block per type per file: constructors first, `// Public` operations next, `// Private` helpers last, and trait `impl` blocks after the inherent block. Pad section headers with hyphens to column 80.
-- Name public repository and service reads `get_*`. Name mutating operations and factories with imperative verbs (`promote`, `publish_session`).
+- Name public repository and service reads `get_*`. Name mutating operations and factories with imperative verbs (`promote`, `publish_session`). Name domain model methods with `get_`, `set_`, `update_`, or `apply_` prefixes (`get_worktree`, `set_collapsed`, `update_appearance`, `set_worktree_name`, `set_worktree`, `apply_worktree_removal`) to indicate pure in-memory data operations without side effects.
 - Call library and generated client methods directly; do not add pass-through wrapper aliases.
 - Prefer a single `new` constructor accepting `Option<...>` parameters over multiple overlapping constructors when callers only need one construction path.
 - Use `uuid::Uuid` for internal IDs, `repository_url` (with `_url` suffix only for full URLs) for normalized remote addresses, and `git_dir` for canonical local `.git` directories.
@@ -70,6 +73,8 @@ impl CommentAnchor {
 - Style IDE menus, context menus, and tab bars compactly with square item highlights (`rounded-none`), full-row submenu trigger hover targets, neutral surface hover/focus tokens (`--accent`, `--ring`), workspace-relative breadcrumbs, and icon-based diagnostic badges only when counts are non-zero.
 - Use Helical UI's `<Pane>` component for pane containers rather than manually binding `useOptionalPaneRegistration` when a standard pane element suffices.
 - Implement CodeMirror 6 features (LSP completions, hover tooltips, diagnostics, signature help, and modal editing state) as modular CodeMirror `Extension` values using `Facet`, `StateField`, and `ViewPlugin` rather than imperative DOM or `EditorView` manipulation inside Svelte components.
+- [Proposed] Cache loaded directory children per workspace so switching workspaces renders expanded tree branches synchronously in a single frame, and constrain CodeMirror's scroll container (`min-h-0 overflow-hidden` with `.cm-scroller` owning scrolling) while warming the syntax tree (`ensureSyntaxTree`) so syntax highlighting never pops in on scroll.
+- [Proposed] Split frontend state into dedicated domain services (`WorkspaceService`, `ProjectService`, `SessionService`, `LspService`, `SettingsService`) exposed via `useService` context rather than pass-through getters on `WorkspaceService`, order TypeScript service files with `// Public ---` and `// Private ---` section headers (private helpers at the bottom), and pair a resizable `LeftDock` (`ProjectsPane` + `WidgetPane`) with a unified bottom bar (`LeftDockToolbar` + `EditorToolbar`) whose dock section tracks `LeftDock` width and highlights active toggles via text contrast (`text-foreground` vs `text-muted-foreground`) without background fills.
 
 ### Documentation
 
@@ -83,7 +88,8 @@ impl CommentAnchor {
 ### Rust BDD Unit & Integration Tests
 
 - Colocate unit tests in `#[cfg(test)] mod tests` after a `// tests ---` separator padded to column 80; place shared unit fixtures in `src/tests/`.
-- Put integration suites directly under `tests/<area>.rs` with shared fixtures in `tests/common/mod.rs` (never `tests/integration/` or `tests/support/`). Cover core module behaviors, edge cases, and failure modes at library integration boundaries to keep E2E suites focused on cross-tier wiring.
+- Put integration suites directly under `tests/<module>.rs` named after the module file they exercise (`tests/git.rs`, `tests/project.rs`, `tests/session.rs`) with shared fixtures in `tests/common/mod.rs` (never `tests/integration/` or `tests/support/`). Keep each test focused on a single behavior (`should_<behavior>`) and cover core module behaviors, edge cases, and failure modes at library integration boundaries to keep E2E suites focused on cross-tier wiring.
+- Document test fixtures with visual ASCII layout docstrings, structure integration `mod given_*` and `mod when_*` branches incrementally from empty preconditions (`given_no_session_exists`, `given_no_project_exists`, `given_a_project_exists`) through public API invariants, and capture initial state, final state, and verbose tracing logs as verifiable test artifacts.
 - Do not write custom JSON schema validation/parsing logic or unit tests for schema validation and serialization; rely on library crates and test domain behavior through public service boundaries.
 - Extract shared test fixtures and JSON or text templates into top-level constants and helper functions rather than repeating setup boilerplate or large inline string literals across test cases.
 - Prefer real Mise-managed language servers over mock LSP scripts in integration tests when verifying language server lifecycle and protocol behavior.

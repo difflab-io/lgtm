@@ -1,3 +1,5 @@
+//! Service managing active workspace roots, directory listings, and file CRUD operations.
+
 use std::{
     fs,
     io::{Read, Write},
@@ -8,7 +10,10 @@ use lgtm_config::LgtmConfigPatch;
 
 use crate::{
     error::{Result, error},
-    models::{FileContent, Workspace, WorkspaceListing, WorkspaceNode},
+    models::{
+        file_content::FileContent,
+        workspace::{Workspace, WorkspaceListing, WorkspaceNode},
+    },
 };
 
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
@@ -369,7 +374,6 @@ impl WorkspaceService {
         {
             return Err(error("unsupported", "Linked entries cannot be deleted."));
         }
-        #[cfg(any(test, feature = "e2e-bridge"))]
         if std::env::var_os("LGTM_E2E_PERMANENT_DELETE").is_some() {
             if path.is_dir() {
                 fs::remove_dir_all(&path)?;

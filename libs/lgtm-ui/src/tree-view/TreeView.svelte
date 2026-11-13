@@ -14,6 +14,7 @@
 
   // Props ---------------------------------------------------------------------
   let {
+    version,
     nodes,
     showHidden = $bindable(false),
     renameValue,
@@ -26,6 +27,9 @@
     parentValue,
     selected = null,
     onselect,
+    selectableBranches = false,
+    expandedValue,
+    onExpandedChange,
     loadChildren,
     label = 'Files',
     icon,
@@ -60,8 +64,13 @@
     id,
     collection,
     selectedValue: selected ? [selected] : [],
+    ...(expandedValue !== undefined ? { expandedValue } : {}),
+    expandOnClick: !selectableBranches,
     selectionMode: 'single',
-    canRename: () => Boolean(onrename),
+    canRename: (node) => Boolean(onrename) && node.renamable !== false,
+    onExpandedChange: ({ expandedValue: next }) => {
+      onExpandedChange?.(next)
+    },
 
     onRenameComplete: ({ value, label }) => {
       if (!onrename) return
@@ -85,10 +94,10 @@
             loaded = { ...loaded, [node.value]: children }
             if (pendingChildFocusParent === node.value) {
               pendingChildFocusParent = null
-              const firstChild = children[0]?.value
+              const firstChild = children.filter(isVisibleNode)[0]?.value
               if (firstChild) {
                 void tick().then(() => {
-                  tree().focus(firstChild)
+                  focusNodeValue(firstChild)
                 })
               }
             }
@@ -102,10 +111,18 @@
     onSelectionChange: ({ selectedValue }) => {
       const value = selectedValue[0]
       const node = value ? collection.findNode(value) : undefined
-      if (node && !node.branch) onselect?.(node.value)
+      if (node && (selectableBranches || !node.branch)) onselect?.(node.value)
     },
   }))
   // Lifecycle -----------------------------------------------------------------
+  let lastVersion: number | undefined
+  $effect(() => {
+    if (version !== undefined && version !== lastVersion) {
+      lastVersion = version
+      loaded = {}
+      errors = {}
+    }
+  })
   $effect(() => {
     const request = refresh
     if (request && loadChildren) {
@@ -121,6 +138,53 @@
             errors[request.path] = String(error)
           })
     }
+  })
+  $effect(() => {
+    const dirs = expandedValue
+    const loader = loadChildren
+    const _v = version
+    if (!dirs?.length || !loader) return
+    const currentLoaded = untrack(() => loaded)
+    const missing = [...dirs]
+      .filter(
+        (dir) => !(dir in currentLoaded) && !untrack(() => collection.findNode(dir)?.children),
+      )
+      .sort((a, b) => a.split('/').length - b.split('/').length)
+    if (missing.length === 0) return
+    void (async () => {
+      const results = await Promise.all(
+        missing.map(async (dir) => {
+          try {
+            const node = untrack(() => collection.findNode(dir)) ?? {
+              value: dir,
+              label: dir.split('/').at(-1) ?? dir,
+              branch: true,
+            }
+            const children = await loader(node)
+            return { dir, children, error: null as string | null }
+          } catch (error) {
+            return {
+              dir,
+              children: null,
+              error: error instanceof Error ? error.message : String(error),
+            }
+          }
+        }),
+      )
+      const nextLoaded: Record<string, TreeNode[]> = {}
+      let hasLoaded = false
+      for (const item of results) {
+        if (item.children) {
+          nextLoaded[item.dir] = item.children
+          hasLoaded = true
+        } else if (item.error) {
+          errors[item.dir] = item.error
+        }
+      }
+      if (hasLoaded) {
+        loaded = { ...loaded, ...nextLoaded }
+      }
+    })()
   })
   $effect(() => {
     const value = renameValue
@@ -140,12 +204,10 @@
         hidden: true,
         action: ({ event }) => {
           if (!event || !resolveTreeItemTarget(event)) return false
-          const visible = tree()
-            .getVisibleNodes()
-            .map((v) => v.node)
-          const dest = visible[0]?.value
+          const visible = getVisibleNodeValues()
+          const dest = visible[0]
           if (!dest) return false
-          tree().focus(dest)
+          focusNodeValue(dest)
           return true
         },
       },
@@ -155,12 +217,10 @@
         hidden: true,
         action: ({ event }) => {
           if (!event || !resolveTreeItemTarget(event)) return false
-          const visible = tree()
-            .getVisibleNodes()
-            .map((v) => v.node)
-          const dest = visible[visible.length - 1]?.value
+          const visible = getVisibleNodeValues()
+          const dest = visible[visible.length - 1]
           if (!dest) return false
-          tree().focus(dest)
+          focusNodeValue(dest)
           return true
         },
       },
@@ -257,11 +317,9 @@
           if (!item) return false
           showHidden = !showHidden
           void tick().then(() => {
-            const visible = tree()
-              .getVisibleNodes()
-              .map((v) => v.node)
-            const next = visible.find((n) => n.value === item.nodeValue) ?? visible[0]
-            if (next) tree().focus(next.value)
+            const visible = getVisibleNodeValues()
+            const next = visible.includes(item.nodeValue) ? item.nodeValue : visible[0]
+            if (next) focusNodeValue(next)
           })
           return true
         },
@@ -279,14 +337,14 @@
       },
       Enter: {
         key: 'Enter',
-        label: 'Open File or Toggle Folder',
+        label: 'Open Item or Toggle Folder',
         mode: 'normal',
         hidden: true,
         when: () => isNormalTreeReady(),
         action: ({ event }) => {
           const item = event ? resolveTreeItemTarget(event) : null
           if (!item) return false
-          if (item.isBranch) {
+          if (item.isBranch && !selectableBranches) {
             if (tree().expandedValue.includes(item.nodeValue)) {
               tree().collapse([item.nodeValue])
             } else {
@@ -307,6 +365,8 @@
         action: ({ event }) => {
           const item = event ? resolveTreeItemTarget(event) : null
           if (!item || !onrename) return false
+          const node = collection.findNode(item.nodeValue)
+          if (!node || node.renamable === false) return false
           tree().startRenaming(item.nodeValue)
           return true
         },
@@ -320,6 +380,8 @@
         action: ({ event }) => {
           const item = event ? resolveTreeItemTarget(event) : null
           if (!item || !onrename) return false
+          const node = collection.findNode(item.nodeValue)
+          if (!node || node.renamable === false) return false
           tree().startRenaming(item.nodeValue)
           return true
         },
@@ -352,18 +414,19 @@
       },
       a: {
         key: 'a',
-        label: 'New File',
+        label: 'New Item',
         mode: 'normal',
         hidden: true,
         when: () => isNormalTreeReady() && Boolean(onaction),
         action: ({ event }) => {
           const item = event ? resolveTreeItemTarget(event) : null
           if (!item || !onaction) return false
-          const parentFolder = item.isBranch
-            ? item.nodeValue
-            : item.nodeValue.includes('/')
-              ? item.nodeValue.slice(0, item.nodeValue.lastIndexOf('/'))
-              : ''
+          const parentFolder =
+            selectableBranches || item.isBranch
+              ? item.nodeValue
+              : item.nodeValue.includes('/')
+                ? item.nodeValue.slice(0, item.nodeValue.lastIndexOf('/'))
+                : ''
           onaction(parentFolder, 'new-file')
           return true
         },
@@ -377,11 +440,12 @@
         action: ({ event }) => {
           const item = event ? resolveTreeItemTarget(event) : null
           if (!item || !onaction) return false
-          const parentFolder = item.isBranch
-            ? item.nodeValue
-            : item.nodeValue.includes('/')
-              ? item.nodeValue.slice(0, item.nodeValue.lastIndexOf('/'))
-              : ''
+          const parentFolder =
+            selectableBranches || item.isBranch
+              ? item.nodeValue
+              : item.nodeValue.includes('/')
+                ? item.nodeValue.slice(0, item.nodeValue.lastIndexOf('/'))
+                : ''
           onaction(parentFolder, 'new-folder')
           return true
         },
@@ -395,6 +459,28 @@
   )
 
   // Methods -------------------------------------------------------------------
+  function getVisibleNodeValues(): string[] {
+    if (selectableBranches && rootEl) {
+      return Array.from(rootEl.querySelectorAll<HTMLElement>('[data-tree-node-value]'))
+        .filter((el) => !el.closest('[hidden]'))
+        .map((el) => el.dataset.treeNodeValue!)
+        .filter(Boolean)
+    }
+    return tree()
+      .getVisibleNodes()
+      .map((v) => v.node.value)
+  }
+
+  function focusNodeValue(nodeValue: string) {
+    tree().focus(nodeValue)
+    if (selectableBranches && rootEl) {
+      const el = rootEl.querySelector<HTMLElement>(
+        `[data-tree-node-value=${JSON.stringify(nodeValue)}]`,
+      )
+      el?.focus()
+    }
+  }
+
   function resolveTreeItemTarget(
     event: KeyboardEvent,
   ): { nodeValue: string; isBranch: boolean } | null {
@@ -403,6 +489,7 @@
     if (!(target instanceof HTMLElement) || !paneEl?.contains(target)) return null
     if (
       target.closest('[data-part="node-rename-input"]') ||
+      target.closest('[role="dialog"]') ||
       target instanceof HTMLInputElement ||
       target instanceof HTMLTextAreaElement ||
       target.isContentEditable
@@ -410,18 +497,17 @@
       return null
     }
     const itemEl =
-      target.closest<HTMLElement>('[data-which-key-target][data-value]') ??
+      target.closest<HTMLElement>('[data-tree-node-value]') ??
       (target === paneEl || target.getAttribute('role') === 'tree'
-        ? (rootEl?.querySelector<HTMLElement>(
-            '[data-pane-focus-target][data-which-key-target][data-value]',
-          ) ?? rootEl?.querySelector<HTMLElement>('[data-which-key-target][data-value]'))
+        ? (rootEl?.querySelector<HTMLElement>('[data-pane-focus-target][data-tree-node-value]') ??
+          rootEl?.querySelector<HTMLElement>('[data-tree-node-value]'))
         : null)
     if (!itemEl) return null
-    const nodeValue = itemEl.dataset.value
+    const nodeValue = itemEl.dataset.treeNodeValue
     if (!nodeValue) return null
     return {
       nodeValue,
-      isBranch: Boolean(collection.findNode(nodeValue)?.branch),
+      isBranch: itemEl.dataset.treeNodeBranch === 'true',
     }
   }
 
@@ -439,13 +525,11 @@
   }
 
   function moveFocusDelta(nodeValue: string, delta: 1 | -1): boolean {
-    const visible = tree()
-      .getVisibleNodes()
-      .map((v) => v.node)
-    const idx = visible.findIndex((n) => n.value === nodeValue)
+    const visible = getVisibleNodeValues()
+    const idx = visible.indexOf(nodeValue)
     if (idx === -1) return false
     const next = visible[Math.max(0, Math.min(visible.length - 1, idx + delta))]
-    if (next) tree().focus(next.value)
+    if (next) focusNodeValue(next)
     return true
   }
 
@@ -454,14 +538,12 @@
     if (!tree().expandedValue.includes(nodeValue)) {
       tree().expand([nodeValue])
     } else {
-      const visible = tree()
-        .getVisibleNodes()
-        .map((v) => v.node)
-      const idx = visible.findIndex((n) => n.value === nodeValue)
+      const visible = getVisibleNodeValues()
+      const idx = visible.indexOf(nodeValue)
       const child = visible[idx + 1]
-      if (child && child.value.startsWith(`${nodeValue}/`)) {
+      if (child && (selectableBranches || child.startsWith(`${nodeValue}/`))) {
         pendingChildFocusParent = null
-        tree().focus(child.value)
+        focusNodeValue(child)
       } else if (!loaded[nodeValue]) {
         pendingChildFocusParent = nodeValue
       }
@@ -472,11 +554,19 @@
   function collapseOrFocusParent(nodeValue: string, isBranch: boolean): boolean {
     if (isBranch && tree().expandedValue.includes(nodeValue)) {
       tree().collapse([nodeValue])
-    } else if (nodeValue.includes('/')) {
-      const parent = nodeValue.slice(0, nodeValue.lastIndexOf('/'))
-      tree().focus(parent)
+      return true
     }
-    return true
+    const parentBranch = nodes.find((n) => n.children?.some((c) => c.value === nodeValue))
+    if (parentBranch) {
+      focusNodeValue(parentBranch.value)
+      return true
+    }
+    if (nodeValue.includes('/')) {
+      const parent = nodeValue.slice(0, nodeValue.lastIndexOf('/'))
+      focusNodeValue(parent)
+      return true
+    }
+    return false
   }
 
   function clearRename(value: string) {
@@ -505,7 +595,7 @@
 </script>
 
 <div bind:this={rootEl} class={cn(treeViewRootBase, className)}>
-  <ArkTreeView.RootProvider value={tree} class={treeViewRootBase} lazyMount unmountOnExit>
+  <ArkTreeView.RootProvider value={tree} class={treeViewRootBase}>
     <ArkTreeView.Tree aria-label={label} class={treeViewListBase}>
       {#each collection.rootNode.children ?? [] as node, index (node.value)}
         <TreeNodeView
@@ -514,6 +604,8 @@
           {errors}
           {renameErrors}
           {icon}
+          {selectableBranches}
+          {onselect}
           onedit={(value) => {
             delete renameErrors[value]
           }}

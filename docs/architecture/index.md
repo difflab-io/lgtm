@@ -59,6 +59,9 @@ flowchart TB
 
     subgraph Libraries["Shared Libraries (libs/)"]
         UI["lgtm-ui\nHelical UI, Ark UI & CodeMirror 6 components"]
+        SESS["lgtm-session\nSessionService & ~/.lgtm/sessions/default.json"]
+        PROJ["lgtm-project\nProjectService, Project & Worktree"]
+        RSU["lgtm-rsutils\ngit, paths, slugs & url"]
         DB["lgtm-db\nSeaORM repositories & transactions"]
         LSP["lgtm-lsp\nLgtmLspManager, LspCacheService, stdio JSON-RPC"]
         ENV["lgtm-env\nMiseService & .lgtm/mise.toml synthesis"]
@@ -76,6 +79,11 @@ flowchart TB
     WEB --> UI
     CLI -->|"Connect RPC (/rpc)"| FORGE
     CLI -->|"lgtm run"| ENV
+    DESKTOP --> SESS
+    SESS --> PROJ
+    PROJ --> RSU
+    SESS --> RSU
+    FORGE --> RSU
     DESKTOP --> LSP
     DESKTOP --> ENV
     DESKTOP --> CFG
@@ -187,6 +195,9 @@ lgtm/
 │   ├── lgtm-db/        SeaORM SQLite/PostgreSQL persistence layer and named repositories
 │   ├── lgtm-env/       Managed `mise` binary lifecycle and `<workspace>/.lgtm/mise.toml` synthesis SDK
 │   ├── lgtm-lsp/       Stdio JSON-RPC 2.0 language server pool, document cache, and UTF-16 offset math
+│   ├── lgtm-project/   Project primary checkout resolution and managed/external Git worktree lifecycle
+│   ├── lgtm-rsutils/   Stateless Git path resolution, worktree CLI, slug hashing, atomic write, and URL helpers
+│   ├── lgtm-session/   Desktop session persistence (`~/.lgtm/sessions/<id>.json`) and per-workspace tab retention
 │   └── lgtm-ui/        Portable Helical UI + Ark UI + CodeMirror 6 Svelte 5 component library
 └── e2e/
     ├── common/         Shared test harness and offline GitHub REST/GraphQL cassette replay
@@ -244,7 +255,12 @@ All workspace Cargo crates set `publish = false` and link directly via Cargo `pa
 - [CLI architecture (`lgtm-cli`)](cli/index.md).
 - [Desktop application architecture (`lgtm-desktop` & `lgtm-web`)](desktop/index.md).
 - [Desktop event handling & service orchestration](desktop/events.md).
+- [Desktop project and session management](desktop/projects.md).
 - [Web frontend architecture](web/index.md).
+- [ProjectsPane UI component](web/projects-pane.md).
+- [Session library architecture (`lgtm-session`)](session/index.md).
+- [Project library architecture (`lgtm-project`)](project/index.md).
+- [Rust utilities library architecture (`lgtm-rsutils`)](rsutils/index.md).
 - [Configuration library architecture (`lgtm-config`)](config/index.md).
 - [Environment library architecture (`lgtm-env`)](env/index.md).
 - [LSP library architecture (`lgtm-lsp`)](lsp/index.md).

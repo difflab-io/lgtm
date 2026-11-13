@@ -31,79 +31,6 @@ import type {
 } from '../clients/workspaceClient'
 import type { WorkspaceService } from './workspaceService.svelte'
 
-function leaf(
-  key: string,
-  label: string,
-  category: string,
-  commandId: string,
-  description: string,
-  mode?: KeymapMode[],
-): WhichKeyNode {
-  return { key, label, category, commandId, description, ...(mode ? { mode } : {}) }
-}
-
-interface BooleanSettingCommandOptions {
-  value: string
-  aliases?: string[]
-  label: string
-  actionNoun?: string
-  description: string
-  shortcut?: CommandNode['shortcut']
-  current: boolean
-  apply: (next: boolean) => void
-}
-
-function booleanSettingCommand({
-  value,
-  aliases,
-  label,
-  actionNoun = label,
-  description,
-  shortcut,
-  current,
-  apply,
-}: BooleanSettingCommandOptions): CommandNode {
-  return {
-    value,
-    command: value,
-    ...(aliases ? { aliases } : {}),
-    label,
-    description,
-    group: 'Preferences',
-    shortcut,
-    children: [
-      {
-        value: `${value}-on`,
-        command: 'on',
-        aliases: ['true', 'enable'],
-        label: `Enable ${actionNoun}`,
-        active: current,
-        onSelect: () => {
-          apply(true)
-        },
-      },
-      {
-        value: `${value}-off`,
-        command: 'off',
-        aliases: ['false', 'disable'],
-        label: `Disable ${actionNoun}`,
-        active: !current,
-        onSelect: () => {
-          apply(false)
-        },
-      },
-      {
-        value: `${value}-toggle`,
-        command: 'toggle',
-        label: `Toggle ${actionNoun}`,
-        onSelect: () => {
-          apply(!current)
-        },
-      },
-    ],
-  }
-}
-
 /**
  * Application-level modal keybinding, `WhichKey` leader menu, and `CommandMenu`/`CommandPalette` registry.
  */
@@ -123,6 +50,8 @@ export class HotkeyService {
   constructor(workspace: WorkspaceService) {
     this.workspace = workspace
   }
+
+  // Public --------------------------------------------------------------------
 
   /** Effective Helical command surface style (`menu`, `palette`, or `colon`). */
   get effectiveCommandStyle(): HelicalCommandStyle {
@@ -160,10 +89,26 @@ export class HotkeyService {
     ),
     'Mod+b': leaf(
       'Mod+b',
-      'Toggle Explorer',
+      'Toggle Explorer Dock',
       'Workspace',
       'workspace.toggleExplorer',
-      'Toggle the workspace explorer sidebar open or closed',
+      'Toggle the widget dock pane open or closed',
+      ['normal', 'select', 'insert'],
+    ),
+    'Mod+Shift+b': leaf(
+      'Mod+Shift+b',
+      'Toggle Projects Dock',
+      'Projects',
+      'projects.show',
+      'Toggle the Projects dock pane open or closed',
+      ['normal', 'select', 'insert'],
+    ),
+    'Mod+Shift+B': leaf(
+      'Mod+Shift+B',
+      'Toggle Projects Dock',
+      'Projects',
+      'projects.show',
+      'Toggle the Projects dock pane open or closed',
       ['normal', 'select', 'insert'],
     ),
     'Mod+,': leaf(
@@ -364,11 +309,62 @@ export class HotkeyService {
           ),
           e: leaf(
             'e',
-            'Toggle Explorer',
+            'Toggle Explorer Dock',
             'Workspace',
             'workspace.toggleExplorer',
-            'Toggle the workspace explorer sidebar',
+            'Toggle the workspace explorer dock pane',
           ),
+          E: leaf(
+            'E',
+            'Toggle Projects Dock',
+            'Projects',
+            'projects.show',
+            'Toggle the Projects dock pane',
+          ),
+          p: {
+            key: 'p',
+            label: '+projects',
+            group: 'Projects',
+            description: 'Manage projects and Git worktrees',
+            category: 'Projects',
+            children: {
+              p: leaf(
+                'p',
+                'Toggle Projects Dock',
+                'Projects',
+                'projects.show',
+                'Toggle the Projects dock pane open or closed',
+              ),
+              e: leaf(
+                'e',
+                'Toggle Explorer Dock',
+                'Projects',
+                'projects.showExplorer',
+                'Toggle the widget dock pane open or closed',
+              ),
+              a: leaf(
+                'a',
+                'Add Project',
+                'Projects',
+                'projects.add',
+                'Open a project folder and attach it to the session',
+              ),
+              n: leaf(
+                'n',
+                'New Worktree',
+                'Projects',
+                'projects.newWorktree',
+                'Create a managed Git worktree for the active project',
+              ),
+              d: leaf(
+                'd',
+                'Remove Worktree',
+                'Projects',
+                'projects.removeWorktree',
+                'Remove the active linked Git worktree',
+              ),
+            },
+          },
           f: {
             key: 'f',
             label: '+file',
@@ -726,6 +722,14 @@ export class HotkeyService {
       void this.workspace.selectWorkspace('__open_folder__')
       return true
     },
+    'projects.show': () => this.showSidebarMode('projects'),
+    'projects.showExplorer': () => this.showSidebarMode('explorer'),
+    'projects.add': () => {
+      void this.workspace.selectWorkspace('__open_folder__')
+      return true
+    },
+    'projects.newWorktree': () => this.openNewWorktree(),
+    'projects.removeWorktree': () => this.removeActiveWorktree(),
     'file.save': () => {
       void this.workspace.flushSave()
       return true
@@ -740,6 +744,7 @@ export class HotkeyService {
     },
     'file.newFolder': () => {
       if (!this.sidebarOpen) this.sidebarOpen = true
+      this.workspace.session.setSidebarWidget('explorer')
       this.workspace.startCreate('directory')
       return true
     },
@@ -956,19 +961,71 @@ export class HotkeyService {
         shortcut: 'Space f N',
         onSelect: () => {
           if (!this.sidebarOpen) this.sidebarOpen = true
+          this.workspace.session.setSidebarWidget('explorer')
           this.workspace.startCreate('directory')
         },
       },
       {
         value: 'toggle-sidebar',
         command: 'sidebar',
+        aliases: ['explorer'],
         keywords: ['explorer', 'tree'],
-        label: 'Toggle Workspace Sidebar',
-        description: 'Show or hide the workspace explorer sidebar',
+        label: 'Toggle Explorer Dock',
+        description: 'Show or hide the workspace explorer dock pane',
         group: 'Workspace',
         shortcut: 'Mod+B',
         onSelect: () => {
           this.toggleExplorer()
+        },
+      },
+      {
+        value: 'projects',
+        command: 'projects',
+        aliases: ['proj'],
+        keywords: ['worktrees', 'repositories'],
+        label: 'Toggle Projects Dock',
+        description: 'Toggle the Projects and Worktrees dock pane open or closed',
+        group: 'Projects',
+        shortcut: 'Mod+Shift+B',
+        onSelect: () => {
+          this.showSidebarMode('projects')
+        },
+      },
+      {
+        value: 'project-add',
+        command: 'project-add',
+        label: 'Add Project',
+        description: 'Open a folder and register its project in the active session',
+        group: 'Projects',
+        shortcut: ['Space', 'p', 'a'],
+        onSelect: () => {
+          void this.workspace.selectWorkspace('__open_folder__')
+        },
+      },
+      {
+        value: 'worktree-new',
+        command: 'worktree-new',
+        label: 'New Worktree',
+        description: 'Create a managed Git worktree for the active project',
+        group: 'Projects',
+        shortcut: ['Space', 'p', 'n'],
+        disabled: !this.workspace.project.activeProject,
+        onSelect: () => {
+          this.openNewWorktree()
+        },
+      },
+      {
+        value: 'worktree-remove',
+        command: 'worktree-remove',
+        label: 'Remove Active Worktree',
+        description: 'Remove the currently active linked Git worktree',
+        group: 'Projects',
+        shortcut: ['Space', 'p', 'd'],
+        disabled: !this.workspace.project.activeProject?.worktrees.some(
+          (wt) => wt.path === this.workspace.root,
+        ),
+        onSelect: () => {
+          this.removeActiveWorktree()
         },
       },
       {
@@ -1355,21 +1412,68 @@ export class HotkeyService {
 
   /** Opens the user's configured command surface (`CommandMenu` by default, or `CommandPalette`). */
   openConfiguredCommandSurface(): boolean {
+    if (this.commandOpen && this.commandStyleOverride === null) {
+      this.setCommandOpen(false)
+      return true
+    }
     this.commandStyleOverride = null
     this.commandOpen = true
     return true
   }
 
-  /** Toggles the workspace explorer sidebar and moves focus to the resulting active pane. */
+  /** Toggles the Explorer widget pane and moves focus to the resulting active pane. */
   toggleExplorer(): boolean {
-    const nextOpen = !this.sidebarOpen
-    this.sidebarOpen = nextOpen
-    const targetPane = nextOpen ? 'workspace' : 'editor'
+    this.workspace.session.toggleExplorerPane()
+    this.sidebarOpen = this.workspace.session.explorerOpen
+    const targetPane = this.workspace.session.explorerOpen
+      ? 'workspace'
+      : this.workspace.session.projectsOpen
+        ? 'projects'
+        : 'editor'
     void tick().then(() => {
       requestAnimationFrame(() => {
         this.controller?.focusPane(targetPane)
       })
     })
+    return true
+  }
+
+  /** Toggles the `explorer` or `projects` dock pane independently and focuses it when opened. */
+  showSidebarMode(mode: 'explorer' | 'projects'): boolean {
+    if (mode === 'projects') {
+      this.workspace.session.toggleProjectsPane()
+      const targetPane = this.workspace.session.projectsOpen
+        ? 'projects'
+        : this.workspace.session.explorerOpen
+          ? 'workspace'
+          : 'editor'
+      void tick().then(() => {
+        requestAnimationFrame(() => {
+          this.controller?.focusPane(targetPane)
+        })
+      })
+    } else {
+      this.toggleExplorer()
+    }
+    return true
+  }
+
+  /** Opens the `New Worktree` dialog in `ProjectsPane`. */
+  openNewWorktree(): boolean {
+    if (!this.sidebarOpen) this.sidebarOpen = true
+    this.workspace.session.setSidebarWidget('projects')
+    this.workspace.project.openNewWorktreeDialog()
+    return true
+  }
+
+  /** Prompts to remove the currently active linked Git worktree in `ProjectsPane`. */
+  removeActiveWorktree(): boolean {
+    const project = this.workspace.project.activeProject
+    const wt = project?.worktrees.find((item) => item.path === this.workspace.root)
+    if (!project || !wt) return false
+    if (!this.sidebarOpen) this.sidebarOpen = true
+    this.workspace.session.setSidebarWidget('projects')
+    this.workspace.project.promptRemoveWorktree(project.id, wt.path)
     return true
   }
 
@@ -1390,6 +1494,8 @@ export class HotkeyService {
     this.commandStyleOverride = null
     return this.applySettingsPatch({ keybindings: { commandStyle } }, scope)
   }
+
+  // Private -------------------------------------------------------------------
 
   private get controller() {
     return typeof document !== 'undefined' ? getDocumentWhichKeyController(document) : null
@@ -1476,5 +1582,80 @@ export class HotkeyService {
       }
     })
     return true
+  }
+}
+
+// Private ---------------------------------------------------------------------
+
+function leaf(
+  key: string,
+  label: string,
+  category: string,
+  commandId: string,
+  description: string,
+  mode?: KeymapMode[],
+): WhichKeyNode {
+  return { key, label, category, commandId, description, ...(mode ? { mode } : {}) }
+}
+
+interface BooleanSettingCommandOptions {
+  value: string
+  aliases?: string[]
+  label: string
+  actionNoun?: string
+  description: string
+  shortcut?: CommandNode['shortcut']
+  current: boolean
+  apply: (next: boolean) => void
+}
+
+function booleanSettingCommand({
+  value,
+  aliases,
+  label,
+  actionNoun = label,
+  description,
+  shortcut,
+  current,
+  apply,
+}: BooleanSettingCommandOptions): CommandNode {
+  return {
+    value,
+    command: value,
+    ...(aliases ? { aliases } : {}),
+    label,
+    description,
+    group: 'Preferences',
+    shortcut,
+    children: [
+      {
+        value: `${value}-on`,
+        command: 'on',
+        aliases: ['true', 'enable'],
+        label: `Enable ${actionNoun}`,
+        active: current,
+        onSelect: () => {
+          apply(true)
+        },
+      },
+      {
+        value: `${value}-off`,
+        command: 'off',
+        aliases: ['false', 'disable'],
+        label: `Disable ${actionNoun}`,
+        active: !current,
+        onSelect: () => {
+          apply(false)
+        },
+      },
+      {
+        value: `${value}-toggle`,
+        command: 'toggle',
+        label: `Toggle ${actionNoun}`,
+        onSelect: () => {
+          apply(!current)
+        },
+      },
+    ],
   }
 }

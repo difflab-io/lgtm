@@ -1,17 +1,15 @@
 <script lang="ts">
   import { TreeView } from 'lgtm-ui'
   import { Folder, FolderOpen, FileText } from 'lucide-svelte'
-  import type { WorkspaceService } from '../services/workspaceService.svelte'
+  import { useService } from '../services/context'
 
-  // Props ---------------------------------------------------------------------
-  interface WorkspaceExplorerProps {
-    workspace: WorkspaceService
-  }
-  let { workspace }: WorkspaceExplorerProps = $props()
+  // State ---------------------------------------------------------------------
+  const workspace = useService('workspace')
 </script>
 
 <TreeView
   label="Workspace files"
+  version={workspace.treeVersion}
   nodes={workspace.nodes}
   renameValue={workspace.pendingEntry?.path}
   pendingNode={workspace.pendingNode}
@@ -25,6 +23,8 @@
   }}
   selected={workspace.selected?.path ?? null}
   onselect={(path) => void workspace.select(path)}
+  expandedValue={workspace.expandedDirs}
+  onExpandedChange={(dirs) => workspace.setExpandedDirs(dirs)}
   loadChildren={(node) => workspace.loadChildren(node)}
 >
   {#snippet icon(node, expanded)}

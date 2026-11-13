@@ -1,23 +1,21 @@
-//! Tauri application state, lifecycle, Specta TypeScript binding generation, and IPC command handlers.
+//! Tauri application state, lifecycle, and Specta TypeScript binding generation.
 use std::path::PathBuf;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
 
-use lgtm_config::{ConfigScope, ConfigService, LgtmConfigPatch, ResolvedConfigSnapshot};
-use lgtm_lsp::{
-    LspCompletionItem, LspDiagnosticsBuffer, LspEvent, LspHoverResult, LspLocation,
-    LspServerStatusEvent, LspSignatureHelp, LspWorkspaceSnapshot,
-};
-use tauri::{Manager, State};
+use lgtm_config::ConfigService;
+use lgtm_lsp::LspEvent;
+use lgtm_session::SessionService;
+use lgtm_workspace::WorkspaceService;
+use tauri::Manager;
 
 use crate::{
-    error::{Result, error},
+    commands::*,
     events::{AppEvent, AppEvents, FileOpenedEvent},
     menus::{build_app_menu, handle_menu_event},
-    models::{FileContent, WorkspaceListing, WorkspaceNode},
-    services::{LspService, WorkspaceService},
+    services::LspService,
 };
 
 /// Combined desktop host state managed by Tauri across all IPC command handlers.
@@ -25,6 +23,8 @@ use crate::{
 pub struct AppState {
     /// Shared workspace filesystem service guarded across file and config operations.
     pub workspace: Arc<Mutex<WorkspaceService>>,
+    /// Shared session and project persistence service.
+    pub session: SessionService,
     /// Shared configuration service resolving global and workspace settings.
     pub config: ConfigService,
     /// Shared desktop LSP orchestration service.
@@ -33,6 +33,41 @@ pub struct AppState {
     pub events: AppEvents,
     /// Tracks whether the frontend has registered its quit lifecycle listener.
     pub frontend_ready: Arc<AtomicBool>,
+}
+
+impl AppState {
+    // Public ------------------------------------------------------------------
+
+    /// Runs a blocking operation against cloned [`AppState`] handles on Tauri's blocking thread pool.
+    pub async fn run_blocking<T: Send + 'static>(
+        &self,
+        operation: impl FnOnce(&Self) -> lgtm_workspace::Result<T> + Send + 'static,
+    ) -> lgtm_workspace::Result<T> {
+        let state = self.clone();
+        tauri::async_runtime::spawn_blocking(move || operation(&state))
+            .await
+            .map_err(|err| lgtm_workspace::error("io", err.to_string()))?
+    }
+
+    /// Locks the shared [`WorkspaceService`] mutex, mapping poison errors to an IPC error.
+    pub fn lock_workspace(
+        &self,
+    ) -> lgtm_workspace::Result<std::sync::MutexGuard<'_, WorkspaceService>> {
+        self.workspace
+            .lock()
+            .map_err(|_| lgtm_workspace::error("io", "Workspace service is unavailable."))
+    }
+
+    /// Runs a mutating [`SessionService`] operation on the current thread and broadcasts [`AppEvent::SessionUpdated`].
+    pub fn mutate_session(
+        &self,
+        operation: impl FnOnce(&SessionService) -> lgtm_workspace::Result<lgtm_session::Session>,
+    ) -> lgtm_workspace::Result<lgtm_session::Session> {
+        let session = operation(&self.session)?;
+        self.events
+            .dispatch(AppEvent::SessionUpdated(session.clone()));
+        Ok(session)
+    }
 }
 
 /// Construct the app; an explicit home is used by the isolated desktop smoke harness.
@@ -74,6 +109,7 @@ pub(crate) fn init_app_state<R: tauri::Runtime>(
         None => app_handle.path().home_dir()?,
     };
     let config = ConfigService::from_home(home.clone());
+    let session = SessionService::new(Some(home.join(".lgtm")));
     let events = AppEvents::from_app_handle(app_handle);
     let lsp_events = events.clone();
     let lsp = Arc::new(LspService::new(config.clone(), move |event| match event {
@@ -89,6 +125,7 @@ pub(crate) fn init_app_state<R: tauri::Runtime>(
     let workspace_path = ConfigService::resolve_desktop_workspace();
     app_handle.manage(AppState {
         workspace: Arc::new(Mutex::new(WorkspaceService::new(home, workspace_path))),
+        session,
         config,
         lsp,
         events,
@@ -129,6 +166,9 @@ fn handle_app_event(events: &AppEvents, lsp: &LspService, config: &ConfigService
         AppEvent::LspDiagnostics(payload) => {
             events.emit_to_webview("lsp-diagnostics", &payload);
         }
+        AppEvent::SessionUpdated(payload) => {
+            events.emit_to_webview("session-updated", &payload);
+        }
         AppEvent::QuitRequested => {
             events.emit_to_webview("workspace-quit-requested", &());
         }
@@ -159,6 +199,15 @@ pub fn commands<R: tauri::Runtime>(invoke: tauri::ipc::Invoke<R>) -> bool {
         lsp_restart,
         config_get,
         config_update,
+        session_get,
+        session_save,
+        project_set_collapsed,
+        project_update_appearance,
+        project_rename_worktree,
+        project_create_worktree,
+        project_remove_worktree,
+        project_remove,
+        project_checkout_branch,
     ];
     handler(invoke)
 }
@@ -191,6 +240,15 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             lsp_restart,
             config_get,
             config_update,
+            session_get,
+            session_save,
+            project_set_collapsed,
+            project_update_appearance,
+            project_rename_worktree,
+            project_create_worktree,
+            project_remove_worktree,
+            project_remove,
+            project_checkout_branch,
         ])
 }
 
@@ -233,380 +291,6 @@ pub fn run() {
         .build(app_context())
         .expect("error while building Tauri application")
         .run(handle_event);
-}
-
-async fn run_blocking<T: Send + 'static>(
-    state: State<'_, AppState>,
-    operation: impl FnOnce(&mut WorkspaceService) -> Result<T> + Send + 'static,
-) -> Result<T> {
-    let workspace = state.workspace.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut locked = workspace
-            .lock()
-            .map_err(|_| error("io", "Workspace service is unavailable."))?;
-        operation(&mut locked)
-    })
-    .await
-    .map_err(|e| error("io", e.to_string()))?
-}
-
-async fn run_lsp_blocking<T: Send + 'static>(
-    state: State<'_, AppState>,
-    operation: impl FnOnce(&LspService) -> Result<T> + Send + 'static,
-) -> Result<T> {
-    let lsp_service = state.lsp.clone();
-    tauri::async_runtime::spawn_blocking(move || operation(&lsp_service))
-        .await
-        .map_err(|e| error("io", e.to_string()))?
-}
-
-/// Opens the active or specified workspace directory and prepares workspace language servers.
-#[tauri::command]
-#[specta::specta]
-pub async fn workspace_open(
-    state: State<'_, AppState>,
-    path: Option<String>,
-) -> Result<WorkspaceListing> {
-    let config_service = state.config.clone();
-    let events = state.events.clone();
-    run_blocking(state, move |w| {
-        let previous_root = w.get_root().ok();
-        let effective_path = match path {
-            Some(explicit) => Some(explicit),
-            None if !w.is_custom_root() => config_service
-                .get_config_snapshot(None)
-                .ok()
-                .and_then(|snap| snap.effective.workspace.active_root)
-                .filter(|active| {
-                    !active.trim().is_empty() && std::path::Path::new(active).is_dir()
-                }),
-            None => None,
-        };
-        let listing = w.open(effective_path.as_deref())?;
-        if let Ok(next_root) = w.get_root() {
-            events.dispatch(AppEvent::WorkspaceOpened {
-                previous_root,
-                next_root,
-            });
-        }
-        Ok(listing)
-    })
-    .await
-}
-
-/// Opens a native OS folder picker dialog.
-#[tauri::command]
-#[specta::specta]
-pub async fn workspace_pick_folder() -> Result<Option<String>> {
-    Ok(rfd::AsyncFileDialog::new()
-        .pick_folder()
-        .await
-        .map(|folder| folder.path().to_string_lossy().into_owned()))
-}
-
-/// Lists visible entries inside a workspace-relative directory.
-#[tauri::command]
-#[specta::specta]
-pub async fn workspace_list(
-    state: State<'_, AppState>,
-    relative_path: String,
-) -> Result<Vec<WorkspaceNode>> {
-    run_blocking(state, move |w| w.get_entries(&relative_path)).await
-}
-
-/// Reads UTF-8 file contents and synchronizes the document with its language server.
-#[tauri::command]
-#[specta::specta]
-pub async fn workspace_read(
-    state: State<'_, AppState>,
-    relative_path: String,
-) -> Result<FileContent> {
-    let lsp_service = state.lsp.clone();
-    let (mut file, root_and_path) = run_blocking(state, move |w| {
-        let file = w.get_file_content(&relative_path)?;
-        let root_and_path = w.get_root().ok().zip(w.get_entry_path(&relative_path).ok());
-        Ok((file, root_and_path))
-    })
-    .await?;
-    if let Some((root, path)) = root_and_path {
-        let (language_id, lsp_status) = lsp_service.open_or_sync_file(&root, &path, &file.content);
-        file.language_id = language_id;
-        file.lsp_status = lsp_status;
-    }
-    Ok(file)
-}
-
-/// Writes UTF-8 file contents to disk and dispatches `AppEvent::FileSaved`.
-#[tauri::command]
-#[specta::specta]
-pub async fn workspace_write(
-    state: State<'_, AppState>,
-    relative_path: String,
-    content: String,
-) -> Result<FileContent> {
-    let events = state.events.clone();
-    let saved_content = content.clone();
-    let (saved, save_context) = run_blocking(state, move |w| {
-        let saved = w.write_file(&relative_path, &content)?;
-        let context = w
-            .get_root()
-            .ok()
-            .zip(w.get_entry_path(&relative_path).ok())
-            .map(|(root, path)| {
-                let is_config = w.is_config_path(&path);
-                (root, path, is_config)
-            });
-        Ok((saved, context))
-    })
-    .await?;
-    if let Some((root, path, is_config)) = save_context {
-        events.dispatch(AppEvent::FileSaved {
-            root,
-            path,
-            content: saved_content,
-            is_config,
-        });
-    }
-    Ok(saved)
-}
-
-/// Creates a new file inside a workspace-relative directory.
-#[tauri::command]
-#[specta::specta]
-pub async fn workspace_create_file(
-    state: State<'_, AppState>,
-    name: String,
-    parent_path: Option<String>,
-) -> Result<WorkspaceNode> {
-    run_blocking(state, move |w| {
-        w.create_file(&name, parent_path.as_deref().unwrap_or(""))
-    })
-    .await
-}
-
-/// Creates a new folder inside a workspace-relative directory.
-#[tauri::command]
-#[specta::specta]
-pub async fn workspace_create_folder(
-    state: State<'_, AppState>,
-    name: String,
-    parent_path: Option<String>,
-) -> Result<WorkspaceNode> {
-    run_blocking(state, move |w| {
-        w.create_folder(&name, parent_path.as_deref().unwrap_or(""))
-    })
-    .await
-}
-
-/// Renames a workspace entry exclusively and dispatches `AppEvent::FileClosed` for its previous path.
-#[tauri::command]
-#[specta::specta]
-pub async fn workspace_rename(
-    state: State<'_, AppState>,
-    relative_path: String,
-    name: String,
-) -> Result<WorkspaceNode> {
-    let events = state.events.clone();
-    run_blocking(state, move |w| {
-        let old_target = w.get_root().ok().zip(w.get_entry_path(&relative_path).ok());
-        let node = w.rename(&relative_path, &name)?;
-        if let Some((root, path)) = old_target {
-            events.dispatch(AppEvent::FileClosed { root, path });
-        }
-        Ok(node)
-    })
-    .await
-}
-
-/// Deletes a workspace entry and dispatches `AppEvent::FileClosed` for its path.
-#[tauri::command]
-#[specta::specta]
-pub async fn workspace_delete(state: State<'_, AppState>, relative_path: String) -> Result<()> {
-    let events = state.events.clone();
-    run_blocking(state, move |w| {
-        let old_target = w.get_root().ok().zip(w.get_entry_path(&relative_path).ok());
-        w.delete(&relative_path)?;
-        if let Some((root, path)) = old_target {
-            events.dispatch(AppEvent::FileClosed { root, path });
-        }
-        Ok(())
-    })
-    .await
-}
-
-/// Marks the frontend quit lifecycle listener as ready.
-#[tauri::command]
-#[specta::specta]
-pub fn workspace_frontend_ready(state: State<'_, AppState>) {
-    state.frontend_ready.store(true, Ordering::Relaxed);
-}
-
-/// Shuts down all language servers and exits the Tauri application.
-#[tauri::command]
-pub fn workspace_finish_quit<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-    state: State<'_, AppState>,
-) {
-    state.lsp.shutdown_all();
-    #[cfg(any(test, feature = "e2e-bridge"))]
-    if std::env::var_os("LGTM_IPC_BRIDGE").is_some() {
-        return;
-    }
-    app.exit(0);
-}
-
-/// Synchronizes in-memory editor changes (`textDocument/didChange`) with the language server.
-#[tauri::command]
-#[specta::specta]
-pub async fn lsp_did_change(
-    state: State<'_, AppState>,
-    relative_path: String,
-    content: String,
-) -> Result<()> {
-    let (root, file_path) = run_blocking(state.clone(), move |w| {
-        Ok((w.get_root()?, w.get_entry_path(&relative_path)?))
-    })
-    .await?;
-    run_lsp_blocking(state, move |s| s.did_change(&root, &file_path, &content)).await
-}
-
-/// Requests hover documentation (`textDocument/hover`) at a UTF-16 editor offset.
-#[tauri::command]
-#[specta::specta]
-pub async fn lsp_hover(
-    state: State<'_, AppState>,
-    relative_path: String,
-    offset: u32,
-) -> Result<Option<LspHoverResult>> {
-    let (root, file_path) = run_blocking(state.clone(), move |w| {
-        Ok((w.get_root()?, w.get_entry_path(&relative_path)?))
-    })
-    .await?;
-    run_lsp_blocking(state, move |s| s.get_hover(&root, &file_path, offset)).await
-}
-
-/// Requests symbol definition locations (`textDocument/definition`) at a UTF-16 editor offset.
-#[tauri::command]
-#[specta::specta]
-pub async fn lsp_goto_definition(
-    state: State<'_, AppState>,
-    relative_path: String,
-    offset: u32,
-) -> Result<Vec<LspLocation>> {
-    let (root, file_path) = run_blocking(state.clone(), move |w| {
-        Ok((w.get_root()?, w.get_entry_path(&relative_path)?))
-    })
-    .await?;
-    run_lsp_blocking(state, move |s| s.get_definition(&root, &file_path, offset)).await
-}
-
-/// Requests code completion candidates (`textDocument/completion`) at a UTF-16 editor offset.
-#[tauri::command]
-#[specta::specta]
-pub async fn lsp_completion(
-    state: State<'_, AppState>,
-    relative_path: String,
-    offset: u32,
-) -> Result<Vec<LspCompletionItem>> {
-    let (root, file_path) = run_blocking(state.clone(), move |w| {
-        Ok((w.get_root()?, w.get_entry_path(&relative_path)?))
-    })
-    .await?;
-    run_lsp_blocking(state, move |s| s.get_completions(&root, &file_path, offset)).await
-}
-
-/// Requests callable signature help (`textDocument/signatureHelp`) at a UTF-16 editor offset.
-#[tauri::command]
-#[specta::specta]
-pub async fn lsp_signature_help(
-    state: State<'_, AppState>,
-    relative_path: String,
-    offset: u32,
-) -> Result<Option<LspSignatureHelp>> {
-    let (root, file_path) = run_blocking(state.clone(), move |w| {
-        Ok((w.get_root()?, w.get_entry_path(&relative_path)?))
-    })
-    .await?;
-    run_lsp_blocking(state, move |s| {
-        s.get_signature_help(&root, &file_path, offset)
-    })
-    .await
-}
-
-/// Returns the current workspace LSP server statuses and diagnostics snapshot.
-#[tauri::command]
-#[specta::specta]
-pub async fn lsp_get_state(state: State<'_, AppState>) -> Result<LspWorkspaceSnapshot> {
-    let root = run_blocking(state.clone(), move |w| w.get_root()).await?;
-    run_lsp_blocking(state, move |s| s.get_workspace_snapshot(&root)).await
-}
-
-/// Renders a read-only diagnostics buffer for the active workspace, optionally filtered by `language_id`.
-#[tauri::command]
-#[specta::specta]
-pub async fn lsp_get_diagnostics_buffer(
-    state: State<'_, AppState>,
-    language_id: Option<String>,
-) -> Result<LspDiagnosticsBuffer> {
-    let root = run_blocking(state.clone(), move |w| w.get_root()).await?;
-    run_lsp_blocking(state, move |s| {
-        s.get_diagnostics_buffer(&root, language_id.as_deref())
-    })
-    .await
-}
-
-/// Restarts the language server for `language_id` in the active workspace.
-#[tauri::command]
-#[specta::specta]
-pub async fn lsp_restart(
-    state: State<'_, AppState>,
-    language_id: String,
-) -> Result<LspServerStatusEvent> {
-    let root = run_blocking(state.clone(), move |w| w.get_root()).await?;
-    run_lsp_blocking(state, move |s| {
-        s.restart_language_server(&root, &language_id)
-    })
-    .await
-}
-
-/// Returns the resolved nested configuration snapshot across defaults, global settings, and project overrides.
-#[tauri::command]
-#[specta::specta]
-pub async fn config_get(state: State<'_, AppState>) -> Result<ResolvedConfigSnapshot> {
-    let config_service = state.config.clone();
-    run_blocking(state, move |w| {
-        let root = w.get_root().ok();
-        config_service
-            .get_config_snapshot(root.as_deref())
-            .map_err(|err| error("io", err.to_string()))
-    })
-    .await
-}
-
-/// Applies a partial configuration patch to global or project `config.json` and emits `config-updated`.
-#[tauri::command]
-#[specta::specta]
-pub async fn config_update(
-    state: State<'_, AppState>,
-    patch: LgtmConfigPatch,
-    scope: Option<ConfigScope>,
-) -> Result<ResolvedConfigSnapshot> {
-    let config_service = state.config.clone();
-    let lsp_service = state.lsp.clone();
-    let events = state.events.clone();
-    let (snapshot, maybe_root) = run_blocking(state, move |w| {
-        let root = w.get_root().ok();
-        let snapshot = config_service
-            .update_config(root.as_deref(), patch, scope)
-            .map_err(|err| error("io", err.to_string()))?;
-        Ok((snapshot, root))
-    })
-    .await?;
-    if let Some(root) = maybe_root {
-        lsp_service.reload_workspace_config(&root);
-    }
-    events.emit_to_webview("config-updated", &snapshot);
-    Ok(snapshot)
 }
 
 // tests -----------------------------------------------------------------------
@@ -652,6 +336,8 @@ mod tests {
                 assert!(generated.contains("lspSignatureHelp"));
                 assert!(generated.contains("configGet"));
                 assert!(generated.contains("configUpdate"));
+                assert!(generated.contains("sessionGet"));
+                assert!(generated.contains("projectCreateWorktree"));
             }
         }
     }

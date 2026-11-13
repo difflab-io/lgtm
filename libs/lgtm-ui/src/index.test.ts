@@ -13,6 +13,7 @@ import {
   setModalStateEffect,
 } from './code-editor/modalKeymap'
 import { codeEditorHoverTooltipVariants, codeEditorRootVariants } from './code-editor/styles'
+import { colorSelectorItemVariants } from './color-selector/styles'
 import { contextMenuItemVariants } from './context-menu/styles'
 import { menuIndicatorVariants, menuItemVariants } from './menu/styles'
 import { tabsItemContainerVariants } from './tabs/styles'
@@ -20,7 +21,7 @@ import { themeToggleVariants } from './theme-toggle/styles'
 import { treeViewMessageVariants, treeViewRowVariants } from './tree-view/styles'
 
 describe('When importing lgtm-ui Helical style variants', () => {
-  test('should build orthogonal CVA classes for TreeView, ContextMenu, CodeEditor, Tabs, Menu, and ThemeToggle', () => {
+  test('should build orthogonal CVA classes for TreeView, ContextMenu, CodeEditor, Tabs, Menu, ThemeToggle, and ColorSelector', () => {
     // Arrange
     const errorVariant = { variant: 'error' as const }
     const destructiveItem = { size: 'sm' as const, destructive: true }
@@ -36,6 +37,7 @@ describe('When importing lgtm-ui Helical style variants', () => {
     const menuItemClass = menuItemVariants({ size: 'sm' })
     const statusDotClass = menuIndicatorVariants({ tone: 'active-page' })
     const themeToggleClass = themeToggleVariants({ size: 'sm', variant: 'ghost' })
+    const colorSwatchClass = colorSelectorItemVariants({ size: 'md' })
 
     // Assert
     expect(rowClass).toContain('helical-tree-row')
@@ -48,6 +50,8 @@ describe('When importing lgtm-ui Helical style variants', () => {
     expect(menuItemClass).toContain('rounded-none')
     expect(statusDotClass).toContain('bg-emerald-500')
     expect(themeToggleClass).toContain('helical-theme-toggle')
+    expect(colorSwatchClass).toContain('helical-color-swatch')
+    expect(colorSwatchClass).toContain('rounded-full')
   })
 })
 
