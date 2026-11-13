@@ -40,6 +40,7 @@ impl From<lgtm_project::LgtmProjectError> for WorkspaceError {
             LgtmProjectError::NotGitRepository(msg) => error("notGitRepository", msg),
             LgtmProjectError::DirtyWorktree(msg) => error("dirtyWorktree", msg),
             LgtmProjectError::InvalidPath(msg) => error("invalidWorkspace", msg),
+            LgtmProjectError::NotFound(msg) => error("notFound", msg),
             LgtmProjectError::Git(msg) => error("git", msg),
         }
     }

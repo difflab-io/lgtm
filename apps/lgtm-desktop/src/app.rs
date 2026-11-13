@@ -35,6 +35,41 @@ pub struct AppState {
     pub frontend_ready: Arc<AtomicBool>,
 }
 
+impl AppState {
+    // Public ------------------------------------------------------------------
+
+    /// Runs a blocking operation against cloned [`AppState`] handles on Tauri's blocking thread pool.
+    pub async fn run_blocking<T: Send + 'static>(
+        &self,
+        operation: impl FnOnce(&Self) -> lgtm_workspace::Result<T> + Send + 'static,
+    ) -> lgtm_workspace::Result<T> {
+        let state = self.clone();
+        tauri::async_runtime::spawn_blocking(move || operation(&state))
+            .await
+            .map_err(|err| lgtm_workspace::error("io", err.to_string()))?
+    }
+
+    /// Locks the shared [`WorkspaceService`] mutex, mapping poison errors to an IPC error.
+    pub fn lock_workspace(
+        &self,
+    ) -> lgtm_workspace::Result<std::sync::MutexGuard<'_, WorkspaceService>> {
+        self.workspace
+            .lock()
+            .map_err(|_| lgtm_workspace::error("io", "Workspace service is unavailable."))
+    }
+
+    /// Runs a mutating [`SessionService`] operation on the current thread and broadcasts [`AppEvent::SessionUpdated`].
+    pub fn mutate_session(
+        &self,
+        operation: impl FnOnce(&SessionService) -> lgtm_workspace::Result<lgtm_session::Session>,
+    ) -> lgtm_workspace::Result<lgtm_session::Session> {
+        let session = operation(&self.session)?;
+        self.events
+            .dispatch(AppEvent::SessionUpdated(session.clone()));
+        Ok(session)
+    }
+}
+
 /// Construct the app; an explicit home is used by the isolated desktop smoke harness.
 pub fn builder(workspace_home: Option<PathBuf>) -> tauri::Builder<tauri::Wry> {
     configure_builder(
@@ -171,6 +206,7 @@ pub fn commands<R: tauri::Runtime>(invoke: tauri::ipc::Invoke<R>) -> bool {
         project_create_worktree,
         project_remove_worktree,
         project_remove,
+        project_checkout_branch,
     ];
     handler(invoke)
 }
@@ -210,6 +246,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             project_create_worktree,
             project_remove_worktree,
             project_remove,
+            project_checkout_branch,
         ])
 }
 

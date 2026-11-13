@@ -17,14 +17,14 @@ pub struct Worktree {
 impl Worktree {
     /// Constructs a managed worktree model and normalizes its display label from `branch` or `path`.
     pub fn new(path: String, branch: Option<String>) -> Self {
-        let name = Self::default_name(&path, branch.as_deref());
+        let name = Self::get_default_name(&path, branch.as_deref());
         Self { path, name, branch }
     }
 
     // Public ------------------------------------------------------------------
 
     /// Computes the default display label for a worktree from its `branch` (stripped of `worktree/`) or directory basename.
-    pub fn default_name(path: &str, branch: Option<&str>) -> String {
+    pub fn get_default_name(path: &str, branch: Option<&str>) -> String {
         branch
             .map(|b| b.strip_prefix("worktree/").unwrap_or(b).to_owned())
             .filter(|b| !b.is_empty())
@@ -40,6 +40,6 @@ impl Worktree {
     /// Returns whether `self.name` has been customized away from the default branch/path label.
     pub fn has_custom_name(&self) -> bool {
         !self.name.trim().is_empty()
-            && self.name != Self::default_name(&self.path, self.branch.as_deref())
+            && self.name != Self::get_default_name(&self.path, self.branch.as_deref())
     }
 }

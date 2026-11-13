@@ -15,46 +15,33 @@ import {
   type LspDiagnostic,
   type LspFileDiagnosticsEvent,
   type LspServerStatusEvent,
-  type Project,
   type Session,
-  type SidebarWidget,
 } from '../clients/workspaceClient'
+import type {
+  CachedWorkspaceSnapshot,
+  CustomizeProjectDialogState,
+  FolderRefresh,
+  NewBranchDialogState,
+  RemoveWorktreeConfirmState,
+  WorkspaceTab,
+  WorktreeDialogState,
+} from '../types'
 import { LspService } from './lspService.svelte'
-import {
-  branchToPathSlug,
-  ProjectService,
-  type CustomizeProjectDialogState,
-  type RemoveWorktreeConfirmState,
-  type WorktreeDialogState,
-} from './projectService.svelte'
-import { SessionService, type CachedWorkspaceSnapshot } from './sessionService.svelte'
+import { branchToPathSlug, ProjectService } from './projectService.svelte'
+import { SessionService } from './sessionService.svelte'
 import { SettingsService } from './settingsService.svelte'
 
 export {
   branchToPathSlug,
   type CustomizeProjectDialogState,
+  type FolderRefresh,
+  type NewBranchDialogState,
   type RemoveWorktreeConfirmState,
+  type WorkspaceTab,
   type WorktreeDialogState,
 }
 
-export interface FolderRefresh {
-  path: string
-  version: number
-}
-
-export interface WorkspaceTab {
-  id: string
-  kind: 'file' | 'diagnostics'
-  title: string
-  path?: string
-  languageId?: string | null
-  content: string
-  readonly: boolean
-  dirty?: boolean
-  edited?: boolean
-}
-
-/** Workspace view model coordinating file tree browsing, open tabs, debounced saves, and delegating to `ProjectService`, `SessionService`, `LspService`, and `SettingsService`. */
+/** Workspace view model coordinating file tree browsing, open tabs, debounced saves, and owning `ProjectService`, `SessionService`, `LspService`, and `SettingsService`. */
 export class WorkspaceService {
   readonly lsp: LspService
   readonly settings: SettingsService
@@ -92,10 +79,12 @@ export class WorkspaceService {
   private openRequestSeq = 0
 
   /** Constructs a `WorkspaceService` with its own `LspService`, `SettingsService`, `SessionService`, and `ProjectService` instances. */
-  constructor(private client: WorkspaceClient) {
+  constructor(readonly client: WorkspaceClient) {
     this.lsp = new LspService(client)
     this.settings = new SettingsService(client)
-    this.session = new SessionService(client)
+    this.session = new SessionService(client, () => {
+      void this.saveCurrentWorkspaceSession()
+    })
     this.project = new ProjectService(client, {
       getRoot: () => this.root,
       isActive: () => this.active,
@@ -108,6 +97,8 @@ export class WorkspaceService {
       },
     })
   }
+
+  // Public --------------------------------------------------------------------
 
   /** Returns whether a file or tree operation is currently in progress. */
   get blocked() {
@@ -203,130 +194,6 @@ export class WorkspaceService {
     return 'Idle'
   }
 
-  /** Returns the active sidebar widget (`projects` or `explorer`). */
-  get sidebarWidget(): SidebarWidget {
-    return this.session.sidebarWidget
-  }
-
-  set sidebarWidget(value: SidebarWidget) {
-    this.session.sidebarWidget = value
-  }
-
-  /** Returns whether the Projects dock pane is currently open. */
-  get projectsOpen(): boolean {
-    return this.session.projectsOpen
-  }
-
-  set projectsOpen(value: boolean) {
-    this.session.projectsOpen = value
-  }
-
-  /** Returns whether the Explorer dock pane is currently open. */
-  get explorerOpen(): boolean {
-    return this.session.explorerOpen
-  }
-
-  set explorerOpen(value: boolean) {
-    this.session.explorerOpen = value
-  }
-
-  /** Returns the list of projects in the active session. */
-  get projects(): Project[] {
-    return this.project.projects
-  }
-
-  set projects(value: Project[]) {
-    this.project.projects = value
-  }
-
-  /** Returns the active `New Worktree` dialog state, if open. */
-  get worktreeDialog(): WorktreeDialogState | null {
-    return this.project.worktreeDialog
-  }
-
-  set worktreeDialog(value: WorktreeDialogState | null) {
-    this.project.worktreeDialog = value
-  }
-
-  /** Returns the active `Remove Worktree` confirmation dialog state, if open. */
-  get removeWorktreeConfirm(): RemoveWorktreeConfirmState | null {
-    return this.project.removeWorktreeConfirm
-  }
-
-  set removeWorktreeConfirm(value: RemoveWorktreeConfirmState | null) {
-    this.project.removeWorktreeConfirm = value
-  }
-
-  /** Returns the active `Edit Project` dialog state, if open. */
-  get customizeProjectDialog(): CustomizeProjectDialogState | null {
-    return this.project.customizeProjectDialog
-  }
-
-  set customizeProjectDialog(value: CustomizeProjectDialogState | null) {
-    this.project.customizeProjectDialog = value
-  }
-
-  /** Returns selectable workspace items for the titlebar workspace switcher. */
-  get items() {
-    const projectItems: { label: string; value: string }[] = []
-    const seen = new Set<string>()
-    for (const project of this.projects) {
-      if (!seen.has(project.rootPath)) {
-        seen.add(project.rootPath)
-        projectItems.push({
-          label:
-            project.rootPath === this.defaultRoot || this.isDefaultWorkspaceRoot(project.rootPath)
-              ? 'Local workspace'
-              : project.name,
-          value: project.rootPath,
-        })
-      }
-      for (const wt of project.worktrees ?? []) {
-        if (!seen.has(wt.path)) {
-          seen.add(wt.path)
-          projectItems.push({
-            label: `${project.name} / ${wt.name}`,
-            value: wt.path,
-          })
-        }
-      }
-    }
-    const roots = this.settings.recentRoots.length ? this.settings.recentRoots : [this.root]
-    for (const path of roots) {
-      if (!seen.has(path)) {
-        seen.add(path)
-        projectItems.push({
-          label:
-            path === this.defaultRoot || this.isDefaultWorkspaceRoot(path)
-              ? 'Local workspace'
-              : (path.split(/[\\/]/).filter(Boolean).at(-1) ?? path),
-          value: path,
-        })
-      }
-    }
-    return [...projectItems, { label: 'Open folder…', value: '__open_folder__' }]
-  }
-
-  /** Returns the project that owns the currently active workspace root, if any. */
-  get activeProject(): Project | null {
-    return this.project.activeProject
-  }
-
-  /** Builds `TreeNode` items for `ProjectsPane`. */
-  get projectNodes(): TreeNode[] {
-    return this.project.projectNodes
-  }
-
-  /** Returns the list of expanded project root paths for `ProjectsPane`. */
-  get projectExpandedValues(): string[] {
-    return this.project.projectExpandedValues
-  }
-
-  /** Returns the live `~/.lgtm/worktrees/<project>/<branch-slug>` preview path for the `New Worktree` dialog. */
-  get worktreePreviewPath(): string {
-    return this.project.worktreePreviewPath
-  }
-
   /** Returns top-level tree nodes for the sidebar `TreeView`. */
   get nodes() {
     return [
@@ -344,103 +211,10 @@ export class WorkspaceService {
       : undefined
   }
 
-  /** Toggles the Projects dock pane independently of the Explorer widget slot and persists the choice. */
-  toggleProjectsPane() {
-    this.session.toggleProjectsPane()
-    void this.saveCurrentWorkspaceSession()
-  }
-
-  /** Toggles the Explorer widget pane inside the left dock independently of the Projects pane. */
-  toggleExplorerPane() {
-    this.session.toggleExplorerPane()
-    void this.saveCurrentWorkspaceSession()
-  }
-
-  /** Opens the specified left dock pane (`projects` or `explorer`) and persists the choice. */
-  setSidebarWidget(widget: SidebarWidget) {
-    this.session.setSidebarWidget(widget)
-    void this.saveCurrentWorkspaceSession()
-  }
-
-  /** Updates the tracked list of expanded directory paths in `WorkspaceExplorer` and persists session state. */
+  /** Updates the tracked list of expanded directory paths in `FileExplorer` and persists session state. */
   setExpandedDirs(dirs: string[]) {
     this.expandedDirs = [...dirs]
     void this.saveCurrentWorkspaceSession()
-  }
-
-  /** Synchronizes `ProjectsPane` branch expansion changes with `SessionService::set_project_collapsed`. */
-  async handleProjectExpandedChange(nextExpanded: string[]) {
-    await this.project.handleProjectExpandedChange(nextExpanded)
-  }
-
-  /** Sets the collapsed state for `projectId` and persists it to the session file. */
-  async setProjectCollapsed(projectId: string, collapsed: boolean) {
-    await this.project.setProjectCollapsed(projectId, collapsed)
-  }
-
-  /** Opens the `New Worktree` dialog for `projectId` (or the active project). */
-  openNewWorktreeDialog(projectId?: string) {
-    this.project.openNewWorktreeDialog(projectId)
-  }
-
-  /** Closes the `New Worktree` dialog. */
-  closeNewWorktreeDialog() {
-    this.project.closeNewWorktreeDialog()
-  }
-
-  /** Opens the `Edit Project` dialog for `projectId` (or the active project). */
-  openCustomizeProjectDialog(projectId?: string) {
-    this.project.openCustomizeProjectDialog(projectId)
-  }
-
-  /** Closes the `Edit Project` dialog. */
-  closeCustomizeProjectDialog() {
-    this.project.closeCustomizeProjectDialog()
-  }
-
-  /** Persists the edited `projectName`, `icon`, and `color` from the `Edit Project` dialog. */
-  async submitCustomizeProject() {
-    await this.project.submitCustomizeProject()
-  }
-
-  /** Renames a worktree section's display label in `ProjectsPane` without changing its Git branch name. */
-  async renameProjectWorktree(worktreePath: string, name: string) {
-    await this.project.renameProjectWorktree(worktreePath, name)
-  }
-
-  /** Creates a managed Git worktree from the `New Worktree` dialog and switches to it on success. */
-  async submitNewWorktree() {
-    await this.project.submitNewWorktree()
-  }
-
-  /** Opens the removal confirmation modal for `worktreePath` under `projectId`. */
-  promptRemoveWorktree(projectId: string, worktreePath: string) {
-    this.project.promptRemoveWorktree(projectId, worktreePath)
-  }
-
-  /** Cancels the pending worktree removal confirmation dialog. */
-  cancelRemoveWorktree() {
-    this.project.cancelRemoveWorktree()
-  }
-
-  /** Executes managed worktree removal (`~/.lgtm/worktrees/...`). */
-  async confirmRemoveWorktree(force = false) {
-    await this.project.confirmRemoveWorktree(force)
-  }
-
-  /** Detaches `projectId` from the session without deleting files on disk. */
-  async removeProject(projectId: string) {
-    await this.project.removeProject(projectId)
-  }
-
-  /** Builds right-click `ContextMenu` items for a project or worktree node in `ProjectsPane`. */
-  projectContextItems(node: TreeNode): ContextMenuItem[] {
-    return this.project.projectContextItems(node)
-  }
-
-  /** Handles context menu and hotkey actions on project and worktree nodes in `ProjectsPane`. */
-  async projectContextAction(value: string, action: string) {
-    await this.project.projectContextAction(value, action)
   }
 
   /** Applies an incoming `Session` snapshot from the backend. */
@@ -562,6 +336,10 @@ export class WorkspaceService {
   /** Switches to a selected workspace root or opens the native folder picker dialog. */
   async selectWorkspace(value: string) {
     if (this.blocked) return
+    if (value === '__new_worktree__') {
+      this.project.openNewWorktreeDialog()
+      return
+    }
     if (value === '__open_folder__') {
       try {
         const chosen = await this.client.pickFolder()

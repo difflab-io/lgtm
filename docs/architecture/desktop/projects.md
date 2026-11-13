@@ -178,18 +178,25 @@ apps/
 │       └── lsp.rs                     Desktop language server orchestration
 └── lgtm-web/src/lib/
     ├── clients/workspaceClient.ts     Adds session_* and project_* IPC bindings
+    ├── constants.ts                   Project icon/color palettes and Stormlight-themed worktree branch word lists
+    ├── types/                         Domain TypeScript interfaces and Git branch name validators
     ├── services/
+    │   ├── context.ts                 Svelte context DI registry (setServicesContext, useService)
     │   ├── hotkeyService.svelte.ts    Registers global shortcuts (Mod+Shift+B, Mod+B), WhichKey leader chords, and CommandMenu items
     │   ├── projectService.svelte.ts   Owns open projects, worktrees, project/worktree dialogs, and context actions
-    │   ├── sessionService.svelte.ts   Owns dock visibility, per-workspace cache snapshots, and session persistence
+    │   ├── sessionService.svelte.ts   Owns dock visibility, resizable pane widths, per-workspace cache snapshots, and session persistence
     │   └── workspaceService.svelte.ts Owns active workspace file tree, tabs (tab.edited), and editor buffer saves
     └── components/
-        ├── Shell.svelte               Composes Titlebar, WorkspaceDock, ContentPane, CommandMenu, and WhichKey
-        ├── Titlebar.svelte            Renders SidebarTrigger, brand, and workspace switcher Select
-        ├── WorkspaceDock.svelte       Mounts independent #projects-dock-pane and #explorer-dock-pane and DockViewSwitcher
-        ├── ContentPane.svelte         Renders the active workspace editor tabs, CodeEditor, and bottom status bar
+        ├── Shell.svelte               Composes Titlebar, LeftDock, ContentPane, LeftDockToolbar, EditorToolbar, CommandMenu, and WhichKey
+        ├── Titlebar.svelte            Renders SidebarTrigger, brand, and branch switcher Select
+        ├── LeftDock.svelte            Mounts resizable #projects-dock-pane and WidgetPane
+        ├── WidgetPane.svelte          Hosts FileExplorer inside #explorer-dock-pane
+        ├── FileExplorer.svelte        Renders the active workspace file tree
+        ├── LeftDockToolbar.svelte     Renders Projects and Explorer toggle buttons sized to match LeftDock
+        ├── EditorToolbar.svelte       Renders LspStatusMenu, breadcrumbs, and editor status
+        ├── ContentPane.svelte         Renders the active workspace editor tabs and CodeEditor
         ├── ProjectsPane.svelte        Renders compact collapsible project branches, worktree items, and context menus
-        └── projects/                  Extracted NewWorktreeDialog, RemoveWorktreeDialog, EditProjectDialog, and projectAppearance
+        └── ProjectEditDialog.svelte, ProjectIconSelector.svelte, WorktreeNewDialog.svelte, WorktreeRemoveDialog.svelte, BranchNewDialog.svelte
 ```
 
 ### Tab Retention State Machine

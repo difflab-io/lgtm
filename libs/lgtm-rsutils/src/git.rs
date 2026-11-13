@@ -153,6 +153,71 @@ pub fn get_current_branch(checkout_dir: &Path) -> Option<String> {
     (!branch.is_empty()).then_some(branch)
 }
 
+/// Lists local branch names (`refs/heads/*`) for `checkout_dir` via `gix`, sorted lexicographically.
+pub fn list_local_branches(checkout_dir: &Path) -> Vec<String> {
+    let mut branches = Vec::new();
+    if let Ok(repo) = gix::open(checkout_dir)
+        && let Ok(refs) = repo.references()
+        && let Ok(local) = refs.local_branches()
+    {
+        for reference in local.flatten() {
+            if let Ok(short) = reference.name().shorten().to_str() {
+                let trimmed = short.trim();
+                if !trimmed.is_empty() {
+                    branches.push(trimmed.to_owned());
+                }
+            }
+        }
+    }
+    if let Some(current) = get_current_branch(checkout_dir)
+        && !branches.contains(&current)
+    {
+        branches.push(current);
+    }
+    branches.sort();
+    branches.dedup();
+    branches
+}
+
+/// Switches `checkout_dir` to `branch` (or creates and switches to `-b <branch>` when `create` is `true`).
+pub fn checkout_branch(checkout_dir: &Path, branch: &str, create: bool) -> Result<String> {
+    let branch = branch.trim();
+    if branch.is_empty()
+        || branch.starts_with('-')
+        || branch.starts_with('/')
+        || branch.ends_with('/')
+        || branch.contains("..")
+        || branch.contains("//")
+        || branch.contains(char::is_whitespace)
+        || gix::validate::reference::name_partial(branch.as_bytes().as_bstr()).is_err()
+    {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            format!("'{branch}' is not a valid Git branch name."),
+        ));
+    }
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(checkout_dir).arg("checkout");
+    if create {
+        cmd.arg("-b");
+    }
+    cmd.arg(branch);
+    let output = cmd
+        .output()
+        .map_err(|err| Error::other(format!("failed to invoke git checkout: {err}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        if stderr.contains("already exists")
+            || stderr.contains("already checked out")
+            || stderr.contains("already used by worktree")
+        {
+            return Err(Error::new(ErrorKind::AlreadyExists, stderr));
+        }
+        return Err(Error::other(format!("git checkout failed: {stderr}")));
+    }
+    Ok(get_current_branch(checkout_dir).unwrap_or_else(|| branch.to_owned()))
+}
+
 /// Lists all Git worktrees (primary checkout first, followed by linked worktrees) for `repo_root` via `gix`.
 pub fn list_worktrees(repo_root: &Path) -> Result<Vec<GitWorktreeEntry>> {
     let resolved = resolve_git_paths(repo_root)?;

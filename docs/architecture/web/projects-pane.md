@@ -27,28 +27,25 @@
 ```mermaid
 flowchart TB
     subgraph Shell["Shell.svelte"]
-        subgraph LeftSidebar["Sidebar (#workspace-sidebar, left dock)"]
-            PROJECTS_DOCK["#projects-dock-pane (180px, paneId='projects')\nProjectsPane.svelte (kept mounted via hidden)"]
-            EXPLORER_DOCK["#explorer-dock-pane (236px, paneId='workspace')\nWorkspaceExplorer.svelte (kept mounted via hidden)"]
-            SIDEBAR_FOOTER["SidebarFooter\nIcon-only [Projects (Box)][Explorer (FolderTree)] toggles"]
-            PROJECTS_DOCK --- SIDEBAR_FOOTER
-            EXPLORER_DOCK --- SIDEBAR_FOOTER
+        subgraph LeftSidebar["LeftDock.svelte (#workspace-sidebar, resizable left dock)"]
+            PROJECTS_DOCK["#projects-dock-pane (180px default, paneId='projects')\nProjectsPane.svelte"]
+            EXPLORER_DOCK["WidgetPane.svelte (#explorer-dock-pane, 236px default, paneId='workspace')\nFileExplorer.svelte"]
         end
 
         subgraph MainPane["ContentPane.svelte (Active Workspace Editor)"]
             TABS["Tabs (Open Editors for Active Workspace)"]
             EDITOR["CodeEditor"]
-            subgraph Footer["Footer Status Bar (bottom of editor pane)"]
-                LSP_MENU["LspStatusMenu"]
-                CRUMBS["Breadcrumbs"]
-                STATUS["Workspace Status"]
-            end
-            TABS --> EDITOR --> Footer
+            TABS --> EDITOR
+        end
+
+        subgraph BottomToolbar["Unified Bottom Toolbar (footer)"]
+            LEFT_TOOLBAR["LeftDockToolbar.svelte\nIcon-only [Projects (Box)][Explorer (FolderTree)] toggles"]
+            EDITOR_TOOLBAR["EditorToolbar.svelte\nLspStatusMenu, Breadcrumbs, Workspace Status"]
         end
     end
 
-    SIDEBAR_FOOTER -->|"toggleProjectsPane()"| PROJECTS_DOCK
-    SIDEBAR_FOOTER -->|"toggleExplorerPane()"| EXPLORER_DOCK
+    LEFT_TOOLBAR -->|"toggleProjectsPane()"| PROJECTS_DOCK
+    LEFT_TOOLBAR -->|"toggleExplorerPane()"| EXPLORER_DOCK
     PROJECTS_DOCK -->|"selectWorkspace(path)"| MainPane
 ```
 

@@ -30,6 +30,8 @@ export class LspService {
   /** Constructs an `LspService` backed by `client`. */
   constructor(private client: WorkspaceClient) {}
 
+  // Public --------------------------------------------------------------------
+
   /** Returns all tracked language server status events for the active workspace. */
   get allServers(): LspServerStatusEvent[] {
     return Object.values(this.servers)

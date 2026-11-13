@@ -6,20 +6,20 @@ use std::{
 };
 
 use lgtm_config::ConfigService;
-use lgtm_project::{Project, ProjectService};
+use lgtm_project::ProjectService;
 use lgtm_rsutils::atomic_write;
 use uuid::Uuid;
 
 use crate::{
-    error::{LgtmSessionError, Result},
+    error::Result,
     models::{
         session::Session,
         tab::{PersistedTab, TabCandidate},
-        workspace::{WorkspaceSessionState, WorkspaceStatePatch},
+        workspace::WorkspaceStatePatch,
     },
 };
 
-/// Coordinates `~/.lgtm/sessions/<id>.json` persistence, tab filtering, and [`ProjectService`] aggregation.
+/// Coordinates `~/.lgtm/sessions/<id>.json` persistence, tab filtering, and [`ProjectService`] delegation.
 #[derive(Debug, Clone)]
 pub struct SessionService {
     sessions_dir: PathBuf,
@@ -30,9 +30,15 @@ impl SessionService {
     /// Creates a session service rooted at `<lgtm_home>/sessions` (or `~/.lgtm/sessions`).
     pub fn new(lgtm_home: Option<PathBuf>) -> Self {
         let base = lgtm_home.unwrap_or_else(|| ConfigService::new().get_lgtm_home_dir());
+        Self::with_project_service(Some(base.clone()), ProjectService::new(Some(base)))
+    }
+
+    /// Creates a session service with an injected [`ProjectService`].
+    pub fn with_project_service(lgtm_home: Option<PathBuf>, projects: ProjectService) -> Self {
+        let base = lgtm_home.unwrap_or_else(|| ConfigService::new().get_lgtm_home_dir());
         Self {
             sessions_dir: base.join("sessions"),
-            projects: ProjectService::new(Some(base)),
+            projects,
         }
     }
 
@@ -73,27 +79,8 @@ impl SessionService {
     /// Resolves `path` into its parent `Project` and optional `Worktree`, registers it in `session_id`, sets `active_workspace_root`, and saves the session.
     pub fn open_workspace(&self, session_id: &str, path: &Path) -> Result<Session> {
         let mut session = self.get_session(session_id)?;
-        let (resolved_project, resolved_worktree) = self.projects.resolve_project(path)?;
-        let target_workspace = resolved_worktree
-            .as_ref()
-            .map(|wt| wt.path.clone())
-            .unwrap_or_else(|| resolved_project.root_path.clone());
-
-        if let Some(existing) = session
-            .projects
-            .iter_mut()
-            .find(|p| p.root_path == resolved_project.root_path || p.id == resolved_project.id)
-        {
-            existing.branch = resolved_project.branch;
-            existing.git_common_dir = resolved_project.git_common_dir;
-            if let Some(wt) = resolved_worktree {
-                existing.upsert_worktree(wt);
-            }
-        } else {
-            session.projects.push(resolved_project);
-        }
-
-        self.activate_workspace(&mut session, target_workspace);
+        let target_workspace = self.projects.open_project(&mut session.projects, path)?;
+        session.set_active_workspace(target_workspace);
         self.write_session(&session)?;
         tracing::info!(
             session_id = %session.id,
@@ -122,10 +109,7 @@ impl SessionService {
                 retained_tabs = retained.len(),
                 "saved workspace session state"
             );
-            session.workspaces.insert(
-                workspace_root.clone(),
-                WorkspaceSessionState::new(workspace_root, patch.expanded_dirs, retained),
-            );
+            session.set_workspace_state(workspace_root, patch.expanded_dirs, retained);
         }
         self.write_session(&session)?;
         Ok(session)
@@ -139,7 +123,8 @@ impl SessionService {
         collapsed: bool,
     ) -> Result<Session> {
         let mut session = self.get_session(session_id)?;
-        find_project_mut(&mut session, project_id)?.collapsed = collapsed;
+        self.projects
+            .set_project_collapsed(&mut session.projects, project_id, collapsed)?;
         self.write_session(&session)?;
         tracing::info!(session_id = %session.id, %project_id, collapsed, "updated project collapsed state");
         Ok(session)
@@ -155,7 +140,13 @@ impl SessionService {
         color: Option<String>,
     ) -> Result<Session> {
         let mut session = self.get_session(session_id)?;
-        find_project_mut(&mut session, project_id)?.update_appearance(name, icon, color);
+        self.projects.update_project_appearance(
+            &mut session.projects,
+            project_id,
+            name,
+            icon,
+            color,
+        )?;
         self.write_session(&session)?;
         tracing::info!(session_id = %session.id, %project_id, "updated project appearance");
         Ok(session)
@@ -170,18 +161,12 @@ impl SessionService {
         name: &str,
     ) -> Result<Session> {
         let mut session = self.get_session(session_id)?;
-        let project = find_project_mut(&mut session, project_id)?;
-        let canonical_str = canonicalize_path_str(worktree_path);
-        let raw_str = worktree_path.to_string_lossy();
-        if !project.rename_worktree(&canonical_str, name)
-            && !project.rename_worktree(&raw_str, name)
-        {
-            tracing::warn!(%project_id, worktree = %raw_str, "worktree not found for rename");
-            return Err(LgtmSessionError::NotFound(format!(
-                "Worktree '{}' not found under project '{}'.",
-                raw_str, project.name
-            )));
-        }
+        self.projects.rename_project_worktree(
+            &mut session.projects,
+            project_id,
+            worktree_path,
+            name,
+        )?;
         self.write_session(&session)?;
         tracing::info!(session_id = %session.id, %project_id, name = %name, "renamed project worktree");
         Ok(session)
@@ -196,14 +181,38 @@ impl SessionService {
         base_ref: Option<&str>,
     ) -> Result<Session> {
         let mut session = self.get_session(session_id)?;
-        let project = find_project_mut(&mut session, project_id)?;
-        let worktree = self.projects.create_worktree(project, branch, base_ref)?;
-        let wt_path = worktree.path.clone();
-        project.collapsed = false;
-        project.upsert_worktree(worktree);
-        self.activate_workspace(&mut session, wt_path);
+        let worktree = self.projects.create_project_worktree(
+            &mut session.projects,
+            project_id,
+            branch,
+            base_ref,
+        )?;
+        session.set_active_workspace(worktree.path);
         self.write_session(&session)?;
         tracing::info!(session_id = %session.id, %project_id, branch = %branch, "created project worktree in session");
+        Ok(session)
+    }
+
+    /// Switches `workspace_root` to `branch` (or creates `-b <branch>` when `create` is `true`) and refreshes session metadata.
+    pub fn checkout_workspace_branch(
+        &self,
+        session_id: &str,
+        workspace_root: &Path,
+        branch: &str,
+        create: bool,
+    ) -> Result<Session> {
+        let checked_out = self
+            .projects
+            .checkout_branch(workspace_root, branch, create)?;
+        let session = self.get_session(session_id)?;
+        self.write_session(&session)?;
+        tracing::info!(
+            session_id = %session.id,
+            workspace_root = %workspace_root.display(),
+            branch = %checked_out,
+            create,
+            "checked out workspace branch"
+        );
         Ok(session)
     }
 
@@ -216,28 +225,13 @@ impl SessionService {
         force: bool,
     ) -> Result<Session> {
         let mut session = self.get_session(session_id)?;
-        let canonical =
-            std::fs::canonicalize(worktree_path).unwrap_or_else(|_| worktree_path.to_path_buf());
-        let canonical_str = canonical.to_string_lossy().into_owned();
-        let raw_str = worktree_path.to_string_lossy().into_owned();
-
-        let parent_root = {
-            let project = find_project_mut(&mut session, project_id)?;
-            self.projects.remove_worktree(project, &canonical, force)?;
-            project
-                .worktrees
-                .retain(|wt| wt.path != canonical_str && wt.path != raw_str);
-            project.root_path.clone()
-        };
-
-        session.workspaces.remove(&canonical_str);
-        session.workspaces.remove(&raw_str);
-        if session.active_workspace_root == canonical_str
-            || session.active_workspace_root == raw_str
-        {
-            session.active_workspace_root = parent_root;
-        }
-
+        let (canonical_str, raw_str, parent_root) = self.projects.remove_project_worktree(
+            &mut session.projects,
+            project_id,
+            worktree_path,
+            force,
+        )?;
+        session.apply_worktree_removal(&canonical_str, &raw_str, parent_root);
         self.write_session(&session)?;
         tracing::info!(session_id = %session.id, %project_id, "removed project worktree from session");
         Ok(session)
@@ -246,40 +240,16 @@ impl SessionService {
     /// Removes `project_id` and its remembered workspace states from `session_id`.
     pub fn remove_project(&self, session_id: &str, project_id: Uuid) -> Result<Session> {
         let mut session = self.get_session(session_id)?;
-        let idx = session
+        let removed = self
             .projects
-            .iter()
-            .position(|p| p.id == project_id)
-            .ok_or_else(|| {
-                tracing::warn!(%project_id, "project not found in session");
-                LgtmSessionError::NotFound(format!("Project '{project_id}' not found."))
-            })?;
-        let removed = session.projects.remove(idx);
-        session.workspaces.remove(&removed.root_path);
-        for wt in &removed.worktrees {
-            session.workspaces.remove(&wt.path);
-        }
-        if removed.contains_workspace(&session.active_workspace_root) {
-            session.active_workspace_root = session
-                .projects
-                .first()
-                .map(|p| p.root_path.clone())
-                .unwrap_or_default();
-        }
+            .remove_project(&mut session.projects, project_id)?;
+        session.apply_project_removal(&removed);
         self.write_session(&session)?;
         tracing::info!(session_id = %session.id, %project_id, "removed project from session");
         Ok(session)
     }
 
     // Private -----------------------------------------------------------------
-
-    fn activate_workspace(&self, session: &mut Session, workspace_root: String) {
-        session.active_workspace_root = workspace_root.clone();
-        session
-            .workspaces
-            .entry(workspace_root.clone())
-            .or_insert_with(|| WorkspaceSessionState::new(workspace_root, Vec::new(), Vec::new()));
-    }
 
     fn session_file_path(&self, session_id: &str) -> PathBuf {
         self.sessions_dir.join(format!("{session_id}.json"))
@@ -290,17 +260,6 @@ impl SessionService {
         atomic_write(&self.session_file_path(&session.id), &bytes)?;
         Ok(())
     }
-}
-
-fn find_project_mut(session: &mut Session, project_id: Uuid) -> Result<&mut Project> {
-    session
-        .projects
-        .iter_mut()
-        .find(|p| p.id == project_id)
-        .ok_or_else(|| {
-            tracing::warn!(%project_id, "project not found in session");
-            LgtmSessionError::NotFound(format!("Project '{project_id}' not found."))
-        })
 }
 
 fn canonicalize_path_str(path: &Path) -> String {

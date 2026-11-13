@@ -8,7 +8,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use lgtm_project::{LgtmProjectError, Project, ProjectService};
+use lgtm_project::{LgtmProjectError, Project, ProjectService, Worktree};
 use tempfile::TempDir;
 use tracing_subscriber::fmt::MakeWriter;
 
@@ -114,6 +114,18 @@ impl ProjectTestFixture {
         fs::canonicalize(repo).unwrap()
     }
 
+    /// Initializes a Git project on `main` and creates a managed worktree on `branch`.
+    fn init_project_with_worktree(&self, branch: &str) -> (Project, Worktree) {
+        let main_repo = self.init_git_repo("lgtm");
+        let (mut project, _) = self.service.resolve_project(&main_repo).unwrap();
+        let wt = self
+            .service
+            .create_worktree(&project, branch, None)
+            .unwrap();
+        project.set_worktree(wt.clone());
+        (project, wt)
+    }
+
     /// Runs `f` inside a verbose `TRACE`-level `tracing` subscriber scope.
     fn with_verbose_logger<R>(&self, f: impl FnOnce() -> R) -> R {
         let subscriber = tracing_subscriber::fmt()
@@ -208,16 +220,11 @@ mod given_a_git_project_exists {
         fn should_group_managed_worktrees_under_parent_project() {
             // Arrange
             let fixture = ProjectTestFixture::empty();
-            let main_repo = fixture.init_git_repo("lgtm");
-            let (primary_project, _) = fixture.service.resolve_project(&main_repo).unwrap();
-            let created_wt = fixture
-                .service
-                .create_worktree(&primary_project, "worktree/feature-managed", None)
-                .unwrap();
+            let (primary_project, created_wt) =
+                fixture.init_project_with_worktree("worktree/feature-managed");
             let initial_state = format!(
                 "main_repo: {}\nmanaged_worktree: {}",
-                main_repo.display(),
-                created_wt.path
+                primary_project.root_path, created_wt.path
             );
 
             // Act
@@ -229,12 +236,9 @@ mod given_a_git_project_exists {
             });
 
             // Assert
-            assert_eq!(
-                project_from_wt.root_path,
-                main_repo.to_string_lossy().as_ref()
-            );
+            assert_eq!(project_from_wt.root_path, primary_project.root_path);
             assert_eq!(project_from_wt.branch.as_deref(), Some("main"));
-            assert!(project_from_wt.contains_workspace(&created_wt.path));
+            assert!(project_from_wt.has_workspace(&created_wt.path));
             let wt = resolved_wt.expect("should return managed worktree");
             assert_eq!(wt.name, "feature-managed");
             assert_eq!(wt.branch.as_deref(), Some("worktree/feature-managed"));
@@ -277,7 +281,7 @@ mod given_a_git_project_exists {
                     .expect_err("checked-out branch should fail");
                 (managed_wt, invalid_err, dup_err)
             });
-            project.upsert_worktree(managed_wt.clone());
+            project.set_worktree(managed_wt.clone());
 
             // Assert
             assert_eq!(managed_wt.name, "feature-managed");
@@ -302,20 +306,14 @@ mod given_a_git_project_exists {
         }
     }
 
-    mod when_updating_and_renaming_projects_and_worktrees {
+    mod when_updating_projects_and_renaming_worktrees {
         use super::*;
 
         #[test]
         fn should_update_project_appearance_and_preserve_custom_worktree_names_across_refresh() {
             // Arrange
             let fixture = ProjectTestFixture::empty();
-            let main_repo = fixture.init_git_repo("lgtm");
-            let (mut project, _) = fixture.service.resolve_project(&main_repo).unwrap();
-            let wt = fixture
-                .service
-                .create_worktree(&project, "worktree/feature-ui", None)
-                .unwrap();
-            project.upsert_worktree(wt.clone());
+            let (mut project, wt) = fixture.init_project_with_worktree("worktree/feature-ui");
             let initial_state = serde_json::to_string_pretty(&project).unwrap();
 
             // Act
@@ -325,7 +323,7 @@ mod given_a_git_project_exists {
                     Some("rocket".to_owned()),
                     Some("violet".to_owned()),
                 );
-                assert!(project.rename_worktree(&wt.path, "UI Polish"));
+                assert!(project.set_worktree_name(&wt.path, "UI Polish"));
                 fixture.service.refresh_project(&mut project).unwrap();
             });
 
@@ -339,7 +337,7 @@ mod given_a_git_project_exists {
                 project.worktrees[0].branch.as_deref(),
                 Some("worktree/feature-ui")
             );
-            assert_eq!(Project::default_name(&project.root_path), "lgtm");
+            assert_eq!(Project::get_default_name(&project.root_path), "lgtm");
 
             let final_state = serde_json::to_string_pretty(&project).unwrap();
             fixture.write_artifact(
@@ -358,13 +356,8 @@ mod given_a_git_project_exists {
         fn should_require_force_for_dirty_managed_worktree_and_remove_when_forced() {
             // Arrange
             let fixture = ProjectTestFixture::empty();
-            let main_repo = fixture.init_git_repo("lgtm");
-            let (mut project, _) = fixture.service.resolve_project(&main_repo).unwrap();
-            let managed = fixture
-                .service
-                .create_worktree(&project, "worktree/feature-clean", None)
-                .unwrap();
-            project.upsert_worktree(managed.clone());
+            let (mut project, managed) =
+                fixture.init_project_with_worktree("worktree/feature-clean");
             fs::write(Path::new(&managed.path).join("dirty.txt"), "uncommitted").unwrap();
             let initial_state = serde_json::to_string_pretty(&project).unwrap();
 

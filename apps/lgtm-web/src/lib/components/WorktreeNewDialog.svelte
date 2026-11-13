@@ -14,21 +14,18 @@
     Notice,
   } from '@cloudvoyant/helical-svelte'
   import { X } from 'lucide-svelte'
-  import type { WorkspaceService } from '../../services/workspaceService.svelte'
+  import { useService } from '../services/context'
 
-  // Props ---------------------------------------------------------------------
-  interface NewWorktreeDialogProps {
-    workspace: WorkspaceService
-  }
-  let { workspace }: NewWorktreeDialogProps = $props()
+  // State ---------------------------------------------------------------------
+  const project = useService('project')
 </script>
 
-{#if workspace.worktreeDialog}
+{#if project.worktreeDialog}
   <Dialog
     open={true}
     initialFocusEl={() => document.querySelector<HTMLElement>('input[aria-label="Branch name"]')}
     onOpenChange={({ open }) => {
-      if (!open) workspace.closeNewWorktreeDialog()
+      if (!open) project.closeNewWorktreeDialog()
     }}
   >
     <DialogBackdrop />
@@ -40,7 +37,7 @@
         class="flex flex-col gap-3"
         onsubmit={(event) => {
           event.preventDefault()
-          void workspace.submitNewWorktree()
+          void project.submitNewWorktree()
         }}
       >
         <Field>
@@ -50,12 +47,9 @@
             type="text"
             data-which-key-target=""
             aria-label="Branch name"
-            value={workspace.worktreeDialog.branch}
+            value={project.worktreeDialog.branch}
             oninput={(event) => {
-              if (workspace.worktreeDialog) {
-                workspace.worktreeDialog.branch = event.currentTarget.value
-                workspace.worktreeDialog.error = null
-              }
+              project.updateWorktreeDialogBranch(event.currentTarget.value)
             }}
           />
         </Field>
@@ -66,10 +60,10 @@
             type="text"
             data-which-key-target=""
             aria-label="Base ref"
-            value={workspace.worktreeDialog.baseRef}
+            value={project.worktreeDialog.baseRef}
             oninput={(event) => {
-              if (workspace.worktreeDialog) {
-                workspace.worktreeDialog.baseRef = event.currentTarget.value
+              if (project.worktreeDialog) {
+                project.worktreeDialog.baseRef = event.currentTarget.value
               }
             }}
           />
@@ -77,13 +71,13 @@
         <p
           class="truncate text-[10px] text-muted-foreground"
           data-testid="worktree-preview-path"
-          title={workspace.worktreePreviewPath}
+          title={project.worktreePreviewPath}
         >
-          {workspace.worktreePreviewPath}
+          {project.worktreePreviewPath}
         </p>
-        {#if workspace.worktreeDialog.error}
+        {#if project.worktreeDialog.error}
           <Notice variant="error" class="text-xs">
-            {workspace.worktreeDialog.error}
+            {project.worktreeDialog.error}
           </Notice>
         {/if}
         <DialogFooter>
@@ -91,8 +85,8 @@
             type="button"
             variant="text"
             size="sm"
-            disabled={workspace.worktreeDialog.submitting}
-            onclick={() => workspace.closeNewWorktreeDialog()}
+            disabled={project.worktreeDialog.submitting}
+            onclick={() => project.closeNewWorktreeDialog()}
           >
             Cancel
           </Button>
@@ -100,7 +94,7 @@
             type="submit"
             variant="outline"
             size="sm"
-            disabled={workspace.worktreeDialog.submitting}
+            disabled={project.worktreeDialog.submitting}
           >
             Create worktree
           </Button>

@@ -72,7 +72,7 @@ classDiagram
         +String path
         +String name
         +Option~String~ branch
-        +default_name() String
+        +get_default_name() String
         +has_custom_name() bool
     }
 

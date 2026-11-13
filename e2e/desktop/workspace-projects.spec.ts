@@ -10,12 +10,11 @@ async function openFolderViaPicker(
 ) {
   const canonical = await realpath(folderPath)
   workspace.pickedFolder = canonical
-  if (await page.getByRole('button', { name: 'Add project', exact: true }).isVisible()) {
-    await page.getByRole('button', { name: 'Add project', exact: true }).click()
-  } else {
-    await page.getByRole('combobox', { name: 'Workspace selector', exact: true }).click()
-    await page.getByRole('option', { name: 'Open folder…', exact: true }).click()
+  const addProjectBtn = page.getByRole('button', { name: 'Add project', exact: true })
+  if (!(await addProjectBtn.isVisible())) {
+    await page.getByRole('button', { name: 'Projects view', exact: true }).click()
   }
+  await addProjectBtn.click()
   await expect.poll(() => workspace.root).toBe(canonical)
 }
 
@@ -23,21 +22,21 @@ async function openFolderViaPicker(
 test.describe('Given a session with open projects', { tag: ['@desktop', '@projects'] }, () => {
   test.use({ initialWorkspace: 'existing' })
 
-  test.describe('When toggling Explorer and Projects in the footer bar', () => {
+  test.describe('When toggling Explorer and Projects in LeftDockToolbar', () => {
     test(
-      'should toggle the narrow Projects dock pane alongside WorkspaceExplorer without re-rendering and persist sidebarWidget across reload',
+      'should toggle the Projects and Explorer dock panes in LeftDockToolbar without re-rendering',
       { tag: '@smoke' },
-      async ({ page, workspace }) => {
+      async ({ page }) => {
         // Arrange
-        const sidebarFooter = page.locator('#workspace-sidebar [data-sidebar="footer"]')
-        const footerButtons = sidebarFooter.locator('button')
-        const firstButtonLabel = await footerButtons.nth(0).getAttribute('aria-label')
-        const secondButtonLabel = await footerButtons.nth(1).getAttribute('aria-label')
-        const explorerBtn = sidebarFooter.getByRole('button', {
+        const dockToolbar = page.getByTestId('left-dock-toolbar')
+        const toolbarButtons = dockToolbar.locator('button')
+        const firstButtonLabel = await toolbarButtons.nth(0).getAttribute('aria-label')
+        const secondButtonLabel = await toolbarButtons.nth(1).getAttribute('aria-label')
+        const explorerBtn = dockToolbar.getByRole('button', {
           name: 'Explorer view',
           exact: true,
         })
-        const projectsBtn = sidebarFooter.getByRole('button', {
+        const projectsBtn = dockToolbar.getByRole('button', {
           name: 'Projects view',
           exact: true,
         })
@@ -91,6 +90,37 @@ test.describe('Given a session with open projects', { tag: ['@desktop', '@projec
             (document.querySelector('#explorer-dock-pane [role="tree"]') as HTMLElement | null)
               ?.dataset.instanceMarker ?? null,
         )
+
+        // Assert
+        expect(firstButtonLabel).toBe('Projects view')
+        expect(secondButtonLabel).toBe('Explorer view')
+        expect(projectsWidth).toBeLessThan(explorerWidth)
+        expect(projectsStillVisibleOnSidebarToggle).toBe(true)
+        expect(explorerHiddenOnSidebarToggle).toBe(true)
+        expect(projectsHiddenOnProjectsShortcut).toBe(true)
+        expect(explorerStillVisibleOnProjectsShortcut).toBe(true)
+        expect(projectsMarkerAfterToggle).toBe('persisted-projects')
+        expect(explorerMarkerAfterToggle).toBe('persisted-explorer')
+      },
+    )
+
+    test(
+      'should persist the active sidebarWidget across reload',
+      { tag: '@smoke' },
+      async ({ page, workspace }) => {
+        // Arrange
+        const dockToolbar = page.getByTestId('left-dock-toolbar')
+        const projectsBtn = dockToolbar.getByRole('button', {
+          name: 'Projects view',
+          exact: true,
+        })
+        const explorerBtn = dockToolbar.getByRole('button', {
+          name: 'Explorer view',
+          exact: true,
+        })
+
+        // Act
+        await projectsBtn.click()
         await expect
           .poll(async () => {
             const sessionRaw = await readFile(
@@ -103,15 +133,6 @@ test.describe('Given a session with open projects', { tag: ['@desktop', '@projec
         await page.reload()
 
         // Assert
-        expect(firstButtonLabel).toBe('Projects view')
-        expect(secondButtonLabel).toBe('Explorer view')
-        expect(projectsWidth).toBeLessThan(explorerWidth)
-        expect(projectsStillVisibleOnSidebarToggle).toBe(true)
-        expect(explorerHiddenOnSidebarToggle).toBe(true)
-        expect(projectsHiddenOnProjectsShortcut).toBe(true)
-        expect(explorerStillVisibleOnProjectsShortcut).toBe(true)
-        expect(projectsMarkerAfterToggle).toBe('persisted-projects')
-        expect(explorerMarkerAfterToggle).toBe('persisted-explorer')
         await expect(projectsBtn).toHaveAttribute('aria-pressed', 'true')
         await expect(explorerBtn).toHaveAttribute('aria-pressed', 'true')
         await expect(page.getByRole('tree', { name: 'Projects' })).toBeVisible()
@@ -125,45 +146,37 @@ test.describe('Given a session with open projects', { tag: ['@desktop', '@projec
 test.describe('Given a project with linked worktrees', { tag: ['@desktop', '@projects'] }, () => {
   test.use({ initialWorkspace: 'existing' })
 
+  let repoDir: string
+  let wtOne: string
+  let wtTwo: string
+
+  test.beforeEach(async ({ page, workspace }) => {
+    const rawDir = await workspace.createExternalDir()
+    repoDir = await createGitRepo(join(rawDir, 'alpha-repo'), {
+      'README.md': '# Alpha\n',
+    })
+    const wtBase = join(workspace.lgtmHomeDir, 'worktrees', 'alpha-repo')
+    wtOne = await createGitWorktree(repoDir, join(wtBase, 'feature-wt-one'), 'feature/wt-one')
+    wtTwo = await createGitWorktree(repoDir, join(wtBase, 'feature-wt-two'), 'feature/wt-two')
+
+    await page.getByRole('button', { name: 'Projects view', exact: true }).click()
+    await openFolderViaPicker(page, workspace, repoDir)
+    await openFolderViaPicker(page, workspace, wtOne)
+    await openFolderViaPicker(page, workspace, wtTwo)
+  })
+
   test.describe('When collapsing and expanding the project branch in TreeView', () => {
     test(
-      'should collapse and expand child worktree items using ArkTreeView.Branch without switching the active workspace',
+      'should collapse and expand child worktree items via branch chevron without switching the active workspace',
       { tag: '@smoke' },
       async ({ page, workspace }) => {
         // Arrange
-        const rawDir = await workspace.createExternalDir()
-        const repoDir = await createGitRepo(join(rawDir, 'alpha-repo'), {
-          'README.md': '# Alpha\n',
-        })
-        const wtBase = join(workspace.lgtmHomeDir, 'worktrees', 'alpha-repo')
-        const wtOne = await createGitWorktree(
-          repoDir,
-          join(wtBase, 'feature-wt-one'),
-          'feature/wt-one',
-        )
-        const wtTwo = await createGitWorktree(
-          repoDir,
-          join(wtBase, 'feature-wt-two'),
-          'feature/wt-two',
-        )
-
-        await page.getByRole('button', { name: 'Projects view', exact: true }).click()
-        await openFolderViaPicker(page, workspace, repoDir)
-        await openFolderViaPicker(page, workspace, wtOne)
-        await openFolderViaPicker(page, workspace, wtTwo)
-
         const projectItem = entry(page, repoDir)
         const wtOneItem = entry(page, wtOne)
         const wtTwoItem = entry(page, wtTwo)
         const activeBeforeCollapse = workspace.root
 
         // Act
-        await projectItem.locator('[data-part="branch-control"]').click()
-        await wtOneItem.waitFor({ state: 'hidden' })
-        await wtTwoItem.waitFor({ state: 'hidden' })
-        const wtOneHiddenWhenRowCollapsed = !(await wtOneItem.isVisible())
-        await projectItem.locator('[data-part="branch-control"]').click()
-        await wtOneItem.waitFor({ state: 'visible' })
         await projectItem
           .getByRole('button', { name: `Collapse ${basename(repoDir)}`, exact: true })
           .click()
@@ -176,46 +189,73 @@ test.describe('Given a project with linked worktrees', { tag: ['@desktop', '@pro
           .getByRole('button', { name: `Expand ${basename(repoDir)}`, exact: true })
           .click()
         await wtOneItem.waitFor({ state: 'visible' })
-        await projectItem.locator('[data-part="branch-control"]').click({ button: 'right' })
-        await page.getByRole('menuitem', { name: 'Collapse Worktrees', exact: true }).click()
-        await wtOneItem.waitFor({ state: 'hidden' })
-        const hiddenAfterContextCollapse = !(await wtOneItem.isVisible())
-        await projectItem.locator('[data-part="branch-control"]').click({ button: 'right' })
-        await page.getByRole('menuitem', { name: 'Expand Worktrees', exact: true }).click()
 
         // Assert
-        expect(wtOneHiddenWhenRowCollapsed).toBe(true)
         expect(wtOneHiddenWhenCollapsed).toBe(true)
         expect(wtTwoHiddenWhenCollapsed).toBe(true)
         expect(activeAfterCollapse).toBe(activeBeforeCollapse)
-        expect(hiddenAfterContextCollapse).toBe(true)
         await expect(wtOneItem).toBeVisible()
         await expect(wtTwoItem).toBeVisible()
       },
     )
 
-    test('should open the right-click ContextMenu on project and worktree nodes for New Worktree, Edit, Rename Worktree, Remove Worktree, and Remove Project', async ({
+    test('should collapse and expand child worktree items via the project context menu', async ({
+      page,
+    }) => {
+      // Arrange
+      const projectItem = entry(page, repoDir)
+      const wtOneItem = entry(page, wtOne)
+      const wtTwoItem = entry(page, wtTwo)
+
+      // Act
+      await projectItem.locator('[data-part="branch-control"]').click({ button: 'right' })
+      await page.getByRole('menuitem', { name: 'Collapse Worktrees', exact: true }).click()
+      await wtOneItem.waitFor({ state: 'hidden' })
+      const hiddenAfterContextCollapse = !(await wtOneItem.isVisible())
+      await projectItem.locator('[data-part="branch-control"]').click({ button: 'right' })
+      await page.getByRole('menuitem', { name: 'Expand Worktrees', exact: true }).click()
+
+      // Assert
+      expect(hiddenAfterContextCollapse).toBe(true)
+      await expect(wtOneItem).toBeVisible()
+      await expect(wtTwoItem).toBeVisible()
+    })
+  })
+
+  test.describe('When invoking right-click ContextMenu actions on project and worktree nodes', () => {
+    for (const { nodeKind, expectedItems } of [
+      {
+        nodeKind: 'project' as const,
+        expectedItems: ['New Worktree', 'Edit', 'Collapse Worktrees', 'Remove Project'],
+      },
+      {
+        nodeKind: 'worktree' as const,
+        expectedItems: ['Rename Worktree', 'Remove Worktree'],
+      },
+    ]) {
+      test(`should list expected context menu items for ${nodeKind} nodes`, async ({ page }) => {
+        // Arrange
+        const target =
+          nodeKind === 'project'
+            ? entry(page, repoDir).locator('[data-part="branch-control"]')
+            : entry(page, wtOne)
+
+        // Act
+        await target.click({ button: 'right' })
+
+        // Assert
+        for (const label of expectedItems) {
+          await expect(page.getByRole('menuitem', { name: label })).toBeVisible()
+        }
+      })
+    }
+
+    test('should customize project name, color, and icon via Edit Project dialog', async ({
       page,
       workspace,
     }) => {
       // Arrange
-      const rawDir = await workspace.createExternalDir()
-      const repoDir = await createGitRepo(join(rawDir, 'ctx-repo'), {
-        'README.md': '# Ctx\n',
-      })
-      const wtBase = join(workspace.lgtmHomeDir, 'worktrees', 'ctx-repo')
-      const wtManaged = await createGitWorktree(
-        repoDir,
-        join(wtBase, 'feature-wt-ctx'),
-        'feature/wt-ctx',
-      )
-
-      await page.getByRole('button', { name: 'Projects view', exact: true }).click()
-      await openFolderViaPicker(page, workspace, repoDir)
-      await openFolderViaPicker(page, workspace, wtManaged)
-
       const projectItem = entry(page, repoDir)
-      const wtItem = entry(page, wtManaged)
       const defaultIcon = await projectItem
         .locator('[data-project-icon]')
         .getAttribute('data-project-icon')
@@ -242,7 +282,29 @@ test.describe('Given a project with linked worktrees', { tag: ['@desktop', '@pro
       const updatedColor = await projectItem
         .locator('[data-project-color]')
         .getAttribute('data-project-color')
+      const sessionAfterEdit = await readFile(
+        join(workspace.lgtmHomeDir, 'sessions/default.json'),
+        'utf8',
+      )
 
+      // Assert
+      expect(defaultIcon).toBe('box')
+      expect(closeButtonVisible).toBe(true)
+      expect(updatedProjectLabel).toContain('Renamed Project')
+      expect(updatedIcon).toBe('rocket')
+      expect(updatedColor).toBe('violet')
+      expect(sessionAfterEdit).toContain('"name": "Renamed Project"')
+    })
+
+    test('should rename and remove a worktree and detach the project via context menu', async ({
+      page,
+      workspace,
+    }) => {
+      // Arrange
+      const projectItem = entry(page, repoDir)
+      const wtItem = entry(page, wtOne)
+
+      // Act
       await wtItem.click({ button: 'right' })
       await page.getByRole('menuitem', { name: 'Rename Worktree' }).click()
       const renameInput = wtItem.getByRole('textbox', { name: 'Name', exact: true })
@@ -261,22 +323,16 @@ test.describe('Given a project with linked worktrees', { tag: ['@desktop', '@pro
       await removeDialog.getByRole('button', { name: 'Remove worktree', exact: true }).click()
       await removeDialog.waitFor({ state: 'hidden' })
       await wtItem.waitFor({ state: 'detached' })
-      await projectItem.click({ button: 'right' })
+      await projectItem.locator('[data-part="branch-control"]').click({ button: 'right' })
       await page.getByRole('menuitem', { name: 'Remove Project', exact: true }).click()
 
       // Assert
-      expect(defaultIcon).toBe('box')
-      expect(closeButtonVisible).toBe(true)
-      expect(updatedProjectLabel).toContain('Renamed Project')
-      expect(updatedIcon).toBe('rocket')
-      expect(updatedColor).toBe('violet')
       expect(renamedLabel).toContain('Custom Worktree Section')
-      expect(sessionAfterRename).toContain('"name": "Renamed Project"')
       expect(sessionAfterRename).toContain('"name": "Custom Worktree Section"')
-      expect(sessionAfterRename).toContain('"branch": "feature/wt-ctx"')
+      expect(sessionAfterRename).toContain('"branch": "feature/wt-one"')
       await expect(wtItem).toHaveCount(0)
       await expect(projectItem).toHaveCount(0)
-      expect(await exists(wtManaged)).toBe(false)
+      expect(await exists(wtOne)).toBe(false)
       expect(await exists(repoDir)).toBe(true)
     })
   })
@@ -404,7 +460,32 @@ test.describe(
 
     test.describe('When switching workspaces and restarting the app', () => {
       test(
-        'should switch between project primary checkout and worktrees immediately using cached state and retain only edited tabs and the last opened tab across switches and restarts',
+        'should switch between project primary checkout and worktrees immediately using cached state',
+        { tag: '@smoke' },
+        async ({ page, workspace }) => {
+          // Arrange
+          const firstRoot = workspace.root
+          const rawDir = await workspace.createExternalDir()
+          const secondRepo = await createGitRepo(join(rawDir, 'second-repo'), {
+            'alpha.md': '# Alpha\n',
+          })
+          await entry(page, 'same.md').click()
+          await expect(page.locator('.cm-content')).toContainText('# Markdown')
+
+          // Act
+          await openFolderViaPicker(page, workspace, secondRepo)
+          await entry(page, 'alpha.md').click()
+          await expect(page.locator('.cm-content')).toContainText('# Alpha')
+          await entry(page, firstRoot).click()
+
+          // Assert
+          await expect(page.locator('.cm-content')).toContainText('# Markdown')
+          await expect(entry(page, firstRoot)).toHaveAttribute('aria-selected', 'true')
+        },
+      )
+
+      test(
+        'should retain only edited tabs and the last opened tab across workspace switches and restarts',
         { tag: '@smoke' },
         async ({ page, workspace }) => {
           // Arrange
@@ -430,7 +511,6 @@ test.describe(
           // Act
           await openFolderViaPicker(page, workspace, secondRepo)
           await entry(page, 'alpha.md').click()
-          await page.getByRole('button', { name: 'Projects view', exact: true }).click()
           await entry(page, firstRoot).click()
           await page.reload()
 
@@ -456,6 +536,8 @@ test.describe(
             'README.md': '# Hotkey Repo\n',
           })
           await openFolderViaPicker(page, workspace, repoDir)
+          // Close Projects pane first so Space p p toggles it back open
+          await page.getByRole('button', { name: 'Projects view', exact: true }).click()
           const dialog = page.getByRole('dialog', { name: 'New Worktree' })
 
           // Act

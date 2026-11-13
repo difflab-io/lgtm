@@ -32,6 +32,9 @@ pub struct Project {
     pub collapsed: bool,
     /// Open linked Git worktrees attached underneath this project.
     pub worktrees: Vec<Worktree>,
+    /// Local Git branches (`refs/heads/*`) discovered for this project.
+    #[serde(default)]
+    pub branches: Vec<String>,
 }
 
 impl Project {
@@ -43,7 +46,7 @@ impl Project {
         worktrees: Vec<Worktree>,
     ) -> Self {
         let id = Uuid::new_v5(&Uuid::NAMESPACE_URL, root_path.as_bytes());
-        let name = Self::default_name(&root_path);
+        let name = Self::get_default_name(&root_path);
         Self {
             id,
             name,
@@ -54,13 +57,14 @@ impl Project {
             color: None,
             collapsed: false,
             worktrees,
+            branches: Vec::new(),
         }
     }
 
     // Public ------------------------------------------------------------------
 
     /// Computes the default display name for a project from its directory basename.
-    pub fn default_name(root_path: &str) -> String {
+    pub fn get_default_name(root_path: &str) -> String {
         Path::new(root_path)
             .file_name()
             .and_then(|s| s.to_str())
@@ -69,9 +73,14 @@ impl Project {
     }
 
     /// Returns whether `workspace_root` matches this project's `root_path` or one of its open `worktrees`.
-    pub fn contains_workspace(&self, workspace_root: &str) -> bool {
+    pub fn has_workspace(&self, workspace_root: &str) -> bool {
         self.root_path == workspace_root
             || self.worktrees.iter().any(|wt| wt.path == workspace_root)
+    }
+
+    /// Sets whether child worktrees are collapsed in `ProjectsPane`.
+    pub fn set_collapsed(&mut self, collapsed: bool) {
+        self.collapsed = collapsed;
     }
 
     /// Updates custom `name`, `icon`, and `color` appearance properties on this project.
@@ -84,7 +93,7 @@ impl Project {
         if let Some(raw_name) = name {
             let trimmed = raw_name.trim();
             self.name = if trimmed.is_empty() {
-                Self::default_name(&self.root_path)
+                Self::get_default_name(&self.root_path)
             } else {
                 trimmed.to_owned()
             };
@@ -93,8 +102,8 @@ impl Project {
         self.color = color.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
     }
 
-    /// Renames the display label of `worktree_path` without changing its Git branch name, returning `true` if found.
-    pub fn rename_worktree(&mut self, worktree_path: &str, name: &str) -> bool {
+    /// Updates the display label of `worktree_path` without changing its Git branch name, returning `true` if found.
+    pub fn set_worktree_name(&mut self, worktree_path: &str, name: &str) -> bool {
         let Some(worktree) = self
             .worktrees
             .iter_mut()
@@ -104,7 +113,7 @@ impl Project {
         };
         let trimmed = name.trim();
         worktree.name = if trimmed.is_empty() {
-            Worktree::default_name(&worktree.path, worktree.branch.as_deref())
+            Worktree::get_default_name(&worktree.path, worktree.branch.as_deref())
         } else {
             trimmed.to_owned()
         };
@@ -112,7 +121,7 @@ impl Project {
     }
 
     /// Inserts or updates a linked worktree in `self.worktrees`, preserving existing order and any custom worktree section name.
-    pub fn upsert_worktree(&mut self, worktree: Worktree) {
+    pub fn set_worktree(&mut self, worktree: Worktree) {
         if let Some(existing) = self
             .worktrees
             .iter_mut()
@@ -126,5 +135,11 @@ impl Project {
         } else {
             self.worktrees.push(worktree);
         }
+    }
+
+    /// Removes any linked worktree matching `canonical_path` or `raw_path` from `self.worktrees`.
+    pub fn apply_worktree_removal(&mut self, canonical_path: &str, raw_path: &str) {
+        self.worktrees
+            .retain(|wt| wt.path != canonical_path && wt.path != raw_path);
     }
 }

@@ -9,8 +9,8 @@ import {
   deleteEntry,
   exists,
 } from './fixtures'
-import { readFile, readdir, stat, writeFile } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
 // Tests -----------------------------------------------------------------------
 test.describe('Given a new workspace', { tag: ['@desktop', '@file-tree'] }, () => {
@@ -41,17 +41,14 @@ test.describe('Given a new workspace', { tag: ['@desktop', '@file-tree'] }, () =
 
   test.describe('When opening and switching workspaces', () => {
     test(
-      'should remember opened workspaces in the selector and reopen them',
+      'should remember opened workspaces in the Projects pane and reopen them',
       { tag: '@smoke' },
       async ({ page, workspace }) => {
         // Arrange
-        const defaultRoot = workspace.root
-        const externalDir = await workspace.createExternalDir()
+        const defaultRoot = await realpath(workspace.root)
+        const externalDir = await realpath(await workspace.createExternalDir())
         await writeFile(join(externalDir, 'Cargo.toml'), '[package]\nname = "demo"\n')
         workspace.pickedFolder = externalDir
-        const chooser = page
-          .locator('.titlebar')
-          .getByRole('combobox', { name: 'Workspace selector', exact: true })
 
         // Act
         await createFile(page)
@@ -61,23 +58,21 @@ test.describe('Given a new workspace', { tag: ['@desktop', '@file-tree'] }, () =
         expect(await readFile(join(defaultRoot, 'Untitled.md'), 'utf8')).toBe('# Untitled\n\n')
 
         // Act
-        await chooser.click()
-        await page.getByRole('option', { name: 'Open folder…', exact: true }).click()
+        await page.getByRole('button', { name: 'Projects view', exact: true }).click()
+        await page.getByRole('button', { name: 'Add project', exact: true }).click()
 
         // Assert
         await expect(entry(page, 'Cargo.toml')).toBeVisible()
-        await expect(chooser).toContainText(basename(externalDir))
+        await expect(entry(page, externalDir)).toHaveAttribute('aria-selected', 'true')
 
         // Act
-        await chooser.click()
-        await page.getByRole('option', { name: 'Local workspace', exact: true }).click()
+        await entry(page, defaultRoot).click()
 
         // Assert
         await expect(entry(page, 'Untitled.md')).toBeVisible()
 
         // Act
-        await chooser.click()
-        await page.getByRole('option', { name: basename(externalDir), exact: true }).click()
+        await entry(page, externalDir).click()
 
         // Assert
         await expect(entry(page, 'Cargo.toml')).toBeVisible()

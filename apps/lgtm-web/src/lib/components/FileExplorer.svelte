@@ -1,13 +1,10 @@
 <script lang="ts">
   import { TreeView } from 'lgtm-ui'
   import { Folder, FolderOpen, FileText } from 'lucide-svelte'
-  import type { WorkspaceService } from '../services/workspaceService.svelte'
+  import { useService } from '../services/context'
 
-  // Props ---------------------------------------------------------------------
-  interface WorkspaceExplorerProps {
-    workspace: WorkspaceService
-  }
-  let { workspace }: WorkspaceExplorerProps = $props()
+  // State ---------------------------------------------------------------------
+  const workspace = useService('workspace')
 </script>
 
 <TreeView

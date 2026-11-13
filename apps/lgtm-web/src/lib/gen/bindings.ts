@@ -61,6 +61,8 @@ export const commands = {
 	projectRemoveWorktree: (projectId: string, worktreePath: string, force: boolean | null) => __TAURI_INVOKE<Session>("project_remove_worktree", { projectId, worktreePath, force }),
 	/**  Removes `project_id` and its remembered workspace states from the `default` session. */
 	projectRemove: (projectId: string) => __TAURI_INVOKE<Session>("project_remove", { projectId }),
+	/**  Switches `workspace_root` to `branch` (or creates `-b <branch>` when `create` is `true`) and returns the refreshed session. */
+	projectCheckoutBranch: (workspaceRoot: string, branch: string, create: boolean | null) => __TAURI_INVOKE<Session>("project_checkout_branch", { workspaceRoot, branch, create }),
 };
 
 /* Types */
@@ -453,6 +455,8 @@ export type Project = {
 	collapsed: boolean,
 	/**  Open linked Git worktrees attached underneath this project. */
 	worktrees: Worktree[],
+	/**  Local Git branches (`refs/heads/*`) discovered for this project. */
+	branches?: string[],
 };
 
 /**  Merged configuration snapshot together with per-scope patch trees returned to the frontend. */
@@ -485,7 +489,7 @@ export type Session = {
 
 /**  Left-sidebar widget mode persisted in a [`Session`]. */
 export type SidebarWidget = 
-/**  Active workspace file explorer (`WorkspaceExplorer.svelte`). */
+/**  Active workspace file explorer (`FileExplorer.svelte`). */
 "explorer" | 
 /**  Open projects and collapsible worktrees tree (`ProjectsPane.svelte`). */
 "projects";

@@ -3,17 +3,17 @@
   import { Button, Notice, useKeymap } from '@cloudvoyant/helical-svelte'
   import { TreeView } from 'lgtm-ui'
   import { GitBranch } from 'lucide-svelte'
-  import type { WorkspaceService } from '../services/workspaceService.svelte'
-  import EditProjectDialog from './projects/EditProjectDialog.svelte'
-  import NewWorktreeDialog from './projects/NewWorktreeDialog.svelte'
-  import { resolveColorHex, resolveIconComponent } from './projects/projectAppearance'
-  import RemoveWorktreeDialog from './projects/RemoveWorktreeDialog.svelte'
+  import { resolveColorHex, resolveIconComponent } from '../constants'
+  import { useService } from '../services/context'
+  import BranchNewDialog from './BranchNewDialog.svelte'
+  import ProjectEditDialog from './ProjectEditDialog.svelte'
+  import WorktreeNewDialog from './WorktreeNewDialog.svelte'
+  import WorktreeRemoveDialog from './WorktreeRemoveDialog.svelte'
 
-  // Props ---------------------------------------------------------------------
-  interface ProjectsPaneProps {
-    workspace: WorkspaceService
-  }
-  let { workspace }: ProjectsPaneProps = $props()
+  // State ---------------------------------------------------------------------
+  const workspace = useService('workspace')
+  const project = useService('project')
+  const session = useService('session')
 
   // Lifecycle -----------------------------------------------------------------
   useKeymap(
@@ -24,18 +24,23 @@
         mode: ['normal', 'select', 'insert'],
         hidden: true,
         action: () => {
-          if (workspace.worktreeDialog) {
-            workspace.closeNewWorktreeDialog()
+          if (project.worktreeDialog) {
+            project.closeNewWorktreeDialog()
             getDocumentWhichKeyController()?.setMode('normal')
             return true
           }
-          if (workspace.removeWorktreeConfirm) {
-            workspace.cancelRemoveWorktree()
+          if (project.newBranchDialog) {
+            project.closeNewBranchDialog()
             getDocumentWhichKeyController()?.setMode('normal')
             return true
           }
-          if (workspace.customizeProjectDialog) {
-            workspace.closeCustomizeProjectDialog()
+          if (project.removeWorktreeConfirm) {
+            project.cancelRemoveWorktree()
+            getDocumentWhichKeyController()?.setMode('normal')
+            return true
+          }
+          if (project.customizeProjectDialog) {
+            project.closeCustomizeProjectDialog()
             getDocumentWhichKeyController()?.setMode('normal')
             return true
           }
@@ -47,15 +52,16 @@
       priority: 'pane',
       enabled: () =>
         Boolean(
-          workspace.worktreeDialog ||
-          workspace.removeWorktreeConfirm ||
-          workspace.customizeProjectDialog,
+          project.worktreeDialog ||
+          project.newBranchDialog ||
+          project.removeWorktreeConfirm ||
+          project.customizeProjectDialog,
         ),
     },
   )
 </script>
 
-{#if workspace.projectNodes.length === 0}
+{#if project.projectNodes.length === 0}
   <div class="mx-3.5 my-2 flex flex-col items-start gap-2 text-xs text-muted-foreground">
     <Notice variant="none" class="p-0 text-xs">No projects open in this session.</Notice>
     <Button
@@ -70,25 +76,25 @@
   <TreeView
     label="Projects"
     selectableBranches={true}
-    nodes={workspace.projectNodes}
-    expandedValue={workspace.projectExpandedValues}
-    onExpandedChange={(next) => void workspace.handleProjectExpandedChange(next)}
-    selected={workspace.projectsOpen ? workspace.root : null}
+    nodes={project.projectNodes}
+    expandedValue={project.projectExpandedValues}
+    onExpandedChange={(next) => void project.handleProjectExpandedChange(next)}
+    selected={session.projectsOpen ? workspace.root : null}
     onselect={(path) => void workspace.selectWorkspace(path)}
-    onrename={(path, name) => workspace.renameProjectWorktree(path, name)}
-    contextItems={(node) => workspace.projectContextItems(node)}
-    onaction={(value, action) => void workspace.projectContextAction(value, action)}
+    onrename={(path, name) => project.renameProjectWorktree(path, name)}
+    contextItems={(node) => project.projectContextItems(node)}
+    onaction={(value, action) => void project.projectContextAction(value, action)}
   >
     {#snippet icon(node)}
-      {@const project = workspace.projects.find((p) => p.rootPath === node.value)}
-      {#if project}
-        {@const IconComp = resolveIconComponent(project.icon)}
-        {@const colorHex = resolveColorHex(project.color)}
+      {@const ownerProject = project.projects.find((p) => p.rootPath === node.value)}
+      {#if ownerProject}
+        {@const IconComp = resolveIconComponent(ownerProject.icon)}
+        {@const colorHex = resolveColorHex(ownerProject.color)}
         <span
           class="inline-flex items-center justify-center"
           style:color={colorHex ?? undefined}
-          data-project-icon={project.icon ?? 'box'}
-          data-project-color={project.color ?? 'default'}
+          data-project-icon={ownerProject.icon ?? 'box'}
+          data-project-color={ownerProject.color ?? 'default'}
         >
           <IconComp size={13} strokeWidth={1.6} />
         </span>
@@ -99,6 +105,7 @@
   </TreeView>
 {/if}
 
-<NewWorktreeDialog {workspace} />
-<RemoveWorktreeDialog {workspace} />
-<EditProjectDialog {workspace} />
+<WorktreeNewDialog />
+<BranchNewDialog />
+<WorktreeRemoveDialog />
+<ProjectEditDialog />

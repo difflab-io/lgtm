@@ -30,6 +30,10 @@ pub enum LgtmProjectError {
     #[error("{0}")]
     InvalidPath(String),
 
+    /// Target project or worktree was not found.
+    #[error("{0}")]
+    NotFound(String),
+
     /// Underlying `git` CLI or filesystem error.
     #[error("{0}")]
     Git(String),

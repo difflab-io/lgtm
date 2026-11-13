@@ -143,6 +143,7 @@ export interface WorkspaceClient {
   projectCreateWorktree?(projectId: string, branch: string, baseRef?: string): Promise<Session>
   projectRemoveWorktree?(projectId: string, worktreePath: string, force?: boolean): Promise<Session>
   projectRemove?(projectId: string): Promise<Session>
+  projectCheckoutBranch?(workspaceRoot: string, branch: string, create?: boolean): Promise<Session>
   registerSessionHandlers?(handlers: {
     onSessionUpdated: (session: Session) => void
   }): Promise<(() => void)[]>
@@ -233,6 +234,8 @@ export const workspaceClient: WorkspaceClient = {
   projectRemoveWorktree: (projectId: string, worktreePath: string, force?: boolean) =>
     commands.projectRemoveWorktree(projectId, worktreePath, force ?? null),
   projectRemove: (projectId: string) => commands.projectRemove(projectId),
+  projectCheckoutBranch: (workspaceRoot: string, branch: string, create?: boolean) =>
+    commands.projectCheckoutBranch(workspaceRoot, branch, create ?? null),
   registerSessionHandlers: (handlers) =>
     Promise.all([
       listen<Session>('session-updated', (event) => {

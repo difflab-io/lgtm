@@ -9,17 +9,6 @@ import {
 } from '@cloudvoyant/helical-ui'
 import type { WorkspaceService } from './workspaceService.svelte'
 
-function leaf(
-  key: string,
-  label: string,
-  category: string,
-  commandId: string,
-  description: string,
-  mode?: KeymapMode[],
-): WhichKeyNode {
-  return { key, label, category, commandId, description, ...(mode ? { mode } : {}) }
-}
-
 /**
  * Application-level modal keybinding, `WhichKey` leader menu, and `CommandMenu`/`CommandPalette` registry.
  */
@@ -37,6 +26,8 @@ export class HotkeyService {
   constructor(workspace: WorkspaceService) {
     this.workspace = workspace
   }
+
+  // Public --------------------------------------------------------------------
 
   /** Effective Helical command surface style (`menu` or `colon`). */
   get effectiveCommandStyle(): HelicalCommandStyle {
@@ -275,7 +266,7 @@ export class HotkeyService {
     },
     'file.newFolder': () => {
       if (!this.sidebarOpen) this.sidebarOpen = true
-      this.workspace.setSidebarWidget('explorer')
+      this.workspace.session.setSidebarWidget('explorer')
       this.workspace.startCreate('directory')
       return true
     },
@@ -335,7 +326,7 @@ export class HotkeyService {
         description: 'Create a managed Git worktree for the active project',
         group: 'Projects',
         shortcut: ['Space', 'p', 'n'],
-        disabled: !this.workspace.activeProject,
+        disabled: !this.workspace.project.activeProject,
         onSelect: () => {
           this.openNewWorktree()
         },
@@ -347,7 +338,7 @@ export class HotkeyService {
         description: 'Remove the currently active linked Git worktree',
         group: 'Projects',
         shortcut: ['Space', 'p', 'd'],
-        disabled: !this.workspace.activeProject?.worktrees.some(
+        disabled: !this.workspace.project.activeProject?.worktrees.some(
           (wt) => wt.path === this.workspace.root,
         ),
         onSelect: () => {
@@ -394,8 +385,6 @@ export class HotkeyService {
     ]
   }
 
-  // Public --------------------------------------------------------------------
-
   /** Updates the open state of the command surface and clears any transient `:` override on close. */
   setCommandOpen(open: boolean) {
     this.commandOpen = open
@@ -424,8 +413,8 @@ export class HotkeyService {
 
   /** Toggles the Explorer widget pane and moves focus to it when opened. */
   toggleExplorer(): boolean {
-    this.workspace.toggleExplorerPane()
-    if (this.workspace.explorerOpen) {
+    this.workspace.session.toggleExplorerPane()
+    if (this.workspace.session.explorerOpen) {
       void tick().then(() => {
         getDocumentWhichKeyController()?.focusPane('workspace')
       })
@@ -436,15 +425,15 @@ export class HotkeyService {
   /** Toggles the `explorer` or `projects` dock pane independently and focuses it when opened. */
   showSidebarMode(mode: 'explorer' | 'projects'): boolean {
     if (mode === 'projects') {
-      this.workspace.toggleProjectsPane()
-      if (this.workspace.projectsOpen) {
+      this.workspace.session.toggleProjectsPane()
+      if (this.workspace.session.projectsOpen) {
         void tick().then(() => {
           getDocumentWhichKeyController()?.focusPane('projects')
         })
       }
     } else {
-      this.workspace.toggleExplorerPane()
-      if (this.workspace.explorerOpen) {
+      this.workspace.session.toggleExplorerPane()
+      if (this.workspace.session.explorerOpen) {
         void tick().then(() => {
           getDocumentWhichKeyController()?.focusPane('workspace')
         })
@@ -456,19 +445,32 @@ export class HotkeyService {
   /** Opens the `New Worktree` dialog in `ProjectsPane`. */
   openNewWorktree(): boolean {
     if (!this.sidebarOpen) this.sidebarOpen = true
-    this.workspace.setSidebarWidget('projects')
-    this.workspace.openNewWorktreeDialog()
+    this.workspace.session.setSidebarWidget('projects')
+    this.workspace.project.openNewWorktreeDialog()
     return true
   }
 
   /** Prompts to remove the currently active linked Git worktree in `ProjectsPane`. */
   removeActiveWorktree(): boolean {
-    const project = this.workspace.activeProject
+    const project = this.workspace.project.activeProject
     const wt = project?.worktrees.find((item) => item.path === this.workspace.root)
     if (!project || !wt) return false
     if (!this.sidebarOpen) this.sidebarOpen = true
-    this.workspace.setSidebarWidget('projects')
-    this.workspace.promptRemoveWorktree(project.id, wt.path)
+    this.workspace.session.setSidebarWidget('projects')
+    this.workspace.project.promptRemoveWorktree(project.id, wt.path)
     return true
   }
+}
+
+// Private ---------------------------------------------------------------------
+
+function leaf(
+  key: string,
+  label: string,
+  category: string,
+  commandId: string,
+  description: string,
+  mode?: KeymapMode[],
+): WhichKeyNode {
+  return { key, label, category, commandId, description, ...(mode ? { mode } : {}) }
 }

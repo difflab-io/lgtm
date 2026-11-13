@@ -1,51 +1,61 @@
 import type {
-  FileContent,
   Session,
   SidebarWidget,
   TabCandidate,
   WorkspaceClient,
-  WorkspaceNode,
 } from '../clients/workspaceClient'
-import type { WorkspaceTab } from './workspaceService.svelte'
+import type { CachedWorkspaceSnapshot } from '../types'
 
-/** In-memory snapshot of an open workspace's file tree, tabs, and selection state for instant workspace switching. */
-export interface CachedWorkspaceSnapshot {
-  root: string
-  entries: WorkspaceNode[]
-  dirEntries: Record<string, WorkspaceNode[]>
-  listed: Record<string, WorkspaceNode>
-  tabs: WorkspaceTab[]
-  activeTabId: string | null
-  selected: WorkspaceNode | null
-  fileContent: FileContent | null
-  selectionOffset: number | null
-  expandedDirs: string[]
-}
+export { type CachedWorkspaceSnapshot }
 
-/** Frontend session service managing left-dock visibility, per-workspace in-memory cache snapshots, and `~/.lgtm/sessions/<id>.json` persistence. */
+/** Frontend session service managing left-dock visibility, resizable pane widths, per-workspace cache snapshots, and `~/.lgtm/sessions/<id>.json` persistence. */
 export class SessionService {
   sidebarWidget = $state<SidebarWidget>('explorer')
   projectsOpen = $state(false)
   explorerOpen = $state(true)
+  projectsWidth = $state(180)
+  widgetWidth = $state(236)
   private workspaceCache = new Map<string, CachedWorkspaceSnapshot>()
   private sessionHydratedRoots = new Set<string>()
   private sidebarHydrated = false
   private sessionSaveQueue: Promise<void> = Promise.resolve()
 
-  /** Creates a `SessionService` bound to `client`. */
-  constructor(private client: WorkspaceClient) {}
+  /** Creates a `SessionService` bound to `client` and an optional callback invoked when dock visibility changes. */
+  constructor(
+    private client: WorkspaceClient,
+    private onDockChanged?: () => void,
+  ) {}
+
+  // Public --------------------------------------------------------------------
+
+  /** Returns the total rendered width (in px) of the open left-dock panes (`ProjectsPane` + `WidgetPane`). */
+  get leftDockWidth(): number {
+    return (this.projectsOpen ? this.projectsWidth : 0) + (this.explorerOpen ? this.widgetWidth : 0)
+  }
+
+  /** Clamps and updates the width of the `Projects` dock pane. */
+  setProjectsWidth(width: number): void {
+    this.projectsWidth = Math.min(360, Math.max(140, Math.round(width)))
+  }
+
+  /** Clamps and updates the width of the `WidgetPane` (`FileExplorer`). */
+  setWidgetWidth(width: number): void {
+    this.widgetWidth = Math.min(480, Math.max(160, Math.round(width)))
+  }
 
   /** Toggles the Projects dock pane independently of the Explorer widget slot. */
   toggleProjectsPane(): void {
     this.projectsOpen = !this.projectsOpen
     this.sidebarWidget = this.projectsOpen ? 'projects' : 'explorer'
     this.sidebarHydrated = true
+    this.onDockChanged?.()
   }
 
   /** Toggles the Explorer widget pane inside the left dock independently of the Projects pane. */
   toggleExplorerPane(): void {
     this.explorerOpen = !this.explorerOpen
     this.sidebarHydrated = true
+    this.onDockChanged?.()
   }
 
   /** Opens the specified left dock pane (`projects` or `explorer`). */
@@ -60,6 +70,7 @@ export class SessionService {
       }
     }
     this.sidebarHydrated = true
+    this.onDockChanged?.()
   }
 
   /** Hydrates initial sidebar dock visibility from `session` if not yet modified by the user. */

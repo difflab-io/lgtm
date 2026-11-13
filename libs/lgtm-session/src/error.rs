@@ -1,5 +1,7 @@
 //! Error types returned by `lgtm-session` operations.
 
+use lgtm_project::LgtmProjectError;
+
 /// Result alias for `lgtm-session` operations.
 pub type Result<T> = std::result::Result<T, LgtmSessionError>;
 
@@ -8,7 +10,7 @@ pub type Result<T> = std::result::Result<T, LgtmSessionError>;
 pub enum LgtmSessionError {
     /// Underlying project or worktree error.
     #[error("{0}")]
-    Project(#[from] lgtm_project::LgtmProjectError),
+    Project(LgtmProjectError),
 
     /// Target project or worktree was not found in the session.
     #[error("{0}")]
@@ -21,4 +23,13 @@ pub enum LgtmSessionError {
     /// Direct filesystem I/O error.
     #[error("filesystem error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+impl From<LgtmProjectError> for LgtmSessionError {
+    fn from(value: LgtmProjectError) -> Self {
+        match value {
+            LgtmProjectError::NotFound(msg) => Self::NotFound(msg),
+            other => Self::Project(other),
+        }
+    }
 }

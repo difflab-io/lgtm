@@ -5,36 +5,20 @@ import {
   type Session,
   type WorkspaceClient,
 } from '../clients/workspaceClient'
+import { WORKTREE_ADJECTIVES, WORKTREE_NOUNS } from '../constants'
+import {
+  validateGitBranchName,
+  type CustomizeProjectDialogState,
+  type NewBranchDialogState,
+  type RemoveWorktreeConfirmState,
+  type WorktreeDialogState,
+} from '../types'
 
-/** Form and submission state for the `New Worktree` dialog in `ProjectsPane`. */
-export interface WorktreeDialogState {
-  projectId: string
-  projectName: string
-  branch: string
-  baseRef: string
-  submitting: boolean
-  error: string | null
-}
-
-/** Confirmation and force-retry state for the `Remove Worktree` dialog in `ProjectsPane`. */
-export interface RemoveWorktreeConfirmState {
-  projectId: string
-  projectName: string
-  worktreePath: string
-  worktreeName: string
-  requiresForce: boolean
-  submitting: boolean
-  error: string | null
-}
-
-/** Form state for customizing a project's name, icon, and color in `ProjectsPane`. */
-export interface CustomizeProjectDialogState {
-  projectId: string
-  projectName: string
-  icon: string
-  color: string
-  submitting: boolean
-  error: string | null
+export {
+  type CustomizeProjectDialogState,
+  type NewBranchDialogState,
+  type RemoveWorktreeConfirmState,
+  type WorktreeDialogState,
 }
 
 /** Callbacks coordinating project/worktree mutations with `WorkspaceService` and `SessionService`. */
@@ -48,39 +32,7 @@ export interface ProjectServiceCallbacks {
   setCreationError: (message: string) => void
 }
 
-const ADJECTIVES = [
-  'amber',
-  'brisk',
-  'calm',
-  'clear',
-  'crisp',
-  'focal',
-  'lunar',
-  'quiet',
-  'rapid',
-  'solar',
-]
-const NOUNS = [
-  'arch',
-  'brook',
-  'cedar',
-  'crest',
-  'delta',
-  'field',
-  'grove',
-  'haven',
-  'path',
-  'ridge',
-]
-
-function generateDefaultBranchName(): string {
-  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)] ?? 'brisk'
-  const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)] ?? 'grove'
-  const hex = Math.floor(Math.random() * 0xffff)
-    .toString(16)
-    .padStart(4, '0')
-  return `worktree/${adj}-${noun}-${hex}`
-}
+// Public ----------------------------------------------------------------------
 
 /** Converts a Git branch name into a filesystem-safe directory slug matching `lgtm_rsutils::paths::branch_to_path_slug`. */
 export function branchToPathSlug(branch: string): string {
@@ -102,12 +54,13 @@ export function branchToPathSlug(branch: string): string {
   return clean || 'worktree'
 }
 
-/** Frontend project and managed Git worktree service backing `ProjectsPane` and project modal dialogs. */
+/** Frontend project and managed Git worktree service backing `ProjectsPane`, `Titlebar`, and project modal dialogs. */
 export class ProjectService {
   projects = $state<Project[]>([])
   worktreeDialog = $state<WorktreeDialogState | null>(null)
   removeWorktreeConfirm = $state<RemoveWorktreeConfirmState | null>(null)
   customizeProjectDialog = $state<CustomizeProjectDialogState | null>(null)
+  newBranchDialog = $state<NewBranchDialogState | null>(null)
   private pendingCollapsed = new Map<string, { seq: number; collapsed: boolean }>()
   private collapseRequestSeq = 0
   private collapseQueue: Promise<void> = Promise.resolve()
@@ -117,6 +70,8 @@ export class ProjectService {
     private client: WorkspaceClient,
     private callbacks: ProjectServiceCallbacks,
   ) {}
+
+  // Public --------------------------------------------------------------------
 
   /** Returns the project that owns the currently active workspace root, if any. */
   get activeProject(): Project | null {
@@ -128,6 +83,64 @@ export class ProjectService {
       this.projects[0] ??
       null
     )
+  }
+
+  /** Returns the managed worktree matching the currently active workspace root, if active on a worktree. */
+  get activeWorktree() {
+    const root = this.callbacks.getRoot()
+    return this.activeProject?.worktrees?.find((wt) => wt.path === root) ?? null
+  }
+
+  /** Returns the checked-out Git branch for the active worktree or primary project checkout. */
+  get activeBranch(): string | null {
+    const wt = this.activeWorktree
+    if (wt) return wt.branch ?? null
+    return this.activeProject?.branch ?? null
+  }
+
+  /** Returns all known local Git branches for the active project, sorted lexicographically. */
+  get allProjectBranches(): string[] {
+    const project = this.activeProject
+    if (!project) return []
+    const set = new Set<string>(project.branches ?? [])
+    if (project.branch) set.add(project.branch)
+    for (const wt of project.worktrees ?? []) {
+      if (wt.branch) set.add(wt.branch)
+    }
+    return Array.from(set).sort()
+  }
+
+  /** Returns selectable local Git branches for the active checkout (excluding branches checked out in other worktrees). */
+  get branches(): string[] {
+    const project = this.activeProject
+    if (!project) return []
+    const root = this.callbacks.getRoot()
+    const checkedOutElsewhere = new Set<string>()
+    if (project.rootPath !== root && project.branch) {
+      checkedOutElsewhere.add(project.branch)
+    }
+    for (const wt of project.worktrees ?? []) {
+      if (wt.path !== root && wt.branch) {
+        checkedOutElsewhere.add(wt.branch)
+      }
+    }
+    return this.allProjectBranches.filter((branch) => !checkedOutElsewhere.has(branch))
+  }
+
+  /** Returns selectable branch items for the titlebar branch switcher. */
+  get branchItems() {
+    return [
+      ...this.branches.map((branch) => ({
+        label: branch,
+        value: branch,
+        kind: 'branch' as const,
+      })),
+      {
+        label: 'New branch…',
+        value: '__new_branch__',
+        kind: 'action' as const,
+      },
+    ]
   }
 
   /** Builds `TreeNode` items for `ProjectsPane`. */
@@ -188,11 +201,14 @@ export class ProjectService {
     }
   }
 
-  /** Sets the collapsed state for `projectId` and persists it to the session file. */
+  /** Sets the collapsed state for `projectId` and persists it to the session file without forcing a full tree re-render. */
   async setProjectCollapsed(projectId: string, collapsed: boolean): Promise<void> {
     const seq = ++this.collapseRequestSeq
     this.pendingCollapsed.set(projectId, { seq, collapsed })
-    this.projects = this.projects.map((p) => (p.id === projectId ? { ...p, collapsed } : p))
+    const target = this.projects.find((p) => p.id === projectId)
+    if (target) {
+      target.collapsed = collapsed
+    }
     if (!this.client.projectSetCollapsed) {
       this.pendingCollapsed.delete(projectId)
       return
@@ -200,10 +216,9 @@ export class ProjectService {
     const task = this.collapseQueue.then(async () => {
       if (this.pendingCollapsed.get(projectId)?.seq !== seq) return
       try {
-        const session = await this.client.projectSetCollapsed!(projectId, collapsed)
+        await this.client.projectSetCollapsed!(projectId, collapsed)
         if (this.pendingCollapsed.get(projectId)?.seq === seq) {
           this.pendingCollapsed.delete(projectId)
-          if (this.callbacks.isActive()) this.callbacks.applySession(session)
         }
       } catch (error) {
         if (this.pendingCollapsed.get(projectId)?.seq === seq) {
@@ -222,14 +237,22 @@ export class ProjectService {
       ? this.projects.find((p) => p.id === projectId || p.rootPath === projectId)
       : this.activeProject
     if (!project) return
+    const branch = generateDefaultBranchName()
     this.worktreeDialog = {
       projectId: project.id,
       projectName: project.name,
-      branch: generateDefaultBranchName(),
+      branch,
       baseRef: project.branch ?? 'HEAD',
       submitting: false,
-      error: null,
+      error: this.validateWorktreeBranch(project.id, branch),
     }
+  }
+
+  /** Updates the candidate branch in `WorktreeNewDialog` and validates it live. */
+  updateWorktreeDialogBranch(branch: string): void {
+    if (!this.worktreeDialog) return
+    this.worktreeDialog.branch = branch
+    this.worktreeDialog.error = this.validateWorktreeBranch(this.worktreeDialog.projectId, branch)
   }
 
   /** Closes the `New Worktree` dialog. */
@@ -256,6 +279,91 @@ export class ProjectService {
   /** Closes the `Edit Project` dialog. */
   closeCustomizeProjectDialog(): void {
     this.customizeProjectDialog = null
+  }
+
+  /** Opens the `New Branch` dialog for the active checkout. */
+  openNewBranchDialog(): void {
+    const root = this.callbacks.getRoot()
+    const project = this.activeProject
+    if (!root || !project) return
+    this.newBranchDialog = {
+      projectId: project.id,
+      workspaceRoot: root,
+      branch: '',
+      submitting: false,
+      error: null,
+    }
+  }
+
+  /** Updates the candidate branch in `BranchNewDialog` and validates it live. */
+  updateNewBranchDialogBranch(branch: string): void {
+    if (!this.newBranchDialog) return
+    this.newBranchDialog.branch = branch
+    this.newBranchDialog.error = branch.trim()
+      ? this.validateNewBranch(this.newBranchDialog.projectId, branch)
+      : null
+  }
+
+  /** Closes the `New Branch` dialog. */
+  closeNewBranchDialog(): void {
+    this.newBranchDialog = null
+  }
+
+  /** Switches the active checkout/worktree to `value`, or opens the `New Branch` dialog when `value === '__new_branch__'`. */
+  async selectBranch(value: string): Promise<void> {
+    if (value === '__new_branch__') {
+      this.openNewBranchDialog()
+      return
+    }
+    if (value && value !== this.activeBranch) {
+      await this.checkoutBranch(value, false)
+    }
+  }
+
+  /** Checks out `branch` in the active workspace (or creates `-b <branch>` when `create` is `true`). */
+  async checkoutBranch(branch: string, create = false): Promise<void> {
+    const trimmed = branch.trim()
+    if (!trimmed) return
+    const root = this.callbacks.getRoot()
+    if (!this.client.projectCheckoutBranch) return
+    try {
+      const session = await this.client.projectCheckoutBranch(root, trimmed, create)
+      if (!this.callbacks.isActive()) return
+      this.callbacks.applySession(session)
+    } catch (error) {
+      if (this.callbacks.isActive()) this.callbacks.setCreationError(errorMessage(error))
+    }
+  }
+
+  /** Creates and checks out a new Git branch from the `New Branch` dialog. */
+  async submitNewBranch(): Promise<void> {
+    const dialog = this.newBranchDialog
+    if (!dialog || dialog.submitting) return
+    const validationError = this.validateNewBranch(dialog.projectId, dialog.branch)
+    if (validationError) {
+      this.newBranchDialog = { ...dialog, error: validationError }
+      return
+    }
+    const branch = dialog.branch.trim()
+    if (!this.client.projectCheckoutBranch) {
+      this.newBranchDialog = null
+      return
+    }
+    this.newBranchDialog = { ...dialog, submitting: true, error: null }
+    try {
+      const session = await this.client.projectCheckoutBranch(dialog.workspaceRoot, branch, true)
+      if (!this.callbacks.isActive()) return
+      this.newBranchDialog = null
+      this.callbacks.applySession(session)
+    } catch (error) {
+      if (this.callbacks.isActive() && this.newBranchDialog) {
+        this.newBranchDialog = {
+          ...this.newBranchDialog,
+          submitting: false,
+          error: errorMessage(error),
+        }
+      }
+    }
   }
 
   /** Persists the edited `projectName`, `icon`, and `color` from the `Edit Project` dialog. */
@@ -327,11 +435,12 @@ export class ProjectService {
   async submitNewWorktree(): Promise<void> {
     const dialog = this.worktreeDialog
     if (!dialog || dialog.submitting || !this.client.projectCreateWorktree) return
-    const branch = dialog.branch.trim()
-    if (!branch) {
-      this.worktreeDialog = { ...dialog, error: 'Branch name cannot be empty.' }
+    const validationError = this.validateWorktreeBranch(dialog.projectId, dialog.branch)
+    if (validationError) {
+      this.worktreeDialog = { ...dialog, error: validationError }
       return
     }
+    const branch = dialog.branch.trim()
     this.worktreeDialog = { ...dialog, submitting: true, error: null }
     try {
       const session = await this.client.projectCreateWorktree(
@@ -440,7 +549,6 @@ export class ProjectService {
       return [
         { value: 'new-worktree', label: 'New Worktree' },
         { value: 'customize-project', label: 'Edit' },
-        { value: 'open-primary', label: 'Open Primary Checkout' },
         ...((project.worktrees ?? []).length > 0
           ? [
               {
@@ -453,7 +561,6 @@ export class ProjectService {
       ]
     }
     return [
-      { value: 'open-worktree', label: 'Open Worktree' },
       { value: 'rename', label: 'Rename Worktree', shortcut: 'r' },
       { value: 'remove-worktree', label: 'Remove Worktree', destructive: true },
     ]
@@ -501,4 +608,43 @@ export class ProjectService {
       }
     }
   }
+
+  // Private -------------------------------------------------------------------
+
+  private getCheckedOutBranches(projectId: string): Set<string> {
+    const project = this.projects.find((p) => p.id === projectId) ?? this.activeProject
+    const set = new Set<string>()
+    if (!project) return set
+    if (project.branch) set.add(project.branch)
+    for (const wt of project.worktrees ?? []) {
+      if (wt.branch) set.add(wt.branch)
+    }
+    return set
+  }
+
+  private validateWorktreeBranch(projectId: string, branch: string): string | null {
+    return validateGitBranchName(branch, {
+      checkedOutBranches: this.getCheckedOutBranches(projectId),
+    })
+  }
+
+  private validateNewBranch(projectId: string, branch: string): string | null {
+    return validateGitBranchName(branch, {
+      checkedOutBranches: this.getCheckedOutBranches(projectId),
+      existingBranches: this.allProjectBranches,
+      requireNew: true,
+    })
+  }
+}
+
+// Private ---------------------------------------------------------------------
+
+function generateDefaultBranchName(): string {
+  const adj =
+    WORKTREE_ADJECTIVES[Math.floor(Math.random() * WORKTREE_ADJECTIVES.length)] ?? 'radiant'
+  const noun = WORKTREE_NOUNS[Math.floor(Math.random() * WORKTREE_NOUNS.length)] ?? 'spren'
+  const hex = Math.floor(Math.random() * 0xffff)
+    .toString(16)
+    .padStart(4, '0')
+  return `worktree/${adj}-${noun}-${hex}`
 }

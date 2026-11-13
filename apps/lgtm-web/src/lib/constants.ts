@@ -18,6 +18,7 @@ import {
   Zap,
 } from 'lucide-svelte'
 
+/** Selectable project icons for `ProjectIconSelector` and `ProjectsPane`. */
 export const PROJECT_ICONS: { id: string; label: string; component: typeof Box }[] = [
   { id: 'box', label: 'Box', component: Box },
   { id: 'package', label: 'Package', component: Package },
@@ -37,6 +38,7 @@ export const PROJECT_ICONS: { id: string; label: string; component: typeof Box }
   { id: 'compass', label: 'Compass', component: Compass },
 ]
 
+/** Selectable project color swatches for `ProjectEditDialog` and `ProjectsPane`. */
 export const PROJECT_COLORS: ColorOption[] = [
   { value: 'default', label: 'Default', color: null },
   { value: 'blue', label: 'Blue', color: '#3b82f6' },
@@ -48,6 +50,40 @@ export const PROJECT_COLORS: ColorOption[] = [
   { value: 'orange', label: 'Orange', color: '#f97316' },
   { value: 'pink', label: 'Pink', color: '#ec4899' },
 ]
+
+/** Stormlight Archive-themed adjectives for default `worktree/<adjective>-<noun>-<digits>` branch names. */
+export const WORKTREE_ADJECTIVES = [
+  'radiant',
+  'stormblessed',
+  'windrunner',
+  'lightweaver',
+  'bondsmith',
+  'skybreaker',
+  'truthwatcher',
+  'willshaper',
+  'elsecaller',
+  'stoneward',
+  'edgedancer',
+  'dustbringer',
+] as const
+
+/** Stormlight Archive-themed nouns for default `worktree/<adjective>-<noun>-<digits>` branch names. */
+export const WORKTREE_NOUNS = [
+  'spren',
+  'shard',
+  'highstorm',
+  'urithiru',
+  'shadesmar',
+  'roshar',
+  'kholinar',
+  'bridge',
+  'glyph',
+  'oathgate',
+  'sylphrena',
+  'chasm',
+] as const
+
+// Public ----------------------------------------------------------------------
 
 /** Resolves a project icon Lucide component by its identifier (`box` by default). */
 export function resolveIconComponent(iconId?: string | null): typeof Box {

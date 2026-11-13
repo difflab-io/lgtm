@@ -11,11 +11,14 @@
   } from '@cloudvoyant/helical-svelte'
   import { ThemeService } from 'lgtm-ui'
   import { errorMessage, workspaceClient, type WorkspaceClient } from '../clients/workspaceClient'
+  import { setServicesContext } from '../services/context'
   import { HotkeyService } from '../services/hotkeyService.svelte'
   import { WorkspaceService } from '../services/workspaceService.svelte'
   import ContentPane from './ContentPane.svelte'
+  import EditorToolbar from './EditorToolbar.svelte'
+  import LeftDock from './LeftDock.svelte'
+  import LeftDockToolbar from './LeftDockToolbar.svelte'
   import Titlebar from './Titlebar.svelte'
-  import WorkspaceDock from './WorkspaceDock.svelte'
 
   // Props ---------------------------------------------------------------------
   interface ShellProps {
@@ -25,6 +28,7 @@
 
   // State ---------------------------------------------------------------------
   const workspace = untrack(() => new WorkspaceService(client))
+  const { session } = setServicesContext(workspace)
   const hotkeys = untrack(() => new HotkeyService(workspace))
   const theme = untrack(
     () =>
@@ -34,6 +38,15 @@
         windowBridge: client.themeWindowBridge?.(),
       }),
   )
+
+  // Derived -------------------------------------------------------------------
+  let lastOpenSidebarWidth = $state(236)
+  const activeSidebarWidth = $derived(session.leftDockWidth)
+  $effect(() => {
+    if (activeSidebarWidth > 0) {
+      lastOpenSidebarWidth = activeSidebarWidth
+    }
+  })
 
   // Lifecycle -----------------------------------------------------------------
   $effect(() => {
@@ -102,8 +115,8 @@
         .catch(() => {})
       void client
         .registerSessionHandlers?.({
-          onSessionUpdated: (session) => {
-            workspace.applySession(session)
+          onSessionUpdated: (nextSession) => {
+            workspace.applySession(nextSession)
           },
         })
         .then((stops) => {
@@ -141,20 +154,37 @@
     style={hotkeys.effectiveCommandStyle}
   >
     <SidebarProvider
-      open={workspace.projectsOpen || workspace.explorerOpen}
+      open={session.projectsOpen || session.explorerOpen}
       onOpenChange={() => {}}
       class="workspace-shell h-dvh min-h-0 flex-col gap-0 overflow-hidden"
-      style="--sidebar-width: {(workspace.projectsOpen ? 180 : 0) +
-        (workspace.explorerOpen ? 236 : 0)}px"
+      style="--sidebar-width: {activeSidebarWidth || lastOpenSidebarWidth}px"
     >
-      <Titlebar {workspace} />
+      <Titlebar />
       <Row class="min-h-0 flex-1 items-stretch gap-0">
-        <WorkspaceDock {workspace} {client} />
-        <ContentPane {workspace} />
+        <LeftDock />
+        <ContentPane />
       </Row>
+      <footer
+        data-testid="bottom-toolbar"
+        class="flex h-7 shrink-0 items-stretch gap-0 border-t border-border bg-sidebar"
+      >
+        <LeftDockToolbar />
+        <EditorToolbar />
+      </footer>
     </SidebarProvider>
-    <CommandMenu hotkey={false} showShortcuts />
-    <CommandPalette hotkey={false} />
+    <CommandMenu
+      open={(hotkeys.effectiveCommandStyle === 'menu' ||
+        hotkeys.effectiveCommandStyle === 'colon') &&
+        hotkeys.commandOpen}
+      onOpenChange={(open) => hotkeys.setCommandOpen(open)}
+      hotkey={false}
+      showShortcuts
+    />
+    <CommandPalette
+      open={hotkeys.effectiveCommandStyle === 'palette' && hotkeys.commandOpen}
+      onOpenChange={(open) => hotkeys.setCommandOpen(open)}
+      hotkey={false}
+    />
   </CommandProvider>
   <WhichKey />
 </WhichKeyProvider>
