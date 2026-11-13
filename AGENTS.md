@@ -12,7 +12,7 @@
 - Keep CLI review and comment commands as thin RPC clients over `lgtm-forge`. Preserve daemon and health behavior; do not embed review persistence in `lgtm-cli`.
 - Establish tracing spans at CLI/RPC boundaries (`#[tracing::instrument]`). Services emit tracing events and never store request spans.
 - Preserve pinned Neovim dependencies in the plugin setup, source-switch installer, and E2E harness (including NuiComponents/NUI and optional Kak).
-- [Proposed] Preserve the Neovim development and release plugin installation tasks when resetting plugin features.
+- Preserve the Neovim development and release plugin installation tasks when resetting plugin features.
 - Never create, recreate, rename, archive, or delete GitHub repositories in tests. Use `LGTM_E2E_GITHUB_REPOSITORY`, verify private visibility before writes, and clean up only run-owned PRs and refs.
 
 ## Organization
@@ -21,8 +21,8 @@
 - `libs/`: Shared domain, configuration, environment, protocol, database, and UI libraries.
 - `e2e/`: Cross-tier integration and end-to-end test suites.
 
-- [Proposed] Preserve existing documentation template headings and structure; use `NA/WIP` for unimplemented sections.
-- [Proposed] Centralize shared workspace path resolution and desktop executable discovery in [`libs/lgtm-config`](libs/lgtm-config/src/lib.rs) rather than duplicating configuration across `lgtm-cli` and `lgtm-desktop`.
+- Preserve existing documentation template headings and structure; use `NA/WIP` for unimplemented sections.
+- Centralize shared workspace path resolution and desktop executable discovery in [`libs/lgtm-config`](libs/lgtm-config/src/lib.rs) rather than duplicating configuration across `lgtm-cli` and `lgtm-desktop`.
 
 ## Style
 
@@ -34,7 +34,7 @@
 - Use one inherent `impl` block per type per file: constructors first, `// Public` operations next, `// Private` helpers last, and trait `impl` blocks after the inherent block. Pad section headers with hyphens to column 80.
 - Name public repository and service reads `get_*`. Name mutating operations and factories with imperative verbs (`promote`, `publish_session`).
 - Call library and generated client methods directly; do not add pass-through wrapper aliases.
-- [Proposed] Prefer a single `new` constructor accepting `Option<...>` parameters over multiple overlapping constructors when callers only need one construction path.
+- Prefer a single `new` constructor accepting `Option<...>` parameters over multiple overlapping constructors when callers only need one construction path.
 - Use `uuid::Uuid` for internal IDs, `repository_url` (with `_url` suffix only for full URLs) for normalized remote addresses, and `git_dir` for canonical local `.git` directories.
 - Humans require `email`; agents require `provider` and `model` and have no email. Model review contexts as `Local` or `ForgeBacked` and reject remote operations on `Local` contexts.
 
@@ -68,15 +68,15 @@ impl CommentAnchor {
 - Compose `@cloudvoyant/helical-svelte` primitives directly in `apps/lgtm-web`; build missing reusable primitives and services in `libs/lgtm-ui` per Helical UI conventions (`@ark-ui/svelte`, orthogonal `cva` + `VariantProps` in `styles.ts`, `cn` + semantic Tailwind tokens, and app-agnostic `types.ts`) for upstreaming.
 - Style components and shell layouts with Tailwind utilities and `cva` variants; restrict `apps/lgtm-web/src/app.css` to theme imports and global element resets, and extract repeated Svelte markup/class patterns into local `{#snippet}` blocks or subcomponents.
 - Style IDE menus, context menus, and tab bars compactly with square item highlights (`rounded-none`), full-row submenu trigger hover targets, neutral surface hover/focus tokens (`--accent`, `--ring`), workspace-relative breadcrumbs, and icon-based diagnostic badges only when counts are non-zero.
-- [Proposed] Use Helical UI's `<Pane>` component for pane containers rather than manually binding `useOptionalPaneRegistration` when a standard pane element suffices.
-- [Proposed] Implement CodeMirror 6 features (LSP completions, hover tooltips, diagnostics, signature help, and modal editing state) as modular CodeMirror `Extension` values using `Facet`, `StateField`, and `ViewPlugin` rather than imperative DOM or `EditorView` manipulation inside Svelte components.
+- Use Helical UI's `<Pane>` component for pane containers rather than manually binding `useOptionalPaneRegistration` when a standard pane element suffices.
+- Implement CodeMirror 6 features (LSP completions, hover tooltips, diagnostics, signature help, and modal editing state) as modular CodeMirror `Extension` values using `Facet`, `StateField`, and `ViewPlugin` rather than imperative DOM or `EditorView` manipulation inside Svelte components.
 
 ### Documentation
 
 - Document all environment variables that affect LGTM behavior in [`docs/environment.md`](docs/environment.md).
 - Use soft wraps for Markdown prose (one source line per paragraph). Keep diagrams as inline Mermaid fences and prefer file trees, tables, and short code snippets over long prose.
-- [Proposed] Write documentation in plain, concise English (`/simple-english`): use short sentences, active voice, simple tenses, and no bold lead-ins in lists, and rely on Mermaid diagrams and tables rather than long prose paragraphs.
-- [Proposed] In architecture `## Requirement` sections, do not prefix bullets with `FR` or `NFR` labels; state `### Functional` requirements as user-facing capabilities and `### Non-Functional` requirements as performance, security, isolation, and reliability characteristics without internal crate or implementation fluff.
+- Write documentation in plain, concise English (`/simple-english`): use short sentences, active voice, simple tenses, and no bold lead-ins in lists, and rely on Mermaid diagrams and tables rather than long prose paragraphs.
+- In architecture `## Requirement` sections, do not prefix bullets with `FR` or `NFR` labels; state `### Functional` requirements as user-facing capabilities and `### Non-Functional` requirements as performance, security, isolation, and reliability characteristics without internal crate or implementation fluff.
 
 ## Testing
 
@@ -86,7 +86,7 @@ impl CommentAnchor {
 - Put integration suites directly under `tests/<area>.rs` with shared fixtures in `tests/common/mod.rs` (never `tests/integration/` or `tests/support/`). Cover core module behaviors, edge cases, and failure modes at library integration boundaries to keep E2E suites focused on cross-tier wiring.
 - Do not write custom JSON schema validation/parsing logic or unit tests for schema validation and serialization; rely on library crates and test domain behavior through public service boundaries.
 - Extract shared test fixtures and JSON or text templates into top-level constants and helper functions rather than repeating setup boilerplate or large inline string literals across test cases.
-- [Proposed] Prefer real Mise-managed language servers over mock LSP scripts in integration tests when verifying language server lifecycle and protocol behavior.
+- Prefer real Mise-managed language servers over mock LSP scripts in integration tests when verifying language server lifecycle and protocol behavior.
 - Structure all Rust unit and integration tests with nested `mod given_*` and `mod when_*` modules and `fn should_<behavior>()` leaf cases:
 
 ```rust
@@ -130,7 +130,7 @@ mod tests {
 - Separate `// Arrange`, `// Act`, and `// Assert` blocks with comments. Keep feature setup in adjacent `*.fixtures.ts` files and export only helpers used across modules.
 - Keep E2E `test(...)` cases focused on a single behavior rather than chaining unrelated assertions in one test block, and query single-use locators inline rather than exporting one-line `getByTestId` wrapper functions from `fixtures.ts`.
 - Separate desktop workspace E2E suites into `Given a new workspace` (creation, persistence, and reopening) and `Given an existing workspace` (viewing, editing, creating, renaming, conflict handling, and deleting entries) with nested `When ...` action blocks, and keep desktop settings E2E specs in a dedicated `e2e/desktop/workspace-settings.spec.ts` suite (`Given no global settings`, `Given global settings and no local settings`, `Given global and local settings`).
-- [Proposed] Separate daemon lifecycle tests (`apps/lgtm-cli/tests/daemon.rs`, `e2e/cli/daemon.spec.ts`) into `Given a stopped daemon` and `Given a running daemon` contexts with nested `When ...` blocks for each action (`up`, `status`, `down`, and HTTP/RPC requests), and keep `lgtm open` tests in dedicated `open` suites (`apps/lgtm-cli/tests/open.rs`, `e2e/cli/open.spec.ts`) structured with an outer `When running open` block and inner `Given ...` blocks for each precondition combination.
+- Separate daemon lifecycle tests (`apps/lgtm-cli/tests/daemon.rs`, `e2e/cli/daemon.spec.ts`) into `Given a stopped daemon` and `Given a running daemon` contexts with nested `When ...` blocks for each action (`up`, `status`, `down`, and HTTP/RPC requests), and keep `lgtm open` tests in dedicated `open` suites (`apps/lgtm-cli/tests/open.rs`, `e2e/cli/open.spec.ts`) structured with an outer `When running open` block and inner `Given ...` blocks for each precondition combination.
 
 ```typescript
 describe(
