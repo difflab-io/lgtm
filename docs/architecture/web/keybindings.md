@@ -2,7 +2,7 @@
 
 ## Overview
 
-`lgtm-web` and `lgtm-ui` adopt `@cloudvoyant/helical-svelte` `v0.23.0` to provide modal keyboard navigation across panes, files, and the CodeMirror 6 editor. One document-level `WhichKeyController` owns modal state (`normal`, `select`, `insert`, `jump`), pane focus (`workspace` and `editor`), Flash two-character jump labels, and `Space` leader sequences. `HotkeyService` registers all application keybindings and command nodes in one place, feeding `WhichKey`, `CommandMenu` (`:` and default `Mod+k`), and `CommandPalette` (`Mod+k` when `keybindings.commandStyle == "palette"`).
+`lgtm-web` and `lgtm-ui` adopt `@cloudvoyant/helical-svelte` `v0.24.0` to provide modal keyboard navigation across panes, files, and the CodeMirror 6 editor. One document-level `WhichKeyController` owns modal state (`normal`, `select`, `insert`, `jump`), pane focus (`workspace` and `editor`), Flash two-character jump labels, and `Space` leader sequences. `HotkeyService` registers all application keybindings and command nodes in one place, feeding `WhichKey`, `CommandMenu` (`:` and default `Mod+k`), and `CommandPalette` (`Mod+k` when `keybindings.commandStyle == "palette"`).
 
 ## Requirement
 
