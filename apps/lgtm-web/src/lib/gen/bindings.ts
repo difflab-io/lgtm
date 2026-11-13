@@ -33,6 +33,10 @@ export const commands = {
 	lspHover: (relativePath: string, offset: number) => __TAURI_INVOKE<LspHoverResult | null>("lsp_hover", { relativePath, offset }),
 	/**  Requests symbol definition locations (`textDocument/definition`) at a UTF-16 editor offset. */
 	lspGotoDefinition: (relativePath: string, offset: number) => __TAURI_INVOKE<LspLocation[]>("lsp_goto_definition", { relativePath, offset }),
+	/**  Requests code completion candidates (`textDocument/completion`) at a UTF-16 editor offset. */
+	lspCompletion: (relativePath: string, offset: number) => __TAURI_INVOKE<LspCompletionItem[]>("lsp_completion", { relativePath, offset }),
+	/**  Requests callable signature help (`textDocument/signatureHelp`) at a UTF-16 editor offset. */
+	lspSignatureHelp: (relativePath: string, offset: number) => __TAURI_INVOKE<LspSignatureHelp | null>("lsp_signature_help", { relativePath, offset }),
 	/**  Returns the current workspace LSP server statuses and diagnostics snapshot. */
 	lspGetState: () => __TAURI_INVOKE<LspWorkspaceSnapshot>("lsp_get_state"),
 	/**  Renders a read-only diagnostics buffer for the active workspace, optionally filtered by `language_id`. */
@@ -41,6 +45,8 @@ export const commands = {
 	lspRestart: (languageId: string) => __TAURI_INVOKE<LspServerStatusEvent>("lsp_restart", { languageId }),
 	/**  Returns the resolved nested configuration snapshot across defaults, global settings, and project overrides. */
 	configGet: () => __TAURI_INVOKE<ResolvedConfigSnapshot>("config_get"),
+	/**  Applies a partial configuration patch to global or project `config.json` and emits `config-updated`. */
+	configUpdate: (patch: LgtmConfigPatch, scope: ConfigScope | null) => __TAURI_INVOKE<ResolvedConfigSnapshot>("config_update", { patch, scope }),
 };
 
 /* Types */
@@ -55,6 +61,20 @@ export type AppearanceSettingsPatch = {
 	/**  Preferred application color theme (`system`, `light`, or `dark`). */
 	theme?: ThemeMode | null,
 };
+
+/**  Active command surface style for `Mod+k` and leader command invocation (`keybindings.commandStyle`). */
+export type CommandStyle = 
+/**  Bottom-docked modal command bar (`CommandMenu`, `:` style). */
+"menu" | 
+/**  Centered modal command palette (`CommandPalette`, `Mod+k` style). */
+"palette";
+
+/**  Configuration storage scope (`global` or `project`). */
+export type ConfigScope = 
+/**  User-wide configuration stored in `~/.lgtm/config.json`. */
+"global" | 
+/**  Workspace-specific configuration stored in `<workspace>/.lgtm/config.json`. */
+"project";
 
 /**  Resolved code editor settings section (`editor.*`). */
 export type EditorSettings = {
@@ -90,6 +110,43 @@ export type FileOpenedEvent = {
 	offset: number | null,
 };
 
+/**  Modal keybinding preset for `WhichKey` and `CodeEditor` (`keybindings.preset`). */
+export type KeybindPreset = 
+/**  Selection-first Helix keybindings (`normal`, `select`, `insert`, `jump`). */
+"helix" | 
+/**  Operator-pending Vim keybindings. */
+"vim" | 
+/**  Selection-first Kakoune keybindings. */
+"kakoune";
+
+/**  Resolved modal keybinding and command surface settings (`keybindings.*`). */
+export type KeybindingSettings = {
+	/**  Primary command surface (`"menu"` by default, or `"palette"`). */
+	commandStyle?: CommandStyle,
+	/**  Modal editing preset (`"helix"` by default, `"vim"`, or `"kakoune"`). */
+	preset?: KeybindPreset,
+	/**  Restrict modal handling to the `Space` leader key and keep the editor in insert mode (`false` by default). */
+	leaderOnly?: boolean,
+	/**  Render active pane focus outline when switching panes with the keyboard (`true` by default). */
+	paneOutline?: boolean,
+	/**  Enter `insert` mode when clicking inside the code editor (`true` by default). */
+	clickToInsert?: boolean,
+};
+
+/**  Resolved modal keybinding and command surface settings (`keybindings.*`). */
+export type KeybindingSettingsPatch = {
+	/**  Primary command surface (`"menu"` by default, or `"palette"`). */
+	commandStyle?: CommandStyle | null,
+	/**  Modal editing preset (`"helix"` by default, `"vim"`, or `"kakoune"`). */
+	preset?: KeybindPreset | null,
+	/**  Restrict modal handling to the `Space` leader key and keep the editor in insert mode (`false` by default). */
+	leaderOnly?: boolean | null,
+	/**  Render active pane focus outline when switching panes with the keyboard (`true` by default). */
+	paneOutline?: boolean | null,
+	/**  Enter `insert` mode when clicking inside the code editor (`true` by default). */
+	clickToInsert?: boolean | null,
+};
+
 /**  Language server and Mise tool preset for a single programming language. */
 export type LanguageConfig = {
 	/**  Whether this language preset is active. */
@@ -120,6 +177,8 @@ export type LgtmConfig = {
 	workspace?: WorkspaceSettings,
 	/**  Code editor display settings (`editor.*`). */
 	editor?: EditorSettings,
+	/**  Modal keybinding and command surface settings (`keybindings.*`). */
+	keybindings?: KeybindingSettings,
 	/**  Global LSP lifecycle and timeout settings (`lsp.*`). */
 	lsp?: LspSettings,
 	/**  Per-language LSP server and Mise toolchain definitions keyed by language ID (`languages.*`). */
@@ -136,6 +195,8 @@ export type LgtmConfigPatch = {
 	workspace?: WorkspaceSettingsPatch | null,
 	/**  Partial code editor settings overrides (`editor.*`). */
 	editor?: EditorSettingsPatch | null,
+	/**  Partial modal keybinding and command surface overrides (`keybindings.*`). */
+	keybindings?: KeybindingSettingsPatch | null,
 	/**  Partial LSP lifecycle and timeout overrides (`lsp.*`). */
 	lsp?: LspSettingsPatch | null,
 	/**  Per-language LSP server and Mise toolchain overrides keyed by language ID (`languages.*`). */
@@ -150,6 +211,24 @@ export type LineWrap =
 "auto" | 
 /**  Fixed character column width at which lines wrap. */
 number;
+
+/**  A single code completion candidate returned by `textDocument/completion`. */
+export type LspCompletionItem = {
+	/**  Display label for the completion candidate. */
+	label: string,
+	/**  Normalized CodeMirror completion category (`function`, `method`, `variable`, `type`, `class`, `interface`, `property`, `keyword`, `constant`, `enum`, `namespace`, `text`). */
+	kind: string | null,
+	/**  Short type signature or symbol detail string. */
+	detail: string | null,
+	/**  Markdown or plain-text documentation string. */
+	documentation: string | null,
+	/**  Text to insert when the candidate is accepted, if different from `label`. */
+	insertText: string | null,
+	/**  Optional UTF-16 replacement start offset when a `textEdit` range is provided. */
+	from: number | null,
+	/**  Optional UTF-16 replacement end offset when a `textEdit` range is provided. */
+	to: number | null,
+};
 
 /**  A single diagnostic normalized to both UTF-16 flat editor offsets and 0-based line/character coordinates. */
 export type LspDiagnostic = {
@@ -286,6 +365,26 @@ export type LspSettingsPatch = {
 	/**  Maximum duration in milliseconds to wait for an LSP JSON-RPC response. */
 	request_timeout_ms?: number | null,
 });
+
+/**  Active function or method signature help returned by `textDocument/signatureHelp`. */
+export type LspSignatureHelp = {
+	/**  Candidate signatures for the active call site. */
+	signatures: LspSignatureInformation[],
+	/**  Zero-based index of the active signature in `signatures`. */
+	activeSignature: number,
+	/**  Zero-based index of the active parameter in the active signature. */
+	activeParameter: number,
+};
+
+/**  A single callable signature returned inside [`LspSignatureHelp`]. */
+export type LspSignatureInformation = {
+	/**  Full signature label (for example `fn helper(count: usize) -> usize`). */
+	label: string,
+	/**  Optional Markdown or plain-text documentation for the callable. */
+	documentation: string | null,
+	/**  Parameter labels declared on the signature. */
+	parameters: string[],
+};
 
 /**  Complete snapshot of all active language servers and file diagnostics for a workspace. */
 export type LspWorkspaceSnapshot = {

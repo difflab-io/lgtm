@@ -2,7 +2,7 @@
 
 ## Overview
 
-`lgtm-lsp` is the Rust Language Server Protocol client and process orchestration SDK for `lgtm-desktop`. Consuming `lgtm-config` and `lgtm-env`, it spawns and pools per-`(workspace_root, language_id, project_root)` stdio JSON-RPC 2.0 language server sessions (via `MiseService::build_exec_command` with direct binary fallback), maintains open UTF-8 document snapshots, converts between CodeMirror UTF-16 character offsets (`u32`) and LSP `(line, character)` coordinates in Rust, and provides diagnostics, hover documentation, go-to-definition locations, and plain-text diagnostics buffers.
+`lgtm-lsp` is the Rust Language Server Protocol client and process orchestration SDK for `lgtm-desktop`. Consuming `lgtm-config` and `lgtm-env`, it spawns and pools per-`(workspace_root, language_id, project_root)` stdio JSON-RPC 2.0 language server sessions (via `MiseService::build_exec_command` with direct binary fallback), maintains open UTF-8 document snapshots, converts between CodeMirror UTF-16 character offsets (`u32`) and LSP `(line, character)` coordinates in Rust, and provides diagnostics, hover documentation, go-to-definition locations, autocomplete suggestions, signature help, and plain-text diagnostics buffers.
 
 ## Requirement
 
@@ -12,7 +12,7 @@
 - Synchronize document open, change, save, and close notifications as workspace files change.
 - Translate between 0-based UTF-16 character offsets and LSP `(line, character)` coordinates.
 - Stream file diagnostics and server statuses, and render plain-text diagnostics buffers for read-only inspection.
-- Resolve hover documentation and go-to-definition locations from a file path and cursor offset.
+- Resolve hover documentation, go-to-definition locations, completion items, and signature help from a file path and cursor offset.
 
 ### Non-Functional
 
@@ -111,6 +111,8 @@ sequenceDiagram
 | `LgtmLspManager::did_close`               | `fn did_close(&self, workspace_root: &Path, file_path: &Path) -> Result<()>`                                                            | Remove the open document snapshot and send `textDocument/didClose`.                                                                           |
 | `LgtmLspManager::get_hover`               | `fn get_hover(&self, workspace_root: &Path, file_path: &Path, offset: u32) -> Result<Option<LspHoverResult>>`                           | Convert UTF-16 `offset` to `(line, character)` and query `textDocument/hover`.                                                                |
 | `LgtmLspManager::get_definition`          | `fn get_definition(&self, workspace_root: &Path, file_path: &Path, offset: u32) -> Result<Vec<LspLocation>>`                            | Convert UTF-16 `offset` to `(line, character)`, query `textDocument/definition`, and return workspace-relative locations with UTF-16 offsets. |
+| `LgtmLspManager::get_completions`         | `fn get_completions(&self, workspace_root: &Path, file_path: &Path, offset: u32) -> Result<Vec<LspCompletionItem>>`                     | Convert UTF-16 `offset` to `(line, character)` and query `textDocument/completion`.                                                           |
+| `LgtmLspManager::get_signature_help`      | `fn get_signature_help(&self, workspace_root: &Path, file_path: &Path, offset: u32) -> Result<Option<LspSignatureHelp>>`                | Convert UTF-16 `offset` to `(line, character)` and query `textDocument/signatureHelp`.                                                        |
 | `LgtmLspManager::get_workspace_snapshot`  | `fn get_workspace_snapshot(&self, workspace_root: &Path) -> Result<LspWorkspaceSnapshot>`                                               | Return all active language server statuses and diagnostics for `workspace_root`.                                                              |
 | `LgtmLspManager::get_diagnostics_buffer`  | `fn get_diagnostics_buffer(&self, workspace_root: &Path, language_id: Option<&str>) -> Result<LspDiagnosticsBuffer>`                    | Render a plain-text diagnostics report for all active servers or a single language server.                                                    |
 | `LgtmLspManager::restart_language_server` | `fn restart_language_server(&self, workspace_root: &Path, language_id: &str) -> Result<LspServerStatusEvent>`                           | Restart all active sessions for `language_id` in `workspace_root` and re-synchronize open documents.                                          |

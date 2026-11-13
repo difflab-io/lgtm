@@ -415,4 +415,120 @@ test.describe('Given global and local settings', { tag: ['@desktop', '@settings'
       },
     )
   })
+
+  test.describe('When toggling settings from CommandMenu and CommandPalette', () => {
+    test.beforeEach(async ({ page, workspace }) => {
+      const globalConfigPath = join(workspace.lgtmHomeDir, 'config.json')
+      const localConfigDir = join(workspace.root, '.lgtm')
+      const localConfigPath = join(localConfigDir, 'config.json')
+      await mkdir(localConfigDir, { recursive: true })
+      await writeFile(
+        globalConfigPath,
+        JSON.stringify(
+          {
+            $schema: SCHEMA_URL,
+            appearance: { theme: 'dark' },
+            editor: { lineWrapping: 'auto' },
+          },
+          null,
+          2,
+        ) + '\n',
+        'utf8',
+      )
+      await writeFile(
+        localConfigPath,
+        JSON.stringify(
+          {
+            $schema: SCHEMA_URL,
+            editor: { lineWrapping: 'auto' },
+          },
+          null,
+          2,
+        ) + '\n',
+        'utf8',
+      )
+      await page.reload()
+      await page.keyboard.press('Meta+,')
+      await expect(page.locator('.cm-content')).toContainText('"theme": "dark"')
+      await page.keyboard.press('Escape')
+      await expect(page.getByTestId('which-key-mode-badge')).toHaveAttribute('data-mode', 'normal')
+    })
+
+    test(
+      'should persist preset and commandStyle from CommandMenu to global config.json and refresh open Settings tab',
+      { tag: '@smoke' },
+      async ({ page, workspace }) => {
+        // Arrange
+        const globalConfigPath = join(workspace.lgtmHomeDir, 'config.json')
+        const menu = page.getByTestId('command-menu')
+        const menuInput = page.getByTestId('command-menu-input')
+        const badge = page.getByTestId('which-key-mode-badge')
+
+        // Act: switch preset to vim and commandStyle to palette via CommandMenu (:)
+        await page.keyboard.press(':')
+        await expect(menu).toBeVisible()
+        await menuInput.fill('preset vim')
+        await menuInput.press('Enter')
+        await expect(menu).toBeHidden()
+        await expect(badge).toHaveAttribute('data-preset', 'vim')
+
+        await page.keyboard.press(':')
+        await expect(menu).toBeVisible()
+        await menuInput.fill('command-style palette')
+        await menuInput.press('Enter')
+        await expect(menu).toBeHidden()
+
+        // Assert: global config and open Settings tab reflect preset and commandStyle
+        await expect(page.locator('.cm-content')).toContainText('"preset": "vim"')
+        await expect(page.locator('.cm-content')).toContainText('"commandStyle": "palette"')
+        const savedGlobal = JSON.parse(await readFile(globalConfigPath, 'utf8'))
+        expect(savedGlobal.keybindings?.preset).toBe('vim')
+        expect(savedGlobal.keybindings?.commandStyle).toBe('palette')
+      },
+    )
+
+    test(
+      'should route theme to global config.json and project-overridden lineWrapping to local config.json from CommandPalette',
+      { tag: '@smoke' },
+      async ({ page, workspace }) => {
+        // Arrange
+        const globalConfigPath = join(workspace.lgtmHomeDir, 'config.json')
+        const localConfigPath = join(workspace.root, '.lgtm', 'config.json')
+        const menu = page.getByTestId('command-menu')
+        const menuInput = page.getByTestId('command-menu-input')
+        const palette = page.getByTestId('command-palette')
+        const paletteInput = page.getByTestId('command-palette-input')
+        await page.keyboard.press(':')
+        await expect(menu).toBeVisible()
+        await menuInput.fill('command-style palette')
+        await menuInput.press('Enter')
+        await expect(menu).toBeHidden()
+
+        // Act: open CommandPalette via Meta+k and update theme (global) and wrap (project override)
+        await page.keyboard.press('Meta+k')
+        await expect(palette).toBeVisible()
+        await paletteInput.fill('Light')
+        await paletteInput.press('Enter')
+        await expect(palette).toBeHidden()
+
+        await page.keyboard.press('Meta+k')
+        await expect(palette).toBeVisible()
+        await paletteInput.fill('Off (No Wrapping)')
+        await paletteInput.press('Enter')
+        await expect(palette).toBeHidden()
+
+        // Assert: global config receives theme, project config receives lineWrapping, and open Settings tab refreshes
+        await expect(page.locator('html')).not.toHaveClass(/dark/)
+        await expect(page.locator('.cm-content')).not.toHaveClass(/cm-lineWrapping/)
+        await expect(page.locator('.cm-content')).toContainText('"theme": "light"')
+
+        const savedGlobal = JSON.parse(await readFile(globalConfigPath, 'utf8'))
+        expect(savedGlobal.appearance?.theme).toBe('light')
+        expect(savedGlobal.editor?.lineWrapping).toBe('auto')
+
+        const savedLocal = JSON.parse(await readFile(localConfigPath, 'utf8'))
+        expect(savedLocal.editor?.lineWrapping).toBe('off')
+      },
+    )
+  })
 })

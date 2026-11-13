@@ -1,16 +1,18 @@
 <script lang="ts">
   import { tick } from 'svelte'
-  import { Button } from '@cloudvoyant/helical-svelte'
+  import { Button, Pane, WhichKeyMode } from '@cloudvoyant/helical-svelte'
   import { CodeEditor, Tabs } from 'lgtm-ui'
   import { ChevronRight, FileText } from 'lucide-svelte'
+  import type { HotkeyService } from '../services/hotkeyService.svelte'
   import type { WorkspaceService } from '../services/workspaceService.svelte'
   import LspStatusMenu from './LspStatusMenu.svelte'
 
   // Props ---------------------------------------------------------------------
   interface ContentPaneProps {
     workspace: WorkspaceService
+    hotkeys: HotkeyService
   }
-  let { workspace }: ContentPaneProps = $props()
+  let { workspace, hotkeys }: ContentPaneProps = $props()
 
   // State ---------------------------------------------------------------------
   let editorRef = $state<{ focus: () => void }>()
@@ -34,8 +36,16 @@
   })
 </script>
 
-<main
-  class="document-pane flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground"
+<Pane
+  paneId="editor"
+  paneTitle="Editor"
+  paneOrder={2}
+  role="main"
+  tabindex={-1}
+  class="document-pane relative flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground outline-none {workspace
+    .settings.paneOutline
+    ? 'data-[pane-active=true]:ring-1 data-[pane-active=true]:ring-ring/40 data-[pane-active=true]:ring-inset'
+    : 'ring-0 data-[pane-active=true]:ring-0'}"
   aria-label="File viewer"
 >
   {#if workspace.tabItems.length > 0}
@@ -78,11 +88,15 @@
           label={workspace.selectedTitle}
           readonly={workspace.activeTab?.readonly ?? false}
           lineWrapping={workspace.settings.lineWrapping}
+          clickToInsert={workspace.settings.clickToInsert}
           diagnostics={editorDiagnostics}
           selectionOffset={workspace.selectionOffset}
           onchange={(content) => workspace.updateContent(content)}
           onhover={(offset) => workspace.requestHover(offset)}
           ongotodefinition={(offset) => workspace.gotoDefinition(offset)}
+          oncompletion={(offset) => workspace.requestCompletions(offset)}
+          onsignaturehelp={(offset) => workspace.requestSignatureHelp(offset)}
+          onViewReady={(v) => hotkeys.setEditorView(v)}
         />
       {/key}
     </div>
@@ -127,8 +141,11 @@
         {/if}
       </nav>
     </div>
-    <span class={workspace.openingError ? 'shrink-0 text-warn' : 'shrink-0'}
-      >{workspace.status}</span
-    >
+    <div class="flex shrink-0 items-center gap-2.5">
+      <WhichKeyMode showPreset aria-label="Editor mode" />
+      <span class={workspace.openingError ? 'shrink-0 text-warn' : 'shrink-0'}
+        >{workspace.status}</span
+      >
+    </div>
   </footer>
-</main>
+</Pane>

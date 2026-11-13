@@ -2,8 +2,8 @@ use std::path::Path;
 
 use lgtm_config::ConfigService;
 use lgtm_lsp::{
-    LgtmLspManager, LspDiagnosticsBuffer, LspEvent, LspHoverResult, LspLocation,
-    LspServerStatusEvent, LspWorkspaceSnapshot,
+    LgtmLspManager, LspCompletionItem, LspDiagnosticsBuffer, LspEvent, LspHoverResult, LspLocation,
+    LspServerStatusEvent, LspSignatureHelp, LspWorkspaceSnapshot,
 };
 
 use crate::error::{Result, error};
@@ -102,6 +102,30 @@ impl LspService {
     ) -> Result<Vec<LspLocation>> {
         self.manager
             .get_definition(workspace_root, file_path, offset)
+            .map_err(|e| error("lsp", e.to_string()))
+    }
+
+    /// Requests code completion candidates (`textDocument/completion`) at `offset` in `file_path`.
+    pub fn get_completions(
+        &self,
+        workspace_root: &Path,
+        file_path: &Path,
+        offset: u32,
+    ) -> Result<Vec<LspCompletionItem>> {
+        self.manager
+            .get_completions(workspace_root, file_path, offset)
+            .map_err(|e| error("lsp", e.to_string()))
+    }
+
+    /// Requests callable signature help (`textDocument/signatureHelp`) at `offset` in `file_path`.
+    pub fn get_signature_help(
+        &self,
+        workspace_root: &Path,
+        file_path: &Path,
+        offset: u32,
+    ) -> Result<Option<LspSignatureHelp>> {
+        self.manager
+            .get_signature_help(workspace_root, file_path, offset)
             .map_err(|e| error("lsp", e.to_string()))
     }
 

@@ -123,6 +123,50 @@ pub struct LspLocation {
     pub character: u32,
 }
 
+/// A single code completion candidate returned by `textDocument/completion`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LspCompletionItem {
+    /// Display label for the completion candidate.
+    pub label: String,
+    /// Normalized CodeMirror completion category (`function`, `method`, `variable`, `type`, `class`, `interface`, `property`, `keyword`, `constant`, `enum`, `namespace`, `text`).
+    pub kind: Option<String>,
+    /// Short type signature or symbol detail string.
+    pub detail: Option<String>,
+    /// Markdown or plain-text documentation string.
+    pub documentation: Option<String>,
+    /// Text to insert when the candidate is accepted, if different from `label`.
+    pub insert_text: Option<String>,
+    /// Optional UTF-16 replacement start offset when a `textEdit` range is provided.
+    pub from: Option<u32>,
+    /// Optional UTF-16 replacement end offset when a `textEdit` range is provided.
+    pub to: Option<u32>,
+}
+
+/// A single callable signature returned inside [`LspSignatureHelp`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LspSignatureInformation {
+    /// Full signature label (for example `fn helper(count: usize) -> usize`).
+    pub label: String,
+    /// Optional Markdown or plain-text documentation for the callable.
+    pub documentation: Option<String>,
+    /// Parameter labels declared on the signature.
+    pub parameters: Vec<String>,
+}
+
+/// Active function or method signature help returned by `textDocument/signatureHelp`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LspSignatureHelp {
+    /// Candidate signatures for the active call site.
+    pub signatures: Vec<LspSignatureInformation>,
+    /// Zero-based index of the active signature in `signatures`.
+    pub active_signature: u32,
+    /// Zero-based index of the active parameter in the active signature.
+    pub active_parameter: u32,
+}
+
 /// Complete snapshot of all active language servers and file diagnostics for a workspace.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]

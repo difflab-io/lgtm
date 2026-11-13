@@ -1,11 +1,8 @@
-mod common;
-
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use common::write_mock_lsp_server;
 use lgtm_config::ConfigService;
 use lgtm_lsp::{
     LgtmLspManager, LspError, LspEvent, LspServerStatus, LspSessionKey, LspWorkspaceSnapshot,
@@ -14,6 +11,40 @@ use serde_json::json;
 use tempfile::TempDir;
 
 // fixtures --------------------------------------------------------------------
+
+const CARGO_TOML_TEMPLATE: &str = "\
+[package]
+name = \"demo\"
+version = \"0.1.0\"
+edition = \"2021\"
+
+[lib]
+path = \"lib.rs\"
+";
+
+const BROKEN_RUST_SOURCE: &str = "\
+/// Computes the helper value.
+pub fn helper(count: usize, label: &str) -> usize {
+    let _ = label;
+    count
+}
+
+pub fn BadName() {
+    let broken = ;
+}
+";
+
+const FIXED_RUST_SOURCE: &str = "\
+/// Computes the helper value.
+pub fn helper(count: usize, label: &str) -> usize {
+    let _ = label;
+    count
+}
+
+pub fn entry() -> usize {
+    helper(1, \"ok\")
+}
+";
 
 struct ManagerFixture {
     _temp: TempDir,
@@ -28,23 +59,23 @@ impl ManagerFixture {
         let temp = TempDir::new().unwrap();
         let workspace_root = fs::canonicalize(temp.path()).unwrap();
         fs::create_dir_all(workspace_root.join(".lgtm")).unwrap();
-        let script_path = write_mock_lsp_server(&workspace_root.join(".lgtm"));
         let global_cfg = workspace_root.join(".lgtm/global.json");
-        fs::write(
-            workspace_root.join("Cargo.toml"),
-            "[package]\nname = \"demo\"\n",
-        )
-        .unwrap();
+        fs::write(workspace_root.join("Cargo.toml"), CARGO_TOML_TEMPLATE).unwrap();
 
         let default_cfg = serde_json::to_string_pretty(&json!({
+            "lsp": {
+                "enabled": true,
+                "autoInstall": false,
+                "requestTimeoutMs": 15000
+            },
             "languages": {
                 "rust": {
                     "enabled": true,
                     "extensions": ["rs"],
                     "root_markers": ["Cargo.toml"],
                     "mise_tools": {},
-                    "command": "node",
-                    "args": [script_path.display().to_string()]
+                    "command": "rust-analyzer",
+                    "args": []
                 }
             }
         }))
@@ -73,11 +104,12 @@ impl ManagerFixture {
         }
     }
 
+    // TODO: Move polling helpers to rsutils once available.
     fn wait_for_snapshot<F>(&self, predicate: F) -> LspWorkspaceSnapshot
     where
         F: Fn(&LspWorkspaceSnapshot) -> bool,
     {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(45);
         while Instant::now() < deadline {
             let snapshot = self
                 .manager
@@ -86,11 +118,25 @@ impl ManagerFixture {
             if predicate(&snapshot) {
                 return snapshot;
             }
-            std::thread::sleep(Duration::from_millis(25));
+            std::thread::sleep(Duration::from_millis(50));
         }
         self.manager
             .get_workspace_snapshot(&self.workspace_root)
             .unwrap()
+    }
+
+    fn wait_for<T, F>(&self, mut op: F) -> T
+    where
+        F: FnMut() -> Option<T>,
+    {
+        let deadline = Instant::now() + Duration::from_secs(45);
+        while Instant::now() < deadline {
+            if let Some(value) = op() {
+                return value;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        op().expect("timed out waiting for language server response")
     }
 }
 
@@ -113,10 +159,9 @@ mod given_a_workspace_with_a_configured_language_server {
             // Arrange
             let fixture = ManagerFixture::new(None);
             let src_file = fixture.workspace_root.join("lib.rs");
-            let broken_source = "fn helper() {}\nfn main() {\n    BROKEN();\n    UNUSED();\n}\n";
-            fs::write(&src_file, broken_source).unwrap();
+            fs::write(&src_file, BROKEN_RUST_SOURCE).unwrap();
 
-            // Act: open broken file and wait for initial error + warning diagnostics
+            // Act: open broken file and wait for initial error + warning diagnostics from rust-analyzer
             fixture
                 .manager
                 .prepare_workspace(&fixture.workspace_root)
@@ -124,19 +169,29 @@ mod given_a_workspace_with_a_configured_language_server {
             let (lang, status) = fixture.manager.open_or_sync_file(
                 &fixture.workspace_root,
                 &src_file,
-                broken_source,
+                BROKEN_RUST_SOURCE,
             );
-            let initial_snapshot =
-                fixture.wait_for_snapshot(|snap| !snap.diagnostics_by_path.is_empty());
+            let initial_snapshot = fixture.wait_for_snapshot(|snap| {
+                snap.servers.first().is_some_and(|srv| srv.error_count >= 1)
+            });
+            let hover_offset = BROKEN_RUST_SOURCE.find("helper(count").unwrap() as u32 + 2;
+            let _ = fixture.wait_for(|| {
+                fixture
+                    .manager
+                    .get_hover(&fixture.workspace_root, &src_file, hover_offset)
+                    .ok()
+                    .flatten()
+            });
 
-            // Act: fix the error via did_change + did_save and wait for diagnostics to clear
-            let fixed_source = "fn helper() {}\nfn main() {\n    helper();\n}\n";
+            // Act: fix the error on disk + did_save and wait for diagnostics to clear
+            fs::write(&src_file, FIXED_RUST_SOURCE).unwrap();
             fixture
                 .manager
-                .did_save(&fixture.workspace_root, &src_file, fixed_source)
+                .did_save(&fixture.workspace_root, &src_file, FIXED_RUST_SOURCE)
                 .unwrap();
-            let cleared_snapshot =
-                fixture.wait_for_snapshot(|snap| snap.diagnostics_by_path.is_empty());
+            let cleared_snapshot = fixture.wait_for_snapshot(|snap| {
+                snap.servers.first().is_some_and(|srv| srv.error_count == 0)
+            });
 
             // Act: close document
             fixture
@@ -147,10 +202,8 @@ mod given_a_workspace_with_a_configured_language_server {
             // Assert
             assert_eq!(lang, Some("rust".to_string()));
             assert_eq!(status.unwrap().status, LspServerStatus::Ready);
-            assert_eq!(initial_snapshot.servers[0].error_count, 1);
-            assert_eq!(initial_snapshot.servers[0].warning_count, 1);
+            assert!(initial_snapshot.servers[0].error_count >= 1);
             assert_eq!(cleared_snapshot.servers[0].error_count, 0);
-            assert_eq!(cleared_snapshot.servers[0].warning_count, 0);
             assert!(
                 fixture
                     .manager
@@ -170,31 +223,74 @@ mod given_a_workspace_with_a_configured_language_server {
             // Arrange
             let fixture = ManagerFixture::new(None);
             let src_file = fixture.workspace_root.join("lib.rs");
-            let source = "fn helper() {}\nfn main() {\n    helper();\n}\n";
-            fs::write(&src_file, source).unwrap();
-            fixture
-                .manager
-                .open_or_sync_file(&fixture.workspace_root, &src_file, source);
+            fs::write(&src_file, FIXED_RUST_SOURCE).unwrap();
+            fixture.manager.open_or_sync_file(
+                &fixture.workspace_root,
+                &src_file,
+                FIXED_RUST_SOURCE,
+            );
+
+            let hover_offset = FIXED_RUST_SOURCE.find("helper(count").unwrap() as u32 + 2;
+            let call_offset = FIXED_RUST_SOURCE.find("helper(1").unwrap() as u32 + 2;
+            let sig_offset = FIXED_RUST_SOURCE.find("\"ok\"").unwrap() as u32;
 
             // Act
-            let hover = fixture
-                .manager
-                .get_hover(&fixture.workspace_root, &src_file, 4)
-                .unwrap()
-                .expect("expected hover result");
-            let definitions = fixture
-                .manager
-                .get_definition(&fixture.workspace_root, &src_file, 31)
-                .unwrap();
+            let hover = fixture.wait_for(|| {
+                fixture
+                    .manager
+                    .get_hover(&fixture.workspace_root, &src_file, hover_offset)
+                    .ok()
+                    .flatten()
+            });
+            let definitions = fixture.wait_for(|| {
+                let defs = fixture
+                    .manager
+                    .get_definition(&fixture.workspace_root, &src_file, call_offset)
+                    .ok()?;
+                (!defs.is_empty()).then_some(defs)
+            });
+            let completions = fixture.wait_for(|| {
+                let items = fixture
+                    .manager
+                    .get_completions(&fixture.workspace_root, &src_file, call_offset + 1)
+                    .ok()?;
+                items
+                    .iter()
+                    .any(|item| item.label.starts_with("helper"))
+                    .then_some(items)
+            });
+            let signature_help = fixture.wait_for(|| {
+                fixture
+                    .manager
+                    .get_signature_help(&fixture.workspace_root, &src_file, sig_offset)
+                    .ok()
+                    .flatten()
+            });
 
             // Assert
-            assert!(hover.contents.contains("fn helper() -> usize"));
-            assert_eq!(hover.from, Some(0));
-            assert_eq!(hover.to, Some(6));
-            assert_eq!(definitions.len(), 1);
+            assert!(hover.contents.contains("fn helper"));
+            assert!(hover.contents.contains("Computes the helper value."));
+            assert!(hover.from.is_some());
+            assert!(hover.to.is_some());
             assert_eq!(definitions[0].path, "lib.rs");
-            assert_eq!(definitions[0].offset, 3);
-            assert_eq!(definitions[0].end_offset, 9);
+            let expected_def_offset = FIXED_RUST_SOURCE.find("helper(count").unwrap() as u32;
+            assert_eq!(definitions[0].offset, expected_def_offset);
+            let helper_completion = completions
+                .iter()
+                .find(|item| item.label.starts_with("helper"))
+                .expect("expected helper completion item");
+            assert_eq!(helper_completion.kind.as_deref(), Some("function"));
+            assert_eq!(signature_help.active_signature, 0);
+            assert_eq!(signature_help.active_parameter, 1);
+            assert!(
+                signature_help.signatures[0]
+                    .label
+                    .contains("fn helper(count: usize, label: &str) -> usize")
+            );
+            assert_eq!(
+                signature_help.signatures[0].parameters,
+                vec!["count: usize".to_string(), "label: &str".to_string()]
+            );
         }
     }
 
@@ -206,26 +302,37 @@ mod given_a_workspace_with_a_configured_language_server {
             // Arrange
             let fixture = ManagerFixture::new(None);
             let src_file = fixture.workspace_root.join("lib.rs");
-            let source = "fn helper() {}\nfn main() {\n    BROKEN();\n}\n";
-            fs::write(&src_file, source).unwrap();
-            fixture
-                .manager
-                .open_or_sync_file(&fixture.workspace_root, &src_file, source);
-            let _ = fixture.wait_for_snapshot(|snap| !snap.diagnostics_by_path.is_empty());
+            fs::write(&src_file, FIXED_RUST_SOURCE).unwrap();
+            fixture.manager.open_or_sync_file(
+                &fixture.workspace_root,
+                &src_file,
+                FIXED_RUST_SOURCE,
+            );
+            let hover_offset = FIXED_RUST_SOURCE.find("helper(count").unwrap() as u32 + 2;
+            let _ = fixture.wait_for(|| {
+                fixture
+                    .manager
+                    .get_hover(&fixture.workspace_root, &src_file, hover_offset)
+                    .ok()
+                    .flatten()
+            });
 
             // Act
             let restarted = fixture
                 .manager
                 .restart_language_server(&fixture.workspace_root, "rust")
                 .unwrap();
-            let hover_after_restart = fixture
-                .manager
-                .get_hover(&fixture.workspace_root, &src_file, 4)
-                .unwrap();
+            let hover_after_restart = fixture.wait_for(|| {
+                fixture
+                    .manager
+                    .get_hover(&fixture.workspace_root, &src_file, hover_offset)
+                    .ok()
+                    .flatten()
+            });
 
             // Assert
             assert_eq!(restarted.status, LspServerStatus::Ready);
-            assert!(hover_after_restart.is_some());
+            assert!(hover_after_restart.contents.contains("fn helper"));
         }
     }
 
@@ -236,6 +343,13 @@ mod given_a_workspace_with_a_configured_language_server {
         fn should_return_reusable_handle_that_executes_requests_and_notifications() {
             // Arrange
             let fixture = ManagerFixture::new(None);
+            let src_file = fixture.workspace_root.join("lib.rs");
+            fs::write(&src_file, FIXED_RUST_SOURCE).unwrap();
+            fixture.manager.open_or_sync_file(
+                &fixture.workspace_root,
+                &src_file,
+                FIXED_RUST_SOURCE,
+            );
             let key = LspSessionKey::new(&fixture.workspace_root, "rust", &fixture.workspace_root);
 
             // Act
@@ -250,17 +364,16 @@ mod given_a_workspace_with_a_configured_language_server {
                 .expect("expected cached handle");
             let response = looked_up
                 .request(
-                    "textDocument/hover",
+                    "workspace/symbol",
                     json!({
-                        "textDocument": { "uri": "file:///tmp/lib.rs" },
-                        "position": { "line": 0, "character": 0 },
+                        "query": "helper",
                     }),
                 )
                 .unwrap();
 
             // Assert
             assert_eq!(handle.get_key(), &key);
-            assert!(response.get("contents").is_some());
+            assert!(response.is_array());
         }
     }
 }
@@ -316,16 +429,32 @@ mod given_a_workspace_with_unavailable_or_failing_language_servers {
 
         #[test]
         fn should_return_timeout_error_when_request_exceeds_configured_deadline() {
-            // Arrange
-            let temp = TempDir::new().unwrap();
-            let workspace_root = fs::canonicalize(temp.path()).unwrap();
-            fs::create_dir_all(workspace_root.join(".lgtm")).unwrap();
-            let script_path = write_mock_lsp_server(&workspace_root.join(".lgtm"));
+            // Arrange: spawn a process that holds stdio open past the 150ms request timeout
+            let hang_script = "\
+import { Buffer } from 'node:buffer';
+let buf = Buffer.alloc(0);
+process.stdin.on('data', (chunk) => {
+  buf = Buffer.concat([buf, chunk]);
+  const end = buf.indexOf('\\r\\n\\r\\n');
+  if (end === -1) return;
+  const match = buf.slice(0, end).toString().match(/Content-Length:\\s*(\\d+)/i);
+  if (!match) return;
+  const len = Number(match[1]);
+  if (buf.length < end + 4 + len) return;
+  const msg = JSON.parse(buf.slice(end + 4, end + 4 + len).toString());
+  buf = buf.slice(end + 4 + len);
+  if (msg.method === 'initialize') {
+    const body = Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { capabilities: { hoverProvider: true } } }));
+    process.stdout.write(`Content-Length: ${body.length}\\r\\n\\r\\n`);
+    process.stdout.write(body);
+  }
+});
+";
             let timeout_cfg = serde_json::to_string_pretty(&json!({
                 "lsp": {
                     "enabled": true,
                     "auto_install": false,
-                    "request_timeout_ms": 250
+                    "request_timeout_ms": 150
                 },
                 "languages": {
                     "rust": {
@@ -334,8 +463,7 @@ mod given_a_workspace_with_unavailable_or_failing_language_servers {
                         "root_markers": ["Cargo.toml"],
                         "mise_tools": {},
                         "command": "node",
-                        "args": [script_path.display().to_string()],
-                        "env": { "MOCK_LSP_DELAY_MS": "2000" }
+                        "args": ["-e", hang_script]
                     }
                 }
             }))

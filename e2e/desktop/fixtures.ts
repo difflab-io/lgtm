@@ -108,6 +108,12 @@ function handleMessage(msg) {
           textDocumentSync: 1,
           hoverProvider: true,
           definitionProvider: true,
+          completionProvider: {
+            triggerCharacters: ['.', ':'],
+          },
+          signatureHelpProvider: {
+            triggerCharacters: ['(', ','],
+          },
         },
       },
     });
@@ -187,6 +193,49 @@ function handleMessage(msg) {
           },
         },
       ],
+    });
+    return;
+  }
+  if (msg.method === 'textDocument/completion') {
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        isIncomplete: false,
+        items: [
+          {
+            label: 'helper_value',
+            kind: 3,
+            detail: 'fn helper_value() -> i32',
+            documentation: {
+              kind: 'markdown',
+              value: 'Returns the **helper** value.',
+            },
+            insertText: 'helper_value()',
+          },
+        ],
+      },
+    });
+    return;
+  }
+  if (msg.method === 'textDocument/signatureHelp') {
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        signatures: [
+          {
+            label: 'fn helper(x: i32, y: i32) -> i32',
+            documentation: {
+              kind: 'markdown',
+              value: 'Computes the sum of \`x\` and \`y\`.',
+            },
+            parameters: [{ label: 'x: i32' }, { label: 'y: i32' }],
+          },
+        ],
+        activeSignature: 0,
+        activeParameter: 0,
+      },
     });
     return;
   }
@@ -290,6 +339,7 @@ export const test = base.extend<{
         await writeFile(join(initialRoot, 'Drafts/two.md'), '# Two\n\nSecond file.\n')
         await writeFile(join(initialRoot, 'same.md'), '# Markdown\n')
         await writeFile(join(initialRoot, 'notes.txt'), 'Plain text note.\n')
+        await writeFile(join(initialRoot, '.gitignore'), 'target/\n')
       } else if (initialWorkspace === 'default-seeded') {
         await mkdir(initialRoot, { recursive: true })
         await writeFile(join(initialRoot, 'hello.py'), 'def hello_world():\n    BROKEN()\n', 'utf8')

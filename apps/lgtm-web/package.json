@@ -28,8 +28,8 @@
   },
   "dependencies": {
     "@bufbuild/protobuf": "2.16.0",
-    "@cloudvoyant/helical-svelte": "0.19.0",
-    "@cloudvoyant/helical-ui": "0.19.0",
+    "@cloudvoyant/helical-svelte": "0.24.0",
+    "@cloudvoyant/helical-ui": "0.24.0",
     "@connectrpc/connect": "2.2.0",
     "@connectrpc/connect-web": "2.2.0",
     "@tauri-apps/api": "2.12.3",

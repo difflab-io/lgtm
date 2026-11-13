@@ -59,11 +59,11 @@ flowchart TB
     LSP_MGR --> SERVERS["Language Server Processes (stdio JSON-RPC 2.0)"]
 ```
 
-- `app.rs` (`lgtm-desktop`): Registers a unified `AppState` (`workspace`, `config`, `lsp`, `frontend_ready`, `events`) in Tauri managed state, dispatches `workspace_*`, `lsp_*`, and `config_get` IPC commands onto `spawn_blocking`, emits `config-updated` when `workspace_write` saves a configuration file, and coordinates the `RunEvent::ExitRequested` quit handshake.
+- `app.rs` (`lgtm-desktop`): Registers a unified `AppState` (`workspace`, `config`, `lsp`, `frontend_ready`, `events`) in Tauri managed state, dispatches `workspace_*`, `lsp_*`, `config_get`, and `config_update` IPC commands onto `spawn_blocking`, emits `config-updated` when `workspace_write` or `config_update` saves a configuration file, and coordinates the `RunEvent::ExitRequested` quit handshake.
 - `services::workspace::WorkspaceService` (`lgtm-desktop`): Owns the active `Workspace` root, validates workspace-relative paths (plus `~/.lgtm/config.json` and `.lgtm/config.json`), reads global and local configuration files via `get_file_content`, and performs atomic file/folder CRUD.
 - `services::lsp::LspService` (`lgtm-desktop`): Bridges `lgtm-lsp`'s `LgtmLspManager` to the Tauri `AppHandle` (and optional E2E stdio bridge forwarder), translating `LspEvent::Status` and `LspEvent::Diagnostics` callbacks into `app_handle.emit("lsp-status", ...)` and `app_handle.emit("lsp-diagnostics", ...)`.
 - `LgtmLspManager` & `LspCacheService` (`lgtm-lsp`): Manage per-`(workspace_root, language_id, project_root)` stdio JSON-RPC 2.0 sessions, cache open UTF-8 document snapshots and diagnostics, and coordinate with `MiseService` (`lgtm-env`) and `ConfigService` (`lgtm-config`) to launch language servers.
-- `WorkspaceService`, `LspService`, & `SettingsService` (`lgtm-web`): Reactive Svelte 5 `$state` services that manage open editor tabs, 150ms debounced auto-save (`flushSave`), live `lsp_did_change` notifications, active language server indicators, read-only diagnostics buffer tabs, and live `config-updated` preference synchronization. See [Web frontend architecture](../web/index.md).
+- `WorkspaceService`, `LspService`, `SettingsService`, & `HotkeyService` (`lgtm-web`): Reactive Svelte 5 `$state` services that manage open editor tabs, 150ms debounced auto-save (`flushSave`), live `lsp_did_change` notifications, active language server indicators, read-only diagnostics buffer tabs, modal keybindings (`WhichKeyProvider`, `CommandMenu`, `CommandPalette`), and live `config-updated` preference synchronization. See [Web frontend architecture](../web/index.md) and [Modal keybindings architecture](../web/keybindings.md).
 
 ### Data and Control Flow
 
@@ -150,10 +150,13 @@ sequenceDiagram
 | `lsp_did_change` | UI -> Host | `(relativePath: string, content: string) -> void` | Update cached buffer text and send `textDocument/didChange`. |
 | `lsp_hover` | UI -> Host | `(relativePath: string, offset: number) -> LspHoverResult \| null` | Query `textDocument/hover` at a CodeMirror UTF-16 offset. |
 | `lsp_goto_definition` | UI -> Host | `(relativePath: string, offset: number) -> LspLocation[]` | Query `textDocument/definition` at a CodeMirror UTF-16 offset and return workspace-relative locations. |
+| `lsp_completion` | UI -> Host | `(relativePath: string, offset: number) -> LspCompletionItem[]` | Query `textDocument/completion` at a CodeMirror UTF-16 offset and return completion candidates. |
+| `lsp_signature_help` | UI -> Host | `(relativePath: string, offset: number) -> LspSignatureHelp \| null` | Query `textDocument/signatureHelp` at a CodeMirror UTF-16 offset and return active function signatures. |
 | `lsp_get_state` | UI -> Host | `() -> LspWorkspaceSnapshot` | Return all tracked language server statuses and file diagnostics for the active workspace. |
 | `lsp_get_diagnostics_buffer` | UI -> Host | `(languageId?: string) -> LspDiagnosticsBuffer` | Render a read-only plain-text diagnostics report for all active servers or a single language. |
 | `lsp_restart` | UI -> Host | `(languageId: string) -> LspServerStatusEvent` | Restart all sessions for `languageId` in the active workspace and re-open tracked documents. |
 | `config_get` | UI -> Host | `() -> ResolvedConfigSnapshot` | Return effective deep-merged `LgtmConfig` plus global and project `LgtmConfigPatch` trees. |
+| `config_update` | UI -> Host | `(patch: LgtmConfigPatch, scope?: ConfigScope) -> ResolvedConfigSnapshot` | Atomically apply `patch` to global or project `config.json`, reload workspace LSP config, emit `config-updated`, and return the updated snapshot. |
 | `lsp-status` | Host -> UI | `LspServerStatusEvent` | Real-time language server lifecycle status and error/warning counts. |
 | `lsp-diagnostics` | Host -> UI | `LspFileDiagnosticsEvent` | Real-time workspace-relative or global config file diagnostics with UTF-16 offsets. |
 | `config-updated` | Host -> UI | `ResolvedConfigSnapshot` | Live resolved nested settings snapshot emitted when `workspace_write` saves `~/.lgtm/config.json` or `<workspace>/.lgtm/config.json`. |
