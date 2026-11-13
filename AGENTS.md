@@ -85,7 +85,7 @@ impl CommentAnchor {
 - Colocate unit tests in `#[cfg(test)] mod tests` after a `// tests ---` separator padded to column 80; place shared unit fixtures in `src/tests/`.
 - Put integration suites directly under `tests/<area>.rs` with shared fixtures in `tests/common/mod.rs` (never `tests/integration/` or `tests/support/`). Cover core module behaviors, edge cases, and failure modes at library integration boundaries to keep E2E suites focused on cross-tier wiring.
 - Do not write custom JSON schema validation/parsing logic or unit tests for schema validation and serialization; rely on library crates and test domain behavior through public service boundaries.
-- [Proposed] Extract shared test fixtures and JSON or text templates into top-level constants and helper functions rather than repeating setup boilerplate or large inline string literals across test cases.
+- Extract shared test fixtures and JSON or text templates into top-level constants and helper functions rather than repeating setup boilerplate or large inline string literals across test cases.
 - [Proposed] Prefer real Mise-managed language servers over mock LSP scripts in integration tests when verifying language server lifecycle and protocol behavior.
 - Structure all Rust unit and integration tests with nested `mod given_*` and `mod when_*` modules and `fn should_<behavior>()` leaf cases:
 
@@ -128,7 +128,7 @@ mod tests {
 
 - Organize Vitest specs under `e2e/` using `describe('Given ... / When ...')` or `describe('When ...')` blocks and space-separated `it('should <behavior>')` titles (do not use `should_snake_case` in TypeScript).
 - Separate `// Arrange`, `// Act`, and `// Assert` blocks with comments. Keep feature setup in adjacent `*.fixtures.ts` files and export only helpers used across modules.
-- [Proposed] Keep E2E `test(...)` cases focused on a single behavior rather than chaining unrelated assertions in one test block, and query single-use locators inline rather than exporting one-line `getByTestId` wrapper functions from `fixtures.ts`.
+- Keep E2E `test(...)` cases focused on a single behavior rather than chaining unrelated assertions in one test block, and query single-use locators inline rather than exporting one-line `getByTestId` wrapper functions from `fixtures.ts`.
 - Separate desktop workspace E2E suites into `Given a new workspace` (creation, persistence, and reopening) and `Given an existing workspace` (viewing, editing, creating, renaming, conflict handling, and deleting entries) with nested `When ...` action blocks, and keep desktop settings E2E specs in a dedicated `e2e/desktop/workspace-settings.spec.ts` suite (`Given no global settings`, `Given global settings and no local settings`, `Given global and local settings`).
 - [Proposed] Separate daemon lifecycle tests (`apps/lgtm-cli/tests/daemon.rs`, `e2e/cli/daemon.spec.ts`) into `Given a stopped daemon` and `Given a running daemon` contexts with nested `When ...` blocks for each action (`up`, `status`, `down`, and HTTP/RPC requests), and keep `lgtm open` tests in dedicated `open` suites (`apps/lgtm-cli/tests/open.rs`, `e2e/cli/open.spec.ts`) structured with an outer `When running open` block and inner `Given ...` blocks for each precondition combination.
 

@@ -127,54 +127,41 @@ impl ConfigService {
         patch: LgtmConfigPatch,
         scope: Option<ConfigScope>,
     ) -> Result<ResolvedConfigSnapshot> {
-        let global_path = self.get_global_config_path();
-        let mut global_patch = if global_path.is_file() {
-            Self::read_scoped_patch(ConfigScope::Global, &global_path)
-        } else {
-            LgtmConfigPatch {
-                schema: Some(DEFAULT_SCHEMA_URL.to_string()),
-                ..LgtmConfigPatch::default()
-            }
-        };
-
-        let existing_project = workspace_root.and_then(|ws| {
-            let p_path = Self::get_project_config_path(ws);
-            if p_path.is_file() {
-                Some(Self::read_scoped_patch(ConfigScope::Project, &p_path))
-            } else {
-                None
-            }
-        });
+        let project_path = workspace_root.map(Self::get_project_config_path);
+        let existing_project = project_path
+            .as_deref()
+            .filter(|path| path.is_file())
+            .map(|path| Self::read_scoped_patch(ConfigScope::Project, path));
 
         let (global_overlay, project_overlay) = match (scope, workspace_root) {
-            (Some(ConfigScope::Project), Some(_)) => (None, Some(patch)),
-            (Some(ConfigScope::Global), _) | (_, None) => (Some(patch), None),
-            (None, Some(_)) => {
-                let (g, p) = patch.split_by_project_overrides(existing_project.as_ref());
-                ((!g.is_empty()).then_some(g), (!p.is_empty()).then_some(p))
-            }
+            (Some(ConfigScope::Project), Some(_)) => (LgtmConfigPatch::default(), patch),
+            (Some(ConfigScope::Global), _) | (_, None) => (patch, LgtmConfigPatch::default()),
+            (None, Some(_)) => patch.split_by_project_overrides(existing_project.as_ref()),
         };
 
-        if let (Some(overlay), Some(ws)) = (project_overlay, workspace_root) {
+        if !project_overlay.is_empty()
+            && let (Some(ws), Some(path)) = (workspace_root, project_path.as_deref())
+        {
             self.ensure_workspace_dir(ws)?;
-            let p_path = Self::get_project_config_path(ws);
-            let mut proj = existing_project.unwrap_or_else(|| LgtmConfigPatch {
-                schema: Some(DEFAULT_SCHEMA_URL.to_string()),
-                ..LgtmConfigPatch::default()
-            });
-            proj.merge_patch(overlay);
-            if proj.schema.is_none() {
-                proj.schema = Some(DEFAULT_SCHEMA_URL.to_string());
-            }
-            Self::write_scoped_patch(ConfigScope::Project, &p_path, &proj)?;
+            Self::merge_and_write_scoped_patch(
+                ConfigScope::Project,
+                path,
+                existing_project,
+                project_overlay,
+            )?;
         }
 
-        if let Some(overlay) = global_overlay {
-            global_patch.merge_patch(overlay);
-            if global_patch.schema.is_none() {
-                global_patch.schema = Some(DEFAULT_SCHEMA_URL.to_string());
-            }
-            Self::write_scoped_patch(ConfigScope::Global, &global_path, &global_patch)?;
+        if !global_overlay.is_empty() {
+            let global_path = self.get_global_config_path();
+            let existing_global = global_path
+                .is_file()
+                .then(|| Self::read_scoped_patch(ConfigScope::Global, &global_path));
+            Self::merge_and_write_scoped_patch(
+                ConfigScope::Global,
+                &global_path,
+                existing_global,
+                global_overlay,
+            )?;
         }
 
         self.get_config_snapshot(workspace_root)
@@ -356,6 +343,20 @@ impl ConfigService {
                 LgtmConfigPatch::from_str_lenient(&raw)
             }
         }
+    }
+
+    fn merge_and_write_scoped_patch(
+        scope: ConfigScope,
+        path: &Path,
+        existing: Option<LgtmConfigPatch>,
+        overlay: LgtmConfigPatch,
+    ) -> Result<()> {
+        let mut merged = existing.unwrap_or_default();
+        merged.merge_patch(overlay);
+        if merged.schema.is_none() {
+            merged.schema = Some(DEFAULT_SCHEMA_URL.to_string());
+        }
+        Self::write_scoped_patch(scope, path, &merged)
     }
 
     fn write_scoped_patch(scope: ConfigScope, path: &Path, patch: &LgtmConfigPatch) -> Result<()> {
