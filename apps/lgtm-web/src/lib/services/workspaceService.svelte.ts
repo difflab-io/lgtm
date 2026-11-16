@@ -436,11 +436,15 @@ export class WorkspaceService {
     const tab = this.tabs.find((item) => item.id === tabId)
     if (!tab) return
     if (tab.kind === 'file' && tab.path) {
-      await this.openFile({
-        path: tab.path,
-        name: tab.title,
-        kind: 'file',
-      })
+      await this.openFile(
+        {
+          path: tab.path,
+          name: tab.title,
+          kind: 'file',
+        },
+        undefined,
+        true,
+      )
       return
     }
     await this.flushSave()
@@ -454,6 +458,7 @@ export class WorkspaceService {
       languageId: tab.languageId ?? null,
     }
     this.fileVersion++
+    this.focusRequest++
     try {
       const refreshed = await this.lsp.getDiagnosticsBuffer(tab.languageId ?? undefined)
       if (!this.active) return

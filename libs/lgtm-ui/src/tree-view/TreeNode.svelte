@@ -53,10 +53,7 @@
 
   function handleSelectableBranchClick(event: MouseEvent, expanded: boolean) {
     if (!selectableBranches) return
-    if (
-      event.target instanceof Element &&
-      event.target.closest('[data-part="node-rename-input"]')
-    ) {
+    if (!(event.target instanceof Element) || !event.target.closest('[data-branch-toggle]')) {
       return
     }
     event.preventDefault()

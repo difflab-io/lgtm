@@ -1,3 +1,5 @@
+import { tick } from 'svelte'
+import { getDocumentWhichKeyController } from '@cloudvoyant/helical-ui'
 import type {
   Session,
   SidebarWidget,
@@ -49,19 +51,21 @@ export class SessionService {
     this.resizing = active
   }
 
-  /** Toggles the Projects dock pane independently of the Explorer widget slot. */
+  /** Toggles the Projects dock pane independently of the Explorer widget slot and shifts focus to the opened pane or editor on close. */
   toggleProjectsPane(): void {
     this.projectsOpen = !this.projectsOpen
     this.sidebarWidget = this.projectsOpen ? 'projects' : 'explorer'
     this.sidebarHydrated = true
     this.onDockChanged?.()
+    this.focusTargetPane(this.projectsOpen ? 'projects' : 'editor')
   }
 
-  /** Toggles the Explorer widget pane inside the left dock independently of the Projects pane. */
+  /** Toggles the Explorer widget pane inside the left dock independently of the Projects pane and shifts focus to the opened pane or editor on close. */
   toggleExplorerPane(): void {
     this.explorerOpen = !this.explorerOpen
     this.sidebarHydrated = true
     this.onDockChanged?.()
+    this.focusTargetPane(this.explorerOpen ? 'workspace' : 'editor')
   }
 
   /** Opens the specified left dock pane (`projects` or `explorer`). */
@@ -158,5 +162,16 @@ export class SessionService {
     })
     this.sessionSaveQueue = task.catch(() => {})
     await task
+  }
+
+  // Private -------------------------------------------------------------------
+
+  private focusTargetPane(paneId: 'projects' | 'workspace' | 'editor'): void {
+    if (typeof document === 'undefined') return
+    void tick().then(() => {
+      requestAnimationFrame(() => {
+        getDocumentWhichKeyController(document)?.focusPane(paneId)
+      })
+    })
   }
 }

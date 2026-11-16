@@ -34,6 +34,19 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@keybinds'] },
         await expect(editorPane).toHaveAttribute('data-pane-active', 'true')
         await expect(sidebarPane).toHaveAttribute('data-pane-active', 'false')
         await expect(page.locator('.cm-content')).toBeFocused()
+
+        // Act: click tab and editor (entering insert mode), then use Ctrl-w h directly to focus workspace pane
+        await page.getByRole('tab', { name: 'same.md', exact: true }).click()
+        await page.locator('.cm-content').click()
+        await page.keyboard.press('Control+w')
+        await page.keyboard.press('h')
+
+        // Assert
+        await expect(sidebarPane).toHaveAttribute('data-pane-active', 'true')
+        await expect(editorPane).toHaveAttribute('data-pane-active', 'false')
+        await page.keyboard.press('Control+w')
+        await page.keyboard.press('l')
+        await expect(page.locator('.cm-content')).toBeFocused()
       },
     )
 

@@ -40,6 +40,7 @@
 
 <Sidebar
   id="workspace-sidebar"
+  paneDisabled={true}
   collapsible="none"
   class={[
     'workspace-sidebar h-full min-h-0 w-auto shrink-0 overflow-hidden bg-sidebar outline-none',
@@ -61,7 +62,6 @@
         data-testid="projects-dock-pane"
         paneId="projects"
         paneTitle="Projects"
-        paneOrder={1}
         paneDisabled={!session.projectsOpen &&
           !project.worktreeDialog &&
           !project.newBranchDialog &&

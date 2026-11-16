@@ -14,6 +14,14 @@ async function openFolderViaPicker(
   if (!(await addProjectBtn.isVisible())) {
     await page.getByRole('button', { name: 'Projects view', exact: true }).click()
   }
+  await expect(addProjectBtn).toBeVisible()
+  await expect(addProjectBtn).toBeEnabled()
+  await expect
+    .poll(
+      async () =>
+        (await page.getByTestId('projects-dock-pane').locator('..').boundingBox())?.width ?? 0,
+    )
+    .toBeGreaterThanOrEqual(180)
   await addProjectBtn.click()
   await expect.poll(() => workspace.root).toBe(canonical)
 }
@@ -63,8 +71,20 @@ test.describe('Given a session with open projects', { tag: ['@desktop', '@projec
           if (el) (el as HTMLElement).dataset.instanceMarker = 'persisted-projects'
         })
         await projectsBtn.click()
+        await expect(page.locator('[data-pane-id="editor"]')).toHaveAttribute(
+          'data-pane-active',
+          'true',
+        )
         await projectsBtn.click()
+        await expect(page.locator('[data-pane-id="projects"]')).toHaveAttribute(
+          'data-pane-active',
+          'true',
+        )
         await page.keyboard.press('ControlOrMeta+b')
+        await expect(page.locator('[data-pane-id="editor"]')).toHaveAttribute(
+          'data-pane-active',
+          'true',
+        )
         const projectsStillVisibleOnSidebarToggle = await page
           .getByRole('tree', { name: 'Projects' })
           .isVisible()
@@ -72,7 +92,15 @@ test.describe('Given a session with open projects', { tag: ['@desktop', '@projec
           .getByRole('tree', { name: 'Workspace files' })
           .isVisible())
         await page.keyboard.press('ControlOrMeta+b')
+        await expect(page.locator('[data-pane-id="workspace"]')).toHaveAttribute(
+          'data-pane-active',
+          'true',
+        )
         await page.keyboard.press('ControlOrMeta+Shift+B')
+        await expect(page.locator('[data-pane-id="editor"]')).toHaveAttribute(
+          'data-pane-active',
+          'true',
+        )
         const projectsHiddenOnProjectsShortcut = !(await page
           .getByRole('tree', { name: 'Projects' })
           .isVisible())

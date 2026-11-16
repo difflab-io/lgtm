@@ -15,7 +15,6 @@
   data-testid="explorer-dock-pane"
   paneId="workspace"
   paneTitle="Workspace"
-  paneOrder={2}
   paneDisabled={!session.explorerOpen}
   collapsible="none"
   aria-hidden={!session.explorerOpen}

@@ -151,6 +151,86 @@ export class HotkeyService {
       'Open the bottom-docked colon CommandMenu (:)',
       ['normal', 'select'],
     ),
+    'Control+w': {
+      key: 'Control+w',
+      label: 'Window',
+      group: 'Window / Pane',
+      description: 'Spatial and indexed pane navigation',
+      category: 'Window / Pane',
+      mode: ['normal', 'select', 'insert'],
+      when: () => {
+        if (this.controller?.getState().mode === 'insert') {
+          this.controller.setMode('normal')
+        }
+        return true
+      },
+      children: {
+        h: leaf(
+          'h',
+          'Focus Pane Left',
+          'Window / Pane',
+          'pane.left',
+          'Move focus to the pane on the left',
+        ),
+        j: leaf(
+          'j',
+          'Focus Pane Down',
+          'Window / Pane',
+          'pane.down',
+          'Move focus to the pane below',
+        ),
+        k: leaf('k', 'Focus Pane Up', 'Window / Pane', 'pane.up', 'Move focus to the pane above'),
+        l: leaf(
+          'l',
+          'Focus Pane Right',
+          'Window / Pane',
+          'pane.right',
+          'Move focus to the pane on the right',
+        ),
+        ArrowLeft: {
+          key: 'ArrowLeft',
+          label: 'Focus Pane Left',
+          category: 'Window / Pane',
+          commandId: 'pane.left',
+          hidden: true,
+        },
+        ArrowDown: {
+          key: 'ArrowDown',
+          label: 'Focus Pane Down',
+          category: 'Window / Pane',
+          commandId: 'pane.down',
+          hidden: true,
+        },
+        ArrowUp: {
+          key: 'ArrowUp',
+          label: 'Focus Pane Up',
+          category: 'Window / Pane',
+          commandId: 'pane.up',
+          hidden: true,
+        },
+        ArrowRight: {
+          key: 'ArrowRight',
+          label: 'Focus Pane Right',
+          category: 'Window / Pane',
+          commandId: 'pane.right',
+          hidden: true,
+        },
+        w: leaf(
+          'w',
+          'Cycle Next Pane',
+          'Window / Pane',
+          'pane.next',
+          'Cycle focus to the next registered pane',
+        ),
+        W: leaf(
+          'W',
+          'Cycle Previous Pane',
+          'Window / Pane',
+          'pane.prev',
+          'Cycle focus to the previous registered pane',
+        ),
+      },
+    },
     'Control+d': leaf(
       'Control+d',
       'Scroll Half Page Down',
@@ -1421,37 +1501,17 @@ export class HotkeyService {
     return true
   }
 
-  /** Toggles the Explorer widget pane and moves focus to the resulting active pane. */
+  /** Toggles the Explorer widget pane and moves focus to the opened pane or editor on close. */
   toggleExplorer(): boolean {
     this.workspace.session.toggleExplorerPane()
     this.sidebarOpen = this.workspace.session.explorerOpen
-    const targetPane = this.workspace.session.explorerOpen
-      ? 'workspace'
-      : this.workspace.session.projectsOpen
-        ? 'projects'
-        : 'editor'
-    void tick().then(() => {
-      requestAnimationFrame(() => {
-        this.controller?.focusPane(targetPane)
-      })
-    })
     return true
   }
 
-  /** Toggles the `explorer` or `projects` dock pane independently and focuses it when opened. */
+  /** Toggles the `explorer` or `projects` dock pane independently and focuses the opened pane or editor on close. */
   showSidebarMode(mode: 'explorer' | 'projects'): boolean {
     if (mode === 'projects') {
       this.workspace.session.toggleProjectsPane()
-      const targetPane = this.workspace.session.projectsOpen
-        ? 'projects'
-        : this.workspace.session.explorerOpen
-          ? 'workspace'
-          : 'editor'
-      void tick().then(() => {
-        requestAnimationFrame(() => {
-          this.controller?.focusPane(targetPane)
-        })
-      })
     } else {
       this.toggleExplorer()
     }
