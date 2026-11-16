@@ -114,8 +114,10 @@
       if (node && (selectableBranches || !node.branch)) onselect?.(node.value)
     },
   }))
+
   // Lifecycle -----------------------------------------------------------------
   let lastVersion: number | undefined
+
   $effect(() => {
     if (version !== undefined && version !== lastVersion) {
       lastVersion = version
@@ -123,6 +125,7 @@
       errors = {}
     }
   })
+
   $effect(() => {
     const request = refresh
     if (request && loadChildren) {
@@ -139,6 +142,7 @@
           })
     }
   })
+
   $effect(() => {
     const dirs = expandedValue
     const loader = loadChildren
@@ -186,6 +190,7 @@
       }
     })()
   })
+
   $effect(() => {
     const value = renameValue
     const parent = parentValue

@@ -35,6 +35,7 @@
 - Export only public API types from crate roots (`lib.rs`), formatted one `pub use` item per line.
 - Link workspace library crates through `Cargo.toml` dependencies rather than `#[path = ...]` module shims or `#[allow(dead_code)]`, and prefer standard library or crate formatting traits (such as `LowerHex` on digest outputs) over manual formatting loops.
 - Use one inherent `impl` block per type per file: constructors first, `// Public` operations next, `// Private` helpers last, and trait `impl` blocks after the inherent block. Pad section headers with hyphens to column 80.
+- [Proposed] Separate free-function modules with `// Public` and `// Private` section headers padded with hyphens to column 80, matching `impl` blocks.
 - Name public repository and service reads `get_*`. Name mutating operations and factories with imperative verbs (`promote`, `publish_session`). Name domain model methods with `get_`, `set_`, `update_`, or `apply_` prefixes (`get_worktree`, `set_collapsed`, `update_appearance`, `set_worktree_name`, `set_worktree`, `apply_worktree_removal`) to indicate pure in-memory data operations without side effects.
 - Call library and generated client methods directly; do not add pass-through wrapper aliases.
 - Prefer a single `new` constructor accepting `Option<...>` parameters over multiple overlapping constructors when callers only need one construction path.
@@ -75,6 +76,8 @@ impl CommentAnchor {
 - Implement CodeMirror 6 features (LSP completions, hover tooltips, diagnostics, signature help, and modal editing state) as modular CodeMirror `Extension` values using `Facet`, `StateField`, and `ViewPlugin` rather than imperative DOM or `EditorView` manipulation inside Svelte components.
 - [Proposed] Cache loaded directory children per workspace so switching workspaces renders expanded tree branches synchronously in a single frame, and constrain CodeMirror's scroll container (`min-h-0 overflow-hidden` with `.cm-scroller` owning scrolling) while warming the syntax tree (`ensureSyntaxTree`) so syntax highlighting never pops in on scroll.
 - [Proposed] Split frontend state into dedicated domain services (`WorkspaceService`, `ProjectService`, `SessionService`, `LspService`, `SettingsService`) exposed via `useService` context rather than pass-through getters on `WorkspaceService`, order TypeScript service files with `// Public ---` and `// Private ---` section headers (private helpers at the bottom), and pair a resizable `LeftDock` (`ProjectsPane` + `WidgetPane`) with a unified bottom bar (`LeftDockToolbar` + `EditorToolbar`) whose dock section tracks `LeftDock` width and highlights active toggles via text contrast (`text-foreground` vs `text-muted-foreground`) without background fills.
+- Align frontend domain services 1:1 with backend service IPC boundaries (`SessionService` with `lgtm-session`, `ProjectService` with `lgtm-project`), keeping file explorer responsibilities separate from session and tab state.
+- [Proposed] Separate consecutive Svelte `$effect` blocks and lifecycle sections with a blank line, and render active pane focus rings via an `after:` overlay (`relative` + `after:pointer-events-none after:absolute after:inset-0 after:z-20 after:ring-1 after:ring-inset`) so child selection backgrounds and gutters do not clip or obscure pane borders.
 
 ### Documentation
 
@@ -88,6 +91,7 @@ impl CommentAnchor {
 ### Rust BDD Unit & Integration Tests
 
 - Colocate unit tests in `#[cfg(test)] mod tests` after a `// tests ---` separator padded to column 80; place shared unit fixtures in `src/tests/`.
+- [Proposed] Organize BDD tests for multi-function utility modules with one `mod given_*` group per public function, and rely on integration tests rather than redundant unit tests for trivial predicates.
 - Put integration suites directly under `tests/<module>.rs` named after the module file they exercise (`tests/git.rs`, `tests/project.rs`, `tests/session.rs`) with shared fixtures in `tests/common/mod.rs` (never `tests/integration/` or `tests/support/`). Keep each test focused on a single behavior (`should_<behavior>`) and cover core module behaviors, edge cases, and failure modes at library integration boundaries to keep E2E suites focused on cross-tier wiring.
 - Document test fixtures with visual ASCII layout docstrings, structure integration `mod given_*` and `mod when_*` branches incrementally from empty preconditions (`given_no_session_exists`, `given_no_project_exists`, `given_a_project_exists`) through public API invariants, and capture initial state, final state, and verbose tracing logs as verifiable test artifacts.
 - Do not write custom JSON schema validation/parsing logic or unit tests for schema validation and serialization; rely on library crates and test domain behavior through public service boundaries.

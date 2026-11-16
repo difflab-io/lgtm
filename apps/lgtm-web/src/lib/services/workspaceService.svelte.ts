@@ -23,6 +23,7 @@ import { ProjectService } from './projectService.svelte'
 import { SessionService } from './sessionService.svelte'
 import { SettingsService } from './settingsService.svelte'
 
+// TODO(DIFF-307): Rename `WorkspaceService` to `FileExplorerService` so its name matches its file-explorer scope, move session/tab/open-workspace coordination (`applySession`, `syncSession`, `saveCurrentWorkspaceSession`, tab retention) into `SessionService` to mirror `lgtm-session`, and merge `lgtm-workspace` into `lgtm-desktop`.
 /** Workspace view model coordinating file tree browsing, open tabs, debounced saves, and owning `ProjectService`, `SessionService`, `LspService`, and `SettingsService`. */
 export class WorkspaceService {
   readonly lsp: LspService

@@ -282,6 +282,12 @@ mod given_a_project_exists_in_session {
                             workspace_root: wt_path_str.clone(),
                             tabs: vec![
                                 TabCandidate {
+                                    path: "   ".to_owned(),
+                                    title: "blank".to_owned(),
+                                    edited: true,
+                                    last_opened: true,
+                                },
+                                TabCandidate {
                                     path: "README.md".to_owned(),
                                     title: "README.md".to_owned(),
                                     edited: false,

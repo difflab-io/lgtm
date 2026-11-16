@@ -47,10 +47,10 @@
     paneTitle="Editor"
     paneOrder={3}
     tabindex={-1}
-    class="relative flex min-h-0 min-w-0 flex-1 flex-col rounded-none border-0 bg-background text-foreground shadow-none outline-none {workspace
+    class="relative flex min-h-0 min-w-0 flex-1 flex-col rounded-none border-0 bg-background text-foreground shadow-none ring-0 outline-none data-[pane-active=true]:ring-0 {workspace
       .settings.paneOutline
-      ? 'data-[pane-active=true]:ring-1 data-[pane-active=true]:ring-ring/40 data-[pane-active=true]:ring-inset'
-      : 'ring-0 data-[pane-active=true]:ring-0'}"
+      ? 'data-[pane-active=true]:after:pointer-events-none data-[pane-active=true]:after:absolute data-[pane-active=true]:after:inset-0 data-[pane-active=true]:after:z-20 data-[pane-active=true]:after:ring-1 data-[pane-active=true]:after:ring-ring/40 data-[pane-active=true]:after:ring-inset'
+      : ''}"
     aria-label="File viewer"
   >
     {#if workspace.fileLoading}

@@ -35,6 +35,8 @@ pub struct GitWorktreeEntry {
     pub is_main: bool,
 }
 
+// Public ----------------------------------------------------------------------
+
 /// Resolves any working tree or `.git` path into its canonical `main_root`, `worktree_root`, `worktree_git_dir`, and `common_git_dir`.
 pub fn resolve_git_paths(git_dir_or_worktree: &Path) -> Result<ResolvedGitPaths> {
     let raw = git_dir_or_worktree.to_string_lossy();
@@ -453,6 +455,8 @@ pub fn parse_github_owner_repo(repository_url: &str) -> Result<(String, String)>
     Ok((owner, repo))
 }
 
+// Private ---------------------------------------------------------------------
+
 fn inspect_worktree_entry(path: &Path, is_main: bool) -> GitWorktreeEntry {
     let (head_sha, branch) = match gix::open(path) {
         Ok(repo) => {
@@ -561,14 +565,14 @@ mod tests {
 
     // tests -------------------------------------------------------------------
 
-    mod given_remote_git_urls {
+    mod given_normalize_repository_url {
         use super::*;
 
-        mod when_normalizing_and_extracting_owner_repo {
+        mod when_given_ssh_and_https_remotes {
             use super::*;
 
             #[test]
-            fn should_normalize_ssh_and_https_repository_urls() {
+            fn should_return_canonical_https_urls() {
                 // Arrange
                 let ssh_url = "git@github.com:difflab-io/lgtm.git";
                 let https_url = "https://github.com/difflab-io/lgtm.git/";
@@ -576,12 +580,65 @@ mod tests {
                 // Act
                 let normalized_ssh = normalize_repository_url(ssh_url).unwrap();
                 let normalized_https = normalize_repository_url(https_url).unwrap();
-                let owner_repo = parse_github_owner_repo(ssh_url).unwrap();
 
                 // Assert
                 assert_eq!(normalized_ssh, "https://github.com/difflab-io/lgtm");
                 assert_eq!(normalized_https, "https://github.com/difflab-io/lgtm");
+            }
+        }
+
+        mod when_given_empty_or_invalid_remotes {
+            use super::*;
+
+            #[test]
+            fn should_return_invalid_input() {
+                // Arrange
+                let empty = "   ";
+                let unsupported = "ftp://github.com/difflab-io/lgtm";
+
+                // Act
+                let empty_err = normalize_repository_url(empty).unwrap_err();
+                let scheme_err = normalize_repository_url(unsupported).unwrap_err();
+
+                // Assert
+                assert_eq!(empty_err.kind(), ErrorKind::InvalidInput);
+                assert_eq!(scheme_err.kind(), ErrorKind::InvalidInput);
+            }
+        }
+    }
+
+    mod given_parse_github_owner_repo {
+        use super::*;
+
+        mod when_given_valid_remote_url {
+            use super::*;
+
+            #[test]
+            fn should_extract_owner_and_repo() {
+                // Arrange
+                let ssh_url = "git@github.com:difflab-io/lgtm.git";
+
+                // Act
+                let owner_repo = parse_github_owner_repo(ssh_url).unwrap();
+
+                // Assert
                 assert_eq!(owner_repo, ("difflab-io".to_owned(), "lgtm".to_owned()));
+            }
+        }
+
+        mod when_missing_owner_or_repo_segment {
+            use super::*;
+
+            #[test]
+            fn should_return_invalid_input() {
+                // Arrange
+                let missing_repo = "https://github.com/difflab-io";
+
+                // Act
+                let err = parse_github_owner_repo(missing_repo).unwrap_err();
+
+                // Assert
+                assert_eq!(err.kind(), ErrorKind::InvalidInput);
             }
         }
     }
