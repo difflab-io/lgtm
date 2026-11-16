@@ -17,29 +17,11 @@ import {
   type LspServerStatusEvent,
   type Session,
 } from '../clients/workspaceClient'
-import type {
-  CachedWorkspaceSnapshot,
-  CustomizeProjectDialogState,
-  FolderRefresh,
-  NewBranchDialogState,
-  RemoveWorktreeConfirmState,
-  WorkspaceTab,
-  WorktreeDialogState,
-} from '../types'
+import type { CachedWorkspaceSnapshot, FolderRefresh, WorkspaceTab } from '../types'
 import { LspService } from './lspService.svelte'
-import { branchToPathSlug, ProjectService } from './projectService.svelte'
+import { ProjectService } from './projectService.svelte'
 import { SessionService } from './sessionService.svelte'
 import { SettingsService } from './settingsService.svelte'
-
-export {
-  branchToPathSlug,
-  type CustomizeProjectDialogState,
-  type FolderRefresh,
-  type NewBranchDialogState,
-  type RemoveWorktreeConfirmState,
-  type WorkspaceTab,
-  type WorktreeDialogState,
-}
 
 /** Workspace view model coordinating file tree browsing, open tabs, debounced saves, and owning `ProjectService`, `SessionService`, `LspService`, and `SettingsService`. */
 export class WorkspaceService {
@@ -454,7 +436,6 @@ export class WorkspaceService {
     this.selectionOffset = null
     this.fileContent = {
       content: tab.content,
-      revision: 'diagnostics',
       languageId: tab.languageId ?? null,
     }
     this.fileVersion++
@@ -468,7 +449,6 @@ export class WorkspaceService {
       if (this.activeTabId === tab.id) {
         this.fileContent = {
           content: refreshed.content,
-          revision: 'diagnostics',
           languageId: refreshed.languageId ?? null,
         }
       }
@@ -580,7 +560,6 @@ export class WorkspaceService {
       this.selectionOffset = null
       this.fileContent = {
         content: buffer.content,
-        revision: 'diagnostics',
         languageId: buffer.languageId ?? null,
       }
       this.fileVersion++
@@ -683,7 +662,7 @@ export class WorkspaceService {
       this.saving = true
       const task = this.client
         .write(path, content)
-        .then(async (saved) => {
+        .then(async () => {
           if (!this.active) return
           const tabId = `file:${path}`
           this.tabs = this.tabs.map((tab) =>
@@ -691,14 +670,6 @@ export class WorkspaceService {
               ? { ...tab, dirty: false, edited: true }
               : tab,
           )
-          if (this.selected?.path === path && this.fileContent?.content === content) {
-            this.fileContent = {
-              ...this.fileContent,
-              ...saved,
-              languageId: saved.languageId ?? this.fileContent.languageId,
-              lspStatus: saved.lspStatus ?? this.fileContent.lspStatus,
-            }
-          }
           this.saveCurrentWorkspaceToCache(this.root)
           void this.saveCurrentWorkspaceSession()
           if (this.isConfigFilePath(path)) {
@@ -954,7 +925,6 @@ export class WorkspaceService {
           : activeTab
             ? {
                 content: activeTab.content,
-                revision: 'cached',
                 languageId: activeTab.languageId ?? null,
               }
             : null,

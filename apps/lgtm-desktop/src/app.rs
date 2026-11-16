@@ -58,15 +58,45 @@ impl AppState {
             .map_err(|_| lgtm_workspace::error("io", "Workspace service is unavailable."))
     }
 
-    /// Runs a mutating [`SessionService`] operation on the current thread and broadcasts [`AppEvent::SessionUpdated`].
+    /// Runs a mutating [`SessionService`] operation and broadcasts [`AppEvent::SessionUpdated`].
     pub fn mutate_session(
         &self,
-        operation: impl FnOnce(&SessionService) -> lgtm_workspace::Result<lgtm_session::Session>,
+        operation: impl FnOnce(&SessionService) -> lgtm_session::Result<lgtm_session::Session>,
     ) -> lgtm_workspace::Result<lgtm_session::Session> {
-        let session = operation(&self.session)?;
+        let session = operation(&self.session).map_err(Self::map_session_error)?;
         self.events
             .dispatch(AppEvent::SessionUpdated(session.clone()));
         Ok(session)
+    }
+
+    /// Maps a [`lgtm_session::LgtmSessionError`] into a stable transport [`lgtm_workspace::WorkspaceError`].
+    pub fn map_session_error(
+        err: lgtm_session::LgtmSessionError,
+    ) -> lgtm_workspace::WorkspaceError {
+        use lgtm_project::LgtmProjectError;
+        use lgtm_session::LgtmSessionError;
+        match err {
+            LgtmSessionError::Project(project_err) => match project_err {
+                LgtmProjectError::InvalidBranch(msg) => lgtm_workspace::error("invalidBranch", msg),
+                LgtmProjectError::BranchAlreadyCheckedOut(msg) => {
+                    lgtm_workspace::error("branchAlreadyCheckedOut", msg)
+                }
+                LgtmProjectError::CheckoutPathExists(msg) => {
+                    lgtm_workspace::error("checkoutPathExists", msg)
+                }
+                LgtmProjectError::NotGitRepository(msg) => {
+                    lgtm_workspace::error("notGitRepository", msg)
+                }
+                LgtmProjectError::DirtyWorktree(msg) => lgtm_workspace::error("dirtyWorktree", msg),
+                LgtmProjectError::InvalidPath(msg) => {
+                    lgtm_workspace::error("invalidWorkspace", msg)
+                }
+                LgtmProjectError::NotFound(msg) => lgtm_workspace::error("notFound", msg),
+                LgtmProjectError::Git(msg) => lgtm_workspace::error("git", msg),
+            },
+            LgtmSessionError::NotFound(msg) => lgtm_workspace::error("notFound", msg),
+            other => lgtm_workspace::error("session", other.to_string()),
+        }
     }
 }
 

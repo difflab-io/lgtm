@@ -37,8 +37,6 @@ import type { WorkspaceService } from './workspaceService.svelte'
 export class HotkeyService {
   private readonly workspace: WorkspaceService
 
-  /** Whether the workspace explorer sidebar is currently expanded. */
-  sidebarOpen = $state(true)
   /** Whether the active command surface (`CommandMenu` or `CommandPalette`) is open. */
   commandOpen = $state(false)
   /** Transient override forcing `CommandMenu` (`colon`) when opened via `:`. */
@@ -823,7 +821,6 @@ export class HotkeyService {
       return true
     },
     'file.newFolder': () => {
-      if (!this.sidebarOpen) this.sidebarOpen = true
       this.workspace.session.setSidebarWidget('explorer')
       this.workspace.startCreate('directory')
       return true
@@ -1040,7 +1037,6 @@ export class HotkeyService {
         group: 'File',
         shortcut: 'Space f N',
         onSelect: () => {
-          if (!this.sidebarOpen) this.sidebarOpen = true
           this.workspace.session.setSidebarWidget('explorer')
           this.workspace.startCreate('directory')
         },
@@ -1504,7 +1500,6 @@ export class HotkeyService {
   /** Toggles the Explorer widget pane and moves focus to the opened pane or editor on close. */
   toggleExplorer(): boolean {
     this.workspace.session.toggleExplorerPane()
-    this.sidebarOpen = this.workspace.session.explorerOpen
     return true
   }
 
@@ -1520,7 +1515,6 @@ export class HotkeyService {
 
   /** Opens the `New Worktree` dialog in `ProjectsPane`. */
   openNewWorktree(): boolean {
-    if (!this.sidebarOpen) this.sidebarOpen = true
     this.workspace.session.setSidebarWidget('projects')
     this.workspace.project.openNewWorktreeDialog()
     return true
@@ -1531,7 +1525,6 @@ export class HotkeyService {
     const project = this.workspace.project.activeProject
     const wt = project?.worktrees.find((item) => item.path === this.workspace.root)
     if (!project || !wt) return false
-    if (!this.sidebarOpen) this.sidebarOpen = true
     this.workspace.session.setSidebarWidget('projects')
     this.workspace.project.promptRemoveWorktree(project.id, wt.path)
     return true

@@ -113,7 +113,7 @@ export interface WorkspaceClient {
   pickFolder(): Promise<string | null>
   list(path: string): Promise<WorkspaceNode[]>
   read(path: string): Promise<FileContent>
-  write(path: string, content: string): Promise<FileContent>
+  write(path: string, content: string): Promise<void>
   createFile(name: string, parentPath?: string): Promise<WorkspaceNode>
   createFolder(name: string, parentPath?: string): Promise<WorkspaceNode>
   rename(path: string, name: string): Promise<WorkspaceNode>

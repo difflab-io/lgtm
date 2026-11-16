@@ -2937,12 +2937,8 @@ name = "lgtm-workspace"
 version = "0.1.0"
 dependencies = [
  "lgtm-config",
- "lgtm-lsp",
- "lgtm-project",
- "lgtm-session",
  "rustix 1.1.6",
  "serde",
- "sha2",
  "specta",
  "trash",
  "windows-sys 0.61.2",

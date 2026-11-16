@@ -10,11 +10,7 @@ license = "Apache-2.0"
 
 [dependencies]
 lgtm-config = { path = "../lgtm-config" }
-lgtm-lsp = { path = "../lgtm-lsp" }
-lgtm-project = { path = "../lgtm-project" }
-lgtm-session = { path = "../lgtm-session" }
 serde = { version = "1", features = ["derive"] }
-sha2 = "0.10"
 specta = { version = "=2.0.0-rc.26", features = ["derive"] }
 trash = "=5.2.9"
 

@@ -2890,12 +2890,8 @@ name = "lgtm-workspace"
 version = "0.1.0"
 dependencies = [
  "lgtm-config",
- "lgtm-lsp",
- "lgtm-project",
- "lgtm-session",
  "rustix 1.1.5",
  "serde",
- "sha2 0.10.9",
  "specta",
  "tempfile",
  "trash",

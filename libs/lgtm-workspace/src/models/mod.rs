@@ -1,4 +1,3 @@
-//! Domain models for local workspaces, directory entries, and UTF-8 file payloads.
+//! Domain models for local workspaces and directory entries.
 
-pub(crate) mod file_content;
 pub(crate) mod workspace;

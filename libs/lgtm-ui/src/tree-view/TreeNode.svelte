@@ -23,7 +23,6 @@
     renameErrors,
     icon,
     selectableBranches = false,
-    onselect,
     onedit,
     oncancel,
     contextItems,
@@ -176,7 +175,6 @@
                 {renameErrors}
                 {icon}
                 {selectableBranches}
-                {onselect}
                 {onedit}
                 {oncancel}
                 {contextItems}

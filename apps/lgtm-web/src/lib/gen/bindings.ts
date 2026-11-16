@@ -16,7 +16,7 @@ export const commands = {
 	/**  Reads UTF-8 file contents and synchronizes the document with its language server. */
 	workspaceRead: (relativePath: string) => __TAURI_INVOKE<FileContent>("workspace_read", { relativePath }),
 	/**  Writes UTF-8 file contents to disk and dispatches `AppEvent::FileSaved`. */
-	workspaceWrite: (relativePath: string, content: string) => __TAURI_INVOKE<FileContent>("workspace_write", { relativePath, content }),
+	workspaceWrite: (relativePath: string, content: string) => __TAURI_INVOKE<null>("workspace_write", { relativePath, content }),
 	/**  Creates a new file inside a workspace-relative directory. */
 	workspaceCreateFile: (name: string, parentPath: string | null) => __TAURI_INVOKE<WorkspaceNode>("workspace_create_file", { name, parentPath }),
 	/**  Creates a new folder inside a workspace-relative directory. */
@@ -106,12 +106,10 @@ export type EditorSettingsPatch = {
 	lineWrapping?: LineWrap | null,
 };
 
-/**  Tauri IPC response payload returned by `workspace_read` and `workspace_write`, bundling the decoded UTF-8 document text, its SHA-256 content revision fingerprint for change tracking, and the initial LSP language and server status synchronized when the file is opened. */
+/**  Tauri IPC response payload returned by `workspace_read`, bundling the UTF-8 document text and its synchronized LSP language and server status. */
 export type FileContent = {
 	/**  The UTF-8 source text of the file. */
 	content: string,
-	/**  The lowercase SHA-256 hex digest of the on-disk file bytes used to detect content changes across reads and writes. */
-	revision: string,
 	/**  Optional detected language identifier for the file. */
 	languageId?: string | null,
 	/**  Optional active LSP server status for the file's language and project root. */

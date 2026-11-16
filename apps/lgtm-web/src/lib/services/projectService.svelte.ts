@@ -14,13 +14,6 @@ import {
   type WorktreeDialogState,
 } from '../types'
 
-export {
-  type CustomizeProjectDialogState,
-  type NewBranchDialogState,
-  type RemoveWorktreeConfirmState,
-  type WorktreeDialogState,
-}
-
 /** Callbacks coordinating project/worktree mutations with `WorkspaceService` and `SessionService`. */
 export interface ProjectServiceCallbacks {
   getRoot: () => string

@@ -19,9 +19,8 @@ pub async fn project_set_collapsed(
 ) -> Result<Session> {
     state
         .run_blocking(move |app| {
-            app.mutate_session(move |s| {
-                Ok(s.set_project_collapsed("default", parse_project_id(&project_id)?, collapsed)?)
-            })
+            let id = parse_project_id(&project_id)?;
+            app.mutate_session(move |s| s.set_project_collapsed("default", id, collapsed))
         })
         .await
 }
@@ -38,14 +37,9 @@ pub async fn project_update_appearance(
 ) -> Result<Session> {
     state
         .run_blocking(move |app| {
+            let id = parse_project_id(&project_id)?;
             app.mutate_session(move |s| {
-                Ok(s.update_project_appearance(
-                    "default",
-                    parse_project_id(&project_id)?,
-                    name,
-                    icon,
-                    color,
-                )?)
+                s.update_project_appearance("default", id, name, icon, color)
             })
         })
         .await
@@ -62,13 +56,9 @@ pub async fn project_rename_worktree(
 ) -> Result<Session> {
     state
         .run_blocking(move |app| {
+            let id = parse_project_id(&project_id)?;
             app.mutate_session(move |s| {
-                Ok(s.rename_project_worktree(
-                    "default",
-                    parse_project_id(&project_id)?,
-                    Path::new(worktree_path.trim()),
-                    &name,
-                )?)
+                s.rename_project_worktree("default", id, Path::new(worktree_path.trim()), &name)
             })
         })
         .await
@@ -85,13 +75,9 @@ pub async fn project_create_worktree(
 ) -> Result<Session> {
     state
         .run_blocking(move |app| {
+            let id = parse_project_id(&project_id)?;
             app.mutate_session(move |s| {
-                Ok(s.create_project_worktree(
-                    "default",
-                    parse_project_id(&project_id)?,
-                    &branch,
-                    base_ref.as_deref(),
-                )?)
+                s.create_project_worktree("default", id, &branch, base_ref.as_deref())
             })
         })
         .await
@@ -108,13 +94,14 @@ pub async fn project_remove_worktree(
 ) -> Result<Session> {
     state
         .run_blocking(move |app| {
+            let id = parse_project_id(&project_id)?;
             app.mutate_session(move |s| {
-                Ok(s.remove_project_worktree(
+                s.remove_project_worktree(
                     "default",
-                    parse_project_id(&project_id)?,
+                    id,
                     Path::new(worktree_path.trim()),
                     force.unwrap_or(false),
-                )?)
+                )
             })
         })
         .await
@@ -126,9 +113,8 @@ pub async fn project_remove_worktree(
 pub async fn project_remove(state: State<'_, AppState>, project_id: String) -> Result<Session> {
     state
         .run_blocking(move |app| {
-            app.mutate_session(move |s| {
-                Ok(s.remove_project("default", parse_project_id(&project_id)?)?)
-            })
+            let id = parse_project_id(&project_id)?;
+            app.mutate_session(move |s| s.remove_project("default", id))
         })
         .await
 }
@@ -145,12 +131,12 @@ pub async fn project_checkout_branch(
     state
         .run_blocking(move |app| {
             app.mutate_session(move |s| {
-                Ok(s.checkout_workspace_branch(
+                s.checkout_workspace_branch(
                     "default",
                     Path::new(workspace_root.trim()),
                     &branch,
                     create.unwrap_or(false),
-                )?)
+                )
             })
         })
         .await

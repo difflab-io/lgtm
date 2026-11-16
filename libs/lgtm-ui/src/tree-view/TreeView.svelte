@@ -605,7 +605,6 @@
           {renameErrors}
           {icon}
           {selectableBranches}
-          {onselect}
           onedit={(value) => {
             delete renameErrors[value]
           }}

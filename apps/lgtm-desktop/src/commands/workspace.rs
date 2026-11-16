@@ -2,10 +2,26 @@
 
 use std::sync::atomic::Ordering;
 
-use lgtm_workspace::{FileContent, Result, WorkspaceListing, WorkspaceNode};
+use lgtm_workspace::{Result, WorkspaceListing, WorkspaceNode};
+use serde::Serialize;
+use specta::Type;
 use tauri::State;
 
 use crate::{app::AppState, events::AppEvent};
+
+/// Tauri IPC response payload returned by `workspace_read`, bundling the UTF-8 document text and its synchronized LSP language and server status.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FileContent {
+    /// The UTF-8 source text of the file.
+    pub content: String,
+    /// Optional detected language identifier for the file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language_id: Option<String>,
+    /// Optional active LSP server status for the file's language and project root.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lsp_status: Option<lgtm_lsp::LspServerStatusEvent>,
+}
 
 /// Opens the active or specified workspace directory, updates the `default` session, and prepares workspace language servers.
 #[tauri::command]
@@ -85,19 +101,22 @@ pub async fn workspace_read(
 ) -> Result<FileContent> {
     state
         .run_blocking(move |app| {
-            let (mut file, root_and_path) = {
+            let (content, root_and_path) = {
                 let w = app.lock_workspace()?;
-                let file = w.get_file_content(&relative_path)?;
+                let content = w.get_file_content(&relative_path)?;
                 let root_and_path = w.get_root().ok().zip(w.get_entry_path(&relative_path).ok());
-                (file, root_and_path)
+                (content, root_and_path)
             };
-            if let Some((root, path)) = root_and_path {
-                let (language_id, lsp_status) =
-                    app.lsp.open_or_sync_file(&root, &path, &file.content);
-                file.language_id = language_id;
-                file.lsp_status = lsp_status;
-            }
-            Ok(file)
+            let (language_id, lsp_status) = if let Some((root, path)) = root_and_path {
+                app.lsp.open_or_sync_file(&root, &path, &content)
+            } else {
+                (None, None)
+            };
+            Ok(FileContent {
+                content,
+                language_id,
+                lsp_status,
+            })
         })
         .await
 }
@@ -109,21 +128,19 @@ pub async fn workspace_write(
     state: State<'_, AppState>,
     relative_path: String,
     content: String,
-) -> Result<FileContent> {
+) -> Result<()> {
     state
         .run_blocking(move |app| {
-            let (saved, save_context) = {
+            let save_context = {
                 let w = app.lock_workspace()?;
-                let saved = w.write_file(&relative_path, &content)?;
-                let context = w
-                    .get_root()
+                w.write_file(&relative_path, &content)?;
+                w.get_root()
                     .ok()
                     .zip(w.get_entry_path(&relative_path).ok())
                     .map(|(root, path)| {
                         let is_config = w.is_config_path(&path);
                         (root, path, is_config)
-                    });
-                (saved, context)
+                    })
             };
             if let Some((root, path, is_config)) = save_context {
                 app.events.dispatch(AppEvent::FileSaved {
@@ -133,7 +150,7 @@ pub async fn workspace_write(
                     is_config,
                 });
             }
-            Ok(saved)
+            Ok(())
         })
         .await
 }

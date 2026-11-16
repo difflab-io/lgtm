@@ -15,9 +15,9 @@ pub async fn session_get(
 ) -> Result<Session> {
     state
         .run_blocking(move |app| {
-            Ok(app
-                .session
-                .get_session(session_id.as_deref().unwrap_or("default"))?)
+            app.session
+                .get_session(session_id.as_deref().unwrap_or("default"))
+                .map_err(AppState::map_session_error)
         })
         .await
 }
@@ -31,7 +31,7 @@ pub async fn session_save(
 ) -> Result<Session> {
     state
         .run_blocking(move |app| {
-            app.mutate_session(move |s| Ok(s.save_workspace_state("default", patch)?))
+            app.mutate_session(move |s| s.save_workspace_state("default", patch))
         })
         .await
 }

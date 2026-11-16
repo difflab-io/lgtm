@@ -45,7 +45,6 @@ export interface TreeNodeViewProps {
   renameErrors: Record<string, string>
   icon?: Snippet<[TreeNode, boolean]>
   selectableBranches?: boolean
-  onselect?: (value: string) => void
   onedit?: (value: string) => void
   contextItems?: (node: TreeNode) => ContextMenuItem[]
   onaction?: (value: string, action: string) => void
