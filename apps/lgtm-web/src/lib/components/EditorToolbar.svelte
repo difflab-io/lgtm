@@ -15,7 +15,7 @@
   aria-live="polite"
 >
   <div class="flex min-w-0 items-center gap-2.5">
-    <LspStatusMenu {workspace} />
+    <LspStatusMenu />
     <nav
       aria-label="Breadcrumb"
       class="document-path flex min-w-0 items-center gap-1 truncate"

@@ -1,10 +1,11 @@
 import { getContext, setContext } from 'svelte'
-import type { HotkeyService } from './hotkeyService.svelte'
-import type { LspService } from './lspService.svelte'
-import type { ProjectService } from './projectService.svelte'
-import type { SessionService } from './sessionService.svelte'
-import type { SettingsService } from './settingsService.svelte'
-import type { WorkspaceService } from './workspaceService.svelte'
+import type { WorkspaceClient } from '../clients/workspaceClient'
+import { HotkeyService } from './hotkeyService.svelte'
+import { LspService } from './lspService.svelte'
+import { ProjectService } from './projectService.svelte'
+import { SessionService } from './sessionService.svelte'
+import { SettingsService } from './settingsService.svelte'
+import { WorkspaceService } from './workspaceService.svelte'
 
 const SERVICES_CONTEXT_KEY = Symbol('lgtm.services')
 
@@ -20,19 +21,31 @@ export interface AppServices {
 
 // Public ----------------------------------------------------------------------
 
+/** Constructs peer frontend domain services wired 1:1 to their backend IPC services (`lgtm-session`, `lgtm-project`, `lgtm-lsp`, `lgtm-config`, and `lgtm-workspace`). */
+export function createAppServices(client: WorkspaceClient): Required<AppServices> {
+  const settings = new SettingsService(client)
+  const lsp = new LspService(client)
+  const session = new SessionService(client)
+  const workspace = new WorkspaceService(client, session, lsp, settings)
+  const project = new ProjectService(client, {
+    getRoot: () => session.root,
+    isActive: () => session.isActive,
+    applySession: (nextSession) => session.applySession(nextSession),
+    openWorkspace: (path) => session.openWorkspace(path),
+    selectWorkspace: (path) => session.selectWorkspace(path),
+    evictWorkspace: (path) => session.evictWorkspace(path),
+    setCreationError: (message) => {
+      workspace.creationError = message
+    },
+  })
+  session.bindPeers({ workspace, project, lsp, settings })
+  const services: AppServices = { workspace, project, session, lsp, settings }
+  const hotkeys = new HotkeyService(services)
+  return { workspace, project, session, lsp, settings, hotkeys }
+}
+
 /** Registers all domain services (`workspace`, `project`, `session`, `lsp`, `settings`, `hotkeys`) in the component tree's Svelte context. */
-export function setServicesContext(
-  workspace: WorkspaceService,
-  hotkeys?: HotkeyService,
-): AppServices {
-  const services: AppServices = {
-    workspace,
-    project: workspace.project,
-    session: workspace.session,
-    lsp: workspace.lsp,
-    settings: workspace.settings,
-    ...(hotkeys ? { hotkeys } : {}),
-  }
+export function setServicesContext(services: AppServices): AppServices {
   return setContext(SERVICES_CONTEXT_KEY, services)
 }
 

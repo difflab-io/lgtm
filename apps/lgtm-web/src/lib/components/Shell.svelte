@@ -15,9 +15,7 @@
   } from '@cloudvoyant/helical-svelte'
   import { ThemeService } from 'lgtm-ui'
   import { errorMessage, workspaceClient, type WorkspaceClient } from '../clients/workspaceClient'
-  import { setServicesContext } from '../services/context'
-  import { HotkeyService } from '../services/hotkeyService.svelte'
-  import { WorkspaceService } from '../services/workspaceService.svelte'
+  import { createAppServices, setServicesContext } from '../services/context'
   import ContentPane from './ContentPane.svelte'
   import EditorToolbar from './EditorToolbar.svelte'
   import LeftDock from './LeftDock.svelte'
@@ -31,9 +29,9 @@
   let { client = workspaceClient }: ShellProps = $props()
 
   // State ---------------------------------------------------------------------
-  const workspace = untrack(() => new WorkspaceService(client))
-  const hotkeys = untrack(() => new HotkeyService(workspace))
-  const { session } = setServicesContext(workspace, hotkeys)
+  const services = untrack(() => createAppServices(client))
+  const { workspace, session, lsp, settings, hotkeys } = setServicesContext(services)
+  const resolvedHotkeys = hotkeys!
   const theme = untrack(
     () =>
       new ThemeService({
@@ -61,8 +59,8 @@
 
   // Lifecycle -----------------------------------------------------------------
   $effect(() => {
-    if (!workspace.settings.snapshot) return
-    const nextTheme = workspace.settings.theme
+    if (!settings.snapshot) return
+    const nextTheme = settings.theme
     untrack(() => {
       if (theme.preference !== nextTheme) {
         theme.setPreference(nextTheme)
@@ -106,7 +104,7 @@
     let active = true
     const handleKeydown = (event: KeyboardEvent) => {
       if (
-        hotkeys.commandOpen &&
+        resolvedHotkeys.commandOpen &&
         (event.metaKey || event.ctrlKey) &&
         !event.altKey &&
         !event.shiftKey &&
@@ -114,7 +112,7 @@
       ) {
         event.preventDefault()
         event.stopPropagation()
-        hotkeys.setCommandOpen(false)
+        resolvedHotkeys.setCommandOpen(false)
       }
     }
     window.addEventListener('keydown', handleKeydown, true)
@@ -122,7 +120,7 @@
       theme.init(),
       () => window.removeEventListener('keydown', handleKeydown, true),
     ]
-    void workspace.open().then(async () => {
+    void session.openWorkspace().then(async () => {
       if (!active || workspace.selected) return
       await tick()
       requestAnimationFrame(() => {
@@ -139,7 +137,7 @@
       void client
         .registerQuitHandlers(async () => {
           await workspace.flushSave()
-          await workspace.saveCurrentWorkspaceSession()
+          await session.saveCurrentWorkspaceSession()
         })
         .then(async (stops) => {
           for (const stop of stops) {
@@ -153,21 +151,29 @@
         })
       void client
         .registerLspHandlers({
-          onStatus: (event) => workspace.handleLspStatus(event),
-          onDiagnostics: (event) => workspace.handleLspDiagnostics(event),
+          onStatus: (event) => {
+            if (active) lsp.handleStatus(event)
+          },
+          onDiagnostics: (event) => {
+            if (!active) return
+            lsp.handleDiagnostics(event)
+            if (session.activeTab?.kind === 'diagnostics') {
+              void workspace.openDiagnosticsBuffer(session.activeTab.languageId ?? undefined)
+            }
+          },
         })
         .then((stops) => {
           for (const stop of stops) {
             if (active) unlisteners.push(stop)
             else stop()
           }
-          if (active) void workspace.syncLspState()
+          if (active) void lsp.syncState()
         })
         .catch(() => {})
       void client
         .registerConfigHandlers?.({
           onConfigUpdated: (snapshot) => {
-            workspace.settings.handleUpdated(snapshot)
+            settings.handleUpdated(snapshot)
             void workspace.reloadCleanConfigTabs()
           },
           onOpenFile: (event) => {
@@ -188,7 +194,7 @@
       void client
         .registerSessionHandlers?.({
           onSessionUpdated: (nextSession) => {
-            workspace.applySession(nextSession)
+            session.applySession(nextSession)
           },
         })
         .then((stops) => {
@@ -203,6 +209,7 @@
       active = false
       unlisteners.forEach((stop) => stop())
       workspace.dispose()
+      session.dispose()
     }
   })
 </script>
@@ -213,33 +220,33 @@
 </svelte:head>
 
 <WhichKeyProvider
-  preset={workspace.settings.keybindPreset}
-  leaderOnly={workspace.settings.leaderOnly}
+  preset={settings.keybindPreset}
+  leaderOnly={settings.leaderOnly}
   storageKey="lgtm"
   scoped={false}
-  keymap={hotkeys.keymap}
-  commands={hotkeys.commands}
+  keymap={resolvedHotkeys.keymap}
+  commands={resolvedHotkeys.commands}
   onPresetChange={(next) => {
-    if (workspace.settings.keybindPreset !== next) {
-      hotkeys.setPreset(next)
+    if (settings.keybindPreset !== next) {
+      resolvedHotkeys.setPreset(next)
     }
   }}
   onLeaderOnlyChange={(next) => {
-    if (workspace.settings.leaderOnly !== next) {
-      hotkeys.setLeaderOnly(next)
+    if (settings.leaderOnly !== next) {
+      resolvedHotkeys.setLeaderOnly(next)
     }
   }}
 >
   <CommandProvider
-    items={hotkeys.commandItems}
-    open={hotkeys.commandOpen}
-    onOpenChange={(open) => hotkeys.setCommandOpen(open)}
-    style={hotkeys.effectiveCommandStyle}
+    items={resolvedHotkeys.commandItems}
+    open={resolvedHotkeys.commandOpen}
+    onOpenChange={(open) => resolvedHotkeys.setCommandOpen(open)}
+    style={resolvedHotkeys.effectiveCommandStyle}
   >
     <SidebarProvider
       open={session.projectsOpen || session.explorerOpen}
       onOpenChange={() => {}}
-      data-pane-outline={workspace.settings.paneOutline ? 'true' : 'false'}
+      data-pane-outline={settings.paneOutline ? 'true' : 'false'}
       class="workspace-shell h-dvh min-h-0 flex-col gap-0 overflow-hidden"
       style="--sidebar-width: {activeSidebarWidth || lastOpenSidebarWidth}px"
     >

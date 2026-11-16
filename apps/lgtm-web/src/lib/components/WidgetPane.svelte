@@ -8,6 +8,7 @@
   // State ---------------------------------------------------------------------
   const workspace = useService('workspace')
   const session = useService('session')
+  const settings = useService('settings')
 </script>
 
 <Sidebar
@@ -22,7 +23,7 @@
   style="width: {session.widgetWidth}px"
   class={[
     'relative h-full min-h-0 shrink-0 overflow-hidden bg-sidebar outline-none',
-    workspace.settings.paneOutline &&
+    settings.paneOutline &&
       'data-[pane-active=true]:after:pointer-events-none data-[pane-active=true]:after:absolute data-[pane-active=true]:after:inset-0 data-[pane-active=true]:after:z-20 data-[pane-active=true]:after:ring-1 data-[pane-active=true]:after:ring-ring/40 data-[pane-active=true]:after:ring-inset',
   ]
     .filter(Boolean)
@@ -56,7 +57,7 @@
   <SidebarContent class="min-h-0 flex-1 overflow-y-auto">
     {#if workspace.error && workspace.client.isDesktop()}
       <div class="mx-3.5 my-2">
-        <Button variant="text" size="sm" onclick={() => workspace.open()}>Retry</Button>
+        <Button variant="text" size="sm" onclick={() => session.openWorkspace()}>Retry</Button>
       </div>
     {:else if !workspace.loading && !workspace.error && !workspace.entries.length && !workspace.pendingEntry}
       <Notice variant="none" class="mx-3.5 my-2 text-xs">

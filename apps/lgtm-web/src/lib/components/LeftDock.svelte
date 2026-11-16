@@ -10,6 +10,7 @@
   const workspace = useService('workspace')
   const project = useService('project')
   const session = useService('session')
+  const settings = useService('settings')
   const dockOpen = $derived(session.projectsOpen || session.explorerOpen)
 
   function startResize(target: 'projects' | 'widget', event: PointerEvent) {
@@ -81,7 +82,7 @@
           : `${session.projectsWidth}px`}"
         class={[
           'relative h-full min-h-0 shrink-0 overflow-hidden bg-sidebar outline-none',
-          workspace.settings.paneOutline &&
+          settings.paneOutline &&
             'data-[pane-active=true]:after:pointer-events-none data-[pane-active=true]:after:absolute data-[pane-active=true]:after:inset-0 data-[pane-active=true]:after:z-20 data-[pane-active=true]:after:ring-1 data-[pane-active=true]:after:ring-ring/40 data-[pane-active=true]:after:ring-inset',
         ]
           .filter(Boolean)
@@ -97,7 +98,7 @@
               aria-label="Add project"
               title="Add project"
               disabled={workspace.blocked}
-              onclick={() => void workspace.selectWorkspace('__open_folder__')}
+              onclick={() => void session.selectWorkspace('__open_folder__')}
               ><FolderPlus size={14} strokeWidth={1.5} /></Button
             >
             <Button

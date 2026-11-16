@@ -7,12 +7,15 @@
 
   // State ---------------------------------------------------------------------
   const workspace = useService('workspace')
+  const session = useService('session')
+  const lsp = useService('lsp')
+  const settings = useService('settings')
   const hotkeys = useService('hotkeys')
   let editorRef = $state<{ focus: () => void }>()
 
   // Derived -------------------------------------------------------------------
   const editorDiagnostics = $derived(
-    workspace.activeDiagnostics.map((diag) => ({
+    lsp.getDiagnosticsForPath(workspace.selected?.path).map((diag) => ({
       from: diag.from,
       to: diag.to,
       severity: diag.severity,
@@ -32,13 +35,13 @@
 <div
   class="document-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground"
 >
-  {#if workspace.tabItems.length > 0}
+  {#if session.tabItems.length > 0}
     <Tabs
-      items={workspace.tabItems}
-      value={workspace.activeTabId}
+      items={session.tabItems}
+      value={session.activeTabId}
       ariaLabel="Open editors"
-      onchange={(tabId) => workspace.activateTab(tabId)}
-      onclose={(tabId) => workspace.closeTab(tabId)}
+      onchange={(tabId) => session.activateTab(tabId)}
+      onclose={(tabId) => session.closeTab(tabId)}
     />
   {/if}
   <Pane
@@ -47,8 +50,7 @@
     paneTitle="Editor"
     paneOrder={3}
     tabindex={-1}
-    class="relative flex min-h-0 min-w-0 flex-1 flex-col rounded-none border-0 bg-background text-foreground shadow-none ring-0 outline-none data-[pane-active=true]:ring-0 {workspace
-      .settings.paneOutline
+    class="relative flex min-h-0 min-w-0 flex-1 flex-col rounded-none border-0 bg-background text-foreground shadow-none ring-0 outline-none data-[pane-active=true]:ring-0 {settings.paneOutline
       ? 'data-[pane-active=true]:after:pointer-events-none data-[pane-active=true]:after:absolute data-[pane-active=true]:after:inset-0 data-[pane-active=true]:after:z-20 data-[pane-active=true]:after:ring-1 data-[pane-active=true]:after:ring-ring/40 data-[pane-active=true]:after:ring-inset'
       : ''}"
     aria-label="File viewer"
@@ -74,7 +76,7 @@
             >Retry opening</Button
           >{/if}
       </div>
-    {:else if workspace.fileContent && (workspace.selected || workspace.activeTab)}
+    {:else if workspace.fileContent && (workspace.selected || session.activeTab)}
       <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
         {#key workspace.fileVersion}
           <CodeEditor
@@ -82,9 +84,9 @@
             value={workspace.fileContent.content}
             filename={workspace.activeEditorFilename}
             label={workspace.selectedTitle}
-            readonly={workspace.activeTab?.readonly ?? false}
-            lineWrapping={workspace.settings.lineWrapping}
-            clickToInsert={workspace.settings.clickToInsert}
+            readonly={session.activeTab?.readonly ?? false}
+            lineWrapping={settings.lineWrapping}
+            clickToInsert={settings.clickToInsert}
             diagnostics={editorDiagnostics}
             selectionOffset={workspace.selectionOffset}
             onchange={(content) => workspace.updateContent(content)}

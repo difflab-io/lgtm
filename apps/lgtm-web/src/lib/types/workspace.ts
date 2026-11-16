@@ -4,7 +4,7 @@ export interface FolderRefresh {
   version: number
 }
 
-/** Open file or diagnostics buffer tab in `WorkspaceService`. */
+/** Open file or diagnostics buffer tab tracked in `SessionService`. */
 export interface WorkspaceTab {
   id: string
   kind: 'file' | 'diagnostics'
