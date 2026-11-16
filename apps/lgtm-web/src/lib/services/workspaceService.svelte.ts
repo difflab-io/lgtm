@@ -1,25 +1,47 @@
+import { tick } from 'svelte'
 import type {
   TreeNode,
   ContextMenuItem,
   CodeEditorCompletionItem,
   CodeEditorHoverResult,
   CodeEditorSignatureHelp,
+  TabItem,
 } from 'lgtm-ui'
+import { getDocumentWhichKeyController } from '@cloudvoyant/helical-ui'
 import { WorkspaceNodeViewModel } from '../models/workspaceNodeViewModel'
 import {
   errorMessage,
   type WorkspaceClient,
   type WorkspaceNode,
   type FileContent,
+  type Session,
+  type SidebarWidget,
+  type TabCandidate,
+  type WorkspaceSessionState,
+  type WorkspaceStatePatch,
 } from '../clients/workspaceClient'
 import type { CachedWorkspaceSnapshot, FolderRefresh, WorkspaceTab } from '../types'
 import type { LspService } from './lspService.svelte'
 import type { SessionService } from './sessionService.svelte'
 import type { SettingsService } from './settingsService.svelte'
 
-// TODO(DIFF-307): Rename `WorkspaceService` to `FileExplorerService` once the remaining active-buffer/file-explorer split finishes, and merge `libs/lgtm-workspace` into `apps/lgtm-desktop`.
-/** File explorer tree and active editor buffer service backed by `lgtm-workspace` IPC commands. */
+/** Peer callbacks invoked by `WorkspaceService` for shell/workspace actions crossing sibling domains. */
+export interface WorkspaceServiceCallbacks {
+  onNewWorktreeRequested?: () => void
+}
+
+/** Active workspace & shell state service managing open tabs, dock widgets/widths, workspace switching, file explorer tree, and active buffer I/O. */
 export class WorkspaceService {
+  defaultRoot = $state('')
+  root = $state('~/.lgtm/workspace')
+  sidebarWidget = $state<SidebarWidget>('explorer')
+  projectsOpen = $state(false)
+  explorerOpen = $state(true)
+  projectsWidth = $state(180)
+  widgetWidth = $state(236)
+  resizing = $state(false)
+  tabs = $state<WorkspaceTab[]>([])
+  activeTabId = $state<string | null>(null)
   entries = $state<WorkspaceNode[]>([])
   loading = $state(true)
   error = $state<string | null>(null)
@@ -40,6 +62,8 @@ export class WorkspaceService {
   expandedDirs = $state<string[]>([])
   private dirEntries = $state<Record<string, WorkspaceNode[]>>({})
   private listed = $state<Record<string, WorkspaceNode>>({})
+  private workspaceCache = new Map<string, CachedWorkspaceSnapshot>()
+  private sidebarHydrated = false
   private active = true
   private dirtyPath: string | null = null
   private dirtyContent: string | null = null
@@ -47,15 +71,21 @@ export class WorkspaceService {
   private inFlightSave: Promise<void> | null = null
   private openRequestSeq = 0
 
-  /** Constructs a `WorkspaceService` scoped to file explorer tree state and file buffer I/O. */
+  /** Constructs a `WorkspaceService` owning shell/workspace UI state backed by `client` and peer services. */
   constructor(
     readonly client: WorkspaceClient,
     private readonly session: SessionService,
     private readonly lsp: LspService,
     private readonly settings: SettingsService,
+    private readonly callbacks: WorkspaceServiceCallbacks = {},
   ) {}
 
   // Public --------------------------------------------------------------------
+
+  /** Returns the total rendered width (in px) of the open left-dock panes (`ProjectsPane` + `WidgetPane`). */
+  get leftDockWidth(): number {
+    return (this.projectsOpen ? this.projectsWidth : 0) + (this.explorerOpen ? this.widgetWidth : 0)
+  }
 
   /** Returns whether a file or tree operation is currently in progress. */
   get blocked(): boolean {
@@ -67,30 +97,46 @@ export class WorkspaceService {
     return this.blocked || this.loading || Boolean(this.error || this.pendingEntry)
   }
 
+  /** Returns the currently active editor or diagnostics tab, if any. */
+  get activeTab(): WorkspaceTab | null {
+    if (!this.activeTabId) return null
+    return this.tabs.find((tab) => tab.id === this.activeTabId) ?? null
+  }
+
+  /** Returns tab bar items formatted for the Helical `Tabs` component. */
+  get tabItems(): TabItem[] {
+    return this.tabs.map((tab) => ({
+      value: tab.id,
+      label: tab.title,
+      dirty: Boolean(tab.dirty),
+      closable: true,
+    }))
+  }
+
   /** Returns the display title of the active tab or selected file. */
   get selectedTitle(): string {
-    if (this.session.activeTab?.kind === 'diagnostics') {
-      return this.session.activeTab.title
+    if (this.activeTab?.kind === 'diagnostics') {
+      return this.activeTab.title
     }
     return this.selected ? this.selected.name : 'No file selected'
   }
 
   /** Returns the path or title shown in the footer breadcrumb tooltip. */
   get selectedPath(): string | undefined {
-    if (this.session.activeTab?.kind === 'diagnostics') return this.session.activeTab.title
+    if (this.activeTab?.kind === 'diagnostics') return this.activeTab.title
     return this.selected?.path
   }
 
   /** Returns the filename passed to `CodeEditor` for syntax highlighting. */
   get activeEditorFilename(): string {
-    if (this.session.activeTab?.kind === 'diagnostics') return 'diagnostics.md'
+    if (this.activeTab?.kind === 'diagnostics') return 'diagnostics.md'
     if (this.selected?.path.endsWith('config.json')) return 'config.json'
     return this.selected?.name ?? 'diagnostics.md'
   }
 
   /** Returns path segments rendered in the footer breadcrumb bar. */
   get breadcrumbs(): string[] {
-    if (this.session.activeTab?.kind === 'diagnostics') return [this.session.activeTab.title]
+    if (this.activeTab?.kind === 'diagnostics') return [this.activeTab.title]
     if (!this.selected) return []
     if (this.isConfigFilePath(this.selected.path)) {
       return ['.lgtm', 'config.json']
@@ -100,8 +146,8 @@ export class WorkspaceService {
 
   /** Returns the language ID of the active editor buffer. */
   get activeLanguageId(): string | null {
-    if (this.session.activeTab?.kind === 'diagnostics') {
-      return this.session.activeTab.languageId ?? null
+    if (this.activeTab?.kind === 'diagnostics') {
+      return this.activeTab.languageId ?? null
     }
     return this.fileContent?.languageId ?? null
   }
@@ -111,7 +157,7 @@ export class WorkspaceService {
     if (this.openingError) return this.openingError
     if (this.fileLoading) return 'Opening file…'
     if (this.saving) return 'Saving…'
-    if (this.selected || this.session.activeTab) return 'Ready'
+    if (this.selected || this.activeTab) return 'Ready'
     return 'Idle'
   }
 
@@ -132,136 +178,201 @@ export class WorkspaceService {
       : undefined
   }
 
-  /** Returns the monotonic open-file sequence number for race detection during startup open. */
-  getOpenRequestSeq(): number {
-    return this.openRequestSeq
+  /** Clamps and updates the width of the `Projects` dock pane. */
+  setProjectsWidth(width: number): void {
+    this.projectsWidth = Math.min(360, Math.max(140, Math.round(width)))
   }
 
-  /** Clears transient explorer errors and marks loading active before switching workspaces. */
-  beginWorkspaceOpen(): void {
-    this.loading = true
-    this.error = null
-    this.creationError = null
-    this.pendingEntry = null
-    this.pendingParent = ''
+  /** Clamps and updates the width of the `WidgetPane` (`FileExplorer`). */
+  setWidgetWidth(width: number): void {
+    this.widgetWidth = Math.min(480, Math.max(160, Math.round(width)))
   }
 
-  /** Replaces the top-level directory entries for the active workspace root. */
-  setEntries(entries: WorkspaceNode[]): void {
-    this.entries = entries
+  /** Updates whether a left-dock pane resizer is actively being dragged. */
+  setResizing(active: boolean): void {
+    this.resizing = active
   }
 
-  /** Sets hydrated `expandedDirs` restored from persisted session state. */
-  setHydratedExpandedDirs(dirs: string[]): void {
-    this.expandedDirs = dirs
+  /** Toggles the Projects dock pane independently of the Explorer widget slot and shifts focus to the opened pane or editor on close. */
+  toggleProjectsPane(): void {
+    this.projectsOpen = !this.projectsOpen
+    this.sidebarWidget = this.projectsOpen ? 'projects' : 'explorer'
+    this.sidebarHydrated = true
+    void this.session.saveCurrentSession(this.root)
+    this.focusTargetPane(this.projectsOpen ? 'projects' : 'editor')
   }
 
-  /** Applies an opened directory listing from `workspace_open` to the explorer tree and resets selection unless preserving startup selection. */
-  applyOpenedListing(entries: WorkspaceNode[], preserveSelection: boolean): void {
-    this.entries = entries
-    if (!preserveSelection) {
-      this.dirEntries = {}
-      this.listed = {}
-      this.expandedDirs = []
-      this.clearSelected()
-    }
+  /** Toggles the Explorer widget pane inside the left dock independently of the Projects pane and shifts focus to the opened pane or editor on close. */
+  toggleExplorerPane(): void {
+    this.explorerOpen = !this.explorerOpen
+    this.sidebarHydrated = true
+    void this.session.saveCurrentSession(this.root)
+    this.focusTargetPane(this.explorerOpen ? 'workspace' : 'editor')
   }
 
-  /** Applies a cached tree and buffer snapshot during an instant workspace switch. */
-  applyCachedWorkspace(cached: CachedWorkspaceSnapshot, entriesOverride?: WorkspaceNode[]): void {
-    this.loading = false
-    this.error = null
-    this.creationError = null
-    this.openingError = null
-    this.pendingEntry = null
-    this.pendingParent = ''
-    this.entries = entriesOverride ?? cached.entries
-    this.dirEntries = cached.dirEntries
-    this.listed = cached.listed
-    this.selected = cached.selected
-    this.fileContent = cached.fileContent
-    this.selectionOffset = cached.selectionOffset
-    this.expandedDirs = cached.expandedDirs
-  }
-
-  /** Applies restored file selection and buffer content loaded from persisted session tabs. */
-  applyRestoredBuffer(entry: WorkspaceNode | null, content: FileContent | null): void {
-    this.selected = entry
-    this.fileContent = content
-    this.fileVersion++
-  }
-
-  /** Increments `treeVersion` to reset transient `TreeView` internal expansion cache cleanly. */
-  bumpTreeVersion(): void {
-    this.treeVersion++
-  }
-
-  /** Increments `fileVersion` to remount `CodeEditor` on buffer transitions. */
-  bumpFileVersion(): void {
-    this.fileVersion++
-  }
-
-  /** Builds a `CachedWorkspaceSnapshot` combining current explorer state with session `retainedTabs`. */
-  buildSnapshot(
-    root: string,
-    retainedTabs: WorkspaceTab[],
-    activeTab: WorkspaceTab | null,
-  ): CachedWorkspaceSnapshot {
-    return {
-      root,
-      entries: [...this.entries],
-      dirEntries: { ...this.dirEntries },
-      listed: { ...this.listed },
-      tabs: retainedTabs,
-      activeTabId: activeTab?.id ?? null,
-      selected: activeTab?.path
-        ? { path: activeTab.path, name: activeTab.title, kind: 'file' }
-        : null,
-      fileContent:
-        activeTab && this.fileContent
-          ? { ...this.fileContent, content: activeTab.content }
-          : activeTab
-            ? {
-                content: activeTab.content,
-                languageId: activeTab.languageId ?? null,
-              }
-            : null,
-      selectionOffset: this.selectionOffset,
-      expandedDirs: [...this.expandedDirs],
-    }
-  }
-
-  /** Preloads directory listings for all expanded branches so the explorer renders synchronously in one frame. */
-  async preloadExpandedDirs(dirs: string[], forceRefresh = false): Promise<void> {
-    if (dirs.length === 0) return
-    const targets = forceRefresh ? dirs : dirs.filter((dir) => !(dir in this.dirEntries))
-    if (targets.length === 0) return
-    const results = await Promise.all(
-      targets.map(async (dir) => {
-        try {
-          const items = await this.client.list(dir)
-          return { dir, items }
-        } catch {
-          return null
-        }
-      }),
-    )
-    if (!this.active) return
-    const nextDirEntries = forceRefresh ? {} : { ...this.dirEntries }
-    for (const res of results) {
-      if (!res) continue
-      nextDirEntries[res.dir] = res.items
-      for (const item of res.items) {
-        this.listed[item.path] = item
+  /** Opens the specified left dock pane (`projects` or `explorer`). */
+  setSidebarWidget(widget: SidebarWidget): void {
+    if (widget === 'projects') {
+      this.projectsOpen = true
+      this.sidebarWidget = 'projects'
+    } else {
+      this.explorerOpen = true
+      if (!this.projectsOpen) {
+        this.sidebarWidget = 'explorer'
       }
     }
-    this.dirEntries = nextDirEntries
+    this.sidebarHydrated = true
+    void this.session.saveCurrentSession(this.root)
+  }
+
+  /** Hydrates initial sidebar dock widget state from a loaded `Session` if not yet changed locally. */
+  applySessionWidgets(session: Session): void {
+    if (!this.sidebarHydrated) {
+      this.sidebarHydrated = true
+      const nextWidget = session.sidebarWidget ?? 'explorer'
+      this.sidebarWidget = nextWidget
+      this.projectsOpen = nextWidget === 'projects'
+    }
+  }
+
+  /** Restores expanded explorer branches and persisted editor tabs for the active workspace from `wsState`. */
+  async restoreSessionWorkspaceState(wsState: WorkspaceSessionState | undefined): Promise<void> {
+    if (!wsState || !this.active) return
+    const dirs = [...(wsState.expandedDirs ?? [])]
+    await this.preloadExpandedDirs(dirs)
+    if (!this.active) return
+    this.expandedDirs = dirs
+    if (this.tabs.length === 0 && (wsState.tabs ?? []).length > 0) {
+      await this.restorePersistedTabs(wsState.tabs)
+    }
+  }
+
+  /** Builds a `WorkspaceStatePatch` capturing current open tabs, expanded dirs, and active dock widget for `SessionService`. */
+  buildSessionSavePatch(targetRoot = this.root): WorkspaceStatePatch {
+    const isPlaceholder = !targetRoot || this.isDefaultPlaceholderRoot(targetRoot)
+    const snapshot = isPlaceholder
+      ? undefined
+      : targetRoot === this.root
+        ? this.buildSnapshotForCurrentRoot()
+        : this.workspaceCache.get(targetRoot)
+    const tabs: TabCandidate[] = snapshot
+      ? snapshot.tabs
+          .filter((tab) => tab.kind === 'file' && Boolean(tab.path))
+          .map((tab) => ({
+            path: tab.path!,
+            title: tab.title,
+            edited: Boolean(tab.edited),
+            lastOpened: tab.id === snapshot.activeTabId,
+          }))
+      : []
+    return {
+      workspaceRoot: isPlaceholder ? '' : targetRoot,
+      tabs,
+      expandedDirs: snapshot ? snapshot.expandedDirs : [],
+      sidebarWidget: this.sidebarWidget,
+    }
+  }
+
+  /** Removes any cached in-memory workspace snapshot for `root`. */
+  evictCachedWorkspace(root: string): void {
+    this.workspaceCache.delete(root)
   }
 
   /** Updates the tracked list of expanded directory paths in `FileExplorer` and persists session state. */
   setExpandedDirs(dirs: string[]): void {
     this.expandedDirs = [...dirs]
-    void this.session.saveCurrentWorkspaceSession()
+    void this.session.saveCurrentSession(this.root)
+  }
+
+  /** Opens the default or specified workspace directory and refreshes settings, session, and LSP state. */
+  async open(path?: string): Promise<void> {
+    const outgoingRoot = this.root && !this.isDefaultPlaceholderRoot(this.root) ? this.root : null
+    if (outgoingRoot && path && path !== outgoingRoot) {
+      this.saveCurrentWorkspaceToCache(outgoingRoot)
+    }
+    await this.flushSave()
+    if (outgoingRoot && path && path !== outgoingRoot) {
+      void this.session.saveCurrentSession(outgoingRoot)
+    }
+
+    const cached = path ? this.workspaceCache.get(path) : undefined
+    if (cached && path) {
+      this.applyCachedWorkspace(cached)
+      void this.refreshWorkspaceInBackground(path)
+      return
+    }
+
+    const seqBeforeOpen = this.openRequestSeq
+    this.loading = true
+    this.error = null
+    this.creationError = null
+    this.pendingEntry = null
+    this.pendingParent = ''
+    try {
+      const result = await this.client.open(path)
+      if (!this.active) return
+      if (!this.defaultRoot && !path && this.isDefaultWorkspaceRoot(result.root)) {
+        this.defaultRoot = result.root
+      }
+      const switchedCached = this.workspaceCache.get(result.root)
+      const fileOpenedDuringInit = !path && this.openRequestSeq !== seqBeforeOpen
+      this.root = result.root
+      this.settings.rememberRoot(result.root)
+      this.entries = result.entries
+      if (switchedCached) {
+        this.dirEntries = switchedCached.dirEntries
+        this.listed = switchedCached.listed
+        this.tabs = switchedCached.tabs
+        this.activeTabId = switchedCached.activeTabId
+        this.selected = switchedCached.selected
+        this.fileContent = switchedCached.fileContent
+        this.selectionOffset = switchedCached.selectionOffset
+        this.expandedDirs = switchedCached.expandedDirs
+      } else if (!fileOpenedDuringInit) {
+        this.dirEntries = {}
+        this.listed = {}
+        this.tabs = []
+        this.activeTabId = null
+        this.expandedDirs = []
+        this.clearSelected()
+      }
+      if (!fileOpenedDuringInit) {
+        this.lsp.reset()
+        this.fileVersion++
+      }
+      this.treeVersion++
+      void this.settings.load()
+      void this.lsp.syncState()
+      await this.session.syncSession(!switchedCached && !fileOpenedDuringInit)
+      this.saveCurrentWorkspaceToCache(this.root)
+    } catch (error) {
+      if (this.active) this.error = errorMessage(error)
+    } finally {
+      if (this.active) this.loading = false
+    }
+  }
+
+  /** Switches to a selected workspace root, opens the native folder picker, or opens the `New Worktree` dialog. */
+  async selectWorkspace(value: string): Promise<void> {
+    if (this.blocked) return
+    if (value === '__new_worktree__') {
+      this.callbacks.onNewWorktreeRequested?.()
+      return
+    }
+    if (value === '__open_folder__') {
+      try {
+        const chosen = await this.client.pickFolder()
+        if (chosen && this.active) {
+          await this.open(chosen)
+        }
+      } catch (error) {
+        if (this.active) this.creationError = errorMessage(error)
+      }
+      return
+    }
+    if (value && value !== this.root) {
+      await this.open(value)
+    }
   }
 
   /** Lazily loads child nodes for an expanded directory in the sidebar tree. */
@@ -271,7 +382,7 @@ export class WorkspaceService {
     if (!this.active) return []
     for (const entry of items) this.listed[entry.path] = entry
     this.dirEntries = { ...this.dirEntries, [node.value]: items }
-    this.session.saveCurrentWorkspaceToCache()
+    this.saveCurrentWorkspaceToCache(this.root)
     return items.map((entry) => this.toTreeNodeWithChildren(entry))
   }
 
@@ -295,7 +406,7 @@ export class WorkspaceService {
   /** Reads a file from the workspace, opens or activates its tab, and optionally positions the cursor at `targetOffset`. */
   async openFile(entry: WorkspaceNode, targetOffset?: number, focus = false): Promise<void> {
     const tabId = `file:${entry.path}`
-    if (this.session.activeTabId === tabId && this.fileContent) {
+    if (this.activeTabId === tabId && this.fileContent) {
       if (targetOffset !== undefined) {
         this.selectionOffset = null
         await Promise.resolve()
@@ -307,7 +418,7 @@ export class WorkspaceService {
     const requestId = ++this.openRequestSeq
     await this.flushSave()
     if (requestId !== this.openRequestSeq) return
-    const existingTab = this.session.tabs.find((t) => t.id === tabId)
+    const existingTab = this.tabs.find((t) => t.id === tabId)
     this.selected = entry
     this.fileLoading = true
     this.openingError = null
@@ -319,7 +430,7 @@ export class WorkspaceService {
       if (!this.active || requestId !== this.openRequestSeq) return
       this.fileContent = content
       this.lsp.recordFileStatus(content.lspStatus)
-      this.session.upsertAndActivateTab({
+      this.upsertTab({
         id: tabId,
         kind: 'file',
         title: entry.name,
@@ -330,13 +441,14 @@ export class WorkspaceService {
         dirty: false,
         edited: Boolean(existingTab?.edited),
       })
+      this.activeTabId = tabId
       this.selectionOffset = targetOffset ?? null
       this.fileVersion++
       if (focus || targetOffset !== undefined) {
         this.focusRequest++
       }
-      this.session.saveCurrentWorkspaceToCache()
-      void this.session.saveCurrentWorkspaceSession()
+      this.saveCurrentWorkspaceToCache(this.root)
+      void this.session.saveCurrentSession(this.root)
       void this.lsp.syncState()
     } catch (error) {
       if (this.active && requestId === this.openRequestSeq) {
@@ -348,24 +460,109 @@ export class WorkspaceService {
     }
   }
 
-  /** Displays a cached diagnostics tab buffer and focuses the editor pane. */
-  showDiagnosticsTabSnapshot(content: string, languageId: string | null): void {
+  /** Activates an open file or diagnostics tab by its ID. */
+  async activateTab(tabId: string): Promise<void> {
+    if (this.blocked || this.activeTabId === tabId) return
+    const tab = this.tabs.find((item) => item.id === tabId)
+    if (!tab) return
+    if (tab.kind === 'file' && tab.path) {
+      await this.openFile(
+        {
+          path: tab.path,
+          name: tab.title,
+          kind: 'file',
+        },
+        undefined,
+        true,
+      )
+      return
+    }
+    await this.flushSave()
     this.selected = null
     this.openingError = null
+    this.activeTabId = tab.id
     this.selectionOffset = null
-    this.fileContent = { content, languageId }
+    this.fileContent = {
+      content: tab.content,
+      languageId: tab.languageId ?? null,
+    }
     this.fileVersion++
     this.focusRequest++
+    try {
+      const refreshed = await this.lsp.getDiagnosticsBuffer(tab.languageId ?? undefined)
+      if (!this.active) return
+      this.tabs = this.tabs.map((item) =>
+        item.id === tab.id ? { ...item, title: refreshed.title, content: refreshed.content } : item,
+      )
+      if (this.activeTabId === tab.id) {
+        this.fileContent = {
+          content: refreshed.content,
+          languageId: refreshed.languageId ?? null,
+        }
+      }
+    } catch {
+      // Keep existing diagnostics buffer snapshot if refresh is unsupported.
+    }
   }
 
-  /** Updates the displayed diagnostics buffer content after a background refresh. */
-  updateDiagnosticsContent(content: string, languageId: string | null): void {
-    this.fileContent = { content, languageId }
+  /** Flushes pending saves and closes the tab with `tabId`. */
+  async closeTab(tabId: string): Promise<void> {
+    if (this.blocked) return
+    const index = this.tabs.findIndex((item) => item.id === tabId)
+    if (index === -1) return
+    await this.flushSave()
+    const remaining = this.tabs.filter((item) => item.id !== tabId)
+    this.tabs = remaining
+    if (this.activeTabId !== tabId) {
+      this.saveCurrentWorkspaceToCache(this.root)
+      void this.session.saveCurrentSession(this.root)
+      return
+    }
+    const fallback = remaining[index] ?? remaining[index - 1] ?? null
+    if (!fallback) {
+      this.clearSelected()
+      this.saveCurrentWorkspaceToCache(this.root)
+      void this.session.saveCurrentSession(this.root)
+      return
+    }
+    this.activeTabId = null
+    await this.activateTab(fallback.id)
+  }
+
+  /** Closes the currently active editor tab, if any. */
+  async closeActiveTab(): Promise<void> {
+    if (!this.activeTabId) return
+    await this.closeTab(this.activeTabId)
+  }
+
+  /** Cycles forward through open tabs by `count`. */
+  async selectNextTab(count = 1): Promise<void> {
+    if (this.blocked || this.tabs.length <= 1) return
+    const currentIdx = this.tabs.findIndex((tab) => tab.id === this.activeTabId)
+    const startIdx = currentIdx === -1 ? 0 : currentIdx
+    const step = Math.max(1, count)
+    const target = this.tabs[(startIdx + step) % this.tabs.length]
+    if (target) {
+      await this.activateTab(target.id)
+    }
+  }
+
+  /** Cycles backward through open tabs by `count`. */
+  async selectPrevTab(count = 1): Promise<void> {
+    if (this.blocked || this.tabs.length <= 1) return
+    const currentIdx = this.tabs.findIndex((tab) => tab.id === this.activeTabId)
+    const startIdx = currentIdx === -1 ? 0 : currentIdx
+    const step = Math.max(1, count)
+    const nextIdx = (((startIdx - step) % this.tabs.length) + this.tabs.length) % this.tabs.length
+    const target = this.tabs[nextIdx]
+    if (target) {
+      await this.activateTab(target.id)
+    }
   }
 
   /** Reloads any open, clean `config.json` editor tabs from disk after a programmatic settings update. */
   async reloadCleanConfigTabs(): Promise<void> {
-    for (const tab of this.session.tabs) {
+    for (const tab of this.tabs) {
       if (tab.kind !== 'file' || !tab.path || tab.dirty || !this.isConfigFilePath(tab.path)) {
         continue
       }
@@ -373,9 +570,11 @@ export class WorkspaceService {
       try {
         const refreshed = await this.client.read(tab.path)
         if (!this.active) return
-        this.session.updateCleanTabContent(tab.id, refreshed.content)
+        this.tabs = this.tabs.map((item) =>
+          item.id === tab.id && !item.dirty ? { ...item, content: refreshed.content } : item,
+        )
         if (
-          this.session.activeTabId === tab.id &&
+          this.activeTabId === tab.id &&
           this.selected?.path === tab.path &&
           this.dirtyPath !== tab.path
         ) {
@@ -394,7 +593,7 @@ export class WorkspaceService {
       const buffer = await this.lsp.getDiagnosticsBuffer(languageId)
       if (!this.active) return
       const tabId = languageId ? `diagnostics:${languageId}` : 'diagnostics:all'
-      this.session.upsertAndActivateTab({
+      this.upsertTab({
         id: tabId,
         kind: 'diagnostics',
         title: buffer.title,
@@ -405,6 +604,7 @@ export class WorkspaceService {
       })
       this.selected = null
       this.openingError = null
+      this.activeTabId = tabId
       this.selectionOffset = null
       this.fileContent = {
         content: buffer.content,
@@ -452,9 +652,13 @@ export class WorkspaceService {
   updateContent(content: string): void {
     if (!this.selected || !this.fileContent || this.fileContent.content === content) return
     this.fileContent = { ...this.fileContent, content }
-    this.session.markTabDirty(this.selected.path, content)
+    const tabId = `file:${this.selected.path}`
+    this.tabs = this.tabs.map((tab) =>
+      tab.id === tabId ? { ...tab, content, dirty: true, edited: true } : tab,
+    )
     this.dirtyPath = this.selected.path
     this.dirtyContent = content
+    this.saveCurrentWorkspaceToCache(this.root)
     this.lsp.notifyDidChange(this.selected.path, content)
     if (this.saveTimer) clearTimeout(this.saveTimer)
     this.saveTimer = setTimeout(() => {
@@ -482,7 +686,14 @@ export class WorkspaceService {
         .write(path, content)
         .then(async () => {
           if (!this.active) return
-          this.session.markTabSaved(path, content)
+          const tabId = `file:${path}`
+          this.tabs = this.tabs.map((tab) =>
+            tab.id === tabId && tab.content === content
+              ? { ...tab, dirty: false, edited: true }
+              : tab,
+          )
+          this.saveCurrentWorkspaceToCache(this.root)
+          void this.session.saveCurrentSession(this.root)
           if (this.isConfigFilePath(path)) {
             await this.settings.load()
           }
@@ -510,6 +721,7 @@ export class WorkspaceService {
     this.selected = null
     this.fileContent = null
     this.openingError = null
+    this.activeTabId = null
     this.selectionOffset = null
   }
 
@@ -570,7 +782,26 @@ export class WorkspaceService {
       } else {
         const renamed = await this.client.rename(path, name)
         this.listed[renamed.path] = renamed
-        this.session.handlePathRenamed(path, renamed)
+        this.tabs = this.tabs.map((tab) => {
+          if (tab.kind !== 'file' || !tab.path) return tab
+          if (tab.path === path) {
+            return {
+              ...tab,
+              id: `file:${renamed.path}`,
+              path: renamed.path,
+              title: renamed.name,
+            }
+          }
+          if (tab.path.startsWith(`${path}/`)) {
+            const nextPath = renamed.path + tab.path.slice(path.length)
+            return {
+              ...tab,
+              id: `file:${nextPath}`,
+              path: nextPath,
+            }
+          }
+          return tab
+        })
         const selected = this.selected
         if (selected && (selected.path === path || selected.path.startsWith(`${path}/`))) {
           openNext = {
@@ -579,7 +810,6 @@ export class WorkspaceService {
             name: selected.path === path ? renamed.name : selected.name,
           }
           this.clearSelected()
-          this.session.activeTabId = null
         }
         try {
           this.entries = await this.client.list('')
@@ -616,11 +846,15 @@ export class WorkspaceService {
     this.creationError = null
     try {
       await this.client.delete(path)
-      this.session.handlePathsRemoved(path)
+      this.tabs = this.tabs.filter(
+        (tab) =>
+          tab.kind !== 'file' ||
+          !tab.path ||
+          (tab.path !== path && !tab.path.startsWith(`${path}/`)),
+      )
       const selected = this.selected
       if (selected && (selected.path === path || selected.path.startsWith(`${path}/`))) {
         this.clearSelected()
-        this.session.activeTabId = null
       }
       try {
         this.entries = await this.client.list('')
@@ -666,6 +900,18 @@ export class WorkspaceService {
 
   // Private -------------------------------------------------------------------
 
+  private isDefaultPlaceholderRoot(path: string): boolean {
+    return path === '~/.lgtm/workspace'
+  }
+
+  private isDefaultWorkspaceRoot(path: string): boolean {
+    return (
+      path === '~/.lgtm/workspace' ||
+      path.endsWith('/.lgtm/workspace') ||
+      path.endsWith('\\.lgtm\\workspace')
+    )
+  }
+
   private isConfigFilePath(path: string): boolean {
     return (
       path === '~/.lgtm/config.json' ||
@@ -673,6 +919,66 @@ export class WorkspaceService {
       path === this.settings.snapshot?.globalPath ||
       path === this.settings.snapshot?.projectPath
     )
+  }
+
+  private buildSnapshotForCurrentRoot(): CachedWorkspaceSnapshot {
+    const retainedTabs = this.tabs.filter(
+      (tab) =>
+        tab.kind === 'file' &&
+        Boolean(tab.path) &&
+        (Boolean(tab.edited) || tab.id === this.activeTabId),
+    )
+    const activeTab =
+      retainedTabs.find((tab) => tab.id === this.activeTabId) ?? retainedTabs.at(-1) ?? null
+    return {
+      root: this.root,
+      entries: [...this.entries],
+      dirEntries: { ...this.dirEntries },
+      listed: { ...this.listed },
+      tabs: retainedTabs,
+      activeTabId: activeTab?.id ?? null,
+      selected: activeTab?.path
+        ? { path: activeTab.path, name: activeTab.title, kind: 'file' }
+        : null,
+      fileContent:
+        activeTab && this.fileContent
+          ? { ...this.fileContent, content: activeTab.content }
+          : activeTab
+            ? {
+                content: activeTab.content,
+                languageId: activeTab.languageId ?? null,
+              }
+            : null,
+      selectionOffset: this.selectionOffset,
+      expandedDirs: [...this.expandedDirs],
+    }
+  }
+
+  private saveCurrentWorkspaceToCache(root: string): void {
+    if (!root || this.isDefaultPlaceholderRoot(root)) return
+    this.workspaceCache.set(root, this.buildSnapshotForCurrentRoot())
+  }
+
+  private applyCachedWorkspace(cached: CachedWorkspaceSnapshot): void {
+    this.loading = false
+    this.error = null
+    this.creationError = null
+    this.openingError = null
+    this.pendingEntry = null
+    this.pendingParent = ''
+    this.root = cached.root
+    this.entries = cached.entries
+    this.dirEntries = cached.dirEntries
+    this.listed = cached.listed
+    this.tabs = cached.tabs
+    this.activeTabId = cached.activeTabId
+    this.selected = cached.selected
+    this.fileContent = cached.fileContent
+    this.selectionOffset = cached.selectionOffset
+    this.expandedDirs = cached.expandedDirs
+    this.lsp.reset()
+    this.treeVersion++
+    this.fileVersion++
   }
 
   private toTreeNodeWithChildren(entry: WorkspaceNode): TreeNode {
@@ -684,6 +990,95 @@ export class WorkspaceService {
       }
     }
     return node
+  }
+
+  private async preloadExpandedDirs(dirs: string[], forceRefresh = false): Promise<void> {
+    if (dirs.length === 0) return
+    const targets = forceRefresh ? dirs : dirs.filter((dir) => !(dir in this.dirEntries))
+    if (targets.length === 0) return
+    const results = await Promise.all(
+      targets.map(async (dir) => {
+        try {
+          const items = await this.client.list(dir)
+          return { dir, items }
+        } catch {
+          return null
+        }
+      }),
+    )
+    if (!this.active) return
+    const nextDirEntries = forceRefresh ? {} : { ...this.dirEntries }
+    for (const res of results) {
+      if (!res) continue
+      nextDirEntries[res.dir] = res.items
+      for (const item of res.items) {
+        this.listed[item.path] = item
+      }
+    }
+    this.dirEntries = nextDirEntries
+  }
+
+  private async refreshWorkspaceInBackground(path: string): Promise<void> {
+    try {
+      const result = await this.client.open(path)
+      if (!this.active || this.root !== path) return
+      this.root = result.root
+      this.settings.rememberRoot(result.root)
+      this.entries = result.entries
+      void this.settings.load()
+      void this.lsp.syncState()
+      await this.session.syncSession(false)
+      this.saveCurrentWorkspaceToCache(this.root)
+    } catch (error) {
+      if (this.active && this.root === path) {
+        this.error = errorMessage(error)
+      }
+    }
+  }
+
+  private async restorePersistedTabs(
+    persistedTabs: { path: string; title: string; edited: boolean; lastOpened: boolean }[],
+  ): Promise<void> {
+    const restored: WorkspaceTab[] = []
+    let activeId: string | null = null
+    let activeEntry: WorkspaceNode | null = null
+    let activeContent: FileContent | null = null
+
+    for (const item of persistedTabs) {
+      try {
+        const content = await this.client.read(item.path)
+        if (!this.active) return
+        const tabId = `file:${item.path}`
+        const tab: WorkspaceTab = {
+          id: tabId,
+          kind: 'file',
+          title: item.title || (item.path.split('/').at(-1) ?? item.path),
+          path: item.path,
+          languageId: content.languageId ?? null,
+          content: content.content,
+          readonly: false,
+          dirty: false,
+          edited: Boolean(item.edited),
+        }
+        restored.push(tab)
+        if (item.lastOpened || !activeId) {
+          activeId = tabId
+          activeEntry = { path: item.path, name: tab.title, kind: 'file' }
+          activeContent = content
+        }
+      } catch {
+        // Skip persisted tabs whose files were deleted outside the session.
+      }
+    }
+
+    if (restored.length > 0 && this.active) {
+      this.tabs = restored
+      this.activeTabId = activeId
+      this.selected = activeEntry
+      this.fileContent = activeContent
+      this.fileVersion++
+      this.saveCurrentWorkspaceToCache(this.root)
+    }
   }
 
   private sortEntries(entries: WorkspaceNode[]): WorkspaceNode[] {
@@ -710,5 +1105,23 @@ export class WorkspaceService {
         kind: 'file' as const,
       }
     )
+  }
+
+  private upsertTab(tab: WorkspaceTab): void {
+    const existingIdx = this.tabs.findIndex((item) => item.id === tab.id)
+    if (existingIdx === -1) {
+      this.tabs = [...this.tabs, tab]
+    } else {
+      this.tabs = this.tabs.map((item, idx) => (idx === existingIdx ? tab : item))
+    }
+  }
+
+  private focusTargetPane(paneId: 'projects' | 'workspace' | 'editor'): void {
+    if (typeof document === 'undefined') return
+    void tick().then(() => {
+      requestAnimationFrame(() => {
+        getDocumentWhichKeyController(document)?.focusPane(paneId)
+      })
+    })
   }
 }

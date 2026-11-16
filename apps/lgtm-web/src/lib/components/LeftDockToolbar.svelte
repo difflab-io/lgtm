@@ -5,17 +5,17 @@
   import { useService } from '../services/context'
 
   // State ---------------------------------------------------------------------
-  const session = useService('session')
-  const dockOpen = $derived(session.projectsOpen || session.explorerOpen)
+  const workspace = useService('workspace')
+  const dockOpen = $derived(workspace.projectsOpen || workspace.explorerOpen)
   let buttonsWidth = $state(50)
   const minToolbarWidth = $derived(buttonsWidth + 20)
   const toolbarWidth = $derived(
-    dockOpen ? Math.max(session.leftDockWidth, minToolbarWidth) : minToolbarWidth,
+    dockOpen ? Math.max(workspace.leftDockWidth, minToolbarWidth) : minToolbarWidth,
   )
 </script>
 
 {#snippet dockModeButton(mode: SidebarWidget, label: string)}
-  {@const active = mode === 'projects' ? session.projectsOpen : session.explorerOpen}
+  {@const active = mode === 'projects' ? workspace.projectsOpen : workspace.explorerOpen}
   <Button
     variant="text"
     size="sm"
@@ -27,8 +27,8 @@
       active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
     ].join(' ')}
     onclick={() => {
-      if (mode === 'projects') session.toggleProjectsPane()
-      else session.toggleExplorerPane()
+      if (mode === 'projects') workspace.toggleProjectsPane()
+      else workspace.toggleExplorerPane()
     }}
   >
     {#if mode === 'projects'}
@@ -44,7 +44,7 @@
   style="width: {toolbarWidth}px"
   class={[
     'flex h-7 w-min min-w-min shrink-0 items-center justify-start gap-0.5 border-r border-border bg-sidebar px-2.5 py-0',
-    !session.resizing ? 'transition-[width] duration-200 ease-linear' : '',
+    !workspace.resizing ? 'transition-[width] duration-200 ease-linear' : '',
   ].join(' ')}
   role="group"
   aria-label="Sidebar view"

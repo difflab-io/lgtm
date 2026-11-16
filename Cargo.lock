@@ -2875,6 +2875,7 @@ dependencies = [
  "lgtm-config",
  "lgtm-project",
  "lgtm-rsutils",
+ "lgtm-workspace",
  "serde",
  "serde_json",
  "specta",

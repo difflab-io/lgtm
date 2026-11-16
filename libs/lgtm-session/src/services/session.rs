@@ -8,18 +8,12 @@ use std::{
 use lgtm_config::ConfigService;
 use lgtm_project::ProjectService;
 use lgtm_rsutils::atomic_write;
+use lgtm_workspace::{WorkspaceService, WorkspaceStatePatch};
 use uuid::Uuid;
 
-use crate::{
-    error::Result,
-    models::{
-        session::Session,
-        tab::{PersistedTab, TabCandidate},
-        workspace::WorkspaceStatePatch,
-    },
-};
+use crate::{error::Result, models::session::Session};
 
-/// Coordinates `~/.lgtm/sessions/<id>.json` persistence, tab filtering, and [`ProjectService`] delegation.
+/// Coordinates `~/.lgtm/sessions/<id>.json` persistence by orchestrating [`ProjectService`] and [`WorkspaceService`].
 #[derive(Debug, Clone)]
 pub struct SessionService {
     sessions_dir: PathBuf,
@@ -43,15 +37,6 @@ impl SessionService {
     }
 
     // Public ------------------------------------------------------------------
-
-    /// Filters `candidates` so only tabs where [`TabCandidate::should_retain`] is `true` (`edited || last_opened`) are persisted.
-    pub fn retain_tabs(candidates: Vec<TabCandidate>) -> Vec<PersistedTab> {
-        candidates
-            .into_iter()
-            .filter(TabCandidate::should_retain)
-            .map(PersistedTab::from)
-            .collect()
-    }
 
     /// Loads `~/.lgtm/sessions/<session_id>.json` (creating an empty session if none exists yet) and refreshes project branches.
     pub fn get_session(&self, session_id: &str) -> Result<Session> {
@@ -90,26 +75,25 @@ impl SessionService {
         Ok(session)
     }
 
-    /// Filters `patch.tabs` via [`Self::retain_tabs`], updates `workspaces[patch.workspace_root]` and optional `sidebar_widget`, and saves the session.
+    /// Delegates widget and workspace tab filtering to [`WorkspaceService::prepare_session_state`] and saves the session.
     pub fn save_workspace_state(
         &self,
         session_id: &str,
         patch: WorkspaceStatePatch,
     ) -> Result<Session> {
         let mut session = self.get_session(session_id)?;
-        if let Some(widget) = patch.sidebar_widget {
+        let (sidebar_widget, workspace_state) = WorkspaceService::prepare_session_state(patch);
+        if let Some(widget) = sidebar_widget {
             session.sidebar_widget = widget;
         }
-        if !patch.workspace_root.trim().is_empty() {
-            let workspace_root = canonicalize_path_str(Path::new(&patch.workspace_root));
-            let retained = Self::retain_tabs(patch.tabs);
+        if let Some(state) = workspace_state {
             tracing::info!(
                 session_id = %session.id,
-                workspace_root = %workspace_root,
-                retained_tabs = retained.len(),
+                workspace_root = %state.workspace_root,
+                retained_tabs = state.tabs.len(),
                 "saved workspace session state"
             );
-            session.set_workspace_state(workspace_root, patch.expanded_dirs, retained);
+            session.set_workspace_state(state);
         }
         self.write_session(&session)?;
         Ok(session)
@@ -260,13 +244,6 @@ impl SessionService {
         atomic_write(&self.session_file_path(&session.id), &bytes)?;
         Ok(())
     }
-}
-
-fn canonicalize_path_str(path: &Path) -> String {
-    std::fs::canonicalize(path)
-        .unwrap_or_else(|_| path.to_path_buf())
-        .to_string_lossy()
-        .into_owned()
 }
 
 fn normalize_session_id(raw: &str) -> String {

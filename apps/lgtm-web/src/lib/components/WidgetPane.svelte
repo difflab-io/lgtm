@@ -7,7 +7,6 @@
 
   // State ---------------------------------------------------------------------
   const workspace = useService('workspace')
-  const session = useService('session')
   const settings = useService('settings')
 </script>
 
@@ -16,11 +15,11 @@
   data-testid="explorer-dock-pane"
   paneId="workspace"
   paneTitle="Workspace"
-  paneDisabled={!session.explorerOpen}
+  paneDisabled={!workspace.explorerOpen}
   collapsible="none"
-  aria-hidden={!session.explorerOpen}
-  inert={!session.explorerOpen ? true : undefined}
-  style="width: {session.widgetWidth}px"
+  aria-hidden={!workspace.explorerOpen}
+  inert={!workspace.explorerOpen ? true : undefined}
+  style="width: {workspace.widgetWidth}px"
   class={[
     'relative h-full min-h-0 shrink-0 overflow-hidden bg-sidebar outline-none',
     settings.paneOutline &&
@@ -54,10 +53,10 @@
       >
     {/snippet}
   </SidebarPaneHeader>
-  <SidebarContent class="min-h-0 flex-1 overflow-y-auto">
+  <SidebarContent class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
     {#if workspace.error && workspace.client.isDesktop()}
       <div class="mx-3.5 my-2">
-        <Button variant="text" size="sm" onclick={() => session.openWorkspace()}>Retry</Button>
+        <Button variant="text" size="sm" onclick={() => workspace.open()}>Retry</Button>
       </div>
     {:else if !workspace.loading && !workspace.error && !workspace.entries.length && !workspace.pendingEntry}
       <Notice variant="none" class="mx-3.5 my-2 text-xs">
@@ -68,7 +67,7 @@
       hidden={Boolean(workspace.error) || (!workspace.entries.length && !workspace.pendingEntry)}
       class={Boolean(workspace.error) || (!workspace.entries.length && !workspace.pendingEntry)
         ? 'hidden'
-        : ''}
+        : 'w-full min-w-0'}
     >
       <FileExplorer />
     </div>

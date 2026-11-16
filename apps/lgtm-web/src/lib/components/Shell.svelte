@@ -50,7 +50,7 @@
 
   // Derived -------------------------------------------------------------------
   let lastOpenSidebarWidth = $state(236)
-  const activeSidebarWidth = $derived(session.leftDockWidth)
+  const activeSidebarWidth = $derived(workspace.leftDockWidth)
   $effect(() => {
     if (activeSidebarWidth > 0) {
       lastOpenSidebarWidth = activeSidebarWidth
@@ -120,7 +120,7 @@
       theme.init(),
       () => window.removeEventListener('keydown', handleKeydown, true),
     ]
-    void session.openWorkspace().then(async () => {
+    void workspace.open().then(async () => {
       if (!active || workspace.selected) return
       await tick()
       requestAnimationFrame(() => {
@@ -137,7 +137,7 @@
       void client
         .registerQuitHandlers(async () => {
           await workspace.flushSave()
-          await session.saveCurrentWorkspaceSession()
+          await session.saveCurrentSession()
         })
         .then(async (stops) => {
           for (const stop of stops) {
@@ -157,8 +157,8 @@
           onDiagnostics: (event) => {
             if (!active) return
             lsp.handleDiagnostics(event)
-            if (session.activeTab?.kind === 'diagnostics') {
-              void workspace.openDiagnosticsBuffer(session.activeTab.languageId ?? undefined)
+            if (workspace.activeTab?.kind === 'diagnostics') {
+              void workspace.openDiagnosticsBuffer(workspace.activeTab.languageId ?? undefined)
             }
           },
         })
@@ -244,7 +244,7 @@
     style={resolvedHotkeys.effectiveCommandStyle}
   >
     <SidebarProvider
-      open={session.projectsOpen || session.explorerOpen}
+      open={workspace.projectsOpen || workspace.explorerOpen}
       onOpenChange={() => {}}
       data-pane-outline={settings.paneOutline ? 'true' : 'false'}
       class="workspace-shell h-dvh min-h-0 flex-col gap-0 overflow-hidden"

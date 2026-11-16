@@ -2,10 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::{
-    session::SidebarWidget,
-    tab::{PersistedTab, TabCandidate},
-};
+use crate::models::{tab::PersistedTab, tab::TabCandidate, widget::SidebarWidget};
 
 /// Per-checkout UI snapshot stored for a project primary checkout (`Project.root_path`) or linked worktree (`Worktree.path`).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, specta::Type)]
@@ -15,7 +12,7 @@ pub struct WorkspaceSessionState {
     pub workspace_root: String,
     /// Path of the active tab when this workspace was last focused.
     pub last_opened_tab_path: Option<String>,
-    /// Expanded directory paths in `WorkspaceExplorer`.
+    /// Expanded directory paths in `FileExplorer`.
     pub expanded_dirs: Vec<String>,
     /// Retained editor tabs (`edited || last_opened`).
     pub tabs: Vec<PersistedTab>,
@@ -49,7 +46,7 @@ pub struct WorkspaceStatePatch {
     pub workspace_root: String,
     /// Open editor tab candidates to filter and persist.
     pub tabs: Vec<TabCandidate>,
-    /// Expanded directory paths in `WorkspaceExplorer`.
+    /// Expanded directory paths in `FileExplorer`.
     pub expanded_dirs: Vec<String>,
     /// Optional updated sidebar widget selection (`Explorer` or `Projects`).
     pub sidebar_widget: Option<SidebarWidget>,

@@ -487,14 +487,14 @@ export type Session = {
 	workspaces?: { [key in string]: WorkspaceSessionState },
 };
 
-/**  Left-sidebar widget mode persisted in a [`Session`]. */
+/**  Left-sidebar widget mode persisted for an active workspace shell. */
 export type SidebarWidget = 
 /**  Active workspace file explorer (`FileExplorer.svelte`). */
 "explorer" | 
 /**  Open projects and collapsible worktrees tree (`ProjectsPane.svelte`). */
 "projects";
 
-/**  Candidate editor tab evaluated against the session retention policy (`edited || last_opened`). */
+/**  Candidate editor tab evaluated against the workspace retention policy (`edited || last_opened`). */
 export type TabCandidate = {
 	/**  Workspace-relative file path or config path (`~/.lgtm/config.json` / `.lgtm/config.json`). */
 	path: string,
@@ -547,7 +547,7 @@ export type WorkspaceSessionState = {
 	workspaceRoot: string,
 	/**  Path of the active tab when this workspace was last focused. */
 	lastOpenedTabPath: string | null,
-	/**  Expanded directory paths in `WorkspaceExplorer`. */
+	/**  Expanded directory paths in `FileExplorer`. */
 	expandedDirs: string[],
 	/**  Retained editor tabs (`edited || last_opened`). */
 	tabs: PersistedTab[],
@@ -575,7 +575,7 @@ export type WorkspaceStatePatch = {
 	workspaceRoot: string,
 	/**  Open editor tab candidates to filter and persist. */
 	tabs: TabCandidate[],
-	/**  Expanded directory paths in `WorkspaceExplorer`. */
+	/**  Expanded directory paths in `FileExplorer`. */
 	expandedDirs: string[],
 	/**  Optional updated sidebar widget selection (`Explorer` or `Projects`). */
 	sidebarWidget: SidebarWidget | null,

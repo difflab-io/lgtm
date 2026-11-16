@@ -15,7 +15,6 @@
   // State ---------------------------------------------------------------------
   const workspace = useService('workspace')
   const project = useService('project')
-  const session = useService('session')
 </script>
 
 <header
@@ -25,7 +24,7 @@
   <SidebarTrigger
     title="Toggle sidebar"
     aria-controls="workspace-sidebar"
-    onclick={() => session.toggleExplorerPane()}
+    onclick={() => workspace.toggleExplorerPane()}
     ><PanelLeft size={14} strokeWidth={1.5} /></SidebarTrigger
   >
   <span class="brand text-xs font-semibold tracking-tight" data-tauri-drag-region>lgtm</span>

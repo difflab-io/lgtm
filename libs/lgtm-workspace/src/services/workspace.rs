@@ -10,7 +10,12 @@ use lgtm_config::LgtmConfigPatch;
 
 use crate::{
     error::{Result, error},
-    models::workspace::{Workspace, WorkspaceListing, WorkspaceNode},
+    models::{
+        tab::{PersistedTab, TabCandidate},
+        widget::SidebarWidget,
+        workspace::{Workspace, WorkspaceListing, WorkspaceNode},
+        workspace_state::{WorkspaceSessionState, WorkspaceStatePatch},
+    },
 };
 
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
@@ -415,6 +420,31 @@ impl WorkspaceService {
             ));
         }
         Ok(resolved)
+    }
+
+    /// Filters `candidates` so only tabs where [`TabCandidate::should_retain`] is `true` (`edited || last_opened`) are persisted.
+    pub fn retain_tabs(candidates: Vec<TabCandidate>) -> Vec<PersistedTab> {
+        candidates
+            .into_iter()
+            .filter(TabCandidate::should_retain)
+            .map(PersistedTab::from)
+            .collect()
+    }
+
+    /// Builds optional widget and per-checkout workspace session state from a [`WorkspaceStatePatch`].
+    pub fn prepare_session_state(
+        patch: WorkspaceStatePatch,
+    ) -> (Option<SidebarWidget>, Option<WorkspaceSessionState>) {
+        let state = (!patch.workspace_root.trim().is_empty()).then(|| {
+            let root_path = Path::new(&patch.workspace_root);
+            let canonical_root = std::fs::canonicalize(root_path)
+                .unwrap_or_else(|_| root_path.to_path_buf())
+                .to_string_lossy()
+                .into_owned();
+            let retained = Self::retain_tabs(patch.tabs);
+            WorkspaceSessionState::new(canonical_root, patch.expanded_dirs, retained)
+        });
+        (patch.sidebar_widget, state)
     }
 
     // Private -----------------------------------------------------------------

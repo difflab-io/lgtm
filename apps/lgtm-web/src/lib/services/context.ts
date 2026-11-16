@@ -5,7 +5,7 @@ import { LspService } from './lspService.svelte'
 import { ProjectService } from './projectService.svelte'
 import { SessionService } from './sessionService.svelte'
 import { SettingsService } from './settingsService.svelte'
-import { WorkspaceService } from './workspaceService.svelte'
+import { WorkspaceService, type WorkspaceServiceCallbacks } from './workspaceService.svelte'
 
 const SERVICES_CONTEXT_KEY = Symbol('lgtm.services')
 
@@ -21,24 +21,26 @@ export interface AppServices {
 
 // Public ----------------------------------------------------------------------
 
-/** Constructs peer frontend domain services wired 1:1 to their backend IPC services (`lgtm-session`, `lgtm-project`, `lgtm-lsp`, `lgtm-config`, and `lgtm-workspace`). */
+/** Constructs peer frontend domain services (`workspace`, `project`, `session`, `lsp`, `settings`, and `hotkeys`) with shared callbacks wired cleanly. */
 export function createAppServices(client: WorkspaceClient): Required<AppServices> {
   const settings = new SettingsService(client)
   const lsp = new LspService(client)
   const session = new SessionService(client)
-  const workspace = new WorkspaceService(client, session, lsp, settings)
+  const workspaceCallbacks: WorkspaceServiceCallbacks = {}
+  const workspace = new WorkspaceService(client, session, lsp, settings, workspaceCallbacks)
   const project = new ProjectService(client, {
-    getRoot: () => session.root,
+    getRoot: () => workspace.root,
     isActive: () => session.isActive,
     applySession: (nextSession) => session.applySession(nextSession),
-    openWorkspace: (path) => session.openWorkspace(path),
-    selectWorkspace: (path) => session.selectWorkspace(path),
+    openWorkspace: (path) => workspace.open(path),
+    selectWorkspace: (path) => workspace.selectWorkspace(path),
     evictWorkspace: (path) => session.evictWorkspace(path),
     setCreationError: (message) => {
       workspace.creationError = message
     },
   })
-  session.bindPeers({ workspace, project, lsp, settings })
+  workspaceCallbacks.onNewWorktreeRequested = () => project.openNewWorktreeDialog()
+  session.bindPeers({ project, workspace })
   const services: AppServices = { workspace, project, session, lsp, settings }
   const hotkeys = new HotkeyService(services)
   return { workspace, project, session, lsp, settings, hotkeys }

@@ -8,9 +8,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use lgtm_session::{
-    LgtmSessionError, Session, SessionService, SidebarWidget, TabCandidate, WorkspaceStatePatch,
-};
+use lgtm_session::{LgtmSessionError, Session, SessionService};
+use lgtm_workspace::{SidebarWidget, TabCandidate, WorkspaceStatePatch};
 use tempfile::TempDir;
 use tracing_subscriber::fmt::MakeWriter;
 use uuid::Uuid;

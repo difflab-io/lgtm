@@ -1,22 +1,10 @@
-//! Domain models for persisted LGTM sessions and dock sidebar widgets.
+//! Domain model for persisted LGTM sessions orchestrating project and workspace state.
 
 use std::collections::BTreeMap;
 
 use lgtm_project::Project;
+use lgtm_workspace::{SidebarWidget, WorkspaceSessionState};
 use serde::{Deserialize, Serialize};
-
-use crate::models::{tab::PersistedTab, workspace::WorkspaceSessionState};
-
-/// Left-sidebar widget mode persisted in a [`Session`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "snake_case")]
-pub enum SidebarWidget {
-    /// Active workspace file explorer (`FileExplorer.svelte`).
-    #[default]
-    Explorer,
-    /// Open projects and collapsible worktrees tree (`ProjectsPane.svelte`).
-    Projects,
-}
 
 /// Top-level persisted session snapshot stored at `~/.lgtm/sessions/<id>.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -59,17 +47,9 @@ impl Session {
             .or_insert_with(|| WorkspaceSessionState::new(workspace_root, Vec::new(), Vec::new()));
     }
 
-    /// Updates `self.workspaces[workspace_root]` with `expanded_dirs` and `retained_tabs`.
-    pub fn set_workspace_state(
-        &mut self,
-        workspace_root: String,
-        expanded_dirs: Vec<String>,
-        retained_tabs: Vec<PersistedTab>,
-    ) {
-        self.workspaces.insert(
-            workspace_root.clone(),
-            WorkspaceSessionState::new(workspace_root, expanded_dirs, retained_tabs),
-        );
+    /// Updates `self.workspaces` with a prepared [`WorkspaceSessionState`].
+    pub fn set_workspace_state(&mut self, state: WorkspaceSessionState) {
+        self.workspaces.insert(state.workspace_root.clone(), state);
     }
 
     /// Cleans up workspace state and falls back `active_workspace_root` to `parent_root` when a worktree is removed.

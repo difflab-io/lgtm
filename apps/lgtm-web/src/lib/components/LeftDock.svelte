@@ -9,27 +9,26 @@
   // State ---------------------------------------------------------------------
   const workspace = useService('workspace')
   const project = useService('project')
-  const session = useService('session')
   const settings = useService('settings')
-  const dockOpen = $derived(session.projectsOpen || session.explorerOpen)
+  const dockOpen = $derived(workspace.projectsOpen || workspace.explorerOpen)
 
   function startResize(target: 'projects' | 'widget', event: PointerEvent) {
     event.preventDefault()
     const startX = event.clientX
-    const startWidth = target === 'projects' ? session.projectsWidth : session.widgetWidth
-    session.setResizing(true)
+    const startWidth = target === 'projects' ? workspace.projectsWidth : workspace.widgetWidth
+    workspace.setResizing(true)
 
     function onMove(moveEvent: PointerEvent) {
       const delta = moveEvent.clientX - startX
       if (target === 'projects') {
-        session.setProjectsWidth(startWidth + delta)
+        workspace.setProjectsWidth(startWidth + delta)
       } else {
-        session.setWidgetWidth(startWidth + delta)
+        workspace.setWidgetWidth(startWidth + delta)
       }
     }
 
     function onUp() {
-      session.setResizing(false)
+      workspace.setResizing(false)
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
@@ -51,11 +50,11 @@
 >
   <Row class="min-h-0 flex-1 items-stretch gap-0 overflow-hidden">
     <div
-      style="width: {session.projectsOpen ? `${session.projectsWidth}px` : '0px'}"
+      style="width: {workspace.projectsOpen ? `${workspace.projectsWidth}px` : '0px'}"
       class={[
         'relative h-full min-h-0 shrink-0 overflow-hidden',
-        !session.resizing ? 'transition-[width] duration-200 ease-linear' : '',
-        session.projectsOpen && session.explorerOpen ? 'border-r border-border' : '',
+        !workspace.resizing ? 'transition-[width] duration-200 ease-linear' : '',
+        workspace.projectsOpen && workspace.explorerOpen ? 'border-r border-border' : '',
       ].join(' ')}
     >
       <Sidebar
@@ -63,23 +62,23 @@
         data-testid="projects-dock-pane"
         paneId="projects"
         paneTitle="Projects"
-        paneDisabled={!session.projectsOpen &&
+        paneDisabled={!workspace.projectsOpen &&
           !project.worktreeDialog &&
           !project.newBranchDialog &&
           !project.removeWorktreeConfirm &&
           !project.customizeProjectDialog}
         collapsible="none"
-        aria-hidden={!session.projectsOpen}
-        inert={!session.projectsOpen &&
+        aria-hidden={!workspace.projectsOpen}
+        inert={!workspace.projectsOpen &&
         !project.worktreeDialog &&
         !project.newBranchDialog &&
         !project.removeWorktreeConfirm &&
         !project.customizeProjectDialog
           ? true
           : undefined}
-        style="width: {session.projectsOpen && session.explorerOpen
-          ? `${Math.max(0, session.projectsWidth - 1)}px`
-          : `${session.projectsWidth}px`}"
+        style="width: {workspace.projectsOpen && workspace.explorerOpen
+          ? `${Math.max(0, workspace.projectsWidth - 1)}px`
+          : `${workspace.projectsWidth}px`}"
         class={[
           'relative h-full min-h-0 shrink-0 overflow-hidden bg-sidebar outline-none',
           settings.paneOutline &&
@@ -98,7 +97,7 @@
               aria-label="Add project"
               title="Add project"
               disabled={workspace.blocked}
-              onclick={() => void session.selectWorkspace('__open_folder__')}
+              onclick={() => void workspace.selectWorkspace('__open_folder__')}
               ><FolderPlus size={14} strokeWidth={1.5} /></Button
             >
             <Button
@@ -113,11 +112,11 @@
             >
           {/snippet}
         </SidebarPaneHeader>
-        <SidebarContent class="min-h-0 flex-1 overflow-y-auto">
+        <SidebarContent class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
           <ProjectsPane />
         </SidebarContent>
       </Sidebar>
-      {#if session.projectsOpen}
+      {#if workspace.projectsOpen}
         <div
           role="separator"
           aria-orientation="vertical"
@@ -130,14 +129,14 @@
     </div>
 
     <div
-      style="width: {session.explorerOpen ? `${session.widgetWidth}px` : '0px'}"
+      style="width: {workspace.explorerOpen ? `${workspace.widgetWidth}px` : '0px'}"
       class={[
         'relative h-full min-h-0 shrink-0 overflow-hidden',
-        !session.resizing ? 'transition-[width] duration-200 ease-linear' : '',
+        !workspace.resizing ? 'transition-[width] duration-200 ease-linear' : '',
       ].join(' ')}
     >
       <WidgetPane />
-      {#if session.explorerOpen}
+      {#if workspace.explorerOpen}
         <div
           role="separator"
           aria-orientation="vertical"

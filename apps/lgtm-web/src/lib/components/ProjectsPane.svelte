@@ -12,7 +12,7 @@
 
   // State ---------------------------------------------------------------------
   const project = useService('project')
-  const session = useService('session')
+  const workspace = useService('workspace')
 
   // Lifecycle -----------------------------------------------------------------
   useKeymap(
@@ -66,7 +66,7 @@
     <Button
       variant="outline"
       size="sm"
-      onclick={() => void session.selectWorkspace('__open_folder__')}
+      onclick={() => void workspace.selectWorkspace('__open_folder__')}
     >
       Add project
     </Button>
@@ -78,8 +78,8 @@
     nodes={project.projectNodes}
     expandedValue={project.projectExpandedValues}
     onExpandedChange={(next) => void project.handleProjectExpandedChange(next)}
-    selected={session.projectsOpen ? session.root : null}
-    onselect={(path) => void session.selectWorkspace(path)}
+    selected={workspace.projectsOpen ? workspace.root : null}
+    onselect={(path) => void workspace.selectWorkspace(path)}
     onrename={(path, name) => project.renameProjectWorktree(path, name)}
     contextItems={(node) => project.projectContextItems(node)}
     onaction={(value, action) => void project.projectContextAction(value, action)}

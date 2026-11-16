@@ -797,13 +797,13 @@ export class HotkeyService {
     'command.openColon': () => this.openColonCommandMenu(),
     'workspace.toggleExplorer': () => this.toggleExplorer(),
     'workspace.openFolder': () => {
-      void this.services.session.selectWorkspace('__open_folder__')
+      void this.services.workspace.selectWorkspace('__open_folder__')
       return true
     },
     'projects.show': () => this.showSidebarMode('projects'),
     'projects.showExplorer': () => this.showSidebarMode('explorer'),
     'projects.add': () => {
-      void this.services.session.selectWorkspace('__open_folder__')
+      void this.services.workspace.selectWorkspace('__open_folder__')
       return true
     },
     'projects.newWorktree': () => this.openNewWorktree(),
@@ -821,7 +821,7 @@ export class HotkeyService {
       return true
     },
     'file.newFolder': () => {
-      this.services.session.setSidebarWidget('explorer')
+      this.services.workspace.setSidebarWidget('explorer')
       this.services.workspace.startCreate('directory')
       return true
     },
@@ -840,17 +840,17 @@ export class HotkeyService {
       return true
     },
     'tab.next': (ctx: KeymapCommandContext) => {
-      if (this.services.session.tabs.length <= 1) return false
-      void this.services.session.selectNextTab(ctx.count)
+      if (this.services.workspace.tabs.length <= 1) return false
+      void this.services.workspace.selectNextTab(ctx.count)
       return true
     },
     'tab.prev': (ctx: KeymapCommandContext) => {
-      if (this.services.session.tabs.length <= 1) return false
-      void this.services.session.selectPrevTab(ctx.count)
+      if (this.services.workspace.tabs.length <= 1) return false
+      void this.services.workspace.selectPrevTab(ctx.count)
       return true
     },
     'tab.close': () => {
-      void this.services.session.closeActiveTab()
+      void this.services.workspace.closeActiveTab()
       return true
     },
     'lsp.gotoDefinition': () => this.gotoDefinitionAtCursor(),
@@ -990,7 +990,7 @@ export class HotkeyService {
         group: 'Buffer',
         shortcut: 'Space b d',
         onSelect: () => {
-          void this.services.session.closeActiveTab()
+          void this.services.workspace.closeActiveTab()
         },
       },
       {
@@ -1003,7 +1003,7 @@ export class HotkeyService {
         group: 'Buffer',
         shortcut: [']', 't'],
         onSelect: () => {
-          void this.services.session.selectNextTab(1)
+          void this.services.workspace.selectNextTab(1)
         },
       },
       {
@@ -1016,7 +1016,7 @@ export class HotkeyService {
         group: 'Buffer',
         shortcut: ['[', 't'],
         onSelect: () => {
-          void this.services.session.selectPrevTab(1)
+          void this.services.workspace.selectPrevTab(1)
         },
       },
       {
@@ -1040,7 +1040,7 @@ export class HotkeyService {
         group: 'File',
         shortcut: 'Space f N',
         onSelect: () => {
-          this.services.session.setSidebarWidget('explorer')
+          this.services.workspace.setSidebarWidget('explorer')
           this.services.workspace.startCreate('directory')
         },
       },
@@ -1078,7 +1078,7 @@ export class HotkeyService {
         group: 'Projects',
         shortcut: ['Space', 'p', 'a'],
         onSelect: () => {
-          void this.services.session.selectWorkspace('__open_folder__')
+          void this.services.workspace.selectWorkspace('__open_folder__')
         },
       },
       {
@@ -1101,7 +1101,7 @@ export class HotkeyService {
         group: 'Projects',
         shortcut: ['Space', 'p', 'd'],
         disabled: !this.services.project.activeProject?.worktrees.some(
-          (wt) => wt.path === this.services.session.root,
+          (wt) => wt.path === this.services.workspace.root,
         ),
         onSelect: () => {
           this.removeActiveWorktree()
@@ -1505,14 +1505,14 @@ export class HotkeyService {
 
   /** Toggles the Explorer widget pane and moves focus to the opened pane or editor on close. */
   toggleExplorer(): boolean {
-    this.services.session.toggleExplorerPane()
+    this.services.workspace.toggleExplorerPane()
     return true
   }
 
   /** Toggles the `explorer` or `projects` dock pane independently and focuses the opened pane or editor on close. */
   showSidebarMode(mode: 'explorer' | 'projects'): boolean {
     if (mode === 'projects') {
-      this.services.session.toggleProjectsPane()
+      this.services.workspace.toggleProjectsPane()
     } else {
       this.toggleExplorer()
     }
@@ -1521,7 +1521,7 @@ export class HotkeyService {
 
   /** Opens the `New Worktree` dialog in `ProjectsPane`. */
   openNewWorktree(): boolean {
-    this.services.session.setSidebarWidget('projects')
+    this.services.workspace.setSidebarWidget('projects')
     this.services.project.openNewWorktreeDialog()
     return true
   }
@@ -1529,9 +1529,9 @@ export class HotkeyService {
   /** Prompts to remove the currently active linked Git worktree in `ProjectsPane`. */
   removeActiveWorktree(): boolean {
     const project = this.services.project.activeProject
-    const wt = project?.worktrees.find((item) => item.path === this.services.session.root)
+    const wt = project?.worktrees.find((item) => item.path === this.services.workspace.root)
     if (!project || !wt) return false
-    this.services.session.setSidebarWidget('projects')
+    this.services.workspace.setSidebarWidget('projects')
     this.services.project.promptRemoveWorktree(project.id, wt.path)
     return true
   }

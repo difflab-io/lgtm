@@ -1,8 +1,8 @@
-//! Domain models representing candidate and persisted editor tabs in a workspace session.
+//! Domain models representing candidate and persisted editor tabs in a workspace.
 
 use serde::{Deserialize, Serialize};
 
-/// Candidate editor tab evaluated against the session retention policy (`edited || last_opened`).
+/// Candidate editor tab evaluated against the workspace retention policy (`edited || last_opened`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TabCandidate {
@@ -29,7 +29,7 @@ impl TabCandidate {
         self.last_opened
     }
 
-    /// Returns whether this tab candidate has a non-empty path and qualifies for session persistence (`edited || last_opened`).
+    /// Returns whether this tab candidate has a non-empty path and qualifies for retention (`edited || last_opened`).
     pub fn should_retain(&self) -> bool {
         !self.path.trim().is_empty() && (self.is_edited() || self.is_last_opened())
     }

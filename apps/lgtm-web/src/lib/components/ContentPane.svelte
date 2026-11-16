@@ -7,7 +7,6 @@
 
   // State ---------------------------------------------------------------------
   const workspace = useService('workspace')
-  const session = useService('session')
   const lsp = useService('lsp')
   const settings = useService('settings')
   const hotkeys = useService('hotkeys')
@@ -35,15 +34,6 @@
 <div
   class="document-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground"
 >
-  {#if session.tabItems.length > 0}
-    <Tabs
-      items={session.tabItems}
-      value={session.activeTabId}
-      ariaLabel="Open editors"
-      onchange={(tabId) => session.activateTab(tabId)}
-      onclose={(tabId) => session.closeTab(tabId)}
-    />
-  {/if}
   <Pane
     role="main"
     paneId="editor"
@@ -55,6 +45,15 @@
       : ''}"
     aria-label="File viewer"
   >
+    {#if workspace.tabItems.length > 0}
+      <Tabs
+        items={workspace.tabItems}
+        value={workspace.activeTabId}
+        ariaLabel="Open editors"
+        onchange={(tabId) => workspace.activateTab(tabId)}
+        onclose={(tabId) => workspace.closeTab(tabId)}
+      />
+    {/if}
     {#if workspace.fileLoading}
       <div
         class="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground"
@@ -76,7 +75,7 @@
             >Retry opening</Button
           >{/if}
       </div>
-    {:else if workspace.fileContent && (workspace.selected || session.activeTab)}
+    {:else if workspace.fileContent && (workspace.selected || workspace.activeTab)}
       <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
         {#key workspace.fileVersion}
           <CodeEditor
@@ -84,7 +83,7 @@
             value={workspace.fileContent.content}
             filename={workspace.activeEditorFilename}
             label={workspace.selectedTitle}
-            readonly={session.activeTab?.readonly ?? false}
+            readonly={workspace.activeTab?.readonly ?? false}
             lineWrapping={settings.lineWrapping}
             clickToInsert={settings.clickToInsert}
             diagnostics={editorDiagnostics}

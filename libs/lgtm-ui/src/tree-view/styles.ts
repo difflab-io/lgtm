@@ -1,8 +1,8 @@
 import { cn, inputVariants, sidebarMenuButtonVariants } from '@cloudvoyant/helical-ui'
 import { cva, type VariantProps } from 'class-variance-authority'
 
-export const treeViewRootBase = 'helical-tree-view'
-export const treeViewListBase = 'm-0 list-none p-0'
+export const treeViewRootBase = 'helical-tree-view w-full min-w-0'
+export const treeViewListBase = 'm-0 w-full min-w-0 list-none p-0'
 export const treeViewBranchContentBase = cn(treeViewListBase, 'relative')
 export const treeViewLabelBase = 'tree-label truncate'
 export const treeViewIconBase =
@@ -13,7 +13,7 @@ export const treeViewIndentGuideBase =
 export const treeViewRowVariants = cva(
   cn(
     sidebarMenuButtonVariants({ size: 'sm' }),
-    'helical-tree-row h-6 cursor-pointer rounded-none py-0 ps-[calc(10px_+_(var(--depth)_-_1)_*_16px)] text-xs outline-none focus:bg-sidebar-accent focus:text-sidebar-accent-foreground focus:ring-1 focus:ring-inset focus:ring-sidebar-ring focus-visible:bg-sidebar-accent focus-visible:text-sidebar-accent-foreground focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-sidebar-ring data-[selected]:bg-sidebar-accent data-[selected]:text-sidebar-accent-foreground',
+    'helical-tree-row h-6 cursor-pointer rounded-none py-0 ps-[calc(10px_+_(var(--depth)_-_1)_*_16px)] text-xs outline-none focus:bg-sidebar-accent focus:text-sidebar-accent-foreground focus-visible:bg-sidebar-accent focus-visible:text-sidebar-accent-foreground focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-sidebar-ring data-[selected]:bg-sidebar-accent data-[selected]:text-sidebar-accent-foreground',
   ),
 )
 

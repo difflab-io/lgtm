@@ -1,7 +1,7 @@
 //! Session persistence (`SessionService`) IPC command handlers.
 
-use lgtm_session::{Session, WorkspaceStatePatch};
-use lgtm_workspace::Result;
+use lgtm_session::Session;
+use lgtm_workspace::{Result, WorkspaceStatePatch};
 use tauri::State;
 
 use crate::app::AppState;
