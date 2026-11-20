@@ -4,6 +4,7 @@ import { indentUnit, matchBrackets, syntaxTree } from '@codemirror/language'
 import {
   CharCategory,
   EditorSelection,
+  Prec,
   type EditorState,
   Facet,
   StateEffect,
@@ -990,27 +991,72 @@ const modalEditorViewPlugin = ViewPlugin.fromClass(
   },
 )
 
-const modalEditorDomHandlers = EditorView.domEventHandlers({
-  mousedown(event, view) {
-    if (event.button !== 0 || event.metaKey || event.ctrlKey) return false
-    const { clickToInsert, readOnly } = view.state.facet(modalOptionsFacet)
-    if (clickToInsert && !readOnly && !view.state.readOnly) {
-      const controller = getDocumentWhichKeyController(view.dom.ownerDocument)
-      if (controller && controller.getState().mode === 'normal') {
-        controller.setMode('insert')
+function resolveModalMode(view: EditorView): KeymapMode {
+  const attrMode = view.dom.dataset.modalMode
+  if (
+    attrMode === 'normal' ||
+    attrMode === 'insert' ||
+    attrMode === 'select' ||
+    attrMode === 'jump'
+  ) {
+    return attrMode
+  }
+  return view.state.field(modalStateField, false)?.mode ?? 'normal'
+}
+
+const NON_INSERT_EMACS_EDIT_KEYS = new Set(['d', 'h', 'k', 'o', 't'])
+
+function isBlockedNonInsertKey(event: KeyboardEvent, view: EditorView): boolean {
+  if (completionStatus(view.state) === 'active' && (event.key === 'Enter' || event.key === 'Tab')) {
+    return false
+  }
+  if (event.key === 'Enter' || event.key === 'Backspace' || event.key === 'Delete') {
+    return true
+  }
+  if (event.key === 'Tab' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    return true
+  }
+  if (
+    event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey &&
+    !event.shiftKey &&
+    NON_INSERT_EMACS_EDIT_KEYS.has(event.key.toLowerCase())
+  ) {
+    return true
+  }
+  return event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey
+}
+
+const modalEditorDomHandlers = Prec.highest(
+  EditorView.domEventHandlers({
+    mousedown(event, view) {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey) return false
+      const { clickToInsert, readOnly } = view.state.facet(modalOptionsFacet)
+      if (clickToInsert && !readOnly && !view.state.readOnly) {
+        const controller = getDocumentWhichKeyController(view.dom.ownerDocument)
+        if (controller && controller.getState().mode === 'normal') {
+          controller.setMode('insert')
+        }
       }
-    }
-    return false
-  },
-  beforeinput(event, view) {
-    const modalMode = view.dom.dataset.modalMode
-    if (modalMode && modalMode !== 'insert') {
-      event.preventDefault()
-      return true
-    }
-    return false
-  },
-})
+      return false
+    },
+    keydown(event, view) {
+      if (resolveModalMode(view) !== 'insert' && isBlockedNonInsertKey(event, view)) {
+        event.preventDefault()
+        return true
+      }
+      return false
+    },
+    beforeinput(event, view) {
+      if (resolveModalMode(view) !== 'insert') {
+        event.preventDefault()
+        return true
+      }
+      return false
+    },
+  }),
+)
 
 /**
  * Returns the CodeMirror 6 extension integrating Helical UI modal editing (`normal`, `select`, `insert`, `jump`), `Tab`/`Shift-Tab` indentation, and pointer/input guards.
