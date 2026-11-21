@@ -47,7 +47,7 @@ export const commands = {
 	configGet: () => __TAURI_INVOKE<ResolvedConfigSnapshot>("config_get"),
 	/**  Applies a partial configuration patch to global or project `config.json` and emits `config-updated`. */
 	configUpdate: (patch: LgtmConfigPatch, scope: ConfigScope | null) => __TAURI_INVOKE<ResolvedConfigSnapshot>("config_update", { patch, scope }),
-	/**  Loads the persisted session state (`~/.lgtm/sessions/<id>.json`). */
+	/**  Loads the persisted session state (`~/.lgtm/sessions/<id>.json`) with refreshed project branches and worktrees. */
 	sessionGet: (sessionId: string | null) => __TAURI_INVOKE<Session>("session_get", { sessionId }),
 	/**  Saves the active sidebar widget, expanded explorer folders, and filtered tabs (`edited || last_opened`) for a workspace. */
 	sessionSave: (patch: WorkspaceStatePatch) => __TAURI_INVOKE<Session>("session_save", { patch }),
