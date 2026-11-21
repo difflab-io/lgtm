@@ -52,17 +52,21 @@ flowchart TB
         FORGE["Forge Backend (lgtm-forge)\nConnect RPC server, ReviewService, SnapshotStore, RemoteForge"]
         subgraph DesktopApp["Desktop Application"]
             WEB["Web Frontend (lgtm-web)\nSvelte 5 IDE shell & reactive services"]
-            DESKTOP["Rust Backend (lgtm-desktop)\nTauri v2 host, WorkspaceService, LspService"]
-            WEB <-->|"Tauri IPC + lsp-status / lsp-diagnostics"| DESKTOP
+            DESKTOP["Rust Backend (lgtm-desktop)\nTauri v2 host, AppState, commands/, LspService"]
+            WEB <-->|"Tauri IPC + lsp-status / lsp-diagnostics / session-updated"| DESKTOP
         end
     end
 
     subgraph Libraries["Shared Libraries (libs/)"]
         UI["lgtm-ui\nHelical UI, Ark UI & CodeMirror 6 components"]
+        WS["lgtm-workspace\nWorkspaceService, file CRUD & session state models"]
+        SESS["lgtm-session\nSessionService & ~/.lgtm/sessions/default.json"]
+        PROJ["lgtm-project\nProjectService, Project & Worktree"]
+        RSU["lgtm-rsutils\ngit, paths, slugs & url"]
         DB["lgtm-db\nSeaORM repositories & transactions"]
         LSP["lgtm-lsp\nLgtmLspManager, LspCacheService, stdio JSON-RPC"]
         ENV["lgtm-env\nMiseService & .lgtm/mise.toml synthesis"]
-        CFG["lgtm-config\nConfigService, TOML presets & language discovery"]
+        CFG["lgtm-config\nConfigService, JSON presets & language discovery"]
     end
 
     subgraph Storage["Local & External Systems"]
@@ -76,6 +80,13 @@ flowchart TB
     WEB --> UI
     CLI -->|"Connect RPC (/rpc)"| FORGE
     CLI -->|"lgtm run"| ENV
+    DESKTOP --> WS
+    DESKTOP --> SESS
+    DESKTOP --> PROJ
+    SESS --> WS
+    PROJ --> RSU
+    SESS --> RSU
+    FORGE --> RSU
     DESKTOP --> LSP
     DESKTOP --> ENV
     DESKTOP --> CFG
@@ -93,8 +104,8 @@ flowchart TB
 - [`lgtm-cli`](cli/index.md) (`apps/lgtm-cli`): Parses CLI commands, manages the background `lgtm-forge` RPC daemon (`up`, `down`, `status`, `serve`), launches the `lgtm-desktop` IDE (`open [<path>]`), proxies review/VCS commands (`add`, `commit`, `push`, `review`, `comment`) to `lgtm-forge` over Connect RPC, and delegates `lgtm run` to `lgtm-env`.
 - [`lgtm-forge`](forge/index.md) (`apps/lgtm-forge`): Serves `lgtm.forge.v1.ReviewService` over Connect RPC, orchestrating `ReviewService` across `lgtm-db`, `SnapshotStore` (`extensions::gitoxide` for `--local` reviews), native `git` CLI checkout commands, and `RemoteForge` (`GitHubForge` via `extensions::octocrab`).
 - [Desktop Application](desktop/index.md) (`apps/lgtm-web` + `apps/lgtm-desktop`):
-  - **Web Frontend (`lgtm-web`)**: Reactive Svelte 5 IDE shell (`Shell.svelte`, `WorkspaceExplorer.svelte`, `ContentPane.svelte`, `LspStatusMenu.svelte`) and `$state` services (`WorkspaceService`, `LspService`) communicating with the Rust host via `TauriWorkspaceClient`.
-  - **Rust Backend (`lgtm-desktop`)**: Native Tauri v2 host owning `WorkspaceService` (sandboxed filesystem CRUD) and desktop `LspService` (bridging `lgtm-lsp` events to `lsp-status` and `lsp-diagnostics` Tauri events and coordinating the quit handshake).
+  - Web Frontend (`lgtm-web`): Reactive Svelte 5 IDE shell (`Shell.svelte`, `LeftDock.svelte`, `WidgetPane.svelte`, `FileExplorer.svelte`, `ProjectsPane.svelte`, `ContentPane.svelte`, `LspStatusMenu.svelte`) and peer `$state` services (`WorkspaceService`, `ProjectService`, `SessionService`, `LspService`, `SettingsService`, `HotkeyService`) communicating with the Rust host via `TauriWorkspaceClient`.
+  - Rust Backend (`lgtm-desktop`): Native Tauri v2 host orchestrating `lgtm-workspace`, `lgtm-project`, `lgtm-session`, `lgtm-config`, and desktop `LspService` inside `AppState` and `commands/`.
 - `lgtm-ui` (`libs/lgtm-ui`): Provides reusable, app-agnostic Svelte 5 + `@ark-ui/svelte` + CodeMirror 6 components (`CodeEditor`, `TreeView`, `TabBar`, `MenuBar`, `ContextMenu`, `MarkdownPreview`, `Sidebar`) styled with semantic Tailwind tokens and `cva` variants.
 - [`lgtm-db`](db/index.md) (`libs/lgtm-db`): Encapsulates SeaORM migrations, private entity tables (`identities`, `reviews`, `sessions`, `comments`), and typed repositories (`IdentitiesRepository`, `ReviewsRepository`, `SessionsRepository`, `CommentsRepository`) over SQLite or PostgreSQL.
 - [`lgtm-config`](config/index.md) (`libs/lgtm-config`): Merges built-in language presets with `~/.lgtm/config.toml` and `<workspace>/.lgtm/config.toml`, detects workspace languages and ancestor project roots, and initializes `<workspace>/.lgtm/` and `<git-dir>/info/exclude`.
@@ -179,7 +190,7 @@ sequenceDiagram
 lgtm/
 ├── apps/
 │   ├── lgtm-cli/       CLI binary, daemon manager, Connect RPC client, and `lgtm run` proxy
-│   ├── lgtm-desktop/   Tauri v2 desktop host, WorkspaceService, LspService, and E2E stdio IPC bridge
+│   ├── lgtm-desktop/   Tauri v2 desktop host, AppState, commands/, LspService, and E2E stdio IPC bridge
 │   ├── lgtm-forge/     Connect RPC review server, SnapshotStore, RemoteForge, and Protobuf schemas
 │   └── lgtm-web/       Svelte 5 desktop/web IDE shell, reactive services, and Tauri/RPC clients
 ├── libs/
@@ -187,7 +198,11 @@ lgtm/
 │   ├── lgtm-db/        SeaORM SQLite/PostgreSQL persistence layer and named repositories
 │   ├── lgtm-env/       Managed `mise` binary lifecycle and `<workspace>/.lgtm/mise.toml` synthesis SDK
 │   ├── lgtm-lsp/       Stdio JSON-RPC 2.0 language server pool, document cache, and UTF-16 offset math
-│   └── lgtm-ui/        Portable Helical UI + Ark UI + CodeMirror 6 Svelte 5 component library
+│   ├── lgtm-project/   Project primary checkout resolution and managed/external Git worktree lifecycle
+│   ├── lgtm-rsutils/   Stateless Git path resolution, worktree CLI, slug hashing, atomic write, and URL helpers
+│   ├── lgtm-session/   Desktop session persistence (`~/.lgtm/sessions/<id>.json`)
+│   ├── lgtm-ui/        Portable Helical UI + Ark UI + CodeMirror 6 Svelte 5 component library
+│   └── lgtm-workspace/ Workspace filesystem CRUD and per-workspace session state models (`WorkspaceSessionState`, `PersistedTab`)
 └── e2e/
     ├── common/         Shared test harness and offline GitHub REST/GraphQL cassette replay
     ├── forge/          Vitest Connect RPC and ReviewService E2E suite
@@ -244,7 +259,12 @@ All workspace Cargo crates set `publish = false` and link directly via Cargo `pa
 - [CLI architecture (`lgtm-cli`)](cli/index.md).
 - [Desktop application architecture (`lgtm-desktop` & `lgtm-web`)](desktop/index.md).
 - [Desktop event handling & service orchestration](desktop/events.md).
+- [Desktop project and session management](desktop/projects.md).
 - [Web frontend architecture](web/index.md).
+- [ProjectsPane UI component](web/projects-pane.md).
+- [Session library architecture (`lgtm-session`)](session/index.md).
+- [Project library architecture (`lgtm-project`)](project/index.md).
+- [Rust utilities library architecture (`lgtm-rsutils`)](rsutils/index.md).
 - [Configuration library architecture (`lgtm-config`)](config/index.md).
 - [Environment library architecture (`lgtm-env`)](env/index.md).
 - [LSP library architecture (`lgtm-lsp`)](lsp/index.md).

@@ -52,6 +52,8 @@ export class SettingsService {
     this.client = client
   }
 
+  // Public --------------------------------------------------------------------
+
   /** Records an opened workspace root in the session's known roots list. */
   rememberRoot(root: string): void {
     if (!this.knownRoots.includes(root)) {
@@ -90,6 +92,8 @@ export class SettingsService {
   handleUpdated(snapshot: ResolvedConfigSnapshot): void {
     this.applySnapshot(snapshot)
   }
+
+  // Private -------------------------------------------------------------------
 
   private applySnapshot(snapshot: ResolvedConfigSnapshot): void {
     this.snapshot = snapshot

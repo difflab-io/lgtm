@@ -1,5 +1,7 @@
 //! GitHub implementation of `RemoteForge` backed by `extensions::octocrab`.
 
+use lgtm_rsutils::parse_github_owner_repo;
+
 use crate::{
     error::{Error, Result},
     extensions::octocrab,
@@ -11,7 +13,6 @@ use crate::{
         },
     },
     models::ReviewOutcome,
-    utils::parse_github_owner_repo,
 };
 
 /// Remote forge provider for GitHub pull requests, reviews, comments, and viewed-file states.

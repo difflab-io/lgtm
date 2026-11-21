@@ -58,7 +58,12 @@
         data-dirty={item.dirty ? 'true' : undefined}
         data-tab-id={item.value}
       >
-        <Tabs.Trigger value={item.value} class={triggerClasses}>
+        <Tabs.Trigger
+          value={item.value}
+          tabindex={-1}
+          class={triggerClasses}
+          onmousedown={(event) => event.preventDefault()}
+        >
           <span>{item.label}</span>
           {#if item.dirty}
             <span
@@ -71,8 +76,10 @@
         {#if item.closable !== false && onclose}
           <button
             type="button"
+            tabindex={-1}
             class={tabsCloseButtonBase}
             aria-label={`Close ${item.label}`}
+            onmousedown={(event) => event.preventDefault()}
             onclick={(event) => {
               event.stopPropagation()
               onclose(item.value)

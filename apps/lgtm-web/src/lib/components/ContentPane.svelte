@@ -1,25 +1,20 @@
 <script lang="ts">
   import { tick } from 'svelte'
-  import { Button, Pane, WhichKeyMode } from '@cloudvoyant/helical-svelte'
+  import { Button, Notice, Pane } from '@cloudvoyant/helical-svelte'
   import { CodeEditor, Tabs } from 'lgtm-ui'
-  import { ChevronRight, FileText } from 'lucide-svelte'
-  import type { HotkeyService } from '../services/hotkeyService.svelte'
-  import type { WorkspaceService } from '../services/workspaceService.svelte'
-  import LspStatusMenu from './LspStatusMenu.svelte'
-
-  // Props ---------------------------------------------------------------------
-  interface ContentPaneProps {
-    workspace: WorkspaceService
-    hotkeys: HotkeyService
-  }
-  let { workspace, hotkeys }: ContentPaneProps = $props()
+  import { FileText } from 'lucide-svelte'
+  import { useService } from '../services/context'
 
   // State ---------------------------------------------------------------------
+  const workspace = useService('workspace')
+  const lsp = useService('lsp')
+  const settings = useService('settings')
+  const hotkeys = useService('hotkeys')
   let editorRef = $state<{ focus: () => void }>()
 
   // Derived -------------------------------------------------------------------
   const editorDiagnostics = $derived(
-    workspace.activeDiagnostics.map((diag) => ({
+    lsp.getDiagnosticsForPath(workspace.selected?.path).map((diag) => ({
       from: diag.from,
       to: diag.to,
       severity: diag.severity,
@@ -36,116 +31,82 @@
   })
 </script>
 
-<Pane
-  paneId="editor"
-  paneTitle="Editor"
-  paneOrder={2}
-  role="main"
-  tabindex={-1}
-  class="document-pane relative flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground outline-none {workspace
-    .settings.paneOutline
-    ? 'data-[pane-active=true]:ring-1 data-[pane-active=true]:ring-ring/40 data-[pane-active=true]:ring-inset'
-    : 'ring-0 data-[pane-active=true]:ring-0'}"
-  aria-label="File viewer"
+<div
+  class="document-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground"
 >
-  {#if workspace.tabItems.length > 0}
-    <Tabs
-      items={workspace.tabItems}
-      value={workspace.activeTabId}
-      ariaLabel="Open editors"
-      onchange={(tabId) => workspace.activateTab(tabId)}
-      onclose={(tabId) => workspace.closeTab(tabId)}
-    />
-  {/if}
-  {#if workspace.fileLoading}
-    <div
-      class="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground"
-      role="status"
-    >
-      Opening file…
-    </div>
-  {:else if workspace.openingError}
-    <div
-      class="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground"
-    >
-      <p class="max-w-115 text-xs leading-relaxed text-warn" role="alert">
-        {workspace.openingError}
-      </p>
-      {#if workspace.selected}<Button
-          variant="outline"
-          size="sm"
-          onclick={() => workspace.selected && workspace.openFile(workspace.selected)}
-          >Retry opening</Button
-        >{/if}
-    </div>
-  {:else if workspace.fileContent && (workspace.selected || workspace.activeTab)}
-    <div class="flex min-h-0 flex-1 flex-col overflow-auto">
-      {#key workspace.fileVersion}
-        <CodeEditor
-          bind:this={editorRef}
-          value={workspace.fileContent.content}
-          filename={workspace.activeEditorFilename}
-          label={workspace.selectedTitle}
-          readonly={workspace.activeTab?.readonly ?? false}
-          lineWrapping={workspace.settings.lineWrapping}
-          clickToInsert={workspace.settings.clickToInsert}
-          diagnostics={editorDiagnostics}
-          selectionOffset={workspace.selectionOffset}
-          onchange={(content) => workspace.updateContent(content)}
-          onhover={(offset) => workspace.requestHover(offset)}
-          ongotodefinition={(offset) => workspace.gotoDefinition(offset)}
-          oncompletion={(offset) => workspace.requestCompletions(offset)}
-          onsignaturehelp={(offset) => workspace.requestSignatureHelp(offset)}
-          onViewReady={(v) => hotkeys.setEditorView(v)}
-        />
-      {/key}
-    </div>
-  {:else}
-    <div
-      class="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground"
-    >
-      <FileText size={32} strokeWidth={1.5} />
-      <h1 class="text-[17px] font-medium text-foreground">Your workspace, ready for review.</h1>
-      <p class="max-w-115 text-xs leading-relaxed">
-        Select a file from the sidebar, or create a new one.
-      </p>
-    </div>
-  {/if}
-  <footer
-    class="relative flex items-center justify-between gap-4 border-t border-border bg-sidebar px-4 py-2 text-[10px] text-muted-foreground"
-    role="status"
-    aria-live="polite"
+  <Pane
+    role="main"
+    paneId="editor"
+    paneTitle="Editor"
+    paneOrder={3}
+    tabindex={-1}
+    class="relative flex min-h-0 min-w-0 flex-1 flex-col rounded-none border-0 bg-background text-foreground shadow-none ring-0 outline-none data-[pane-active=true]:ring-0 {settings.paneOutline
+      ? 'data-[pane-active=true]:after:pointer-events-none data-[pane-active=true]:after:absolute data-[pane-active=true]:after:inset-0 data-[pane-active=true]:after:z-20 data-[pane-active=true]:after:ring-1 data-[pane-active=true]:after:ring-ring/40 data-[pane-active=true]:after:ring-inset'
+      : ''}"
+    aria-label="File viewer"
   >
-    <div class="flex min-w-0 items-center gap-2.5">
-      <LspStatusMenu {workspace} />
-      <nav
-        aria-label="Breadcrumb"
-        class="document-path flex min-w-0 items-center gap-1 truncate"
-        title={workspace.selectedPath}
+    {#if workspace.tabItems.length > 0}
+      <Tabs
+        items={workspace.tabItems}
+        value={workspace.activeTabId}
+        ariaLabel="Open editors"
+        onchange={(tabId) => workspace.activateTab(tabId)}
+        onclose={(tabId) => workspace.closeTab(tabId)}
+      />
+    {/if}
+    {#if workspace.fileLoading}
+      <div
+        class="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground"
+        role="status"
       >
-        {#if workspace.breadcrumbs.length > 0}
-          {#each workspace.breadcrumbs as segment, idx (idx)}
-            {#if idx > 0}
-              <ChevronRight size={11} strokeWidth={1.5} class="shrink-0 opacity-60" />
-            {/if}
-            <span
-              class={idx === workspace.breadcrumbs.length - 1
-                ? 'truncate text-foreground'
-                : 'truncate'}
-            >
-              {segment}
-            </span>
-          {/each}
-        {:else}
-          <span class="truncate">No file selected</span>
-        {/if}
-      </nav>
-    </div>
-    <div class="flex shrink-0 items-center gap-2.5">
-      <WhichKeyMode showPreset aria-label="Editor mode" />
-      <span class={workspace.openingError ? 'shrink-0 text-warn' : 'shrink-0'}
-        >{workspace.status}</span
+        Opening file…
+      </div>
+    {:else if workspace.openingError}
+      <div
+        class="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground"
       >
-    </div>
-  </footer>
-</Pane>
+        <Notice variant="error" class="max-w-115 text-xs">
+          {workspace.openingError}
+        </Notice>
+        {#if workspace.selected}<Button
+            variant="outline"
+            size="sm"
+            onclick={() => workspace.selected && workspace.openFile(workspace.selected)}
+            >Retry opening</Button
+          >{/if}
+      </div>
+    {:else if workspace.fileContent && (workspace.selected || workspace.activeTab)}
+      <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {#key workspace.fileVersion}
+          <CodeEditor
+            bind:this={editorRef}
+            value={workspace.fileContent.content}
+            filename={workspace.activeEditorFilename}
+            label={workspace.selectedTitle}
+            readonly={workspace.activeTab?.readonly ?? false}
+            lineWrapping={settings.lineWrapping}
+            clickToInsert={settings.clickToInsert}
+            diagnostics={editorDiagnostics}
+            selectionOffset={workspace.selectionOffset}
+            onchange={(content) => workspace.updateContent(content)}
+            onhover={(offset) => workspace.requestHover(offset)}
+            ongotodefinition={(offset) => workspace.gotoDefinition(offset)}
+            oncompletion={(offset) => workspace.requestCompletions(offset)}
+            onsignaturehelp={(offset) => workspace.requestSignatureHelp(offset)}
+            onViewReady={(v) => hotkeys?.setEditorView(v)}
+          />
+        {/key}
+      </div>
+    {:else}
+      <div
+        class="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground"
+      >
+        <FileText size={32} strokeWidth={1.5} />
+        <h1 class="text-[17px] font-medium text-foreground">Your workspace, ready for review.</h1>
+        <p class="max-w-115 text-xs leading-relaxed">
+          Select a file from the sidebar, or create a new one.
+        </p>
+      </div>
+    {/if}
+  </Pane>
+</div>

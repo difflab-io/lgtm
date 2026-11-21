@@ -29,89 +29,14 @@ import type {
   KeybindPreset,
   LgtmConfigPatch,
 } from '../clients/workspaceClient'
-import type { WorkspaceService } from './workspaceService.svelte'
-
-function leaf(
-  key: string,
-  label: string,
-  category: string,
-  commandId: string,
-  description: string,
-  mode?: KeymapMode[],
-): WhichKeyNode {
-  return { key, label, category, commandId, description, ...(mode ? { mode } : {}) }
-}
-
-interface BooleanSettingCommandOptions {
-  value: string
-  aliases?: string[]
-  label: string
-  actionNoun?: string
-  description: string
-  shortcut?: CommandNode['shortcut']
-  current: boolean
-  apply: (next: boolean) => void
-}
-
-function booleanSettingCommand({
-  value,
-  aliases,
-  label,
-  actionNoun = label,
-  description,
-  shortcut,
-  current,
-  apply,
-}: BooleanSettingCommandOptions): CommandNode {
-  return {
-    value,
-    command: value,
-    ...(aliases ? { aliases } : {}),
-    label,
-    description,
-    group: 'Preferences',
-    shortcut,
-    children: [
-      {
-        value: `${value}-on`,
-        command: 'on',
-        aliases: ['true', 'enable'],
-        label: `Enable ${actionNoun}`,
-        active: current,
-        onSelect: () => {
-          apply(true)
-        },
-      },
-      {
-        value: `${value}-off`,
-        command: 'off',
-        aliases: ['false', 'disable'],
-        label: `Disable ${actionNoun}`,
-        active: !current,
-        onSelect: () => {
-          apply(false)
-        },
-      },
-      {
-        value: `${value}-toggle`,
-        command: 'toggle',
-        label: `Toggle ${actionNoun}`,
-        onSelect: () => {
-          apply(!current)
-        },
-      },
-    ],
-  }
-}
+import type { AppServices } from './context'
 
 /**
  * Application-level modal keybinding, `WhichKey` leader menu, and `CommandMenu`/`CommandPalette` registry.
  */
 export class HotkeyService {
-  private readonly workspace: WorkspaceService
+  private readonly services: Omit<AppServices, 'hotkeys'>
 
-  /** Whether the workspace explorer sidebar is currently expanded. */
-  sidebarOpen = $state(true)
   /** Whether the active command surface (`CommandMenu` or `CommandPalette`) is open. */
   commandOpen = $state(false)
   /** Transient override forcing `CommandMenu` (`colon`) when opened via `:`. */
@@ -119,16 +44,18 @@ export class HotkeyService {
   /** Currently mounted CodeMirror 6 `EditorView`, if a file or diagnostics buffer is open. */
   activeEditorView = $state<EditorView | null>(null)
 
-  /** Constructs a `HotkeyService` bound to `workspace`. */
-  constructor(workspace: WorkspaceService) {
-    this.workspace = workspace
+  /** Constructs a `HotkeyService` bound to the domain `services` registry. */
+  constructor(services: Omit<AppServices, 'hotkeys'>) {
+    this.services = services
   }
+
+  // Public --------------------------------------------------------------------
 
   /** Effective Helical command surface style (`menu`, `palette`, or `colon`). */
   get effectiveCommandStyle(): HelicalCommandStyle {
     return (
       this.commandStyleOverride ??
-      (this.workspace.settings.commandStyle === 'palette' ? 'palette' : 'menu')
+      (this.services.settings.commandStyle === 'palette' ? 'palette' : 'menu')
     )
   }
 
@@ -160,10 +87,26 @@ export class HotkeyService {
     ),
     'Mod+b': leaf(
       'Mod+b',
-      'Toggle Explorer',
+      'Toggle Explorer Dock',
       'Workspace',
       'workspace.toggleExplorer',
-      'Toggle the workspace explorer sidebar open or closed',
+      'Toggle the widget dock pane open or closed',
+      ['normal', 'select', 'insert'],
+    ),
+    'Mod+Shift+b': leaf(
+      'Mod+Shift+b',
+      'Toggle Projects Dock',
+      'Projects',
+      'projects.show',
+      'Toggle the Projects dock pane open or closed',
+      ['normal', 'select', 'insert'],
+    ),
+    'Mod+Shift+B': leaf(
+      'Mod+Shift+B',
+      'Toggle Projects Dock',
+      'Projects',
+      'projects.show',
+      'Toggle the Projects dock pane open or closed',
       ['normal', 'select', 'insert'],
     ),
     'Mod+,': leaf(
@@ -206,6 +149,86 @@ export class HotkeyService {
       'Open the bottom-docked colon CommandMenu (:)',
       ['normal', 'select'],
     ),
+    'Control+w': {
+      key: 'Control+w',
+      label: 'Window',
+      group: 'Window / Pane',
+      description: 'Spatial and indexed pane navigation',
+      category: 'Window / Pane',
+      mode: ['normal', 'select', 'insert'],
+      when: () => {
+        if (this.controller?.getState().mode === 'insert') {
+          this.controller.setMode('normal')
+        }
+        return true
+      },
+      children: {
+        h: leaf(
+          'h',
+          'Focus Pane Left',
+          'Window / Pane',
+          'pane.left',
+          'Move focus to the pane on the left',
+        ),
+        j: leaf(
+          'j',
+          'Focus Pane Down',
+          'Window / Pane',
+          'pane.down',
+          'Move focus to the pane below',
+        ),
+        k: leaf('k', 'Focus Pane Up', 'Window / Pane', 'pane.up', 'Move focus to the pane above'),
+        l: leaf(
+          'l',
+          'Focus Pane Right',
+          'Window / Pane',
+          'pane.right',
+          'Move focus to the pane on the right',
+        ),
+        ArrowLeft: {
+          key: 'ArrowLeft',
+          label: 'Focus Pane Left',
+          category: 'Window / Pane',
+          commandId: 'pane.left',
+          hidden: true,
+        },
+        ArrowDown: {
+          key: 'ArrowDown',
+          label: 'Focus Pane Down',
+          category: 'Window / Pane',
+          commandId: 'pane.down',
+          hidden: true,
+        },
+        ArrowUp: {
+          key: 'ArrowUp',
+          label: 'Focus Pane Up',
+          category: 'Window / Pane',
+          commandId: 'pane.up',
+          hidden: true,
+        },
+        ArrowRight: {
+          key: 'ArrowRight',
+          label: 'Focus Pane Right',
+          category: 'Window / Pane',
+          commandId: 'pane.right',
+          hidden: true,
+        },
+        w: leaf(
+          'w',
+          'Cycle Next Pane',
+          'Window / Pane',
+          'pane.next',
+          'Cycle focus to the next registered pane',
+        ),
+        W: leaf(
+          'W',
+          'Cycle Previous Pane',
+          'Window / Pane',
+          'pane.prev',
+          'Cycle focus to the previous registered pane',
+        ),
+      },
+    },
     'Control+d': leaf(
       'Control+d',
       'Scroll Half Page Down',
@@ -364,11 +387,62 @@ export class HotkeyService {
           ),
           e: leaf(
             'e',
-            'Toggle Explorer',
+            'Toggle Explorer Dock',
             'Workspace',
             'workspace.toggleExplorer',
-            'Toggle the workspace explorer sidebar',
+            'Toggle the workspace explorer dock pane',
           ),
+          E: leaf(
+            'E',
+            'Toggle Projects Dock',
+            'Projects',
+            'projects.show',
+            'Toggle the Projects dock pane',
+          ),
+          p: {
+            key: 'p',
+            label: '+projects',
+            group: 'Projects',
+            description: 'Manage projects and Git worktrees',
+            category: 'Projects',
+            children: {
+              p: leaf(
+                'p',
+                'Toggle Projects Dock',
+                'Projects',
+                'projects.show',
+                'Toggle the Projects dock pane open or closed',
+              ),
+              e: leaf(
+                'e',
+                'Toggle Explorer Dock',
+                'Projects',
+                'projects.showExplorer',
+                'Toggle the widget dock pane open or closed',
+              ),
+              a: leaf(
+                'a',
+                'Add Project',
+                'Projects',
+                'projects.add',
+                'Open a project folder and attach it to the session',
+              ),
+              n: leaf(
+                'n',
+                'New Worktree',
+                'Projects',
+                'projects.newWorktree',
+                'Create a managed Git worktree for the active project',
+              ),
+              d: leaf(
+                'd',
+                'Remove Worktree',
+                'Projects',
+                'projects.removeWorktree',
+                'Remove the active linked Git worktree',
+              ),
+            },
+          },
           f: {
             key: 'f',
             label: '+file',
@@ -723,49 +797,60 @@ export class HotkeyService {
     'command.openColon': () => this.openColonCommandMenu(),
     'workspace.toggleExplorer': () => this.toggleExplorer(),
     'workspace.openFolder': () => {
-      void this.workspace.selectWorkspace('__open_folder__')
+      void this.services.workspace.selectWorkspace('__open_folder__')
       return true
     },
+    'projects.show': () => this.showSidebarMode('projects'),
+    'projects.showExplorer': () => this.showSidebarMode('explorer'),
+    'projects.add': () => {
+      void this.services.workspace.selectWorkspace('__open_folder__')
+      return true
+    },
+    'projects.newWorktree': () => this.openNewWorktree(),
+    'projects.removeWorktree': () => this.removeActiveWorktree(),
     'file.save': () => {
-      void this.workspace.flushSave()
+      void this.services.workspace.flushSave()
       return true
     },
     'file.saveAll': () => {
-      void this.workspace.flushSave()
+      void this.services.workspace.flushSave()
       return true
     },
     'file.new': () => {
-      void this.workspace.newFile()
+      void this.services.workspace.newFile()
       return true
     },
     'file.newFolder': () => {
-      if (!this.sidebarOpen) this.sidebarOpen = true
-      this.workspace.startCreate('directory')
+      this.services.workspace.setSidebarWidget('explorer')
+      this.services.workspace.startCreate('directory')
       return true
     },
     'settings.openGlobal': () => {
-      void this.workspace.openPath('~/.lgtm/config.json', { title: 'Settings', focus: true })
+      void this.services.workspace.openPath('~/.lgtm/config.json', {
+        title: 'Settings',
+        focus: true,
+      })
       return true
     },
     'settings.openProject': () => {
-      void this.workspace.openPath('.lgtm/config.json', {
+      void this.services.workspace.openPath('.lgtm/config.json', {
         title: 'Settings (project)',
         focus: true,
       })
       return true
     },
     'tab.next': (ctx: KeymapCommandContext) => {
-      if (this.workspace.tabs.length <= 1) return false
-      void this.workspace.selectNextTab(ctx.count)
+      if (this.services.workspace.tabs.length <= 1) return false
+      void this.services.workspace.selectNextTab(ctx.count)
       return true
     },
     'tab.prev': (ctx: KeymapCommandContext) => {
-      if (this.workspace.tabs.length <= 1) return false
-      void this.workspace.selectPrevTab(ctx.count)
+      if (this.services.workspace.tabs.length <= 1) return false
+      void this.services.workspace.selectPrevTab(ctx.count)
       return true
     },
     'tab.close': () => {
-      void this.workspace.closeActiveTab()
+      void this.services.workspace.closeActiveTab()
       return true
     },
     'lsp.gotoDefinition': () => this.gotoDefinitionAtCursor(),
@@ -781,7 +866,7 @@ export class HotkeyService {
     'lsp.lastDiagnostic': () =>
       this.activeEditorView ? gotoLastEditorDiagnostic(this.activeEditorView) : false,
     'lsp.diagnostics': () => {
-      void this.workspace.openDiagnosticsBuffer()
+      void this.services.workspace.openDiagnosticsBuffer()
       return true
     },
     'lsp.restart': () => this.restartLanguageServers(),
@@ -848,14 +933,14 @@ export class HotkeyService {
     'settings.theme.system': () => this.applySettingsPatch({ appearance: { theme: 'system' } }),
     'settings.commandStyle.menu': () => this.setCommandStyle('menu'),
     'settings.commandStyle.palette': () => this.setCommandStyle('palette'),
-    'settings.toggleLeaderOnly': () => this.setLeaderOnly(!this.workspace.settings.leaderOnly),
+    'settings.toggleLeaderOnly': () => this.setLeaderOnly(!this.services.settings.leaderOnly),
     'settings.togglePaneOutline': () =>
       this.applySettingsPatch({
-        keybindings: { paneOutline: !this.workspace.settings.paneOutline },
+        keybindings: { paneOutline: !this.services.settings.paneOutline },
       }),
     'settings.toggleClickToInsert': () =>
       this.applySettingsPatch({
-        keybindings: { clickToInsert: !this.workspace.settings.clickToInsert },
+        keybindings: { clickToInsert: !this.services.settings.clickToInsert },
       }),
     'settings.wrap.auto': () => this.applySettingsPatch({ editor: { lineWrapping: 'auto' } }),
     'settings.wrap.off': () => this.applySettingsPatch({ editor: { lineWrapping: 'off' } }),
@@ -863,7 +948,7 @@ export class HotkeyService {
     'settings.wrap.100': () => this.applySettingsPatch({ editor: { lineWrapping: 100 } }),
     'settings.wrap.120': () => this.applySettingsPatch({ editor: { lineWrapping: 120 } }),
     'settings.toggleLsp': () =>
-      this.applySettingsPatch({ lsp: { enabled: !this.workspace.settings.lspEnabled } }),
+      this.applySettingsPatch({ lsp: { enabled: !this.services.settings.lspEnabled } }),
   }
 
   /** Hierarchical command catalog shared by `CommandMenu` and `CommandPalette`. */
@@ -879,7 +964,7 @@ export class HotkeyService {
         group: 'File',
         shortcut: 'Mod+S',
         onSelect: () => {
-          void this.workspace.flushSave()
+          void this.services.workspace.flushSave()
         },
       },
       {
@@ -892,7 +977,7 @@ export class HotkeyService {
         group: 'File',
         shortcut: 'Mod+Shift+S',
         onSelect: () => {
-          void this.workspace.flushSave()
+          void this.services.workspace.flushSave()
         },
       },
       {
@@ -905,7 +990,7 @@ export class HotkeyService {
         group: 'Buffer',
         shortcut: 'Space b d',
         onSelect: () => {
-          void this.workspace.closeActiveTab()
+          void this.services.workspace.closeActiveTab()
         },
       },
       {
@@ -918,7 +1003,7 @@ export class HotkeyService {
         group: 'Buffer',
         shortcut: [']', 't'],
         onSelect: () => {
-          void this.workspace.selectNextTab(1)
+          void this.services.workspace.selectNextTab(1)
         },
       },
       {
@@ -931,7 +1016,7 @@ export class HotkeyService {
         group: 'Buffer',
         shortcut: ['[', 't'],
         onSelect: () => {
-          void this.workspace.selectPrevTab(1)
+          void this.services.workspace.selectPrevTab(1)
         },
       },
       {
@@ -943,7 +1028,7 @@ export class HotkeyService {
         group: 'File',
         shortcut: 'Space f n',
         onSelect: () => {
-          void this.workspace.newFile()
+          void this.services.workspace.newFile()
         },
       },
       {
@@ -955,20 +1040,71 @@ export class HotkeyService {
         group: 'File',
         shortcut: 'Space f N',
         onSelect: () => {
-          if (!this.sidebarOpen) this.sidebarOpen = true
-          this.workspace.startCreate('directory')
+          this.services.workspace.setSidebarWidget('explorer')
+          this.services.workspace.startCreate('directory')
         },
       },
       {
         value: 'toggle-sidebar',
         command: 'sidebar',
+        aliases: ['explorer'],
         keywords: ['explorer', 'tree'],
-        label: 'Toggle Workspace Sidebar',
-        description: 'Show or hide the workspace explorer sidebar',
+        label: 'Toggle Explorer Dock',
+        description: 'Show or hide the workspace explorer dock pane',
         group: 'Workspace',
         shortcut: 'Mod+B',
         onSelect: () => {
           this.toggleExplorer()
+        },
+      },
+      {
+        value: 'projects',
+        command: 'projects',
+        aliases: ['proj'],
+        keywords: ['worktrees', 'repositories'],
+        label: 'Toggle Projects Dock',
+        description: 'Toggle the Projects and Worktrees dock pane open or closed',
+        group: 'Projects',
+        shortcut: 'Mod+Shift+B',
+        onSelect: () => {
+          this.showSidebarMode('projects')
+        },
+      },
+      {
+        value: 'project-add',
+        command: 'project-add',
+        label: 'Add Project',
+        description: 'Open a folder and register its project in the active session',
+        group: 'Projects',
+        shortcut: ['Space', 'p', 'a'],
+        onSelect: () => {
+          void this.services.workspace.selectWorkspace('__open_folder__')
+        },
+      },
+      {
+        value: 'worktree-new',
+        command: 'worktree-new',
+        label: 'New Worktree',
+        description: 'Create a managed Git worktree for the active project',
+        group: 'Projects',
+        shortcut: ['Space', 'p', 'n'],
+        disabled: !this.services.project.activeProject,
+        onSelect: () => {
+          this.openNewWorktree()
+        },
+      },
+      {
+        value: 'worktree-remove',
+        command: 'worktree-remove',
+        label: 'Remove Active Worktree',
+        description: 'Remove the currently active linked Git worktree',
+        group: 'Projects',
+        shortcut: ['Space', 'p', 'd'],
+        disabled: !this.services.project.activeProject?.worktrees.some(
+          (wt) => wt.path === this.services.workspace.root,
+        ),
+        onSelect: () => {
+          this.removeActiveWorktree()
         },
       },
       {
@@ -980,7 +1116,10 @@ export class HotkeyService {
         group: 'Preferences',
         shortcut: 'Space f c',
         onSelect: () => {
-          void this.workspace.openPath('~/.lgtm/config.json', { title: 'Settings', focus: true })
+          void this.services.workspace.openPath('~/.lgtm/config.json', {
+            title: 'Settings',
+            focus: true,
+          })
         },
       },
       {
@@ -992,7 +1131,7 @@ export class HotkeyService {
         group: 'Preferences',
         shortcut: 'Space f p',
         onSelect: () => {
-          void this.workspace.openPath('.lgtm/config.json', {
+          void this.services.workspace.openPath('.lgtm/config.json', {
             title: 'Settings (project)',
             focus: true,
           })
@@ -1085,7 +1224,7 @@ export class HotkeyService {
         group: 'LSP',
         shortcut: 'Space l d',
         onSelect: () => {
-          void this.workspace.openDiagnosticsBuffer()
+          void this.services.workspace.openDiagnosticsBuffer()
         },
       },
       {
@@ -1115,7 +1254,7 @@ export class HotkeyService {
             command: 'dark',
             label: 'Dark',
             description: 'Use dark color theme',
-            active: this.workspace.settings.theme === 'dark',
+            active: this.services.settings.theme === 'dark',
             onSelect: () => {
               this.applySettingsPatch({ appearance: { theme: 'dark' } })
             },
@@ -1125,7 +1264,7 @@ export class HotkeyService {
             command: 'light',
             label: 'Light',
             description: 'Use light color theme',
-            active: this.workspace.settings.theme === 'light',
+            active: this.services.settings.theme === 'light',
             onSelect: () => {
               this.applySettingsPatch({ appearance: { theme: 'light' } })
             },
@@ -1136,7 +1275,7 @@ export class HotkeyService {
             aliases: ['auto'],
             label: 'System',
             description: 'Follow OS appearance setting',
-            active: this.workspace.settings.theme === 'system',
+            active: this.services.settings.theme === 'system',
             onSelect: () => {
               this.applySettingsPatch({ appearance: { theme: 'system' } })
             },
@@ -1157,7 +1296,7 @@ export class HotkeyService {
             command: 'menu',
             label: 'Command Menu (Bottom Bar)',
             description: 'Open bottom-docked CommandMenu by default',
-            active: this.workspace.settings.commandStyle === 'menu',
+            active: this.services.settings.commandStyle === 'menu',
             onSelect: () => {
               this.setCommandStyle('menu')
             },
@@ -1167,7 +1306,7 @@ export class HotkeyService {
             command: 'palette',
             label: 'Command Palette (Modal)',
             description: 'Open centered CommandPalette modal by default',
-            active: this.workspace.settings.commandStyle === 'palette',
+            active: this.services.settings.commandStyle === 'palette',
             onSelect: () => {
               this.setCommandStyle('palette')
             },
@@ -1189,7 +1328,7 @@ export class HotkeyService {
             command: 'helix',
             label: 'Helix',
             description: 'Selection-first Helix modal grammar (default)',
-            active: this.workspace.settings.keybindPreset === 'helix',
+            active: this.services.settings.keybindPreset === 'helix',
             onSelect: () => {
               this.setPreset('helix')
             },
@@ -1199,7 +1338,7 @@ export class HotkeyService {
             command: 'vim',
             label: 'Vim',
             description: 'Operator-motion Vim modal grammar',
-            active: this.workspace.settings.keybindPreset === 'vim',
+            active: this.services.settings.keybindPreset === 'vim',
             onSelect: () => {
               this.setPreset('vim')
             },
@@ -1210,7 +1349,7 @@ export class HotkeyService {
             aliases: ['kak'],
             label: 'Kakoune',
             description: 'Selection-first Kakoune modal grammar',
-            active: this.workspace.settings.keybindPreset === 'kakoune',
+            active: this.services.settings.keybindPreset === 'kakoune',
             onSelect: () => {
               this.setPreset('kakoune')
             },
@@ -1222,7 +1361,7 @@ export class HotkeyService {
         label: 'Leader-Only Mode',
         description: 'Only open WhichKey popup for Space leader sequences',
         shortcut: 'Space u m',
-        current: this.workspace.settings.leaderOnly,
+        current: this.services.settings.leaderOnly,
         apply: (next) => {
           this.setLeaderOnly(next)
         },
@@ -1232,7 +1371,7 @@ export class HotkeyService {
         label: 'Active Pane Outline',
         description: 'Show or hide focus outline around the active spatial pane',
         shortcut: 'Space u o',
-        current: this.workspace.settings.paneOutline,
+        current: this.services.settings.paneOutline,
         apply: (next) => {
           this.applySettingsPatch({ keybindings: { paneOutline: next } })
         },
@@ -1243,7 +1382,7 @@ export class HotkeyService {
         actionNoun: 'Click to Insert',
         description: 'Enter insert mode automatically when clicking inside the code editor',
         shortcut: 'Space u i',
-        current: this.workspace.settings.clickToInsert,
+        current: this.services.settings.clickToInsert,
         apply: (next) => {
           this.applySettingsPatch({ keybindings: { clickToInsert: next } })
         },
@@ -1262,7 +1401,7 @@ export class HotkeyService {
             command: 'auto',
             aliases: ['on'],
             label: 'Auto (Viewport Width)',
-            active: this.workspace.settings.lineWrapping === 'auto',
+            active: this.services.settings.lineWrapping === 'auto',
             onSelect: () => {
               this.applySettingsPatch({ editor: { lineWrapping: 'auto' } })
             },
@@ -1271,7 +1410,7 @@ export class HotkeyService {
             value: 'wrap-off',
             command: 'off',
             label: 'Off (No Wrapping)',
-            active: this.workspace.settings.lineWrapping === 'off',
+            active: this.services.settings.lineWrapping === 'off',
             onSelect: () => {
               this.applySettingsPatch({ editor: { lineWrapping: 'off' } })
             },
@@ -1280,7 +1419,7 @@ export class HotkeyService {
             value: 'wrap-80',
             command: '80',
             label: '80 Columns',
-            active: this.workspace.settings.lineWrapping === 80,
+            active: this.services.settings.lineWrapping === 80,
             onSelect: () => {
               this.applySettingsPatch({ editor: { lineWrapping: 80 } })
             },
@@ -1289,7 +1428,7 @@ export class HotkeyService {
             value: 'wrap-100',
             command: '100',
             label: '100 Columns',
-            active: this.workspace.settings.lineWrapping === 100,
+            active: this.services.settings.lineWrapping === 100,
             onSelect: () => {
               this.applySettingsPatch({ editor: { lineWrapping: 100 } })
             },
@@ -1298,7 +1437,7 @@ export class HotkeyService {
             value: 'wrap-120',
             command: '120',
             label: '120 Columns',
-            active: this.workspace.settings.lineWrapping === 120,
+            active: this.services.settings.lineWrapping === 120,
             onSelect: () => {
               this.applySettingsPatch({ editor: { lineWrapping: 120 } })
             },
@@ -1312,7 +1451,7 @@ export class HotkeyService {
         actionNoun: 'LSP',
         description: 'Enable or disable workspace language servers',
         shortcut: 'Space u l',
-        current: this.workspace.settings.lspEnabled,
+        current: this.services.settings.lspEnabled,
         apply: (next) => {
           this.applySettingsPatch({ lsp: { enabled: next } })
         },
@@ -1355,21 +1494,45 @@ export class HotkeyService {
 
   /** Opens the user's configured command surface (`CommandMenu` by default, or `CommandPalette`). */
   openConfiguredCommandSurface(): boolean {
+    if (this.commandOpen && this.commandStyleOverride === null) {
+      this.setCommandOpen(false)
+      return true
+    }
     this.commandStyleOverride = null
     this.commandOpen = true
     return true
   }
 
-  /** Toggles the workspace explorer sidebar and moves focus to the resulting active pane. */
+  /** Toggles the Explorer widget pane and moves focus to the opened pane or editor on close. */
   toggleExplorer(): boolean {
-    const nextOpen = !this.sidebarOpen
-    this.sidebarOpen = nextOpen
-    const targetPane = nextOpen ? 'workspace' : 'editor'
-    void tick().then(() => {
-      requestAnimationFrame(() => {
-        this.controller?.focusPane(targetPane)
-      })
-    })
+    this.services.workspace.toggleExplorerPane()
+    return true
+  }
+
+  /** Toggles the `explorer` or `projects` dock pane independently and focuses the opened pane or editor on close. */
+  showSidebarMode(mode: 'explorer' | 'projects'): boolean {
+    if (mode === 'projects') {
+      this.services.workspace.toggleProjectsPane()
+    } else {
+      this.toggleExplorer()
+    }
+    return true
+  }
+
+  /** Opens the `New Worktree` dialog in `ProjectsPane`. */
+  openNewWorktree(): boolean {
+    this.services.workspace.setSidebarWidget('projects')
+    this.services.project.openNewWorktreeDialog()
+    return true
+  }
+
+  /** Prompts to remove the currently active linked Git worktree in `ProjectsPane`. */
+  removeActiveWorktree(): boolean {
+    const project = this.services.project.activeProject
+    const wt = project?.worktrees.find((item) => item.path === this.services.workspace.root)
+    if (!project || !wt) return false
+    this.services.workspace.setSidebarWidget('projects')
+    this.services.project.promptRemoveWorktree(project.id, wt.path)
     return true
   }
 
@@ -1391,6 +1554,8 @@ export class HotkeyService {
     return this.applySettingsPatch({ keybindings: { commandStyle } }, scope)
   }
 
+  // Private -------------------------------------------------------------------
+
   private get controller() {
     return typeof document !== 'undefined' ? getDocumentWhichKeyController(document) : null
   }
@@ -1403,17 +1568,17 @@ export class HotkeyService {
   }
 
   private gotoDefinitionAtCursor(): boolean {
-    if (!this.activeEditorView || !this.workspace.selected) return false
+    if (!this.activeEditorView || !this.services.workspace.selected) return false
     const pos = resolveEditorSymbolOffset(this.activeEditorView.state)
-    void this.workspace.gotoDefinition(pos)
+    void this.services.workspace.gotoDefinition(pos)
     return true
   }
 
   private hoverAtCursor(): boolean {
     const view = this.activeEditorView
-    if (!view || !this.workspace.selected) return false
+    if (!view || !this.services.workspace.selected) return false
     const pos = resolveEditorSymbolOffset(view.state)
-    void this.workspace.requestHover(pos).then((hover) => {
+    void this.services.workspace.requestHover(pos).then((hover) => {
       if (hover && this.activeEditorView === view) {
         showEditorHoverTooltip(view, hover)
       }
@@ -1423,9 +1588,9 @@ export class HotkeyService {
 
   private signatureHelpAtCursor(): boolean {
     const view = this.activeEditorView
-    if (!view || !this.workspace.selected) return false
+    if (!view || !this.services.workspace.selected) return false
     const pos = resolveEditorSymbolOffset(view.state)
-    void this.workspace.requestSignatureHelp(pos).then((help) => {
+    void this.services.workspace.requestSignatureHelp(pos).then((help) => {
       if (help && this.activeEditorView === view) {
         showEditorSignatureHelpTooltip(view, help)
       }
@@ -1455,26 +1620,101 @@ export class HotkeyService {
   }
 
   private restartLanguageServers(): boolean {
-    const activeLang = this.workspace.activeLanguageId
+    const activeLang = this.services.workspace.activeLanguageId
     if (activeLang) {
-      void this.workspace.restartLanguageServer(activeLang)
+      void this.services.lsp.restartServer(activeLang)
       return true
     }
-    const servers = Object.values(this.workspace.lsp.servers)
+    const servers = Object.values(this.services.lsp.servers)
     if (servers.length === 0) return false
     for (const server of servers) {
-      void this.workspace.restartLanguageServer(server.languageId)
+      void this.services.lsp.restartServer(server.languageId)
     }
     return true
   }
 
   private applySettingsPatch(patch: LgtmConfigPatch, scope?: ConfigScope | null): boolean {
-    void this.workspace.settings.update(patch, scope).then(async () => {
-      await this.workspace.reloadCleanConfigTabs()
+    void this.services.settings.update(patch, scope).then(async () => {
+      await this.services.workspace.reloadCleanConfigTabs()
       if (patch.lsp !== undefined) {
-        await this.workspace.syncLspState()
+        await this.services.lsp.syncState()
       }
     })
     return true
+  }
+}
+
+// Private ---------------------------------------------------------------------
+
+function leaf(
+  key: string,
+  label: string,
+  category: string,
+  commandId: string,
+  description: string,
+  mode?: KeymapMode[],
+): WhichKeyNode {
+  return { key, label, category, commandId, description, ...(mode ? { mode } : {}) }
+}
+
+interface BooleanSettingCommandOptions {
+  value: string
+  aliases?: string[]
+  label: string
+  actionNoun?: string
+  description: string
+  shortcut?: CommandNode['shortcut']
+  current: boolean
+  apply: (next: boolean) => void
+}
+
+function booleanSettingCommand({
+  value,
+  aliases,
+  label,
+  actionNoun = label,
+  description,
+  shortcut,
+  current,
+  apply,
+}: BooleanSettingCommandOptions): CommandNode {
+  return {
+    value,
+    command: value,
+    ...(aliases ? { aliases } : {}),
+    label,
+    description,
+    group: 'Preferences',
+    shortcut,
+    children: [
+      {
+        value: `${value}-on`,
+        command: 'on',
+        aliases: ['true', 'enable'],
+        label: `Enable ${actionNoun}`,
+        active: current,
+        onSelect: () => {
+          apply(true)
+        },
+      },
+      {
+        value: `${value}-off`,
+        command: 'off',
+        aliases: ['false', 'disable'],
+        label: `Disable ${actionNoun}`,
+        active: !current,
+        onSelect: () => {
+          apply(false)
+        },
+      },
+      {
+        value: `${value}-toggle`,
+        command: 'toggle',
+        label: `Toggle ${actionNoun}`,
+        onSelect: () => {
+          apply(!current)
+        },
+      },
+    ],
   }
 }

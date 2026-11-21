@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use lgtm_lsp::{LspFileDiagnosticsEvent, LspServerStatusEvent};
+use lgtm_session::Session;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::Emitter;
@@ -57,6 +58,8 @@ pub enum AppEvent {
     LspStatus(LspServerStatusEvent),
     /// A language server or config validator published diagnostics for a file.
     LspDiagnostics(LspFileDiagnosticsEvent),
+    /// The persisted session or project tree changed.
+    SessionUpdated(Session),
     /// The OS requested application exit (`RunEvent::ExitRequested`).
     QuitRequested,
 }

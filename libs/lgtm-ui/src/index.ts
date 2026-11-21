@@ -1,3 +1,5 @@
+export { default as ColorSelector } from './color-selector/ColorSelector.svelte'
+export type { ColorOption, ColorSelectorProps } from './color-selector/types'
 export { default as TreeView } from './tree-view/TreeView.svelte'
 export type { TreeNode, TreeViewProps } from './tree-view/types'
 export { default as ContextMenu } from './context-menu/ContextMenu.svelte'

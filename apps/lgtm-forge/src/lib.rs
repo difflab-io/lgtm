@@ -8,12 +8,12 @@ pub mod models;
 pub mod rpc;
 pub mod services;
 pub mod snapshots;
-pub mod utils;
 
 use std::sync::Arc;
 
 use connectrpc::{Encodable, RequestContext, Response, Router, ServiceRequest, ServiceResult};
 use connectrpc_health::{StaticChecker, install_static};
+use lgtm_config::ConfigService;
 
 /// Message types, service traits, and clients generated from the shared schema.
 pub mod proto {
@@ -49,7 +49,7 @@ pub fn router() -> (Router, Arc<StaticChecker>) {
 
 /// Connect to the default persistent database (`$LGTM_HOME/lgtm.db` or `LGTM_DATABASE_URL`) and construct the RPC router.
 pub async fn connect_default_router() -> error::Result<(Router, Arc<StaticChecker>)> {
-    let database_url = utils::default_database_url()?;
+    let database_url = ConfigService::new().get_database_url()?;
     let db = database::Database::connect(&database_url).await?;
     Ok(router_with_database(db))
 }

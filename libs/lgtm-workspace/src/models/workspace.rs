@@ -1,3 +1,5 @@
+//! Domain models for local workspace locations, directory listings, and entry path validation.
+
 use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;

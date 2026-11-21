@@ -336,7 +336,7 @@ pub fn parse_body_agent_disclosure(raw_body: &str) -> (String, Option<(String, S
     if let Some(idx) = trimmed.rfind(prefix) {
         let rest = &trimmed[idx + prefix.len()..];
         if let Some(descriptor) = rest.strip_suffix(suffix)
-            && let Ok(parsed) = crate::utils::parse_agent_descriptor(descriptor)
+            && let Ok(parsed) = Identity::parse_agent_descriptor(descriptor)
         {
             let clean = trimmed[..idx].trim_end().to_owned();
             let body = if clean.is_empty() {

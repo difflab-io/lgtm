@@ -67,6 +67,29 @@ impl ConfigService {
             .unwrap_or_else(|| self.get_lgtm_home_dir().join("config.json"))
     }
 
+    /// Returns the root directory (`~/.lgtm/snapshots` or `$LGTM_HOME/snapshots`) for local snapshot repositories.
+    pub fn get_snapshots_dir(&self) -> PathBuf {
+        self.get_lgtm_home_dir().join("snapshots")
+    }
+
+    /// Resolves the database URL (`LGTM_DATABASE_URL`, `DATABASE_URL`, or `sqlite://$LGTM_HOME/lgtm.db?mode=rwc`).
+    pub fn get_database_url(&self) -> Result<String> {
+        for var in ["LGTM_DATABASE_URL", "DATABASE_URL"] {
+            if let Ok(url) = std::env::var(var)
+                && !url.trim().is_empty()
+            {
+                return Ok(url.trim().to_owned());
+            }
+        }
+        let lgtm_home = self.get_lgtm_home_dir();
+        std::fs::create_dir_all(&lgtm_home).map_err(|source| LgtmConfigError::GlobalConfigIo {
+            path: lgtm_home.clone(),
+            source,
+        })?;
+        let db_path = lgtm_home.join("lgtm.db");
+        Ok(format!("sqlite://{}?mode=rwc", db_path.display()))
+    }
+
     /// Returns the project configuration path (`<workspace>/.lgtm/config.json`).
     pub fn get_project_config_path(workspace_root: &Path) -> PathBuf {
         workspace_root.join(".lgtm").join("config.json")

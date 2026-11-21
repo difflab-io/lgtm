@@ -34,6 +34,19 @@ test.describe('Given an existing workspace', { tag: ['@desktop', '@keybinds'] },
         await expect(editorPane).toHaveAttribute('data-pane-active', 'true')
         await expect(sidebarPane).toHaveAttribute('data-pane-active', 'false')
         await expect(page.locator('.cm-content')).toBeFocused()
+
+        // Act: click tab inside editor pane and editor content (entering insert mode), then use Ctrl-w h directly to focus workspace pane
+        await editorPane.getByRole('tab', { name: 'same.md', exact: true }).click()
+        await page.locator('.cm-content').click()
+        await page.keyboard.press('Control+w')
+        await page.keyboard.press('h')
+
+        // Assert
+        await expect(sidebarPane).toHaveAttribute('data-pane-active', 'true')
+        await expect(editorPane).toHaveAttribute('data-pane-active', 'false')
+        await page.keyboard.press('Control+w')
+        await page.keyboard.press('l')
+        await expect(page.locator('.cm-content')).toBeFocused()
       },
     )
 
@@ -238,15 +251,28 @@ test.describe('Given an open file in the code editor', { tag: ['@desktop', '@key
         // Act: open line below with o, type text in insert mode, and return to normal mode on Escape
         await page.keyboard.press('o')
         await expect(badge).toHaveAttribute('data-mode', 'insert')
-        await page.keyboard.type('Modal line.')
+        await page.keyboard.type('Modal line')
+        await page.keyboard.press('Enter')
+        await page.keyboard.type('Second line')
         await page.keyboard.press('Escape')
 
         // Assert
         await expect(badge).toHaveAttribute('data-mode', 'normal')
-        await expect(editorContent).toContainText('Modal line.')
+        await expect(editorContent).toContainText('Modal line')
+        await expect(editorContent).toContainText('Second line')
+
+        // Act: pressing Enter or Backspace in normal mode must not insert newlines or delete text
+        const linesBefore = await page.locator('.cm-line').count()
+        await page.keyboard.press('Enter')
+        await page.keyboard.press('Backspace')
+        await page.keyboard.press('Delete')
+
+        // Assert
+        expect(await page.locator('.cm-line').count()).toBe(linesBefore)
+        await expect(editorContent).toContainText('Second line')
         await expect
           .poll(() => readFile(join(workspace.root, 'same.md'), 'utf8'))
-          .toContain('Modal line.')
+          .toContain('Modal line\nSecond line')
       },
     )
   })

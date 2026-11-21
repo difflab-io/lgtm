@@ -2,16 +2,14 @@
   import { Menu, type MenuItem, type MenuItemIndicatorTone } from 'lgtm-ui'
   import { CircleX, Radio, TriangleAlert } from 'lucide-svelte'
   import type { LspServerStatusEvent } from '../clients/workspaceClient'
-  import type { WorkspaceService } from '../services/workspaceService.svelte'
+  import { useService } from '../services/context'
 
-  // Props ---------------------------------------------------------------------
-  interface LspStatusMenuProps {
-    workspace: WorkspaceService
-  }
-  let { workspace }: LspStatusMenuProps = $props()
+  // State ---------------------------------------------------------------------
+  const lsp = useService('lsp')
+  const workspace = useService('workspace')
 
   // Derived -------------------------------------------------------------------
-  const activeServer = $derived(workspace.activeLspServer)
+  const activeServer = $derived(lsp.getActiveServer(workspace.activeLanguageId))
   const activeErrorCount = $derived(activeServer?.errorCount ?? 0)
   const activeWarningCount = $derived(activeServer?.warningCount ?? 0)
 
@@ -34,12 +32,12 @@
   const triggerTone = $derived.by((): MenuItemIndicatorTone => {
     const server = activeServer
     if (!server) return 'inactive'
-    return workspace.lsp.getServerIndicator(server, workspace.activeLanguageId).tone
+    return lsp.getServerIndicator(server, workspace.activeLanguageId).tone
   })
 
   const serversByLanguageId = $derived.by((): Record<string, LspServerStatusEvent> => {
     const map: Record<string, LspServerStatusEvent> = {}
-    for (const server of workspace.allLspServers) {
+    for (const server of lsp.allServers) {
       map[server.languageId] = server
     }
     return map
@@ -47,7 +45,7 @@
 
   const menuItems = $derived.by((): MenuItem[] => {
     const items: MenuItem[] = []
-    const servers = workspace.allLspServers
+    const servers = lsp.allServers
     if (servers.length === 0) {
       items.push({
         value: 'empty',
@@ -57,7 +55,7 @@
       })
     } else {
       for (const server of servers) {
-        const indicator = workspace.lsp.getServerIndicator(server, workspace.activeLanguageId)
+        const indicator = lsp.getServerIndicator(server, workspace.activeLanguageId)
         const subItems: MenuItem[] = [
           {
             value: `diagnostics:${server.languageId}`,
@@ -100,7 +98,7 @@
     }
     if (value.startsWith('restart:')) {
       const languageId = value.slice('restart:'.length)
-      void workspace.restartLanguageServer(languageId)
+      void lsp.restartServer(languageId)
       return
     }
   }
@@ -134,7 +132,7 @@
   triggerAriaLabel="LSP status"
   triggerTitle={triggerSummary}
   onopenchange={(open) => {
-    if (open) void workspace.syncLspState()
+    if (open) void lsp.syncState()
   }}
   onselect={handleSelect}
 >

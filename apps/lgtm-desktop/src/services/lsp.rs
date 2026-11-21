@@ -6,7 +6,7 @@ use lgtm_lsp::{
     LspServerStatusEvent, LspSignatureHelp, LspWorkspaceSnapshot,
 };
 
-use crate::error::{Result, error};
+use lgtm_workspace::{Result, error};
 
 /// Desktop LSP orchestration service delegating workspace lifecycle and document operations to `LgtmLspManager`.
 #[derive(Clone)]

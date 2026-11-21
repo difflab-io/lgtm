@@ -1,12 +1,13 @@
 //! Concrete local snapshot store (`~/.lgtm/snapshots/$repoSlug`) backed by `extensions::gitoxide`.
 
-use std::{collections::BTreeMap, path::PathBuf};
-
-use crate::{
-    error::Result,
-    extensions::{git::compute_repo_slug, gitoxide},
-    utils::default_snapshots_root,
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
 };
+
+use lgtm_config::ConfigService;
+
+use crate::{error::Result, extensions::gitoxide, models::ReviewContext};
 
 /// Local shadow repository manager that isolates `--local` staging, commits, and blob reads under `~/.lgtm/snapshots/$repoSlug`.
 #[derive(Clone, Debug)]
@@ -26,7 +27,7 @@ impl SnapshotStore {
 
     /// Compute the snapshot repository path for `git_dir` without creating it on disk.
     pub fn snapshot_dir(&self, git_dir: &str) -> Result<PathBuf> {
-        let slug = compute_repo_slug(git_dir)?;
+        let slug = ReviewContext::compute_repo_slug(Path::new(git_dir.trim()))?;
         Ok(self.root_dir.join(slug))
     }
 
@@ -100,6 +101,6 @@ impl SnapshotStore {
 
 impl Default for SnapshotStore {
     fn default() -> Self {
-        Self::new(default_snapshots_root())
+        Self::new(ConfigService::new().get_snapshots_dir())
     }
 }

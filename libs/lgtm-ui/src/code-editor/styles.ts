@@ -3,9 +3,9 @@ import { cva, type VariantProps } from 'class-variance-authority'
 
 export const codeEditorRootVariants = cva(
   [
-    'helical-code-editor relative w-full flex-1 overflow-auto bg-background text-foreground font-mono outline-none',
-    '[&_.cm-editor]:h-full [&_.cm-editor]:outline-none',
-    '[&_.cm-scroller]:font-mono',
+    'helical-code-editor relative h-full w-full min-h-0 flex-1 overflow-hidden bg-background text-foreground font-mono outline-none',
+    '[&_.cm-editor]:h-full [&_.cm-editor]:max-h-full [&_.cm-editor]:min-h-0 [&_.cm-editor]:outline-none',
+    '[&_.cm-scroller]:h-full [&_.cm-scroller]:overflow-auto [&_.cm-scroller]:font-mono',
     '[&_.cm-gutters]:border-r [&_.cm-gutters]:border-border [&_.cm-gutters]:bg-muted/40 [&_.cm-gutters]:text-muted-foreground',
     '[&_.cm-tooltip]:max-h-64 [&_.cm-tooltip]:max-w-lg [&_.cm-tooltip]:overflow-y-auto [&_.cm-tooltip]:overscroll-contain [&_.cm-tooltip]:rounded-md [&_.cm-tooltip]:border [&_.cm-tooltip]:border-border [&_.cm-tooltip]:bg-popover [&_.cm-tooltip]:text-popover-foreground [&_.cm-tooltip]:shadow-md',
     '[&_.cm-tooltip-section]:border-0 [&_.cm-tooltip-section]:bg-transparent [&_.cm-tooltip-section:not(:first-child)]:border-t [&_.cm-tooltip-section:not(:first-child)]:border-border',

@@ -1,3 +1,5 @@
+//! Workspace error definitions and domain error conversions.
+
 use serde::Serialize;
 use specta::Type;
 

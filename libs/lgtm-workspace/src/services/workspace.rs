@@ -1,3 +1,5 @@
+//! Service managing active workspace roots, directory listings, and file CRUD operations.
+
 use std::{
     fs,
     io::{Read, Write},
@@ -8,7 +10,12 @@ use lgtm_config::LgtmConfigPatch;
 
 use crate::{
     error::{Result, error},
-    models::{FileContent, Workspace, WorkspaceListing, WorkspaceNode},
+    models::{
+        tab::{PersistedTab, TabCandidate},
+        widget::SidebarWidget,
+        workspace::{Workspace, WorkspaceListing, WorkspaceNode},
+        workspace_state::{WorkspaceSessionState, WorkspaceStatePatch},
+    },
 };
 
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
@@ -126,8 +133,8 @@ impl WorkspaceService {
         Ok(entries)
     }
 
-    /// Reads UTF-8 text and revision hash for a workspace-relative or config file.
-    pub fn get_file_content(&self, relative: &str) -> Result<FileContent> {
+    /// Reads UTF-8 text for a workspace-relative or config file.
+    pub fn get_file_content(&self, relative: &str) -> Result<String> {
         if relative.is_empty() {
             return Err(error("unsupported", "Choose a file inside the workspace."));
         }
@@ -137,7 +144,7 @@ impl WorkspaceService {
             self.ensure_global_config_file()?;
             let root = self.get_root()?;
             if !root.join(".lgtm").join("config.json").is_file() {
-                return FileContent::from_bytes(b"{\n}\n".to_vec());
+                return Ok("{\n}\n".to_owned());
             }
         }
         let path = self.get_entry_path(relative)?;
@@ -158,11 +165,12 @@ impl WorkspaceService {
                 "This file is larger than the 16 MB viewing limit.",
             ));
         }
-        FileContent::from_bytes(bytes)
+        String::from_utf8(bytes)
+            .map_err(|_| error("unsupported", "Only UTF-8 text files can be opened."))
     }
 
-    /// Writes UTF-8 text to an existing workspace-relative or config file and returns its new revision.
-    pub fn write_file(&self, relative: &str, content: &str) -> Result<FileContent> {
+    /// Writes UTF-8 text to an existing workspace-relative or config file.
+    pub fn write_file(&self, relative: &str, content: &str) -> Result<()> {
         if relative.is_empty() {
             return Err(error("unsupported", "Choose a file inside the workspace."));
         }
@@ -189,7 +197,7 @@ impl WorkspaceService {
                 .open(&path)?;
             file.write_all(content.as_bytes())?;
             file.sync_all()?;
-            return FileContent::from_bytes(content.as_bytes().to_vec());
+            return Ok(());
         }
         if !self.is_global_config_reference(relative) {
             let root = self.get_root()?;
@@ -208,7 +216,7 @@ impl WorkspaceService {
             .open(&path)?;
         file.write_all(content.as_bytes())?;
         file.sync_all()?;
-        FileContent::from_bytes(content.as_bytes().to_vec())
+        Ok(())
     }
 
     /// Creates a new file inside a workspace-relative directory without overwriting existing files.
@@ -369,7 +377,6 @@ impl WorkspaceService {
         {
             return Err(error("unsupported", "Linked entries cannot be deleted."));
         }
-        #[cfg(any(test, feature = "e2e-bridge"))]
         if std::env::var_os("LGTM_E2E_PERMANENT_DELETE").is_some() {
             if path.is_dir() {
                 fs::remove_dir_all(&path)?;
@@ -413,6 +420,31 @@ impl WorkspaceService {
             ));
         }
         Ok(resolved)
+    }
+
+    /// Filters `candidates` so only tabs where [`TabCandidate::should_retain`] is `true` (`edited || last_opened`) are persisted.
+    pub fn retain_tabs(candidates: Vec<TabCandidate>) -> Vec<PersistedTab> {
+        candidates
+            .into_iter()
+            .filter(TabCandidate::should_retain)
+            .map(PersistedTab::from)
+            .collect()
+    }
+
+    /// Builds optional widget and per-checkout workspace session state from a [`WorkspaceStatePatch`].
+    pub fn prepare_session_state(
+        patch: WorkspaceStatePatch,
+    ) -> (Option<SidebarWidget>, Option<WorkspaceSessionState>) {
+        let state = (!patch.workspace_root.trim().is_empty()).then(|| {
+            let root_path = Path::new(&patch.workspace_root);
+            let canonical_root = std::fs::canonicalize(root_path)
+                .unwrap_or_else(|_| root_path.to_path_buf())
+                .to_string_lossy()
+                .into_owned();
+            let retained = Self::retain_tabs(patch.tabs);
+            WorkspaceSessionState::new(canonical_root, patch.expanded_dirs, retained)
+        });
+        (patch.sidebar_widget, state)
     }
 
     // Private -----------------------------------------------------------------
@@ -663,20 +695,26 @@ mod tests {
             use super::*;
 
             #[test]
-            fn should_read_utf8_content_with_sha256_revision_and_reject_invalid_delete_targets() {
+            fn should_read_utf8_content_and_reject_non_utf8_or_invalid_delete_targets() {
                 // Arrange
                 let mut fixture = WorkspaceFixture::new();
                 fixture.service.open(None).unwrap();
                 fixture.service.create_file("Notes.md", "").unwrap();
+                fs::write(
+                    fixture.default_root().join("Binary.bin"),
+                    [0xff, 0xfe, 0xfd],
+                )
+                .unwrap();
 
                 // Act
                 let read = fixture.service.get_file_content("Notes.md").unwrap();
+                let invalid_utf8 = fixture.service.get_file_content("Binary.bin");
                 let delete_root = fixture.service.delete("");
                 let delete_outside = fixture.service.delete("../outside");
 
                 // Assert
-                assert_eq!(read.content, "# Notes\n\n");
-                assert_eq!(read.revision.len(), 64);
+                assert_eq!(read, "# Notes\n\n");
+                assert_eq!(invalid_utf8.unwrap_err().code, "unsupported");
                 assert_eq!(delete_root.unwrap_err().code, "outsideWorkspace");
                 assert_eq!(delete_outside.unwrap_err().code, "outsideWorkspace");
             }
@@ -689,15 +727,14 @@ mod tests {
                 fixture.service.create_file("Notes.md", "").unwrap();
 
                 // Act
-                let written = fixture
+                fixture
                     .service
                     .write_file("Notes.md", "# Notes\n\nUpdated body.\n")
                     .unwrap();
                 let reread = fixture.service.get_file_content("Notes.md").unwrap();
 
                 // Assert
-                assert_eq!(written.content, "# Notes\n\nUpdated body.\n");
-                assert_eq!(reread, written);
+                assert_eq!(reread, "# Notes\n\nUpdated body.\n");
             }
         }
     }
