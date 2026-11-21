@@ -56,7 +56,7 @@ sequenceDiagram
     Disk-->>Git: worktree_git_dir, worktree_dir, common_git_dir
     Git-->>Caller: ResolvedGitPaths { main_root, worktree_root, common_git_dir }
     Caller->>Git: list_worktrees(common_git_dir)
-    Git->>Disk: git worktree list --porcelain
+    Git->>Disk: Inspect main & linked worktrees via gix
     Disk-->>Git: Worktree paths, HEAD SHAs, and branch refs
     Git-->>Caller: Vec<GitWorktreeEntry>
 ```
@@ -65,8 +65,10 @@ sequenceDiagram
 
 | Module / Function | Signature | Description |
 | --- | --- | --- |
-| `git::resolve_git_paths` | `fn resolve_git_paths(path: &Path) -> Result<ResolvedGitPaths>` | Resolve any checkout or `.git` path to `main_root`, `worktree_root`, `worktree_git_dir`, and `common_git_dir`. |
-| `git::list_worktrees` | `fn list_worktrees(repo_root: &Path) -> Result<Vec<GitWorktreeEntry>>` | Parse `git worktree list --porcelain` into main and linked worktree entries. |
+| `git::resolve_git_paths` | `fn resolve_git_paths(path: &Path) -> Result<ResolvedGitPaths>` | Resolve any checkout or `.git` path via `gix` to `main_root`, `worktree_root`, `worktree_git_dir`, and `common_git_dir`. |
+| `git::list_worktrees` | `fn list_worktrees(repo_root: &Path) -> Result<Vec<GitWorktreeEntry>>` | Discover main and linked worktrees via `gix` (`worktrees()` + `HEAD` inspection). |
+| `git::list_local_branches` | `fn list_local_branches(repo_root: &Path) -> Result<Vec<String>>` | List sorted local `refs/heads/*` branch names via `gix`. |
+| `git::checkout_branch` | `fn checkout_branch(repo_root: &Path, branch: &str, create: bool) -> Result<String>` | Check out an existing branch or create `-b <branch>` via `git checkout`. |
 | `git::add_worktree` | `fn add_worktree(repo_root: &Path, target_dir: &Path, branch: &str, base_ref: Option<&str>) -> Result<GitWorktreeEntry>` | Create a linked Git worktree at `target_dir` (checking out `branch` if it exists locally or creating `-b <branch>` from `base_ref`). |
 | `git::remove_worktree` | `fn remove_worktree(repo_root: &Path, worktree_dir: &Path, force: bool) -> Result<()>` | Remove a linked Git worktree (`git worktree remove [--force]`), classify dirty-checkout errors, and clean up leftover directories when forced. |
 | `git::get_current_branch` | `fn get_current_branch(path: &Path) -> Option<String>` | Return the checked-out short branch name for `path`, or `None` when detached or unavailable. |
@@ -88,7 +90,7 @@ libs/lgtm-rsutils/
 │   ├── git.rs                 Git path resolution, worktree helpers, and repository URL normalization
 │   └── paths.rs               Branch slugs and atomic file writes
 └── tests/
-    └── git_worktrees.rs       BDD integration suite for git path and worktree resolution
+    └── git.rs                 BDD integration suite for git path, worktree, branch, and URL helpers
 ```
 
 ## References

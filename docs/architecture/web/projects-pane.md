@@ -2,7 +2,7 @@
 
 ## Overview
 
-`ProjectsPane` renders open projects and their linked Git worktrees in the left sidebar using the shared `TreeView`, `ContextMenu`, and `Dialog` primitives from `libs/lgtm-ui` and `@cloudvoyant/helical-svelte`. Each project row represents the primary repository checkout directly with a distinctive default `Box` icon (or a user-customized icon and color), and linked Git worktrees render as collapsible child `TreeView` items underneath it. Collapsing a project branch hides its child worktrees just like collapsing a directory in `WorkspaceExplorer`.
+`ProjectsPane` renders open projects and their linked Git worktrees in the left sidebar using the shared `TreeView`, `ContextMenu`, and `Dialog` primitives from `libs/lgtm-ui` and `@cloudvoyant/helical-svelte`. Each project row represents the primary repository checkout directly with a distinctive default `Box` icon (or a user-customized icon and color), and linked Git worktrees render as collapsible child `TreeView` items underneath it. Collapsing a project branch hides its child worktrees just like collapsing a directory in `FileExplorer`.
 
 ## Design
 
@@ -52,8 +52,8 @@ flowchart TB
 ### Behavior
 
 - Default: Restore the active session's sidebar configuration, custom project icons/colors, and expanded or collapsed branch state in `TreeView`, and highlight the active workspace row (either a project row or a child worktree item).
-- Interaction: Click the leftmost icon-only `Projects` button (`Box`, the default project icon) in `SidebarFooter` or press `Mod+Shift+B` (`Space p p`) to toggle the narrow `Projects` dock pane (`#projects-dock-pane`, `180px`) independently alongside the `WorkspaceExplorer` widget slot (`#explorer-dock-pane`, `236px`). Click the `Explorer` button (`FolderTree`) or press `Mod+B` (`Space e`) to toggle the Explorer widget slot while keeping `Projects` visible alongside it. Both panes remain mounted in the DOM and toggle visibility via `hidden` so toggling widgets or collapsing the left dock never unmounts or re-renders their state.
-- Interaction: Click a project row or a child worktree item to switch the active workspace immediately. `WorkspaceService` snapshots the outgoing workspace's modified tabs, last-active tab, and expanded directories in memory, swaps the single mounted `CodeEditor` and `WorkspaceExplorer` to the target workspace state immediately, and flushes pending file writes, session persistence, and outgoing LSP process shutdown asynchronously in the background.
+- Interaction: Click the leftmost icon-only `Projects` button (`Box`, the default project icon) in `LeftDockToolbar` or press `Mod+Shift+B` (`Space p p`) to toggle the resizable `Projects` dock pane (`#projects-dock-pane`, `180px` default) independently alongside the `WidgetPane` (`#explorer-dock-pane`, `236px` default). Click the `Explorer` button (`FolderTree`) or press `Mod+B` (`Space e`) to toggle `WidgetPane` while keeping `Projects` visible alongside it. Both panes remain mounted in the DOM and collapse cleanly via width and `inert` so toggling widgets or collapsing `LeftDock` never unmounts or re-renders their state.
+- Interaction: Click a project row or a child worktree item to switch the active workspace immediately. `WorkspaceService` snapshots the outgoing workspace's modified tabs, last-active tab, and expanded directories in memory, swaps the single mounted `CodeEditor` and `FileExplorer` to the target workspace state immediately, and flushes pending file writes, session persistence via `SessionService`, and outgoing LSP process shutdown asynchronously in the background.
 - Interaction: Click the branch collapse trigger on a project with linked worktrees (or click an already-selected project row) to collapse or expand its child worktree items (`ArkTreeView.BranchContent` with `ArkTreeView.BranchIndentGuide`) without switching the active workspace.
 - Interaction: Right-click a project row to open its `ContextMenu` (`New Worktree`, `Edit`, `Open Primary Checkout`, `Collapse Worktrees` / `Expand Worktrees`, `Remove Project`). Right-click a child worktree item to open its `ContextMenu` (`Open Worktree`, `Rename Worktree`, `Remove Worktree`).
 - Interaction: Select `Edit` from a project's context menu to open the `Edit Project` modal dialog (`Dialog` with `DialogDismiss` top-right close trigger, `Field` / `FieldLabel` / `Input`, `ColorSelector` circular swatches from `libs/lgtm-ui`, and `ToggleGroup` icon grid) to update the project display name, accent color (9 circular swatches), and icon (16 icons, `box` default), persisted in `default.json` via `Save`.
@@ -68,7 +68,7 @@ flowchart TB
 | Shortcut / Chord | Command / Scope | Action |
 | --- | --- | --- |
 | `Mod+Shift+B` / `Space p p` | `:projects` (`projects.show`) | Toggle the narrow `Projects` dock pane (`#projects-dock-pane`, `180px`) open or closed independently and focus it when opened. |
-| `Mod+B` / `Space e` / `Space p e` | `:explorer` (`workspace.toggleExplorer`) | Toggle the `WorkspaceExplorer` widget dock pane (`#explorer-dock-pane`, `236px`) open or closed independently and focus it when opened. |
+| `Mod+B` / `Space e` / `Space p e` | `:explorer` (`workspace.toggleExplorer`) | Toggle the `WidgetPane` (`FileExplorer`, `#explorer-dock-pane`, `236px` default) open or closed independently and focus it when opened. |
 | `Space p a` | `:project-add` (`projects.add`) | Open a folder picker and attach the selected project to the active session. |
 | `Space p n` | `:worktree-new` (`projects.newWorktree`) | Open the `New Worktree` modal dialog for the active project. |
 | `Space p d` | `:worktree-remove` (`projects.removeWorktree`) | Open the `Remove Worktree` modal dialog for the active linked Git worktree. |
@@ -77,7 +77,7 @@ flowchart TB
 | `l` / `ArrowRight` | `TreeView` (`normal` mode) | Expand a collapsed project branch, move focus to its first worktree, or select a worktree leaf. |
 | `h` / `ArrowLeft` | `TreeView` (`normal` mode) | Collapse an expanded project branch or move focus from a worktree leaf to its parent project row. |
 | `Enter` | `TreeView` (`normal` mode) | Switch the active workspace to the focused project or worktree checkout. |
-| `a` | `TreeView` (`normal` mode) | Open the `New Worktree` modal dialog for the focused project (`ProjectsPane`) or create a file (`WorkspaceExplorer`). |
+| `a` | `TreeView` (`normal` mode) | Open the `New Worktree` modal dialog for the focused project (`ProjectsPane`) or create a file (`FileExplorer`). |
 | `r` / `F2` | `TreeView` (`normal` mode) | Rename the focused worktree section inline without changing its Git branch name (`renamable: false` on root project rows). |
 | `d` / `Delete` | `TreeView` (`normal` mode) | Remove the focused project from the session or open the `Remove Worktree` modal dialog for the focused worktree. |
 | `Home` / `End` | `TreeView` (`normal` mode) | Move focus to the first or last visible tree row. |
@@ -86,19 +86,10 @@ flowchart TB
 
 ### Public API
 
-```ts
-export interface ProjectsPaneProps {
-  workspace: WorkspaceService
-}
-```
+`ProjectsPane` consumes `ProjectService` and `WorkspaceService` from Svelte context via `useService('project')` and `useService('workspace')` and takes no props.
 
 ```svelte
-<div id="projects-dock-pane" data-pane-id="projects" hidden={!workspace.projectsOpen}>
-  <ProjectsPane {workspace} />
-</div>
-<div id="explorer-dock-pane" data-pane-id="workspace" hidden={!workspace.explorerOpen}>
-  <WorkspaceExplorer {workspace} />
-</div>
+<LeftDock />
 ```
 
 ### State and Data Flow
@@ -106,37 +97,41 @@ export interface ProjectsPaneProps {
 ```mermaid
 sequenceDiagram
     actor User
-    participant Switch as Shell.svelte (SidebarFooter / HotkeyService)
+    participant Switch as LeftDockToolbar / HotkeyService
     participant Pane as ProjectsPane.svelte
-    participant WsSvc as WorkspaceService (workspaceService.svelte.ts)
-    participant Host as lgtm-desktop (lgtm-session)
+    participant WsSvc as WorkspaceService
+    participant SessSvc as SessionService
+    participant Host as lgtm-desktop (AppState & commands/)
 
-    User->>Switch: Press Mod+Shift+B or click "Projects" (Box) in SidebarFooter
+    User->>Switch: Press Mod+Shift+B or click "Projects" (Box) in LeftDockToolbar
     Switch->>WsSvc: toggleProjectsPane()
-    WsSvc->>Host: invoke("session_save", { patch: { sidebarWidget: "projects", ... } })
+    WsSvc->>SessSvc: saveCurrentSession(root)
+    SessSvc->>Host: invoke("session_save", { patch: { sidebarWidget: "projects", ... } })
 
     User->>Pane: Click worktree "feature-projects" under "lgtm"
     Pane->>WsSvc: selectWorkspace("/path/to/feature-projects")
     WsSvc->>WsSvc: saveCurrentWorkspaceToCache() + applyCachedWorkspace()
-    WsSvc--)Host: invoke("session_save", { patch: outgoingState })
+    WsSvc--)SessSvc: saveCurrentSession(outgoingRoot)
     WsSvc->>Host: invoke("workspace_open", { path: "/path/to/feature-projects" })
-    Host-->>WsSvc: WorkspaceListing + Session
-    WsSvc-->>Pane: Highlight "feature-projects" & restore tabs/expandedDirs
+    Host-->>WsSvc: WorkspaceListing
+    SessSvc->>Host: invoke("session_get")
+    Host-->>SessSvc: Session
+    SessSvc-->>Pane: Apply projects, highlight "feature-projects", and restore tabs/expandedDirs
 ```
 
 | State Property | Owner | Persisted In | Description |
 | --- | --- | --- | --- |
-| `projectsOpen` / `explorerOpen` | `WorkspaceService` (`lgtm-web`) | Derived / synced with `sidebarWidget` | Independently controls visibility of `#projects-dock-pane` and `#explorer-dock-pane` via `hidden` without unmounting either pane. |
+| `projectsOpen` / `explorerOpen` | `WorkspaceService` (`lgtm-web`) | Derived / synced with `sidebarWidget` | Independently controls `#projects-dock-pane` and `#explorer-dock-pane` widths and `inert` state without unmounting either pane. |
 | `sidebarWidget` | `WorkspaceService` (`lgtm-web`) | `~/.lgtm/sessions/default.json` | Persists the primary sidebar mode (`"projects"` or `"explorer"`) across restarts. |
-| `projects` | `WorkspaceService` (`lgtm-web`) | `~/.lgtm/sessions/default.json` | Ordered list of `Project` models, each with its `root_path`, `icon`, `color`, `collapsed` state, and open linked `worktrees`. |
+| `projects` | `ProjectService` (`lgtm-web`) | `~/.lgtm/sessions/default.json` | Ordered list of `Project` models, each with its `root_path`, `icon`, `color`, `collapsed` state, and open linked `worktrees`. |
 | `root` | `WorkspaceService` (`lgtm-web`) | `~/.lgtm/sessions/default.json` | Canonical path of the currently active workspace (a project `root_path` or a linked `Worktree.path`). |
 | `tabs` (`edited` / `lastOpened`) | `WorkspaceService` (`lgtm-web`) | `~/.lgtm/sessions/default.json` | Open editor tabs for the active workspace. Only edited tabs and the last opened tab persist. |
 
 ### Styling and Responsiveness
 
-- Reuse `TreeView` and `ContextMenu` from `libs/lgtm-ui` inside `#projects-dock-pane` (`180px` / `w-45`) alongside `#explorer-dock-pane` (`236px` / `w-59`) so project branches and worktree items share the compact `h-6` row height (`treeViewRowVariants`), `ArkTreeView.BranchIndentGuide` vertical border lines (`treeViewIndentGuideBase`), square item highlights (`rounded-none`), and `--accent` / `--ring` hover and focus tokens used by `WorkspaceExplorer`.
+- Reuse `TreeView` and `ContextMenu` from `libs/lgtm-ui` inside `#projects-dock-pane` (`180px` default) alongside `#explorer-dock-pane` (`236px` default) so project branches and worktree items share the compact `h-6` row height (`treeViewRowVariants`), `ArkTreeView.BranchIndentGuide` vertical border lines (`treeViewIndentGuideBase`), square item highlights (`rounded-none`), and `--accent` / `--ring` hover and focus tokens used by `FileExplorer`.
 - Extend `TreeView` (`libs/lgtm-ui/src/tree-view/`) with optional `version`, `selectableBranches`, `expandedValue`, `onExpandedChange`, and per-node `renamable` props so clicking a project branch row selects the primary checkout (`project.root_path`) or toggles branch expansion when already selected, its chevron button toggles branch expansion in capture phase, and child worktree rows support inline renaming without allowing root project paths to be renamed.
-- Place the icon-only `Projects` (`Box`, leftmost) and `Explorer` (`FolderTree`) dock toggle buttons inside `SidebarFooter` at the bottom of `#workspace-sidebar` in `Shell.svelte`.
+- Place the icon-only `Projects` (`Box`, leftmost) and `Explorer` (`FolderTree`) dock toggle buttons inside `LeftDockToolbar` in the unified bottom bar (`footer`) in `Shell.svelte`.
 
 ### Maintainer Notes
 

@@ -4,9 +4,9 @@ use lgtm_session::Session;
 use lgtm_workspace::{Result, WorkspaceStatePatch};
 use tauri::State;
 
-use crate::app::AppState;
+use crate::{app::AppState, events::AppEvent};
 
-/// Loads the persisted session state (`~/.lgtm/sessions/<id>.json`).
+/// Loads the persisted session state (`~/.lgtm/sessions/<id>.json`) with refreshed project branches and worktrees.
 #[tauri::command]
 #[specta::specta]
 pub async fn session_get(
@@ -15,9 +15,7 @@ pub async fn session_get(
 ) -> Result<Session> {
     state
         .run_blocking(move |app| {
-            app.session
-                .get_session(session_id.as_deref().unwrap_or("default"))
-                .map_err(AppState::map_session_error)
+            app.get_refreshed_session(session_id.as_deref().unwrap_or("default"))
         })
         .await
 }
@@ -31,7 +29,16 @@ pub async fn session_save(
 ) -> Result<Session> {
     state
         .run_blocking(move |app| {
-            app.mutate_session(move |s| s.save_workspace_state("default", patch))
+            let mut session = app
+                .session
+                .save_workspace_state("default", patch)
+                .map_err(AppState::map_session_error)?;
+            for project in &mut session.projects {
+                let _ = app.project.refresh_project(project);
+            }
+            app.events
+                .dispatch(AppEvent::SessionUpdated(session.clone()));
+            Ok(session)
         })
         .await
 }

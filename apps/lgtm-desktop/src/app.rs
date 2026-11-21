@@ -7,6 +7,7 @@ use std::sync::{
 
 use lgtm_config::ConfigService;
 use lgtm_lsp::LspEvent;
+use lgtm_project::ProjectService;
 use lgtm_session::SessionService;
 use lgtm_workspace::WorkspaceService;
 use tauri::Manager;
@@ -23,7 +24,9 @@ use crate::{
 pub struct AppState {
     /// Shared workspace filesystem service guarded across file and config operations.
     pub workspace: Arc<Mutex<WorkspaceService>>,
-    /// Shared session and project persistence service.
+    /// Shared project and managed Git worktree service.
+    pub project: ProjectService,
+    /// Shared session JSON persistence service.
     pub session: SessionService,
     /// Shared configuration service resolving global and workspace settings.
     pub config: ConfigService,
@@ -58,42 +61,69 @@ impl AppState {
             .map_err(|_| lgtm_workspace::error("io", "Workspace service is unavailable."))
     }
 
-    /// Runs a mutating [`SessionService`] operation and broadcasts [`AppEvent::SessionUpdated`].
-    pub fn mutate_session(
+    /// Loads `session_id` from [`SessionService`] and refreshes Git branches and worktrees via [`ProjectService`].
+    pub fn get_refreshed_session(
         &self,
-        operation: impl FnOnce(&SessionService) -> lgtm_session::Result<lgtm_session::Session>,
+        session_id: &str,
     ) -> lgtm_workspace::Result<lgtm_session::Session> {
-        let session = operation(&self.session).map_err(Self::map_session_error)?;
+        let mut session = self
+            .session
+            .get_session(session_id)
+            .map_err(Self::map_session_error)?;
+        for project in &mut session.projects {
+            let _ = self.project.refresh_project(project);
+        }
+        Ok(session)
+    }
+
+    /// Loads `session_id`, applies `operation` against the session and [`ProjectService`], saves via [`SessionService`], and broadcasts [`AppEvent::SessionUpdated`].
+    pub fn update_session(
+        &self,
+        session_id: &str,
+        operation: impl FnOnce(
+            &mut lgtm_session::Session,
+            &ProjectService,
+        ) -> lgtm_workspace::Result<()>,
+    ) -> lgtm_workspace::Result<lgtm_session::Session> {
+        let mut session = self.get_refreshed_session(session_id)?;
+        operation(&mut session, &self.project)?;
+        self.session
+            .save_session(&session)
+            .map_err(Self::map_session_error)?;
         self.events
             .dispatch(AppEvent::SessionUpdated(session.clone()));
         Ok(session)
+    }
+
+    /// Maps a [`lgtm_project::LgtmProjectError`] into a stable transport [`lgtm_workspace::WorkspaceError`].
+    pub fn map_project_error(
+        err: lgtm_project::LgtmProjectError,
+    ) -> lgtm_workspace::WorkspaceError {
+        use lgtm_project::LgtmProjectError;
+        match err {
+            LgtmProjectError::InvalidBranch(msg) => lgtm_workspace::error("invalidBranch", msg),
+            LgtmProjectError::BranchAlreadyCheckedOut(msg) => {
+                lgtm_workspace::error("branchAlreadyCheckedOut", msg)
+            }
+            LgtmProjectError::CheckoutPathExists(msg) => {
+                lgtm_workspace::error("checkoutPathExists", msg)
+            }
+            LgtmProjectError::NotGitRepository(msg) => {
+                lgtm_workspace::error("notGitRepository", msg)
+            }
+            LgtmProjectError::DirtyWorktree(msg) => lgtm_workspace::error("dirtyWorktree", msg),
+            LgtmProjectError::InvalidPath(msg) => lgtm_workspace::error("invalidWorkspace", msg),
+            LgtmProjectError::NotFound(msg) => lgtm_workspace::error("notFound", msg),
+            LgtmProjectError::Git(msg) => lgtm_workspace::error("git", msg),
+        }
     }
 
     /// Maps a [`lgtm_session::LgtmSessionError`] into a stable transport [`lgtm_workspace::WorkspaceError`].
     pub fn map_session_error(
         err: lgtm_session::LgtmSessionError,
     ) -> lgtm_workspace::WorkspaceError {
-        use lgtm_project::LgtmProjectError;
         use lgtm_session::LgtmSessionError;
         match err {
-            LgtmSessionError::Project(project_err) => match project_err {
-                LgtmProjectError::InvalidBranch(msg) => lgtm_workspace::error("invalidBranch", msg),
-                LgtmProjectError::BranchAlreadyCheckedOut(msg) => {
-                    lgtm_workspace::error("branchAlreadyCheckedOut", msg)
-                }
-                LgtmProjectError::CheckoutPathExists(msg) => {
-                    lgtm_workspace::error("checkoutPathExists", msg)
-                }
-                LgtmProjectError::NotGitRepository(msg) => {
-                    lgtm_workspace::error("notGitRepository", msg)
-                }
-                LgtmProjectError::DirtyWorktree(msg) => lgtm_workspace::error("dirtyWorktree", msg),
-                LgtmProjectError::InvalidPath(msg) => {
-                    lgtm_workspace::error("invalidWorkspace", msg)
-                }
-                LgtmProjectError::NotFound(msg) => lgtm_workspace::error("notFound", msg),
-                LgtmProjectError::Git(msg) => lgtm_workspace::error("git", msg),
-            },
             LgtmSessionError::NotFound(msg) => lgtm_workspace::error("notFound", msg),
             other => lgtm_workspace::error("session", other.to_string()),
         }
@@ -138,8 +168,10 @@ pub(crate) fn init_app_state<R: tauri::Runtime>(
         Some(home) => home,
         None => app_handle.path().home_dir()?,
     };
+    let lgtm_home = home.join(".lgtm");
     let config = ConfigService::from_home(home.clone());
-    let session = SessionService::new(Some(home.join(".lgtm")));
+    let project = ProjectService::new(Some(lgtm_home.clone()));
+    let session = SessionService::new(Some(lgtm_home));
     let events = AppEvents::from_app_handle(app_handle);
     let lsp_events = events.clone();
     let lsp = Arc::new(LspService::new(config.clone(), move |event| match event {
@@ -155,6 +187,7 @@ pub(crate) fn init_app_state<R: tauri::Runtime>(
     let workspace_path = ConfigService::resolve_desktop_workspace();
     app_handle.manage(AppState {
         workspace: Arc::new(Mutex::new(WorkspaceService::new(home, workspace_path))),
+        project,
         session,
         config,
         lsp,

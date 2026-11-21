@@ -2,7 +2,7 @@
 
 ## Overview
 
-`lgtm-web` is the Svelte 5 and SvelteKit frontend for LGTM, serving both the native Tauri v2 desktop IDE shell (`lgtm-desktop`) and the browser-accessible review interface (`lgtm-forge`). In desktop mode, `lgtm-web` composes portable Helical UI primitives from `@cloudvoyant/helical-svelte` and `lgtm-ui` with four single-responsibility reactive services (`WorkspaceService`, `LspService`, `SettingsService`, and `HotkeyService`) over a typed Specta IPC client (`WorkspaceClient`), coordinating cross-service lifecycle events in `Shell.svelte`.
+`lgtm-web` is the Svelte 5 and SvelteKit frontend for LGTM, serving both the native Tauri v2 desktop IDE shell (`lgtm-desktop`) and the browser-accessible review interface (`lgtm-forge`). In desktop mode, `lgtm-web` composes portable Helical UI primitives from `@cloudvoyant/helical-svelte` and `lgtm-ui` with six peer reactive services (`WorkspaceService`, `ProjectService`, `SessionService`, `LspService`, `SettingsService`, and `HotkeyService`) over a typed Specta IPC client (`WorkspaceClient`), wired via `createAppServices` and `useService` context in `Shell.svelte`.
 
 ## Requirement
 
@@ -24,16 +24,13 @@
 
 ```ts
 import { createWorkspaceClient } from '$lib/clients/workspaceClient'
-import { LspService } from '$lib/services/lspService.svelte'
-import { SettingsService } from '$lib/services/settingsService.svelte'
-import { WorkspaceService } from '$lib/services/workspaceService.svelte'
+import { createAppServices, setServicesContext } from '$lib/services/context'
 
 const client = createWorkspaceClient()
-const lsp = new LspService(client)
-const settings = new SettingsService(client)
-const workspace = new WorkspaceService(client, lsp, settings)
+const services = createAppServices(client)
+const { workspace } = setServicesContext(services)
 
-await workspace.init()
+await workspace.open()
 await workspace.openPath('~/.lgtm/config.json', { title: 'Settings', focus: true })
 await workspace.openPath('.lgtm/config.json', { title: 'Settings (project)', focus: true })
 ```
@@ -44,17 +41,17 @@ await workspace.openPath('.lgtm/config.json', { title: 'Settings (project)', foc
 flowchart TB
     subgraph Components["Svelte 5 Components (src/lib/components)"]
         SHELL["Shell.svelte"]
-        EXPLORER["WorkspaceExplorer.svelte"]
+        DOCK["LeftDock.svelte / WidgetPane.svelte / FileExplorer.svelte"]
         PROJECTS["ProjectsPane.svelte"]
-        CONTENT["ContentPane.svelte"]
-        LSP_MENU["LspStatusMenu.svelte"]
-        SHELL --> EXPLORER
+        CONTENT["ContentPane.svelte (Pane wrapping Tabs + CodeEditor)"]
+        TOOLBARS["LeftDockToolbar.svelte / EditorToolbar.svelte / LspStatusMenu.svelte"]
+        SHELL --> DOCK
         SHELL --> PROJECTS
         SHELL --> CONTENT
-        SHELL --> LSP_MENU
+        SHELL --> TOOLBARS
     end
 
-    subgraph Services["Reactive Services (src/lib/services)"]
+    subgraph Services["Peer Reactive Services (src/lib/services)"]
         HOTKEY_SVC["HotkeyService (hotkeyService.svelte.ts)"]
         WS_SVC["WorkspaceService (workspaceService.svelte.ts)"]
         PROJ_SVC["ProjectService (projectService.svelte.ts)"]
@@ -62,7 +59,9 @@ flowchart TB
         LSP_SVC["LspService (lspService.svelte.ts)"]
         SET_SVC["SettingsService (settingsService.svelte.ts)"]
         HOTKEY_SVC --> WS_SVC
-        WS_SVC --> PROJ_SVC
+        HOTKEY_SVC --> PROJ_SVC
+        SESS_SVC --> PROJ_SVC
+        SESS_SVC --> WS_SVC
         WS_SVC --> SESS_SVC
         WS_SVC --> LSP_SVC
         WS_SVC --> SET_SVC
@@ -76,16 +75,22 @@ flowchart TB
 
     SHELL --> HOTKEY_SVC
     SHELL --> WS_SVC
+    SHELL --> PROJ_SVC
+    SHELL --> SESS_SVC
     SHELL --> LSP_SVC
     SHELL --> SET_SVC
     WS_SVC --> WS_CLIENT
+    PROJ_SVC --> WS_CLIENT
+    SESS_SVC --> WS_CLIENT
     LSP_SVC --> WS_CLIENT
     SET_SVC --> WS_CLIENT
 ```
 
-- `Shell.svelte`: Application entry point that instantiates `WorkspaceService`, `LspService`, `SettingsService`, and `HotkeyService`, mounts `<WhichKey>` and `<CommandSurface>` from `@cloudvoyant/helical-svelte`, keeps `#projects-dock-pane` (`ProjectsPane.svelte`, `180px`) and `#explorer-dock-pane` (`WorkspaceExplorer.svelte`, `236px`) mounted via `hidden` inside the left dock, subscribes to Tauri backend events (`lsp-status`, `lsp-diagnostics`, `config-updated`, `session-updated`, `workspace-quit-requested`), and synchronizes OS/window color scheme media queries with `SettingsService.theme`.
+- `Shell.svelte`: Application entry point that constructs peer services via `createAppServices` and `setServicesContext`, mounts `<WhichKey>` and `<CommandProvider>`, composes `Titlebar`, `LeftDock`, `ContentPane`, `LeftDockToolbar`, and `EditorToolbar`, subscribes to Tauri backend events (`lsp-status`, `lsp-diagnostics`, `config-updated`, `session-updated`, `workspace-quit-requested`), and synchronizes OS/window color scheme media queries with `SettingsService.theme`.
 - `HotkeyService` (`hotkeyService.svelte.ts`): Registers the application keymap (`Mod+S`, `Mod+K`, `Mod+B` for the Explorer widget dock, `Mod+Shift+B` for the Projects dock, `Mod+,`, `Mod+Shift+,`, `:`, and `Space` leader chords) and shared `CommandNode` catalog (`:projects`, `:explorer`, `:project-add`, `:worktree-new`, `:worktree-remove`, `:write`, `:settings`, `:settings-project`) with Helical UI's `WhichKeyController`.
-- `WorkspaceService` (`workspaceService.svelte.ts`): Owns the active workspace tree, expanded directories, independent `projectsOpen` and `explorerOpen` dock states, open editor tabs, dirty buffer tracking, and `150ms` debounced save timer; delegates LSP notifications to `LspService` and loads initial settings through `SettingsService`.
+- `WorkspaceService` (`workspaceService.svelte.ts`): Owns the active workspace root, file explorer tree, expanded directories, independent `projectsOpen` and `explorerOpen` dock states and resizable widths, open editor tabs, in-memory workspace snapshot cache, dirty buffer tracking, and `150ms` debounced save timer.
+- `ProjectService` (`projectService.svelte.ts`): Owns the ordered list of open `Project` models, managed worktrees, branch switcher state, and project/worktree modal dialog state.
+- `SessionService` (`sessionService.svelte.ts`): Orchestrates loading, applying, and saving `~/.lgtm/sessions/<id>.json` snapshots across `ProjectService` and `WorkspaceService`.
 - `LspService` (`lspService.svelte.ts`): Owns reactive language server status maps and per-file UTF-16 diagnostic arrays, formats status indicators for `LspStatusMenu.svelte`, and queries hover/definition/diagnostics buffers via `WorkspaceClient`.
 - `SettingsService` (`settingsService.svelte.ts`): Owns the latest `ResolvedConfigSnapshot` from `lgtm-config`, derives `theme` (`ThemeMode`), `lineWrapping` (`LineWrap`), `activeRoot`, and `recentRoots`, and updates `knownRoots` in `localStorage`.
 - `WorkspaceClient` (`workspaceClient.ts`): Defines the transport-agnostic `WorkspaceClient` interface and `TauriWorkspaceClient` implementation over `@tauri-apps/api/core` and `src/lib/gen/bindings.ts`.

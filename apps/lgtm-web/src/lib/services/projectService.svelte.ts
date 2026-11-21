@@ -182,7 +182,7 @@ export class ProjectService {
     })
   }
 
-  /** Synchronizes `ProjectsPane` branch expansion changes with `SessionService::set_project_collapsed`. */
+  /** Synchronizes `ProjectsPane` branch expansion changes with `project_set_collapsed`. */
   async handleProjectExpandedChange(nextExpanded: string[]): Promise<void> {
     const expandedSet = new Set(nextExpanded)
     for (const project of this.projects) {

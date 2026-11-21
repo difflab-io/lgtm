@@ -57,9 +57,13 @@ pub async fn workspace_open(
             };
             let listing = w.open(effective_path.as_deref())?;
             if let Ok(next_root) = w.get_root() {
-                if let Ok(session) = app.session.open_workspace("default", &next_root) {
-                    app.events.dispatch(AppEvent::SessionUpdated(session));
-                }
+                let _ = app.update_session("default", |session, projects| {
+                    let target_workspace = projects
+                        .open_project(&mut session.projects, &next_root)
+                        .map_err(AppState::map_project_error)?;
+                    session.set_active_workspace(target_workspace);
+                    Ok(())
+                });
                 app.events.dispatch(AppEvent::WorkspaceOpened {
                     previous_root,
                     next_root,

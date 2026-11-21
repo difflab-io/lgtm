@@ -2,22 +2,22 @@
 
 ## Overview
 
-`lgtm-session` manages workspace sessions and persistence for LGTM. A session owns the open projects, the active sidebar view, the active workspace directory, and the remembered editor tabs and explorer state for each project checkout and worktree.
+`lgtm-session` manages atomic session persistence for LGTM (`~/.lgtm/sessions/<id>.json`). A `Session` stores the ordered open projects, active sidebar widget, active workspace directory, and remembered per-workspace editor tabs and explorer state. Cross-service orchestration with `lgtm-project` lives in application entry points (`apps/lgtm-desktop`), while workspace tab filtering delegates to pure `lgtm-workspace` helpers.
 
 ## Requirement
 
 ### Functional
 
-- Store the ordered list of open projects and their worktrees in a named session.
-- Track the active workspace directory and the active left sidebar view.
+- Persist and reload the ordered list of open projects and their worktrees in a named session file.
+- Track the active workspace directory and the active left sidebar widget.
 - Remember state separately for each project checkout and each worktree, including its active tab, tabs modified during the session, and expanded file-explorer directories.
 - Retain only tabs modified during the session and the last active tab when a workspace is saved or switched.
-- Delete worktree disk storage when removing a worktree from a project.
+- Prune remembered workspace entries and fall back `active_workspace_root` when a worktree or project is removed.
 
 ### Non-Functional
 
 - Switch active workspaces in memory without waiting on disk writes.
-- Debounce and write session state atomically in the background so crashes or power loss do not corrupt saved sessions.
+- Write session state atomically (`lgtm-rsutils::atomic_write`) so crashes or power loss do not corrupt saved sessions.
 - Read and write sessions locally without network access or a background daemon.
 
 ## Design
@@ -26,36 +26,41 @@
 
 ```mermaid
 flowchart TB
-    DESKTOP["lgtm-desktop (app.rs)"]
+    DESKTOP["lgtm-desktop (AppState & commands/)"]
     CLI["lgtm-cli (future session attach/switch)"]
 
     subgraph SessionLib["libs/lgtm-session"]
         SVC["SessionService"]
-        MODELS["Session, SidebarWidget, WorkspaceSessionState, WorkspaceStatePatch, PersistedTab, TabCandidate"]
+        MODELS["Session"]
         ERR["LgtmSessionError"]
         SVC --> MODELS
         SVC --> ERR
     end
 
+    subgraph WorkspaceLib["libs/lgtm-workspace"]
+        WS["WorkspaceService::prepare_session_state\nSidebarWidget, WorkspaceSessionState, PersistedTab"]
+    end
+
     subgraph ProjectLib["libs/lgtm-project"]
-        PROJ["ProjectService, Project, Worktree"]
+        PROJ["Project, Worktree (data models)"]
     end
 
     subgraph RsUtils["libs/lgtm-rsutils"]
-        ATOMIC["paths::atomic_write & default_lgtm_home"]
+        ATOMIC["paths::atomic_write"]
     end
 
     DESKTOP --> SVC
     CLI -.-> SVC
-    SVC --> PROJ
+    SVC --> WS
+    MODELS --> PROJ
+    MODELS --> WS
     SVC --> ATOMIC
     ATOMIC --> DISK[("~/.lgtm/sessions/default.json\n~/.lgtm/sessions/<name>.json")]
 ```
 
-- `SessionService`: Coordinates `lgtm_project::ProjectService` and atomic JSON writes (`~/.lgtm/sessions/<id>.json`) to load the `default` session, register projects and worktrees, toggle collapsed project groups, switch the active workspace, and save filtered workspace tabs.
-- `Session`: Top-level persisted root owning `id`, `sidebar_widget`, `active_workspace_root`, `projects`, and `workspaces`.
-- `WorkspaceSessionState`: Per-workspace UI snapshot storing the retained `tabs` (`Vec<PersistedTab>`), `last_opened_tab_path`, and `expanded_dirs` for a single checkout path (either `Project.root_path` or a `Worktree.path`).
-- `PersistedTab` and `TabCandidate`: Tab descriptors that enforce the retention rule (`edited || last_opened`).
+- `SessionService`: Persists and reloads `~/.lgtm/sessions/<id>.json` atomically (`get_session`, `save_session`, `save_workspace_state`) without wrapping sibling domain services.
+- `Session`: Top-level persisted root owning `id`, `sidebar_widget`, `active_workspace_root`, `projects`, and `workspaces`, plus pure state transition methods (`set_active_workspace`, `set_workspace_state`, `apply_worktree_removal`, `apply_project_removal`).
+- `WorkspaceSessionState`, `PersistedTab`, `TabCandidate`, `SidebarWidget`, and `WorkspaceStatePatch` (`libs/lgtm-workspace`): Per-workspace UI state models and tab retention filtering (`WorkspaceService::prepare_session_state`).
 
 ```mermaid
 erDiagram
@@ -70,7 +75,6 @@ erDiagram
         string id PK "default"
         SidebarWidget sidebar_widget "Explorer | Projects"
         string active_workspace_root "Path of active project root or linked worktree"
-        timestamp updated_at
     }
 
     PROJECT {
@@ -83,14 +87,14 @@ erDiagram
 
     WORKTREE {
         string path PK "Linked worktree directory path"
-        string name "Worktree branch label"
+        string name "Worktree display label"
         string branch "Checked-out Git branch"
     }
 
     WORKSPACE_SESSION_STATE {
         string workspace_root PK "Matches Project.root_path or Worktree.path"
         string last_opened_tab_path "Active tab path when last focused"
-        string_array expanded_dirs "Expanded directory paths in WorkspaceExplorer"
+        string_array expanded_dirs "Expanded directory paths in FileExplorer"
     }
 
     PERSISTED_TAB {
@@ -117,7 +121,7 @@ flowchart TD
         P1 --> W_MGD
     end
 
-    subgraph Workspaces["Session.workspaces (per-checkout editor state)"]
+    subgraph Workspaces["Session.workspaces (lgtm-workspace)"]
         WS_MAIN["WorkspaceSessionState (/Projects/lgtm)\ntabs: [README.md (last_opened)]"]
         WS_FEAT["WorkspaceSessionState (~/.herdr/worktrees/lgtm/feature-projects)\ntabs: [src/lib.rs (edited), src/app.rs (last_opened)]"]
     end
@@ -147,15 +151,12 @@ flowchart LR
 | Type / Method | Signature | Description |
 | --- | --- | --- |
 | `SessionService::new` | `fn new(lgtm_home: Option<PathBuf>) -> Self` | Create a session service rooted at `$LGTM_HOME/sessions` or `~/.lgtm/sessions`. |
-| `SessionService::get_session` | `fn get_session(&self, session_id: &str) -> Result<Session>` | Load `~/.lgtm/sessions/<session_id>.json` or initialize the `default` session. |
-| `SessionService::open_workspace` | `fn open_workspace(&self, session_id: &str, path: &Path) -> Result<Session>` | Resolve `path` via `lgtm-project`, upsert its parent `Project` and `Worktree`, and set `active_workspace_root`. |
-| `SessionService::save_workspace_state` | `fn save_workspace_state(&self, session_id: &str, patch: WorkspaceStatePatch) -> Result<Session>` | Filter `patch.tabs` to `edited \|\| last_opened`, update `workspaces[patch.workspace_root]` and optional `sidebar_widget`, and write `default.json`. |
-| `SessionService::create_project_worktree` | `fn create_project_worktree(&self, session_id: &str, project_id: Uuid, branch: &str, base_ref: Option<&str>) -> Result<Session>` | Create a worktree at `~/.lgtm/worktrees/<project>/<branch-slug>`, attach it to `Session`, and activate it. |
-| `SessionService::set_project_collapsed` | `fn set_project_collapsed(&self, session_id: &str, project_id: Uuid, collapsed: bool) -> Result<Session>` | Persist the collapsed or expanded worktree state for a project in `Session`. |
-| `SessionService::update_project_appearance` | `fn update_project_appearance(&self, session_id: &str, project_id: Uuid, name: Option<String>, icon: Option<String>, color: Option<String>) -> Result<Session>` | Persist a project's custom name, icon, and color in `Session`. |
-| `SessionService::rename_project_worktree` | `fn rename_project_worktree(&self, session_id: &str, project_id: Uuid, worktree_path: &Path, name: &str) -> Result<Session>` | Update a worktree's display label in `Session` without changing its Git branch or checkout path. |
-| `SessionService::remove_project_worktree` | `fn remove_project_worktree(&self, session_id: &str, project_id: Uuid, worktree_path: &Path, force: bool) -> Result<Session>` | Remove the worktree from `Session` and delete its disk storage. |
-| `SessionService::remove_project` | `fn remove_project(&self, session_id: &str, project_id: Uuid) -> Result<Session>` | Remove a project and its workspace states from `Session`. |
+| `SessionService::get_session` | `fn get_session(&self, session_id: &str) -> Result<Session>` | Load `~/.lgtm/sessions/<session_id>.json` or initialize a new empty session. |
+| `SessionService::save_session` | `fn save_session(&self, session: &Session) -> Result<()>` | Atomically write `session` to `~/.lgtm/sessions/<session.id>.json`. |
+| `SessionService::save_workspace_state` | `fn save_workspace_state(&self, session_id: &str, patch: WorkspaceStatePatch) -> Result<Session>` | Delegate tab filtering to `WorkspaceService::prepare_session_state`, update `workspaces` and `sidebar_widget`, and write `default.json`. |
+| `Session::set_active_workspace` | `fn set_active_workspace(&mut self, workspace_root: String)` | Update `active_workspace_root` and ensure a `WorkspaceSessionState` entry exists. |
+| `Session::apply_worktree_removal` | `fn apply_worktree_removal(&mut self, canonical_path: &str, raw_path: &str, parent_root: String)` | Remove workspace state for a deleted worktree and fall back `active_workspace_root` to `parent_root`. |
+| `Session::apply_project_removal` | `fn apply_project_removal(&mut self, removed: &Project)` | Remove workspace states for a detached project and its worktrees and update `active_workspace_root`. |
 
 ## Implementation
 
@@ -166,16 +167,16 @@ libs/lgtm-session/
 ├── Cargo.toml
 ├── mise.toml
 ├── src/
-│   ├── lib.rs                 Public SessionService, Session, WorkspaceSessionState, and PersistedTab exports
+│   ├── lib.rs                 Public SessionService, Session, LgtmSessionError, and Result exports
 │   ├── error.rs               LgtmSessionError and Result alias
 │   ├── models/
 │   │   ├── mod.rs
-│   │   └── session.rs         Session, SidebarWidget, WorkspaceSessionState, PersistedTab, and TabCandidate
+│   │   └── session.rs         Session aggregate root and pure state transition methods
 │   └── services/
 │       ├── mod.rs
-│       └── session.rs         SessionService orchestration and atomic ~/.lgtm/sessions/<id>.json persistence
+│       └── session.rs         SessionService atomic ~/.lgtm/sessions/<id>.json persistence
 └── tests/
-    └── session.rs             BDD integration suite for session restore, worktree switching, and tab filtering
+    └── session.rs             BDD integration suite for session load, save, tab filtering, and removals
 ```
 
 ## References

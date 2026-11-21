@@ -9,7 +9,8 @@ use std::{
 
 use lgtm_rsutils::{
     add_worktree, atomic_write, checkout_branch, get_current_branch, list_local_branches,
-    list_worktrees, remove_worktree, resolve_git_paths,
+    list_worktrees, normalize_repository_url, parse_github_owner_repo, remove_worktree,
+    resolve_git_paths,
 };
 use tempfile::TempDir;
 
@@ -240,6 +241,84 @@ mod given_remove_worktree {
             // Assert
             assert_eq!(dirty_err.kind(), ErrorKind::WouldBlock);
             assert!(!created.path.exists());
+        }
+    }
+}
+
+mod given_normalize_repository_url {
+    use super::*;
+
+    mod when_given_ssh_and_https_remotes {
+        use super::*;
+
+        #[test]
+        fn should_return_canonical_https_urls() {
+            // Arrange
+            let ssh_url = "git@github.com:difflab-io/lgtm.git";
+            let https_url = "https://github.com/difflab-io/lgtm.git/";
+
+            // Act
+            let normalized_ssh = normalize_repository_url(ssh_url).unwrap();
+            let normalized_https = normalize_repository_url(https_url).unwrap();
+
+            // Assert
+            assert_eq!(normalized_ssh, "https://github.com/difflab-io/lgtm");
+            assert_eq!(normalized_https, "https://github.com/difflab-io/lgtm");
+        }
+    }
+
+    mod when_given_empty_or_invalid_remotes {
+        use super::*;
+
+        #[test]
+        fn should_return_invalid_input() {
+            // Arrange
+            let empty = "   ";
+            let unsupported = "ftp://github.com/difflab-io/lgtm";
+
+            // Act
+            let empty_err = normalize_repository_url(empty).unwrap_err();
+            let scheme_err = normalize_repository_url(unsupported).unwrap_err();
+
+            // Assert
+            assert_eq!(empty_err.kind(), ErrorKind::InvalidInput);
+            assert_eq!(scheme_err.kind(), ErrorKind::InvalidInput);
+        }
+    }
+}
+
+mod given_parse_github_owner_repo {
+    use super::*;
+
+    mod when_given_valid_remote_url {
+        use super::*;
+
+        #[test]
+        fn should_extract_owner_and_repo() {
+            // Arrange
+            let ssh_url = "git@github.com:difflab-io/lgtm.git";
+
+            // Act
+            let owner_repo = parse_github_owner_repo(ssh_url).unwrap();
+
+            // Assert
+            assert_eq!(owner_repo, ("difflab-io".to_owned(), "lgtm".to_owned()));
+        }
+    }
+
+    mod when_given_missing_repo_segment {
+        use super::*;
+
+        #[test]
+        fn should_return_invalid_input() {
+            // Arrange
+            let missing_repo = "https://github.com/difflab-io";
+
+            // Act
+            let err = parse_github_owner_repo(missing_repo).unwrap_err();
+
+            // Assert
+            assert_eq!(err.kind(), ErrorKind::InvalidInput);
         }
     }
 }
