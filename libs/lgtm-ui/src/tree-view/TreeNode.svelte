@@ -22,6 +22,7 @@
     errors,
     renameErrors,
     icon,
+    trailing,
     selectableBranches = false,
     onedit,
     oncancel,
@@ -124,6 +125,7 @@
             >{node.displayLabel ?? node.label}</ArkTreeView.BranchText
           >
         </div>
+        {#if trailing && !renaming}{@render trailing(node, expanded)}{/if}
         {@render branchToggleButton(expanded)}
         {@render renameInput()}
       </ArkTreeView.BranchControl>
@@ -150,6 +152,7 @@
         <ArkTreeView.ItemText class={treeViewLabelBase} hidden={renaming}
           >{node.displayLabel ?? node.label}</ArkTreeView.ItemText
         >
+        {#if trailing && !renaming}{@render trailing(node, false)}{/if}
         {@render renameInput()}
       </ArkTreeView.Item>
     {/snippet}
@@ -174,6 +177,7 @@
                 {errors}
                 {renameErrors}
                 {icon}
+                {trailing}
                 {selectableBranches}
                 {onedit}
                 {oncancel}

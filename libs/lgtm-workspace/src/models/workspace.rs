@@ -15,10 +15,10 @@ pub struct Workspace {
 }
 
 impl Workspace {
-    /// Builds the default workspace location without accessing the filesystem.
+    /// Builds the default workspace location (`<home>/.lgtm/workspace/demo-workspace`) without accessing the filesystem.
     pub fn from_home(home: PathBuf) -> Self {
         Self {
-            root: home.join(".lgtm").join("workspace"),
+            root: home.join(".lgtm").join("workspace").join("demo-workspace"),
         }
     }
 

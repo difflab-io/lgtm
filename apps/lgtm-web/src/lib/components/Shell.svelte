@@ -177,6 +177,7 @@
             void workspace.reloadCleanConfigTabs()
           },
           onOpenFile: (event) => {
+            workspace.setSidebarMode('files')
             void workspace.openPath(event.path, {
               title: event.title ?? undefined,
               offset: event.offset ?? undefined,
@@ -195,6 +196,19 @@
         .registerSessionHandlers?.({
           onSessionUpdated: (nextSession) => {
             session.applySession(nextSession)
+          },
+        })
+        .then((stops) => {
+          for (const stop of stops) {
+            if (active) unlisteners.push(stop)
+            else stop()
+          }
+        })
+        .catch(() => {})
+      void client
+        .registerDiffHandlers?.({
+          onDiffUpdated: () => {
+            workspace.handleDiffUpdated()
           },
         })
         .then((stops) => {

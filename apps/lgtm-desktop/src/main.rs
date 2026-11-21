@@ -1,10 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
-pub mod commands;
-pub mod events;
-pub mod menus;
-pub mod services;
+mod commands;
+mod events;
+#[cfg(any(test, feature = "e2e-bridge"))]
+mod ipc_bridge;
+mod menus;
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -27,7 +28,7 @@ fn main() {
                 .next()
                 .map(std::path::PathBuf::from)
                 .expect("missing home directory for --ipc-bridge");
-            services::IpcBridgeService::new(home).run();
+            ipc_bridge::IpcBridgeService::new(home).run();
             return;
         }
         _ => {}

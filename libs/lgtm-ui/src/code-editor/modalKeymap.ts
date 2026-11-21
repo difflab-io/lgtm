@@ -1,6 +1,7 @@
 import { closeCompletion, completionStatus } from '@codemirror/autocomplete'
 import { indentWithTab, redo, undo } from '@codemirror/commands'
 import { indentUnit, matchBrackets, syntaxTree } from '@codemirror/language'
+import { goToNextChunk, goToPreviousChunk } from '@codemirror/merge'
 import {
   CharCategory,
   EditorSelection,
@@ -592,6 +593,32 @@ export function scrollEditorHalfPage(
   const delta = Math.max(120, Math.round(scroller.clientHeight * 0.5)) * Math.max(1, count)
   scroller.scrollTop = Math.max(0, scroller.scrollTop + dir * delta)
   return true
+}
+
+/**
+ * Moves the active diff editor selection to the next changed hunk (`count` steps forward).
+ */
+export function goToNextHunk(view: EditorView | null | undefined, count = 1): boolean {
+  if (!view) return false
+  let moved = false
+  const steps = Math.max(1, count)
+  for (let i = 0; i < steps; i += 1) {
+    if (goToNextChunk(view)) moved = true
+  }
+  return moved
+}
+
+/**
+ * Moves the active diff editor selection to the previous changed hunk (`count` steps backward).
+ */
+export function goToPrevHunk(view: EditorView | null | undefined, count = 1): boolean {
+  if (!view) return false
+  let moved = false
+  const steps = Math.max(1, count)
+  for (let i = 0; i < steps; i += 1) {
+    if (goToPreviousChunk(view)) moved = true
+  }
+  return moved
 }
 
 /**

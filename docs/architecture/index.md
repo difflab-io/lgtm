@@ -218,7 +218,7 @@ lgtm/
 | `~/.lgtm/bin/mise` | `lgtm-env` | Managed `mise` binary installed automatically when no system `mise` is available on `PATH`. |
 | `~/.lgtm/lgtm.db` | `lgtm-db` / `lgtm-forge` | Default local SQLite database storing identities, reviews, sessions, and comments. |
 | `~/.lgtm/snapshots/$repoSlug` | `lgtm-forge` (`SnapshotStore`) | Bare Git repository and per-branch shadow indices (`index.<branch>`, `refs/lgtm/snapshots/<branch>`) for `--local` reviews. |
-| `~/.lgtm/workspace` | `lgtm-desktop` (`WorkspaceService`) | Default desktop workspace directory created on first launch when no folder is specified. |
+| `~/.lgtm/workspace/demo-workspace` | `lgtm-desktop` (`WorkspaceService`) | Default desktop workspace directory (initialized as a Git repository) created on first launch when no folder is specified. |
 | `<workspace>/.lgtm/config.toml` | `lgtm-config` | Optional workspace-specific configuration overlay. |
 | `<workspace>/.lgtm/mise.toml` | `lgtm-env` (`MiseService`) | Synthesized Mise tools and tasks file (`dir = "{{cwd}}"`) scoped away from any user-owned root `mise.toml`. |
 | `<workspace>/.lgtm/cache/discovery.json` | `lgtm-lsp` (`LspCacheService`) | Cached workspace language and project-root discovery snapshot. |
@@ -258,10 +258,13 @@ All workspace Cargo crates set `publish = false` and link directly via Cargo `pa
 - [Database library architecture (`lgtm-db`)](db/index.md).
 - [CLI architecture (`lgtm-cli`)](cli/index.md).
 - [Desktop application architecture (`lgtm-desktop` & `lgtm-web`)](desktop/index.md).
+- [Desktop diff viewer and commit inspection](desktop/diffs.md).
 - [Desktop event handling & service orchestration](desktop/events.md).
 - [Desktop project and session management](desktop/projects.md).
 - [Web frontend architecture](web/index.md).
 - [ProjectsPane UI component](web/projects-pane.md).
+- [DiffExplorer & CommitSelector UI components (`lgtm-web`)](web/diff-explorer.md).
+- [DiffEditor UI component (`libs/lgtm-ui`)](ui/diff-editor.md).
 - [Session library architecture (`lgtm-session`)](session/index.md).
 - [Project library architecture (`lgtm-project`)](project/index.md).
 - [Rust utilities library architecture (`lgtm-rsutils`)](rsutils/index.md).

@@ -1526,6 +1526,7 @@ dependencies = [
  "gix-utils",
  "gix-validate 0.9.4",
  "gix-worktree",
+ "gix-worktree-state",
  "once_cell",
  "smallvec",
  "thiserror 2.0.21",
@@ -2190,6 +2191,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "gix-worktree-state"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86f5e199ad5af972086683bd31d640c82cb85885515bf86d86236c73ce575bf0"
+dependencies = [
+ "bstr",
+ "gix-features",
+ "gix-filter",
+ "gix-fs",
+ "gix-glob",
+ "gix-hash",
+ "gix-index",
+ "gix-object",
+ "gix-path",
+ "gix-worktree",
+ "io-close",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "glib"
 version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2649,6 +2670,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "io-close"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cadcf447f06744f8ce713d2d6239bb5bde2c357a452397a9ed90c625da390bc"
+dependencies = [
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2852,6 +2883,7 @@ dependencies = [
 name = "lgtm-desktop"
 version = "0.1.0"
 dependencies = [
+ "gix",
  "lgtm-config",
  "lgtm-lsp",
  "lgtm-project",
@@ -2860,6 +2892,8 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "sha2",
+ "similar",
  "specta",
  "specta-typescript",
  "tauri",
@@ -2937,6 +2971,7 @@ dependencies = [
 name = "lgtm-workspace"
 version = "0.1.0"
 dependencies = [
+ "gix",
  "lgtm-config",
  "rustix 1.1.6",
  "serde",
@@ -4363,6 +4398,12 @@ name = "simdutf8"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
+
+[[package]]
+name = "similar"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
 name = "siphasher"
