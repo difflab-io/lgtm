@@ -32,6 +32,8 @@ export {
   gotoNextEditorDiagnostic,
   gotoPrevEditorDiagnostic,
   gotoEditorSection,
+  goToNextHunk,
+  goToPrevHunk,
   hasEditorIntellisenseActive,
   lspOptionsFacet,
   modalClipboardExtension,
@@ -65,3 +67,6 @@ export type {
   CodeEditorSignatureInformation,
   EditorView,
 } from './code-editor/types'
+export { default as DiffEditor } from './diff-editor/DiffEditor.svelte'
+export { diffEditorRootVariants } from './diff-editor/index'
+export type { DiffEditorMode, DiffEditorProps, DiffEditorRootVariants } from './diff-editor/index'

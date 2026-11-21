@@ -33,6 +33,8 @@
     loadChildren,
     label = 'Files',
     icon,
+    trailing,
+    defaultExpandedValue,
     getLabel = (node) => node.label,
     class: className = '',
   }: TreeViewProps = $props()
@@ -63,6 +65,7 @@
   const tree = useTreeView<TreeNode>(() => ({
     id,
     collection,
+    defaultExpandedValue,
     selectedValue: selected ? [selected] : [],
     ...(expandedValue !== undefined ? { expandedValue } : {}),
     expandOnClick: !selectableBranches,
@@ -609,6 +612,7 @@
           {errors}
           {renameErrors}
           {icon}
+          {trailing}
           {selectableBranches}
           onedit={(value) => {
             delete renameErrors[value]

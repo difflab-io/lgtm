@@ -8,7 +8,7 @@
 
 ### Functional
 
-- Open the default workspace (`~/.lgtm/workspace`) or any selected folder, list files and directories, and create, read, save, rename, or move entries to the OS Trash.
+- Open the default workspace (`~/.lgtm/workspace/demo-workspace`) or any selected folder, list files and directories, and create, read, save, rename, or move entries to the OS Trash.
 - Provide language server integration for any workspace opened in the desktop application.
 - Synchronize open files, unsaved editor changes, file saves, renames, and deletions with active language servers.
 - Stream live language server statuses and file diagnostics to the UI, and provide hover documentation, go-to-definition, read-only diagnostics buffers, and server restarts.
@@ -25,19 +25,24 @@
 ```mermaid
 flowchart TB
     subgraph Frontend["lgtm-web (Svelte 5) & lgtm-ui"]
-        SHELL["Shell.svelte / ContentPane.svelte / LspStatusMenu.svelte"]
+        SHELL["Shell.svelte / ContentPane.svelte / DiffExplorer.svelte / LspStatusMenu.svelte"]
         WS_VM["WorkspaceService (workspaceService.svelte.ts)"]
+        REV_VM["ReviewService & DiffService (reviewService.svelte.ts / diffService.svelte.ts)"]
         LSP_VM["LspService (lspService.svelte.ts)"]
         CLIENT["TauriWorkspaceClient (workspaceClient.ts)"]
         SHELL --> WS_VM
+        SHELL --> REV_VM
         WS_VM --> LSP_VM
         WS_VM --> CLIENT
+        REV_VM --> CLIENT
         LSP_VM --> CLIENT
     end
 
     subgraph Desktop["lgtm-desktop (Tauri v2 Rust Host)"]
         IPC["app.rs (AppState) & commands/"]
+        REV_SVC["services/review.rs & services/diff.rs (ReviewService & DiffService)"]
         DESK_LSP["services/lsp.rs (Desktop LspService)"]
+        IPC --> REV_SVC
         IPC --> DESK_LSP
     end
 
@@ -62,11 +67,12 @@ flowchart TB
     LSP_MGR --> SERVERS["Language Server Processes (stdio JSON-RPC 2.0)"]
 ```
 
-- `app.rs` & `commands/` (`lgtm-desktop`): Registers a unified `AppState` (`workspace`, `project`, `session`, `config`, `lsp`, `frontend_ready`, `events`) in Tauri managed state, dispatches `workspace_*`, `lsp_*`, `config_get`, `config_update`, `session_*`, and `project_*` IPC commands onto `spawn_blocking`, orchestrates `ProjectService` and `SessionService` updates, emits `config-updated` and `session-updated`, and coordinates the `RunEvent::ExitRequested` quit handshake.
+- `app.rs` & `commands/` (`lgtm-desktop`): Registers a unified `AppState` (`workspace`, `project`, `session`, `config`, `lsp`, `review`, `diff`, `frontend_ready`, `events`) in Tauri managed state, dispatches `workspace_*`, `lsp_*`, `config_get`, `config_update`, `session_*`, `project_*`, `review_*`, and `diff_*` IPC commands onto `spawn_blocking`, orchestrates `ProjectService` and `SessionService` updates, emits `config-updated`, `session-updated`, and `diff-updated`, and coordinates the `RunEvent::ExitRequested` quit handshake.
 - `WorkspaceService` (`libs/lgtm-workspace`): Owns the active `Workspace` root, validates workspace-relative paths (plus `~/.lgtm/config.json` and `.lgtm/config.json`), performs atomic file/folder CRUD, and defines per-workspace session state models (`WorkspaceSessionState`, `PersistedTab`, `SidebarWidget`).
+- `services::review::ReviewService` & `services::diff::DiffService` (`lgtm-desktop`): Manage the active review diff mode (`Local` or `ForgeBacked`), enumerate `.git` and `~/.lgtm/snapshots/$repoSlug` shadow commits for the `CommitSelector` checklist, list changed files for `DiffExplorer`, and read `(base_content, head_content)` pairs for `DiffEditor`. See [Desktop diff viewer and commit inspection](diffs.md).
 - `services::lsp::LspService` (`lgtm-desktop`): Bridges `lgtm-lsp`'s `LgtmLspManager` to the Tauri `AppHandle` (and optional E2E stdio bridge forwarder), translating `LspEvent::Status` and `LspEvent::Diagnostics` callbacks into `app_handle.emit("lsp-status", ...)` and `app_handle.emit("lsp-diagnostics", ...)`.
 - `LgtmLspManager` & `LspCacheService` (`lgtm-lsp`): Manage per-`(workspace_root, language_id, project_root)` stdio JSON-RPC 2.0 sessions, cache open UTF-8 document snapshots and diagnostics, and coordinate with `MiseService` (`lgtm-env`) and `ConfigService` (`lgtm-config`) to launch language servers.
-- `WorkspaceService`, `ProjectService`, `SessionService`, `LspService`, `SettingsService`, & `HotkeyService` (`lgtm-web`): Reactive Svelte 5 `$state` services that manage open editor tabs, 150ms debounced auto-save (`flushSave`), live `lsp_did_change` notifications, active language server indicators, read-only diagnostics buffer tabs, modal keybindings (`WhichKeyProvider`, `CommandMenu`, `CommandPalette`), and live `config-updated` preference synchronization. See [Web frontend architecture](../web/index.md) and [Modal keybindings architecture](../web/keybindings.md).
+- `WorkspaceService`, `ProjectService`, `SessionService`, `ReviewService`, `DiffService`, `LspService`, `SettingsService`, & `HotkeyService` (`lgtm-web`): Reactive Svelte 5 `$state` services that manage open editor and diff tabs, 150ms debounced auto-save (`flushSave`), `Local` and `ForgeBacked` diff inspection, live `lsp_did_change` notifications, active language server indicators, read-only diagnostics buffer tabs, modal keybindings (`WhichKeyProvider`, `CommandMenu`, `CommandPalette`), and live `config-updated` preference synchronization. See [Web frontend architecture](../web/index.md) and [Modal keybindings architecture](../web/keybindings.md).
 
 ### Data and Control Flow
 
@@ -210,12 +216,15 @@ When compiled with the `e2e-bridge` feature and launched with `--ipc-bridge <hom
 
 ## References
 
+- [Desktop diff viewer and commit inspection](diffs.md).
 - [Desktop event handling & service orchestration](events.md).
 - [Desktop project and session management](projects.md).
 - [Session library (`lgtm-session`) architecture](../session/index.md).
 - [Project library (`lgtm-project`) architecture](../project/index.md).
 - [Rust utilities library (`lgtm-rsutils`) architecture](../rsutils/index.md).
 - [ProjectsPane UI component](../web/projects-pane.md).
+- [DiffEditor UI component (`libs/lgtm-ui`)](../ui/diff-editor.md).
+- [DiffExplorer & CommitSelector UI components (`lgtm-web`)](../web/diff-explorer.md).
 - [LSP library (`lgtm-lsp`) architecture](../lsp/index.md).
 - [Environment library (`lgtm-env`) architecture](../env/index.md).
 - [Configuration library (`lgtm-config`) architecture](../config/index.md).

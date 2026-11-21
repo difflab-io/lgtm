@@ -2890,6 +2890,7 @@ dependencies = [
 name = "lgtm-workspace"
 version = "0.1.0"
 dependencies = [
+ "gix",
  "lgtm-config",
  "rustix 1.1.5",
  "serde",

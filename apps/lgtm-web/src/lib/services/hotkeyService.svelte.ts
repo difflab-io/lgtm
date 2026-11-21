@@ -15,6 +15,8 @@ import {
   gotoLastEditorDiagnostic,
   gotoNextEditorDiagnostic,
   gotoPrevEditorDiagnostic,
+  goToNextHunk,
+  goToPrevHunk,
   resolveEditorSymbolOffset,
   scrollEditorAlign,
   scrollEditorHalfPage,
@@ -314,6 +316,20 @@ export class HotkeyService {
           'lsp.firstDiagnostic',
           'Jump to first diagnostic in file ([D)',
         ),
+        f: leaf(
+          'f',
+          'Previous Changed File',
+          'Diff',
+          'diff.prevFile',
+          'Open previous changed file in DiffExplorer ([f)',
+        ),
+        c: leaf(
+          'c',
+          'Previous Diff Hunk',
+          'Diff',
+          'diff.prevHunk',
+          'Jump to previous changed hunk in DiffEditor ([c)',
+        ),
       },
     },
     ']': {
@@ -336,6 +352,20 @@ export class HotkeyService {
           'LSP',
           'lsp.lastDiagnostic',
           'Jump to last diagnostic in file (]D)',
+        ),
+        f: leaf(
+          'f',
+          'Next Changed File',
+          'Diff',
+          'diff.nextFile',
+          'Open next changed file in DiffExplorer (]f)',
+        ),
+        c: leaf(
+          'c',
+          'Next Diff Hunk',
+          'Diff',
+          'diff.nextHunk',
+          'Jump to next changed hunk in DiffEditor (]c)',
         ),
       },
     },
@@ -772,13 +802,71 @@ export class HotkeyService {
             'lsp.signatureHelp',
             'Show LSP function signature help at cursor (Space s)',
           ),
-          d: leaf(
-            'd',
-            'Open Diagnostics',
-            'LSP',
-            'lsp.diagnostics',
-            'Open workspace diagnostics buffer (Space d)',
-          ),
+          d: {
+            key: 'd',
+            label: '+diff',
+            group: 'Diff & Review',
+            description: 'Diff viewer, file navigation, and review mode controls',
+            category: 'Diff',
+            children: {
+              d: leaf(
+                'd',
+                'Toggle Diffs Sidebar',
+                'Diff',
+                'diff.toggleSidebar',
+                'Switch the left sidebar between Workspace and Diffs (Space d d)',
+              ),
+              m: leaf(
+                'm',
+                'Toggle Split / Unified',
+                'Diff',
+                'diff.toggleViewMode',
+                'Toggle DiffEditor between split and unified layouts (Space d m)',
+              ),
+              f: leaf(
+                'f',
+                'Toggle Full File / Hunks',
+                'Diff',
+                'diff.toggleFullFile',
+                'Toggle DiffEditor between hunk-only and full-file views (Space d f)',
+              ),
+              r: leaf(
+                'r',
+                'Toggle Review Mode',
+                'Diff',
+                'review.toggleMode',
+                'Switch between Local shadow commits and Branch Git commits (Space d r)',
+              ),
+              n: leaf(
+                'n',
+                'Next Changed File',
+                'Diff',
+                'diff.nextFile',
+                'Open next changed file in DiffExplorer (Space d n)',
+              ),
+              p: leaf(
+                'p',
+                'Previous Changed File',
+                'Diff',
+                'diff.prevFile',
+                'Open previous changed file in DiffExplorer (Space d p)',
+              ),
+              j: leaf(
+                'j',
+                'Next Diff Hunk',
+                'Diff',
+                'diff.nextHunk',
+                'Jump to next changed hunk in DiffEditor (Space d j)',
+              ),
+              k: leaf(
+                'k',
+                'Previous Diff Hunk',
+                'Diff',
+                'diff.prevHunk',
+                'Jump to previous changed hunk in DiffEditor (Space d k)',
+              ),
+            },
+          },
           D: leaf(
             'D',
             'Open Workspace Diagnostics',
@@ -808,6 +896,37 @@ export class HotkeyService {
     },
     'projects.newWorktree': () => this.openNewWorktree(),
     'projects.removeWorktree': () => this.removeActiveWorktree(),
+    'diff.toggleSidebar': () => {
+      this.services.workspace.toggleSidebarMode()
+      return true
+    },
+    'diff.toggleViewMode': () => {
+      this.services.workspace.setSidebarMode('diffs')
+      this.services.workspace.diff.toggleViewMode()
+      return true
+    },
+    'diff.toggleFullFile': () => {
+      this.services.workspace.setSidebarMode('diffs')
+      this.services.workspace.diff.toggleFullFile()
+      return true
+    },
+    'diff.nextFile': () => {
+      this.services.workspace.setSidebarMode('diffs')
+      void this.services.workspace.diff.selectNextFile()
+      return true
+    },
+    'diff.prevFile': () => {
+      this.services.workspace.setSidebarMode('diffs')
+      void this.services.workspace.diff.selectPrevFile()
+      return true
+    },
+    'diff.nextHunk': (ctx: KeymapCommandContext) => goToNextHunk(this.activeEditorView, ctx.count),
+    'diff.prevHunk': (ctx: KeymapCommandContext) => goToPrevHunk(this.activeEditorView, ctx.count),
+    'review.toggleMode': () => {
+      this.services.workspace.setSidebarMode('diffs')
+      void this.services.workspace.review.toggleMode()
+      return true
+    },
     'file.save': () => {
       void this.services.workspace.flushSave()
       return true
@@ -1105,6 +1224,197 @@ export class HotkeyService {
         ),
         onSelect: () => {
           this.removeActiveWorktree()
+        },
+      },
+      {
+        value: 'diff-sidebar',
+        command: 'diffs',
+        aliases: ['diff', 'diff-explorer'],
+        label: 'Toggle Diffs Sidebar',
+        description: 'Switch the left sidebar between Workspace and Diffs',
+        group: 'Diff',
+        shortcut: 'Space d d',
+        onSelect: () => {
+          this.services.workspace.toggleSidebarMode()
+        },
+      },
+      {
+        value: 'diff-mode',
+        command: 'diff-mode',
+        aliases: ['diff-layout'],
+        label: 'Diff Layout Mode',
+        description: 'Switch DiffEditor between split and unified layouts',
+        group: 'Diff',
+        shortcut: 'Space d m',
+        children: [
+          {
+            value: 'diff-mode-split',
+            command: 'split',
+            label: 'Split (Side-by-Side)',
+            description: 'Render base and head in synchronized side-by-side columns',
+            active: this.services.workspace.diff.viewMode === 'split',
+            onSelect: () => {
+              this.services.workspace.setSidebarMode('diffs')
+              this.services.workspace.diff.setViewMode('split')
+            },
+          },
+          {
+            value: 'diff-mode-unified',
+            command: 'unified',
+            label: 'Unified (Single Column)',
+            description: 'Render inline additions and deletions in a single column',
+            active: this.services.workspace.diff.viewMode === 'unified',
+            onSelect: () => {
+              this.services.workspace.setSidebarMode('diffs')
+              this.services.workspace.diff.setViewMode('unified')
+            },
+          },
+          {
+            value: 'diff-mode-toggle',
+            command: 'toggle',
+            label: 'Toggle Split / Unified',
+            onSelect: () => {
+              this.services.workspace.setSidebarMode('diffs')
+              this.services.workspace.diff.toggleViewMode()
+            },
+          },
+        ],
+      },
+      {
+        value: 'diff-full',
+        command: 'diff-full',
+        aliases: ['full-file'],
+        label: 'Full File Diff View',
+        description: 'Expand unchanged lines or collapse around diff hunks',
+        group: 'Diff',
+        shortcut: 'Space d f',
+        children: [
+          {
+            value: 'diff-full-on',
+            command: 'on',
+            aliases: ['true', 'full'],
+            label: 'Full File',
+            description: 'Display the entire file without collapsing unchanged lines',
+            active: this.services.workspace.diff.showFullFile,
+            onSelect: () => {
+              this.services.workspace.setSidebarMode('diffs')
+              this.services.workspace.diff.setShowFullFile(true)
+            },
+          },
+          {
+            value: 'diff-full-off',
+            command: 'off',
+            aliases: ['false', 'hunks'],
+            label: 'Hunks Only',
+            description: 'Collapse unchanged regions around diff hunks',
+            active: !this.services.workspace.diff.showFullFile,
+            onSelect: () => {
+              this.services.workspace.setSidebarMode('diffs')
+              this.services.workspace.diff.setShowFullFile(false)
+            },
+          },
+          {
+            value: 'diff-full-toggle',
+            command: 'toggle',
+            label: 'Toggle Full File / Hunks',
+            onSelect: () => {
+              this.services.workspace.setSidebarMode('diffs')
+              this.services.workspace.diff.toggleFullFile()
+            },
+          },
+        ],
+      },
+      {
+        value: 'review-mode',
+        command: 'review-mode',
+        aliases: ['review'],
+        label: 'Review Mode',
+        description: 'Switch between Local shadow commits and Branch Git commits',
+        group: 'Diff',
+        shortcut: 'Space d r',
+        children: [
+          {
+            value: 'review-mode-local',
+            command: 'local',
+            label: 'Local Shadow Commits',
+            description: 'Inspect Working Tree and local shadow commits in ~/.lgtm/snapshots',
+            active: this.services.workspace.review.mode === 'local',
+            onSelect: () => {
+              this.services.workspace.setSidebarMode('diffs')
+              void this.services.workspace.review.setMode('local')
+            },
+          },
+          {
+            value: 'review-mode-branch',
+            command: 'branch',
+            aliases: ['forge_backed', 'forge', 'git'],
+            label: 'Branch Git Commits',
+            description: 'Inspect standard Git commits on the active branch',
+            active: this.services.workspace.review.mode === 'forge_backed',
+            onSelect: () => {
+              this.services.workspace.setSidebarMode('diffs')
+              void this.services.workspace.review.setMode('forge_backed')
+            },
+          },
+          {
+            value: 'review-mode-toggle',
+            command: 'toggle',
+            label: 'Toggle Local / Branch Review Mode',
+            onSelect: () => {
+              this.services.workspace.setSidebarMode('diffs')
+              void this.services.workspace.review.toggleMode()
+            },
+          },
+        ],
+      },
+      {
+        value: 'diff-next-file',
+        command: 'dfn',
+        aliases: ['diff-next-file'],
+        label: 'Next Changed File',
+        description: 'Open the next changed file in DiffExplorer',
+        group: 'Diff',
+        shortcut: [']', 'f'],
+        onSelect: () => {
+          this.services.workspace.setSidebarMode('diffs')
+          void this.services.workspace.diff.selectNextFile()
+        },
+      },
+      {
+        value: 'diff-prev-file',
+        command: 'dfp',
+        aliases: ['diff-prev-file'],
+        label: 'Previous Changed File',
+        description: 'Open the previous changed file in DiffExplorer',
+        group: 'Diff',
+        shortcut: ['[', 'f'],
+        onSelect: () => {
+          this.services.workspace.setSidebarMode('diffs')
+          void this.services.workspace.diff.selectPrevFile()
+        },
+      },
+      {
+        value: 'diff-next-hunk',
+        command: 'dhn',
+        aliases: ['diff-next-hunk'],
+        label: 'Next Diff Hunk',
+        description: 'Jump to the next changed hunk in DiffEditor',
+        group: 'Diff',
+        shortcut: [']', 'c'],
+        onSelect: () => {
+          goToNextHunk(this.activeEditorView, 1)
+        },
+      },
+      {
+        value: 'diff-prev-hunk',
+        command: 'dhp',
+        aliases: ['diff-prev-hunk'],
+        label: 'Previous Diff Hunk',
+        description: 'Jump to the previous changed hunk in DiffEditor',
+        group: 'Diff',
+        shortcut: ['[', 'c'],
+        onSelect: () => {
+          goToPrevHunk(this.activeEditorView, 1)
         },
       },
       {

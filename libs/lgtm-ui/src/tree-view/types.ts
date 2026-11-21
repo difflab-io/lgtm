@@ -22,6 +22,8 @@ export interface TreeViewProps {
   onrename?: (value: string, name: string) => Promise<void>
   oncancel?: (value: string) => void
   icon?: Snippet<[TreeNode, boolean]>
+  trailing?: Snippet<[TreeNode, boolean]>
+  defaultExpandedValue?: string[]
   getLabel?: (node: TreeNode) => string
   nodes: TreeNode[]
   showHidden?: boolean
@@ -44,6 +46,7 @@ export interface TreeNodeViewProps {
   errors: Record<string, string>
   renameErrors: Record<string, string>
   icon?: Snippet<[TreeNode, boolean]>
+  trailing?: Snippet<[TreeNode, boolean]>
   selectableBranches?: boolean
   onedit?: (value: string) => void
   contextItems?: (node: TreeNode) => ContextMenuItem[]

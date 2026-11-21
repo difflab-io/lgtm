@@ -21,7 +21,9 @@ import {
   type WorkspaceStatePatch,
 } from '../clients/workspaceClient'
 import type { CachedWorkspaceSnapshot, FolderRefresh, WorkspaceTab } from '../types'
+import { DiffService } from './diffService.svelte'
 import type { LspService } from './lspService.svelte'
+import { ReviewService } from './reviewService.svelte'
 import type { SessionService } from './sessionService.svelte'
 import type { SettingsService } from './settingsService.svelte'
 
@@ -30,10 +32,13 @@ export interface WorkspaceServiceCallbacks {
   onNewWorktreeRequested?: () => void
 }
 
-/** Active workspace & shell state service managing open tabs, dock widgets/widths, workspace switching, file explorer tree, and active buffer I/O. */
+/** Active workspace & shell state service managing open tabs, dock widgets/widths, workspace switching, file explorer tree, active buffer I/O, and diff viewing. */
 export class WorkspaceService {
+  readonly review: ReviewService
+  readonly diff: DiffService
+  sidebarMode = $state<'files' | 'diffs'>('files')
   defaultRoot = $state('')
-  root = $state('~/.lgtm/workspace')
+  root = $state('~/.lgtm/workspace/demo-workspace')
   sidebarWidget = $state<SidebarWidget>('explorer')
   projectsOpen = $state(false)
   explorerOpen = $state(true)
@@ -78,13 +83,54 @@ export class WorkspaceService {
     private readonly lsp: LspService,
     private readonly settings: SettingsService,
     private readonly callbacks: WorkspaceServiceCallbacks = {},
-  ) {}
+  ) {
+    this.diff = new DiffService(client, (snapshot) => {
+      this.review.syncMode(snapshot.reviewMode)
+    })
+    this.review = new ReviewService(client, (snapshot) => {
+      void this.diff.applySnapshot(snapshot)
+    })
+  }
 
   // Public --------------------------------------------------------------------
 
   /** Returns the total rendered width (in px) of the open left-dock panes (`ProjectsPane` + `WidgetPane`). */
   get leftDockWidth(): number {
     return (this.projectsOpen ? this.projectsWidth : 0) + (this.explorerOpen ? this.widgetWidth : 0)
+  }
+
+  /** Switches the active sidebar pane between `'files'` (`FileExplorer`) and `'diffs'` (`DiffExplorer` + `CommitSelector`). */
+  setSidebarMode(mode: 'files' | 'diffs'): void {
+    this.sidebarMode = mode
+    if (mode === 'diffs') {
+      this.explorerOpen = true
+      void this.diff.refresh()
+    }
+  }
+
+  /** Toggles the active sidebar pane between `'files'` and `'diffs'`. */
+  toggleSidebarMode(): void {
+    this.setSidebarMode(this.sidebarMode === 'files' ? 'diffs' : 'files')
+  }
+
+  /** Writes updated working-tree file content from `DiffEditor` and refreshes the diff snapshot. */
+  async saveDiffFile(path: string, content: string): Promise<void> {
+    this.saving = true
+    this.openingError = null
+    try {
+      await this.client.write(path, content)
+      await this.diff.refresh()
+    } catch (error) {
+      if (this.active) this.openingError = errorMessage(error)
+    } finally {
+      if (this.active) this.saving = false
+    }
+  }
+
+  /** Refreshes the diff snapshot when a backend `diff-updated` notification arrives. */
+  handleDiffUpdated(): void {
+    if (!this.active) return
+    void this.diff.refresh()
   }
 
   /** Returns whether a file or tree operation is currently in progress. */
@@ -123,6 +169,9 @@ export class WorkspaceService {
 
   /** Returns the path or title shown in the footer breadcrumb tooltip. */
   get selectedPath(): string | undefined {
+    if (this.sidebarMode === 'diffs' && this.diff.activeFilePath) {
+      return this.diff.activeFilePath
+    }
     if (this.activeTab?.kind === 'diagnostics') return this.activeTab.title
     return this.selected?.path
   }
@@ -136,6 +185,9 @@ export class WorkspaceService {
 
   /** Returns path segments rendered in the footer breadcrumb bar. */
   get breadcrumbs(): string[] {
+    if (this.sidebarMode === 'diffs' && this.diff.activeFilePath) {
+      return this.diff.activeFilePath.split(/[\\/]/).filter(Boolean)
+    }
     if (this.activeTab?.kind === 'diagnostics') return [this.activeTab.title]
     if (!this.selected) return []
     if (this.isConfigFilePath(this.selected.path)) {
@@ -155,8 +207,9 @@ export class WorkspaceService {
   /** Returns the human-readable editor status label for the footer. */
   get status(): string {
     if (this.openingError) return this.openingError
-    if (this.fileLoading) return 'Opening file…'
+    if (this.fileLoading || this.diff.isLoading) return 'Opening file…'
     if (this.saving) return 'Saving…'
+    if (this.sidebarMode === 'diffs' && this.diff.activeDiff) return 'Ready'
     if (this.selected || this.activeTab) return 'Ready'
     return 'Idle'
   }
@@ -338,11 +391,13 @@ export class WorkspaceService {
       }
       if (!fileOpenedDuringInit) {
         this.lsp.reset()
+        this.diff.reset()
         this.fileVersion++
       }
       this.treeVersion++
       void this.settings.load()
       void this.lsp.syncState()
+      void this.diff.refresh()
       await this.session.syncSession(!switchedCached && !fileOpenedDuringInit)
       this.saveCurrentWorkspaceToCache(this.root)
     } catch (error) {
@@ -901,14 +956,17 @@ export class WorkspaceService {
   // Private -------------------------------------------------------------------
 
   private isDefaultPlaceholderRoot(path: string): boolean {
-    return path === '~/.lgtm/workspace'
+    return path === '~/.lgtm/workspace' || path === '~/.lgtm/workspace/demo-workspace'
   }
 
   private isDefaultWorkspaceRoot(path: string): boolean {
     return (
       path === '~/.lgtm/workspace' ||
+      path === '~/.lgtm/workspace/demo-workspace' ||
       path.endsWith('/.lgtm/workspace') ||
-      path.endsWith('\\.lgtm\\workspace')
+      path.endsWith('/.lgtm/workspace/demo-workspace') ||
+      path.endsWith('\\.lgtm\\workspace') ||
+      path.endsWith('\\.lgtm\\workspace\\demo-workspace')
     )
   }
 

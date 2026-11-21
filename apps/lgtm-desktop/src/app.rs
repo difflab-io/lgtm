@@ -1,4 +1,6 @@
 //! Tauri application state, lifecycle, and Specta TypeScript binding generation.
+#![allow(unreachable_pub)]
+
 use std::path::PathBuf;
 use std::sync::{
     Arc, Mutex,
@@ -6,6 +8,7 @@ use std::sync::{
 };
 
 use lgtm_config::ConfigService;
+use lgtm_desktop::{DiffService, LspService, ReviewService};
 use lgtm_lsp::LspEvent;
 use lgtm_project::ProjectService;
 use lgtm_session::SessionService;
@@ -16,7 +19,6 @@ use crate::{
     commands::*,
     events::{AppEvent, AppEvents, FileOpenedEvent},
     menus::{build_app_menu, handle_menu_event},
-    services::LspService,
 };
 
 /// Combined desktop host state managed by Tauri across all IPC command handlers.
@@ -32,6 +34,10 @@ pub struct AppState {
     pub config: ConfigService,
     /// Shared desktop LSP orchestration service.
     pub lsp: Arc<LspService>,
+    /// Shared review mode service tracking `Local` vs. `ForgeBacked` mode.
+    pub review: Arc<ReviewService>,
+    /// Shared diff service resolving `.git` and `~/.lgtm/snapshots/$repoSlug` diffs.
+    pub diff: Arc<DiffService>,
     /// In-process backend event bus and webview notification publisher.
     pub events: AppEvents,
     /// Tracks whether the frontend has registered its quit lifecycle listener.
@@ -191,6 +197,8 @@ pub(crate) fn init_app_state<R: tauri::Runtime>(
         session,
         config,
         lsp,
+        review: Arc::new(ReviewService::new(None)),
+        diff: Arc::new(DiffService::new()),
         events,
         frontend_ready: Arc::new(AtomicBool::new(false)),
     });
@@ -204,6 +212,7 @@ fn handle_app_event(events: &AppEvents, lsp: &LspService, config: &ConfigService
             next_root,
         } => {
             lsp.switch_workspace(previous_root.as_deref(), &next_root);
+            events.emit_to_webview("diff-updated", &());
         }
         AppEvent::FileOpened(payload) => {
             events.emit_to_webview("workspace-open-file", &payload);
@@ -219,9 +228,11 @@ fn handle_app_event(events: &AppEvents, lsp: &LspService, config: &ConfigService
                 lsp.reload_workspace_config(&root);
                 events.emit_to_webview("config-updated", &snapshot);
             }
+            events.emit_to_webview("diff-updated", &());
         }
         AppEvent::FileClosed { root, path } => {
             let _ = lsp.did_close(&root, &path);
+            events.emit_to_webview("diff-updated", &());
         }
         AppEvent::LspStatus(payload) => {
             events.emit_to_webview("lsp-status", &payload);
@@ -271,6 +282,10 @@ pub fn commands<R: tauri::Runtime>(invoke: tauri::ipc::Invoke<R>) -> bool {
         project_remove_worktree,
         project_remove,
         project_checkout_branch,
+        review_set_mode,
+        diff_get_state,
+        diff_list_files,
+        diff_read_file,
     ];
     handler(invoke)
 }
@@ -312,6 +327,10 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             project_remove_worktree,
             project_remove,
             project_checkout_branch,
+            review_set_mode,
+            diff_get_state,
+            diff_list_files,
+            diff_read_file,
         ])
 }
 
@@ -395,12 +414,20 @@ mod tests {
                 assert!(generated.contains("export type FileOpenedEvent"));
                 assert!(generated.contains("export type LspCompletionItem"));
                 assert!(generated.contains("export type LspSignatureHelp"));
+                assert!(generated.contains("export type ReviewMode"));
+                assert!(generated.contains("export type DiffWorkspaceSnapshot"));
+                assert!(generated.contains("export type DiffFileEntry"));
+                assert!(generated.contains("export type FileDiffContent"));
                 assert!(generated.contains("lspCompletion"));
                 assert!(generated.contains("lspSignatureHelp"));
                 assert!(generated.contains("configGet"));
                 assert!(generated.contains("configUpdate"));
                 assert!(generated.contains("sessionGet"));
                 assert!(generated.contains("projectCreateWorktree"));
+                assert!(generated.contains("reviewSetMode"));
+                assert!(generated.contains("diffGetState"));
+                assert!(generated.contains("diffListFiles"));
+                assert!(generated.contains("diffReadFile"));
             }
         }
     }

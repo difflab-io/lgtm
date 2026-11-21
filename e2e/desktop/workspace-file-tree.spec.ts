@@ -30,7 +30,7 @@ test.describe('Given a new workspace', { tag: ['@desktop', '@file-tree'] }, () =
 
         // Assert
         expect(info.isDirectory()).toBe(true)
-        expect(files).toEqual([])
+        expect(files).toEqual(['.git'])
         await expect(tree.getByRole('treeitem')).toHaveCount(0)
         await expect(page.getByText('Your workspace is empty.', { exact: false })).toBeVisible()
         await expect(page.getByText('No file selected')).toBeVisible()

@@ -33,7 +33,7 @@ pub struct WorkspaceService {
 }
 
 impl WorkspaceService {
-    /// Creates a workspace service rooted at `workspace_path` when provided and valid on disk (otherwise `<home>/.lgtm/workspace`).
+    /// Creates a workspace service rooted at `workspace_path` when provided and valid on disk (otherwise `<home>/.lgtm/workspace/demo-workspace`).
     pub fn new(home: PathBuf, workspace_path: Option<PathBuf>) -> Self {
         let lgtm_home = home.join(".lgtm");
         let default_workspace = Workspace::from_home(home);
@@ -66,7 +66,12 @@ impl WorkspaceService {
     pub fn open(&mut self, path: Option<&str>) -> Result<WorkspaceListing> {
         if let Some(target) = path.map(str::trim).filter(|s| !s.is_empty()) {
             let candidate = PathBuf::from(target);
-            if candidate == self.default_workspace.root {
+            let is_default = candidate == self.default_workspace.root
+                || (candidate.exists()
+                    && self.default_workspace.root.exists()
+                    && candidate.canonicalize().ok()
+                        == self.default_workspace.root.canonicalize().ok());
+            if is_default {
                 self.workspace = self.default_workspace.clone();
                 self.custom_root = false;
             } else {
@@ -108,7 +113,7 @@ impl WorkspaceService {
                 .file_name()
                 .into_string()
                 .map_err(|_| error("invalidName", "A workspace filename is not valid Unicode."))?;
-            if name == ".lgtm" || name.starts_with(".lgtm-save-") {
+            if name == ".git" || name == ".lgtm" || name.starts_with(".lgtm-save-") {
                 continue;
             }
             let path = if relative.is_empty() {
@@ -389,10 +394,18 @@ impl WorkspaceService {
         Ok(())
     }
 
+    /// Returns the global `.lgtm` home directory (`<home>/.lgtm`).
+    pub fn get_lgtm_home(&self) -> &Path {
+        &self.lgtm_home
+    }
+
     /// Returns the canonical root directory of the active workspace.
     pub fn get_root(&self) -> Result<PathBuf> {
         if !self.custom_root {
             fs::create_dir_all(&self.workspace.root)?;
+            if !self.workspace.root.join(".git").exists() {
+                gix::init(&self.workspace.root).map_err(|err| error("git", err.to_string()))?;
+            }
         } else if !self.workspace.root.is_dir() {
             return Err(error("invalidWorkspace", "Choose an existing folder."));
         }
@@ -494,7 +507,11 @@ mod tests {
         }
 
         fn default_root(&self) -> PathBuf {
-            self.home.path().join(".lgtm").join("workspace")
+            self.home
+                .path()
+                .join(".lgtm")
+                .join("workspace")
+                .join("demo-workspace")
         }
     }
 
@@ -516,6 +533,7 @@ mod tests {
 
                 // Assert
                 assert!(fixture.default_root().is_dir());
+                assert!(fixture.default_root().join(".git").is_dir());
                 assert_eq!(
                     PathBuf::from(&opened.root),
                     fixture.default_root().canonicalize().unwrap()

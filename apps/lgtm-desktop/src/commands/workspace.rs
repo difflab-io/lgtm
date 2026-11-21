@@ -42,7 +42,11 @@ pub async fn workspace_open(
                     .ok()
                     .map(|s| s.active_workspace_root)
                     .filter(|active| {
-                        !active.trim().is_empty() && std::path::Path::new(active).is_dir()
+                        let trimmed = active.trim();
+                        let active_path = std::path::Path::new(trimmed);
+                        !trimmed.is_empty()
+                            && active_path.is_dir()
+                            && active_path != w.get_lgtm_home().join("workspace")
                     })
                     .or_else(|| {
                         app.config
@@ -50,7 +54,11 @@ pub async fn workspace_open(
                             .ok()
                             .and_then(|snap| snap.effective.workspace.active_root)
                             .filter(|active| {
-                                !active.trim().is_empty() && std::path::Path::new(active).is_dir()
+                                let trimmed = active.trim();
+                                let active_path = std::path::Path::new(trimmed);
+                                !trimmed.is_empty()
+                                    && active_path.is_dir()
+                                    && active_path != w.get_lgtm_home().join("workspace")
                             })
                     }),
                 None => None,
@@ -169,8 +177,11 @@ pub async fn workspace_create_file(
 ) -> Result<WorkspaceNode> {
     state
         .run_blocking(move |app| {
-            app.lock_workspace()?
-                .create_file(&name, parent_path.as_deref().unwrap_or(""))
+            let created = app
+                .lock_workspace()?
+                .create_file(&name, parent_path.as_deref().unwrap_or(""))?;
+            app.events.emit_to_webview("diff-updated", &());
+            Ok(created)
         })
         .await
 }

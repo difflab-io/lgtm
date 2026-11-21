@@ -1,7 +1,9 @@
-#[cfg(any(test, feature = "e2e-bridge"))]
-pub mod ipc_bridge;
-pub mod lsp;
+//! Desktop domain and host services for diff resolution, review mode state, and LSP orchestration.
 
-#[cfg(any(test, feature = "e2e-bridge"))]
-pub use ipc_bridge::IpcBridgeService;
+pub(crate) mod diff;
+pub(crate) mod lsp;
+pub(crate) mod review;
+
+pub use diff::DiffService;
 pub use lsp::LspService;
+pub use review::ReviewService;
