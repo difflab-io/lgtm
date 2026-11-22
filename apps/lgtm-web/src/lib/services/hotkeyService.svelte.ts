@@ -119,23 +119,6 @@ export class HotkeyService {
       'Toggle the right-hand terminal dock open or closed',
       ['normal', 'select', 'insert'],
     ),
-    'Control+b': {
-      key: 'Control+b',
-      label: 'Pane Prefix',
-      group: 'Window / Pane',
-      description: 'Herdr-style pane prefix commands',
-      category: 'Window / Pane',
-      mode: ['normal', 'select', 'insert'],
-      children: {
-        r: leaf(
-          'r',
-          'Resize Active Dock',
-          'Window / Pane',
-          'pane.resizeMode',
-          'Enter modal pane resize mode (h/l or arrows, Esc/Enter to exit)',
-        ),
-      },
-    },
     'Mod+,': leaf(
       'Mod+,',
       'Global Settings',
@@ -253,6 +236,13 @@ export class HotkeyService {
           'Window / Pane',
           'pane.prev',
           'Cycle focus to the previous registered pane',
+        ),
+        r: leaf(
+          'r',
+          'Resize Active Dock',
+          'Window / Pane',
+          'pane.resizeMode',
+          'Enter modal pane resize mode (h/l or arrows, Esc/Enter to exit)',
         ),
       },
     },
