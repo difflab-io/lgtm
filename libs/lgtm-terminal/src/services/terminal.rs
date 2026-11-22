@@ -345,28 +345,41 @@ impl TerminalService {
     pub fn close_session(&self, session_id: &str) -> Result<()> {
         let _ = self.detach(session_id);
         let client = self.ensure_connected()?;
-        client.terminal_kill(session_id)?;
-        if let Ok(mut guard) = self.inner.lock() {
-            guard.tracked.remove(session_id);
+        let observer_ch = self
+            .inner
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.tracked.remove(session_id))
+            .and_then(|tracking| tracking.observer_channel);
+        if let Some(ch) = observer_ch {
+            let _ = client.close_channel(ch);
         }
+        client.terminal_kill(session_id)?;
         Ok(())
     }
 
-    /// Detaches any active UI stream without killing background `herdr-core` sessions (called on desktop app quit).
+    /// Detaches any active UI stream and background observer channels without killing `herdr-core` sessions (called on desktop app quit).
     pub fn detach_all(&self) {
-        let (client, channel) = {
+        let (client, channels) = {
             let Ok(mut guard) = self.inner.lock() else {
                 return;
             };
-            let removed = guard.active_attachment.take();
-            let ch = removed.map(|att| {
+            let mut to_close = Vec::new();
+            if let Some(att) = guard.active_attachment.take() {
                 att.stop_flag.store(true, Ordering::Relaxed);
-                att.channel
-            });
-            (guard.client.clone(), ch)
+                to_close.push(att.channel);
+            }
+            for tracking in guard.tracked.values_mut() {
+                if let Some(ch) = tracking.observer_channel.take() {
+                    to_close.push(ch);
+                }
+            }
+            (guard.client.clone(), to_close)
         };
-        if let (Some(client), Some(channel)) = (client, channel) {
-            let _ = client.close_channel(channel);
+        if let Some(client) = client {
+            for channel in channels {
+                let _ = client.close_channel(channel);
+            }
         }
     }
 

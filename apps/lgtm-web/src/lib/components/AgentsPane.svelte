@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Pane } from '@cloudvoyant/helical-svelte'
-  import type { TerminalAgentStatus } from '../clients/workspaceClient'
   import { useService } from '../services/context'
+  import { terminalStatusDotClass } from '../services/terminalService.svelte'
   import SidebarPaneHeader from './SidebarPaneHeader.svelte'
 
   // State ---------------------------------------------------------------------
@@ -10,19 +10,6 @@
   const terminal = useService('terminal')
 
   const agents = $derived(terminal.detectedAgents)
-
-  function dotColorClass(status: TerminalAgentStatus): string {
-    switch (status) {
-      case 'working':
-        return 'bg-amber-400'
-      case 'blocked':
-        return 'bg-orange-500'
-      case 'done':
-        return 'bg-sky-400'
-      case 'idle':
-        return 'bg-emerald-400'
-    }
-  }
 
   function workspaceLabel(root: string): string {
     return root.split('/').filter(Boolean).at(-1) ?? root
@@ -101,9 +88,10 @@
                   <span
                     data-testid="agent-status-dot"
                     data-status={session.status}
-                    class={['size-1.5 shrink-0 rounded-full', dotColorClass(session.status)].join(
-                      ' ',
-                    )}
+                    class={[
+                      'size-1.5 shrink-0 rounded-full',
+                      terminalStatusDotClass(session.status),
+                    ].join(' ')}
                     aria-label={`Agent status: ${session.status}`}
                   ></span>
                   <span class="truncate font-medium">

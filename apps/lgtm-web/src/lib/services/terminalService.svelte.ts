@@ -32,6 +32,20 @@ const STATUS_PRIORITY: Record<TerminalAgentStatus, number> = {
   idle: 0,
 }
 
+/** Returns the consistent Herdr-style status dot Tailwind background class for `status`. */
+export function terminalStatusDotClass(status: TerminalAgentStatus): string {
+  switch (status) {
+    case 'working':
+      return 'bg-amber-400'
+    case 'blocked':
+      return 'bg-orange-500'
+    case 'done':
+      return 'bg-sky-400'
+    case 'idle':
+      return 'bg-emerald-400'
+  }
+}
+
 /**
  * Frontend domain service managing `herdr-core` terminal tabs, active-surface attachment,
  * dynamic `AgentsPane` entries, Herdr-style worktree status dots, and background notifications.

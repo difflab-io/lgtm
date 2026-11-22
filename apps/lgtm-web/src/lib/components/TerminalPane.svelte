@@ -2,8 +2,8 @@
   import { Button } from '@cloudvoyant/helical-svelte'
   import { TerminalSurface, type TerminalSurfaceHandle } from 'lgtm-ui'
   import { Plus, SquareTerminal, X } from 'lucide-svelte'
-  import type { TerminalAgentStatus } from '../clients/workspaceClient'
   import { useService } from '../services/context'
+  import { terminalStatusDotClass } from '../services/terminalService.svelte'
 
   // State ---------------------------------------------------------------------
   const workspace = useService('workspace')
@@ -11,19 +11,6 @@
 
   const tabs = $derived(terminal.activeWorkspaceTabs)
   const activeSessionId = $derived(terminal.activeSessionId)
-
-  function dotColorClass(status: TerminalAgentStatus): string {
-    switch (status) {
-      case 'working':
-        return 'bg-amber-400'
-      case 'blocked':
-        return 'bg-orange-500'
-      case 'done':
-        return 'bg-sky-400'
-      case 'idle':
-        return 'bg-emerald-400'
-    }
-  }
 
   // Lifecycle -----------------------------------------------------------------
   $effect(() => {
@@ -84,7 +71,7 @@
           <span
             data-testid="terminal-tab-dot"
             data-status={tab.status}
-            class={['size-1.5 shrink-0 rounded-full', dotColorClass(tab.status)].join(' ')}
+            class={['size-1.5 shrink-0 rounded-full', terminalStatusDotClass(tab.status)].join(' ')}
             aria-label={`Status: ${tab.status}`}
           ></span>
           <span class="truncate">{tab.title}</span>

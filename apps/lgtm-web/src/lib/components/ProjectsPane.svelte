@@ -5,6 +5,7 @@
   import { GitBranch } from 'lucide-svelte'
   import { resolveColorHex, resolveIconComponent } from '../constants'
   import { useService } from '../services/context'
+  import { terminalStatusDotClass } from '../services/terminalService.svelte'
   import BranchNewDialog from './BranchNewDialog.svelte'
   import ProjectEditDialog from './ProjectEditDialog.svelte'
   import WorktreeNewDialog from './WorktreeNewDialog.svelte'
@@ -14,19 +15,6 @@
   const project = useService('project')
   const workspace = useService('workspace')
   const terminal = useService('terminal')
-
-  function statusDotClass(status: 'working' | 'blocked' | 'done' | 'idle'): string {
-    switch (status) {
-      case 'working':
-        return 'bg-amber-400'
-      case 'blocked':
-        return 'bg-orange-500'
-      case 'done':
-        return 'bg-sky-400'
-      case 'idle':
-        return 'bg-emerald-500'
-    }
-  }
 
   // Lifecycle -----------------------------------------------------------------
   useKeymap(
@@ -122,7 +110,7 @@
           data-testid="workspace-status-dot"
           data-workspace-path={node.value}
           data-status={status}
-          class={['inline-block size-2 rounded-full', statusDotClass(status)].join(' ')}
+          class={['inline-block size-2 rounded-full', terminalStatusDotClass(status)].join(' ')}
           title={`Terminal status: ${status}`}
         ></span>
       {/if}
