@@ -13,6 +13,20 @@
   // State ---------------------------------------------------------------------
   const project = useService('project')
   const workspace = useService('workspace')
+  const terminal = useService('terminal')
+
+  function statusDotClass(status: 'working' | 'blocked' | 'done' | 'idle'): string {
+    switch (status) {
+      case 'working':
+        return 'bg-amber-400'
+      case 'blocked':
+        return 'bg-orange-500'
+      case 'done':
+        return 'bg-sky-400'
+      case 'idle':
+        return 'bg-emerald-500'
+    }
+  }
 
   // Lifecycle -----------------------------------------------------------------
   useKeymap(
@@ -99,6 +113,18 @@
         </span>
       {:else}
         <GitBranch size={13} strokeWidth={1.5} />
+      {/if}
+    {/snippet}
+    {#snippet trailing(node)}
+      {@const status = terminal.getWorkspaceStatus(node.value)}
+      {#if status}
+        <span
+          data-testid="workspace-status-dot"
+          data-workspace-path={node.value}
+          data-status={status}
+          class={['inline-block size-2 rounded-full', statusDotClass(status)].join(' ')}
+          title={`Terminal status: ${status}`}
+        ></span>
       {/if}
     {/snippet}
   </TreeView>

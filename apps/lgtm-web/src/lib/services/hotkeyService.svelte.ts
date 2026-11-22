@@ -43,6 +43,8 @@ export class HotkeyService {
   commandStyleOverride = $state<'colon' | null>(null)
   /** Currently mounted CodeMirror 6 `EditorView`, if a file or diagnostics buffer is open. */
   activeEditorView = $state<EditorView | null>(null)
+  /** Whether Herdr-style modal pane resize mode (`Ctrl+b r`) is active. */
+  resizeModeActive = $state(false)
 
   /** Constructs a `HotkeyService` bound to the domain `services` registry. */
   constructor(services: Omit<AppServices, 'hotkeys'>) {
@@ -109,6 +111,31 @@ export class HotkeyService {
       'Toggle the Projects dock pane open or closed',
       ['normal', 'select', 'insert'],
     ),
+    'Mod+`': leaf(
+      'Mod+`',
+      'Toggle Terminal Dock',
+      'Terminal',
+      'terminal.toggle',
+      'Toggle the right-hand terminal dock open or closed',
+      ['normal', 'select', 'insert'],
+    ),
+    'Control+b': {
+      key: 'Control+b',
+      label: 'Pane Prefix',
+      group: 'Window / Pane',
+      description: 'Herdr-style pane prefix commands',
+      category: 'Window / Pane',
+      mode: ['normal', 'select', 'insert'],
+      children: {
+        r: leaf(
+          'r',
+          'Resize Active Dock',
+          'Window / Pane',
+          'pane.resizeMode',
+          'Enter modal pane resize mode (h/l or arrows, Esc/Enter to exit)',
+        ),
+      },
+    },
     'Mod+,': leaf(
       'Mod+,',
       'Global Settings',
@@ -399,6 +426,43 @@ export class HotkeyService {
             'projects.show',
             'Toggle the Projects dock pane',
           ),
+          a: leaf(
+            'a',
+            'Focus Agents Pane',
+            'Terminal',
+            'agents.focus',
+            'Focus the running agents pane in the Projects dock',
+          ),
+          t: {
+            key: 't',
+            label: '+terminal',
+            group: 'Terminal',
+            description: 'Toggle and manage integrated terminals',
+            category: 'Terminal',
+            children: {
+              t: leaf(
+                't',
+                'Toggle Terminal Dock',
+                'Terminal',
+                'terminal.toggle',
+                'Toggle the right-hand terminal dock open or closed',
+              ),
+              n: leaf(
+                'n',
+                'New Terminal',
+                'Terminal',
+                'terminal.new',
+                'Open a new terminal tab in the active workspace',
+              ),
+              x: leaf(
+                'x',
+                'Close Active Terminal',
+                'Terminal',
+                'terminal.close',
+                'Close the active terminal tab',
+              ),
+            },
+          },
           p: {
             key: 'p',
             label: '+projects',
@@ -840,17 +904,56 @@ export class HotkeyService {
       return true
     },
     'tab.next': (ctx: KeymapCommandContext) => {
+      if (this.isRightDockActive()) {
+        if (this.services.terminal.activeWorkspaceTabs.length <= 1) return false
+        void this.services.terminal.selectNextTab(ctx.count)
+        return true
+      }
       if (this.services.workspace.tabs.length <= 1) return false
       void this.services.workspace.selectNextTab(ctx.count)
       return true
     },
     'tab.prev': (ctx: KeymapCommandContext) => {
+      if (this.isRightDockActive()) {
+        if (this.services.terminal.activeWorkspaceTabs.length <= 1) return false
+        void this.services.terminal.selectPrevTab(ctx.count)
+        return true
+      }
       if (this.services.workspace.tabs.length <= 1) return false
       void this.services.workspace.selectPrevTab(ctx.count)
       return true
     },
     'tab.close': () => {
+      if (this.isRightDockActive()) {
+        void this.services.terminal.closeActiveTab()
+        return true
+      }
       void this.services.workspace.closeActiveTab()
+      return true
+    },
+    'terminal.toggle': () => {
+      this.services.workspace.toggleRightDock('terminal')
+      return true
+    },
+    'terminal.new': () => {
+      void this.services.terminal.createTab()
+      return true
+    },
+    'terminal.close': () => {
+      void this.services.terminal.closeActiveTab()
+      return true
+    },
+    'agents.focus': () => {
+      if (!this.services.workspace.projectsOpen) {
+        this.services.workspace.toggleProjectsPane()
+      }
+      void tick().then(() => {
+        this.controller?.focusPane('agents')
+      })
+      return true
+    },
+    'pane.resizeMode': () => {
+      this.resizeModeActive = true
       return true
     },
     'lsp.gotoDefinition': () => this.gotoDefinitionAtCursor(),
@@ -986,11 +1089,15 @@ export class HotkeyService {
         aliases: ['q', 'bd'],
         keywords: ['close', 'buffer-close'],
         label: 'Close Active Tab',
-        description: 'Close the active editor tab',
+        description: 'Close the active editor or terminal tab',
         group: 'Buffer',
         shortcut: 'Space b d',
         onSelect: () => {
-          void this.services.workspace.closeActiveTab()
+          if (this.isRightDockActive()) {
+            void this.services.terminal.closeActiveTab()
+          } else {
+            void this.services.workspace.closeActiveTab()
+          }
         },
       },
       {
@@ -999,11 +1106,15 @@ export class HotkeyService {
         aliases: ['bn'],
         keywords: ['bnext', 'tab-next'],
         label: 'Next Tab',
-        description: 'Cycle to the next open editor tab',
+        description: 'Cycle to the next open editor or terminal tab',
         group: 'Buffer',
         shortcut: [']', 't'],
         onSelect: () => {
-          void this.services.workspace.selectNextTab(1)
+          if (this.isRightDockActive()) {
+            this.services.terminal.selectNextTab(1)
+          } else {
+            void this.services.workspace.selectNextTab(1)
+          }
         },
       },
       {
@@ -1012,11 +1123,69 @@ export class HotkeyService {
         aliases: ['bp'],
         keywords: ['bprev', 'tab-prev'],
         label: 'Previous Tab',
-        description: 'Cycle to the previous open editor tab',
+        description: 'Cycle to the previous open editor or terminal tab',
         group: 'Buffer',
         shortcut: ['[', 't'],
         onSelect: () => {
-          void this.services.workspace.selectPrevTab(1)
+          if (this.isRightDockActive()) {
+            this.services.terminal.selectPrevTab(1)
+          } else {
+            void this.services.workspace.selectPrevTab(1)
+          }
+        },
+      },
+      {
+        value: 'terminal-toggle',
+        command: 'terminal',
+        aliases: ['term'],
+        keywords: ['shell', 'right-dock'],
+        label: 'Toggle Terminal Dock',
+        description: 'Show or hide the right-hand terminal dock',
+        group: 'Terminal',
+        shortcut: 'Mod+`',
+        onSelect: () => {
+          this.services.workspace.toggleRightDock('terminal')
+        },
+      },
+      {
+        value: 'terminal-new',
+        command: 'terminal-new',
+        keywords: ['shell', 'new-terminal'],
+        label: 'New Terminal',
+        description: 'Create a new terminal tab in the active workspace',
+        group: 'Terminal',
+        shortcut: 'Space t n',
+        onSelect: () => {
+          void this.services.terminal.createTab()
+        },
+      },
+      {
+        value: 'terminal-close',
+        command: 'terminal-close',
+        keywords: ['shell', 'close-terminal'],
+        label: 'Close Active Terminal',
+        description: 'Close the currently selected terminal tab',
+        group: 'Terminal',
+        shortcut: 'Space t x',
+        onSelect: () => {
+          void this.services.terminal.closeActiveTab()
+        },
+      },
+      {
+        value: 'agents-focus',
+        command: 'agents',
+        keywords: ['agent', 'terminal-agents'],
+        label: 'Focus Agents Pane',
+        description: 'Focus the running agents pane in the Projects dock',
+        group: 'Terminal',
+        shortcut: 'Space a',
+        onSelect: () => {
+          if (!this.services.workspace.projectsOpen) {
+            this.services.workspace.toggleProjectsPane()
+          }
+          void tick().then(() => {
+            this.controller?.focusPane('agents')
+          })
         },
       },
       {
@@ -1554,10 +1723,47 @@ export class HotkeyService {
     return this.applySettingsPatch({ keybindings: { commandStyle } }, scope)
   }
 
+  /** Handles keyboard resizing when Herdr-style modal resize mode (`Ctrl+b r`) is active. */
+  handleResizeKeydown(event: KeyboardEvent): boolean {
+    if (!this.resizeModeActive) return false
+    const key = event.key
+    if (key === 'Escape' || key === 'Enter') {
+      this.resizeModeActive = false
+      void this.services.workspace.persistDockLayout()
+      return true
+    }
+    const step = 24
+    if (key === 'h' || key === 'ArrowLeft') {
+      if (this.isRightDockActive() || this.services.workspace.rightDockOpen) {
+        this.services.workspace.setRightDockWidth(this.services.workspace.rightDockWidth + step)
+      } else if (this.services.workspace.explorerOpen) {
+        this.services.workspace.setWidgetWidth(this.services.workspace.widgetWidth - step)
+      }
+      return true
+    }
+    if (key === 'l' || key === 'ArrowRight') {
+      if (this.isRightDockActive() || this.services.workspace.rightDockOpen) {
+        this.services.workspace.setRightDockWidth(this.services.workspace.rightDockWidth - step)
+      } else if (this.services.workspace.explorerOpen) {
+        this.services.workspace.setWidgetWidth(this.services.workspace.widgetWidth + step)
+      }
+      return true
+    }
+    return false
+  }
+
   // Private -------------------------------------------------------------------
 
   private get controller() {
     return typeof document !== 'undefined' ? getDocumentWhichKeyController(document) : null
+  }
+
+  private isRightDockActive(): boolean {
+    const activePane = this.controller?.getState().activePaneId
+    if (activePane === 'right-dock') return true
+    if (typeof document === 'undefined') return false
+    const active = document.activeElement
+    return active instanceof Element && Boolean(active.closest('[data-pane-id="right-dock"]'))
   }
 
   private isEditorActive(): boolean {

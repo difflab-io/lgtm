@@ -9,11 +9,13 @@ const testWindow = window as unknown as {
   workspaceTestInvoke: (command: string, args: unknown) => Promise<unknown>
   workspaceTestEmit: (event: string, payload?: unknown) => Promise<void>
   isTauri: boolean
+  __LGTM_IPC_BRIDGE__: boolean
 }
 mockWindows('main')
 mockIPC((command, args) => testWindow.workspaceTestInvoke(command, args), {
   shouldMockEvents: true,
 })
 testWindow.isTauri = true
+testWindow.__LGTM_IPC_BRIDGE__ = true
 testWindow.workspaceTestEmit = (event, payload) => emit(event, payload)
 mount(Shell, { target: document.querySelector('#app')! })

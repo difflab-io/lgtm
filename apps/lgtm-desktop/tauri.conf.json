@@ -29,6 +29,7 @@
   },
   "bundle": {
     "active": true,
+    "externalBin": ["binaries/hc"],
     "macOS": {
       "signingIdentity": "-"
     },

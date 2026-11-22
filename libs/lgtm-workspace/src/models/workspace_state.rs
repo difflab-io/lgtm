@@ -2,7 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::{tab::PersistedTab, tab::TabCandidate, widget::SidebarWidget};
+use crate::models::{
+    tab::PersistedTab,
+    tab::TabCandidate,
+    widget::{RightDockWidget, SidebarWidget},
+};
 
 /// Per-checkout UI snapshot stored for a project primary checkout (`Project.root_path`) or linked worktree (`Worktree.path`).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, specta::Type)]
@@ -50,4 +54,16 @@ pub struct WorkspaceStatePatch {
     pub expanded_dirs: Vec<String>,
     /// Optional updated sidebar widget selection (`Explorer` or `Projects`).
     pub sidebar_widget: Option<SidebarWidget>,
+    /// Optional updated right-dock open state persisted at the session level.
+    #[serde(default)]
+    pub right_dock_open: Option<bool>,
+    /// Optional updated right-dock active widget persisted at the session level.
+    #[serde(default)]
+    pub right_dock_widget: Option<RightDockWidget>,
+    /// Optional updated right-dock pixel width persisted at the session level.
+    #[serde(default)]
+    pub right_dock_width: Option<u32>,
+    /// Optional updated vertical split height for `AgentsPane` inside `#projects-dock-pane`.
+    #[serde(default)]
+    pub agents_pane_height: Option<u32>,
 }

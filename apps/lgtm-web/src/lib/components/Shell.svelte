@@ -20,6 +20,8 @@
   import EditorToolbar from './EditorToolbar.svelte'
   import LeftDock from './LeftDock.svelte'
   import LeftDockToolbar from './LeftDockToolbar.svelte'
+  import RightDock from './RightDock.svelte'
+  import RightDockToolbar from './RightDockToolbar.svelte'
   import Titlebar from './Titlebar.svelte'
 
   // Props ---------------------------------------------------------------------
@@ -29,8 +31,33 @@
   let { client = workspaceClient }: ShellProps = $props()
 
   // State ---------------------------------------------------------------------
-  const services = untrack(() => createAppServices(client))
-  const { workspace, session, lsp, settings, hotkeys } = setServicesContext(services)
+  const appToaster = createToaster({
+    placement: 'top-end',
+    overlap: true,
+    max: 5,
+    gap: 8,
+    offsets: { top: '2.625rem', right: '0.75rem', bottom: '0.75rem', left: '0.75rem' },
+  })
+  const services = untrack(() =>
+    createAppServices(client, {
+      onTerminalNotification: (notification) => {
+        appToaster.create({
+          id: `terminal-notify-${notification.sessionId}`,
+          title: notification.title,
+          description: notification.message,
+          type: notification.status === 'blocked' ? 'warning' : 'info',
+          duration: notification.status === 'blocked' ? 8000 : 5000,
+          action: {
+            label: 'Focus',
+            onClick: () => {
+              void services.terminal.jumpToSession(notification.sessionId)
+            },
+          },
+        })
+      },
+    }),
+  )
+  const { workspace, session, lsp, settings, terminal, hotkeys } = setServicesContext(services)
   const resolvedHotkeys = hotkeys!
   const theme = untrack(
     () =>
@@ -40,13 +67,6 @@
         windowBridge: client.themeWindowBridge?.(),
       }),
   )
-  const appToaster = createToaster({
-    placement: 'top-end',
-    overlap: true,
-    max: 5,
-    gap: 8,
-    offsets: { top: '2.625rem', right: '0.75rem', bottom: '0.75rem', left: '0.75rem' },
-  })
 
   // Derived -------------------------------------------------------------------
   let lastOpenSidebarWidth = $state(236)
@@ -103,6 +123,11 @@
   onMount(() => {
     let active = true
     const handleKeydown = (event: KeyboardEvent) => {
+      if (resolvedHotkeys.handleResizeKeydown(event)) {
+        event.preventDefault()
+        event.stopPropagation()
+        return
+      }
       if (
         resolvedHotkeys.commandOpen &&
         (event.metaKey || event.ctrlKey) &&
@@ -204,10 +229,28 @@
           }
         })
         .catch(() => {})
+      void client
+        .registerTerminalHandlers?.({
+          onSessionUpdated: (event) => {
+            if (active) terminal.handleSessionUpdated(event)
+          },
+          onExited: (event) => {
+            if (active) terminal.handleExited(event)
+          },
+        })
+        .then((stops) => {
+          for (const stop of stops) {
+            if (active) unlisteners.push(stop)
+            else stop()
+          }
+          if (active) void terminal.syncAllSessions()
+        })
+        .catch(() => {})
     }
     return () => {
       active = false
       unlisteners.forEach((stop) => stop())
+      terminal.dispose()
       workspace.dispose()
       session.dispose()
     }
@@ -254,6 +297,7 @@
       <Row class="min-h-0 flex-1 items-stretch gap-0 overflow-hidden">
         <LeftDock />
         <ContentPane />
+        <RightDock />
       </Row>
       <footer
         data-testid="bottom-toolbar"
@@ -261,6 +305,7 @@
       >
         <LeftDockToolbar />
         <EditorToolbar />
+        <RightDockToolbar />
       </footer>
     </SidebarProvider>
     <CommandMenu size="sm" showAliases hotkey={false} />

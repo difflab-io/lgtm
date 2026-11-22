@@ -15,6 +15,7 @@ LGTM components (`lgtm-cli`, `lgtm-forge`, `lgtm-desktop`, `lgtm-config`, `lgtm-
 | `LGTM_BACKEND_ADDR` | `lgtm-forge` | `127.0.0.1:8080` | Socket address (`<ip>:<port>`) bound by the standalone `lgtm-forge` server binary. |
 | `LGTM_RPC_URL` | `lgtm-cli` | `http://127.0.0.1:<daemon-port>/rpc` | Explicit Connect RPC endpoint URL used by `lgtm-cli` instead of discovering or auto-starting the background daemon. |
 | `LGTM_DESKTOP_BIN` | `lgtm-cli` | Auto-discovered (`PATH`, sibling binary, `/Applications/lgtm-desktop.app`) | Overrides the `lgtm-desktop` executable path launched by `lgtm open [<path>]` (or `lgtm [<path>]`). |
+| `LGTM_HC_BIN` | `lgtm-env`, `lgtm-terminal`, `lgtm-desktop` | Bundled sidecar (`hc-<triple>`) or `PATH` | Overrides the `herdr-core` (`hc`) binary path used by `lgtm-terminal` for background terminal sessions. |
 | `LGTM_WORKSPACE` | `lgtm-desktop`, `lgtm-cli` | `~/.lgtm/workspace` | Initial workspace directory opened on launch by `lgtm-desktop` when no explicit path is passed to `workspace_open`. Set automatically by `lgtm open [<path>]`. |
 | `RUST_LOG` | `lgtm-forge`, `lgtm-cli` | `info` | `tracing_subscriber::EnvFilter` directive controlling structured log verbosity. |
 

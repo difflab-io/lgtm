@@ -65,6 +65,7 @@ impl IpcBridgeService {
         }
 
         app.state::<AppState>().lsp.shutdown_all();
+        app.state::<AppState>().terminal.detach_all();
     }
 
     // Private -----------------------------------------------------------------

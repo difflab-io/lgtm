@@ -2,6 +2,7 @@
   import { Button, Row, Sidebar, SidebarContent } from '@cloudvoyant/helical-svelte'
   import { FolderPlus, GitBranch } from 'lucide-svelte'
   import { useService } from '../services/context'
+  import AgentsPane from './AgentsPane.svelte'
   import ProjectsPane from './ProjectsPane.svelte'
   import SidebarPaneHeader from './SidebarPaneHeader.svelte'
   import WidgetPane from './WidgetPane.svelte'
@@ -115,6 +116,7 @@
         <SidebarContent class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
           <ProjectsPane />
         </SidebarContent>
+        <AgentsPane />
       </Sidebar>
       {#if workspace.projectsOpen}
         <div

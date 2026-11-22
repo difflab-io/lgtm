@@ -14,6 +14,7 @@ import {
   type WorkspaceClient,
   type WorkspaceNode,
   type FileContent,
+  type RightDockWidget,
   type Session,
   type SidebarWidget,
   type TabCandidate,
@@ -39,6 +40,10 @@ export class WorkspaceService {
   explorerOpen = $state(true)
   projectsWidth = $state(180)
   widgetWidth = $state(236)
+  rightDockOpen = $state(false)
+  rightDockWidget = $state<RightDockWidget>('terminal')
+  rightDockWidth = $state(420)
+  agentsPaneHeight = $state(180)
   resizing = $state(false)
   tabs = $state<WorkspaceTab[]>([])
   activeTabId = $state<string | null>(null)
@@ -188,6 +193,47 @@ export class WorkspaceService {
     this.widgetWidth = Math.min(480, Math.max(160, Math.round(width)))
   }
 
+  /** Clamps and updates the width of `RightDock`. */
+  setRightDockWidth(width: number): void {
+    this.rightDockWidth = Math.min(820, Math.max(240, Math.round(width)))
+  }
+
+  /** Clamps and updates the height of `AgentsPane` in the bottom section of `#projects-dock-pane`. */
+  setAgentsPaneHeight(height: number): void {
+    this.agentsPaneHeight = Math.min(420, Math.max(96, Math.round(height)))
+  }
+
+  /** Toggles `RightDock` open or closed for `widget` and persists the session-level layout state. */
+  toggleRightDock(widget: RightDockWidget = this.rightDockWidget): void {
+    if (this.rightDockOpen && this.rightDockWidget === widget) {
+      this.rightDockOpen = false
+      this.focusTargetPane('editor')
+    } else {
+      this.rightDockWidget = widget
+      this.rightDockOpen = true
+      this.focusTargetPane('right-dock')
+    }
+    this.sidebarHydrated = true
+    void this.session.saveCurrentSession(this.root)
+  }
+
+  /** Opens `RightDock` on `widget` without collapsing if already open. */
+  openRightDock(widget: RightDockWidget = 'terminal'): void {
+    const changed = !this.rightDockOpen || this.rightDockWidget !== widget
+    this.rightDockWidget = widget
+    this.rightDockOpen = true
+    this.sidebarHydrated = true
+    if (changed) {
+      void this.session.saveCurrentSession(this.root)
+    }
+    this.focusTargetPane('right-dock')
+  }
+
+  /** Persists updated dock dimensions after a pointer-drag or keyboard resize completes. */
+  persistDockLayout(): void {
+    void this.session.saveCurrentSession(this.root)
+  }
+
   /** Updates whether a left-dock pane resizer is actively being dragged. */
   setResizing(active: boolean): void {
     this.resizing = active
@@ -225,13 +271,21 @@ export class WorkspaceService {
     void this.session.saveCurrentSession(this.root)
   }
 
-  /** Hydrates initial sidebar dock widget state from a loaded `Session` if not yet changed locally. */
+  /** Hydrates initial sidebar and right-dock layout state from a loaded `Session` if not yet changed locally. */
   applySessionWidgets(session: Session): void {
     if (!this.sidebarHydrated) {
       this.sidebarHydrated = true
       const nextWidget = session.sidebarWidget ?? 'explorer'
       this.sidebarWidget = nextWidget
       this.projectsOpen = nextWidget === 'projects'
+      this.rightDockOpen = Boolean(session.rightDockOpen)
+      this.rightDockWidget = session.rightDockWidget ?? 'terminal'
+      if (typeof session.rightDockWidth === 'number' && session.rightDockWidth >= 240) {
+        this.rightDockWidth = session.rightDockWidth
+      }
+      if (typeof session.agentsPaneHeight === 'number' && session.agentsPaneHeight >= 96) {
+        this.agentsPaneHeight = session.agentsPaneHeight
+      }
     }
   }
 
@@ -270,6 +324,10 @@ export class WorkspaceService {
       tabs,
       expandedDirs: snapshot ? snapshot.expandedDirs : [],
       sidebarWidget: this.sidebarWidget,
+      rightDockOpen: this.rightDockOpen,
+      rightDockWidget: this.rightDockWidget,
+      rightDockWidth: this.rightDockWidth,
+      agentsPaneHeight: this.agentsPaneHeight,
     }
   }
 
@@ -1116,7 +1174,7 @@ export class WorkspaceService {
     }
   }
 
-  private focusTargetPane(paneId: 'projects' | 'workspace' | 'editor'): void {
+  private focusTargetPane(paneId: 'projects' | 'workspace' | 'editor' | 'right-dock'): void {
     if (typeof document === 'undefined') return
     void tick().then(() => {
       requestAnimationFrame(() => {

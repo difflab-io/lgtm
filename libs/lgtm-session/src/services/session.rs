@@ -65,9 +65,25 @@ impl SessionService {
         patch: WorkspaceStatePatch,
     ) -> Result<Session> {
         let mut session = self.get_session(session_id)?;
+        let right_dock_open = patch.right_dock_open;
+        let right_dock_widget = patch.right_dock_widget;
+        let right_dock_width = patch.right_dock_width;
+        let agents_pane_height = patch.agents_pane_height;
         let (sidebar_widget, workspace_state) = WorkspaceService::prepare_session_state(patch);
         if let Some(widget) = sidebar_widget {
             session.sidebar_widget = widget;
+        }
+        if let Some(open) = right_dock_open {
+            session.right_dock_open = open;
+        }
+        if let Some(widget) = right_dock_widget {
+            session.right_dock_widget = widget;
+        }
+        if let Some(width) = right_dock_width {
+            session.right_dock_width = Some(width);
+        }
+        if let Some(height) = agents_pane_height {
+            session.agents_pane_height = Some(height);
         }
         if let Some(state) = workspace_state {
             tracing::info!(

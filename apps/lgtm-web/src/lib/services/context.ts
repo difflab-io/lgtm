@@ -5,6 +5,7 @@ import { LspService } from './lspService.svelte'
 import { ProjectService } from './projectService.svelte'
 import { SessionService } from './sessionService.svelte'
 import { SettingsService } from './settingsService.svelte'
+import { TerminalService, type TerminalWorktreeNotification } from './terminalService.svelte'
 import { WorkspaceService, type WorkspaceServiceCallbacks } from './workspaceService.svelte'
 
 const SERVICES_CONTEXT_KEY = Symbol('lgtm.services')
@@ -16,13 +17,17 @@ export interface AppServices {
   session: SessionService
   lsp: LspService
   settings: SettingsService
+  terminal: TerminalService
   hotkeys?: HotkeyService
 }
 
 // Public ----------------------------------------------------------------------
 
-/** Constructs peer frontend domain services (`workspace`, `project`, `session`, `lsp`, `settings`, and `hotkeys`) with shared callbacks wired cleanly. */
-export function createAppServices(client: WorkspaceClient): Required<AppServices> {
+/** Constructs peer frontend domain services (`workspace`, `project`, `session`, `lsp`, `settings`, `terminal`, and `hotkeys`) with shared callbacks wired cleanly. */
+export function createAppServices(
+  client: WorkspaceClient,
+  options?: { onTerminalNotification?: (notification: TerminalWorktreeNotification) => void },
+): Required<AppServices> {
   const settings = new SettingsService(client)
   const lsp = new LspService(client)
   const session = new SessionService(client)
@@ -39,11 +44,18 @@ export function createAppServices(client: WorkspaceClient): Required<AppServices
       workspace.creationError = message
     },
   })
+  const terminal = new TerminalService(client, {
+    getRoot: () => workspace.root,
+    isRightDockOpen: () => workspace.rightDockOpen,
+    openRightDock: () => workspace.openRightDock('terminal'),
+    selectWorkspace: (path) => workspace.selectWorkspace(path),
+    onNotification: options?.onTerminalNotification,
+  })
   workspaceCallbacks.onNewWorktreeRequested = () => project.openNewWorktreeDialog()
   session.bindPeers({ project, workspace })
-  const services: AppServices = { workspace, project, session, lsp, settings }
+  const services: AppServices = { workspace, project, session, lsp, settings, terminal }
   const hotkeys = new HotkeyService(services)
-  return { workspace, project, session, lsp, settings, hotkeys }
+  return { workspace, project, session, lsp, settings, terminal, hotkeys }
 }
 
 /** Registers all domain services (`workspace`, `project`, `session`, `lsp`, `settings`, `hotkeys`) in the component tree's Svelte context. */

@@ -10,6 +10,7 @@ pub use error::WorkspaceError;
 pub use error::error;
 pub use models::tab::PersistedTab;
 pub use models::tab::TabCandidate;
+pub use models::widget::RightDockWidget;
 pub use models::widget::SidebarWidget;
 pub use models::workspace::Workspace;
 pub use models::workspace::WorkspaceListing;

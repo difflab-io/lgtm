@@ -53,6 +53,20 @@ const desktopBinary = join(
   process.platform === 'win32' ? 'lgtm-desktop.exe' : 'lgtm-desktop',
 )
 
+function resolveStagedHcBinary(): string {
+  const triple =
+    process.platform === 'darwin'
+      ? process.arch === 'arm64'
+        ? 'aarch64-apple-darwin'
+        : 'x86_64-apple-darwin'
+      : process.platform === 'win32'
+        ? 'x86_64-pc-windows-msvc.exe'
+        : process.arch === 'arm64'
+          ? 'aarch64-unknown-linux-gnu'
+          : 'x86_64-unknown-linux-gnu'
+  return join(repoRoot, 'apps', 'lgtm-desktop', 'binaries', `hc-${triple}`)
+}
+
 const MOCK_LSP_SERVER_SOURCE = `import { Buffer } from 'node:buffer';
 
 let buffer = Buffer.alloc(0);
@@ -350,12 +364,16 @@ export const test = base.extend<{
         )
       }
 
+      const hcSession = `le${Math.random().toString(16).slice(2, 10)}`
+      const hcBin = resolveStagedHcBinary()
       const bridge = spawn(desktopBinary, ['--ipc-bridge', homeRoot], {
         env: {
           ...process.env,
           LGTM_IPC_BRIDGE: '1',
           LGTM_E2E_PERMANENT_DELETE: '1',
           LGTM_E2E_LSP_SCRIPT: mockLspScript,
+          LGTM_HC_BIN: hcBin,
+          HC_SESSION: hcSession,
         },
         stdio: ['pipe', 'pipe', 'inherit'],
       })
@@ -492,6 +510,15 @@ export const test = base.extend<{
               bridge.stdin.end()
               bridge.kill()
             } finally {
+              try {
+                execFileSync(hcBin, ['daemon', 'stop'], {
+                  env: { ...process.env, HC_SESSION: hcSession },
+                  stdio: 'ignore',
+                  timeout: 3000,
+                })
+              } catch {
+                // Daemon may not have been started by tests that did not open terminals.
+              }
               await rm(homeRoot, { recursive: true, force: true })
               for (const dir of extraDirs) {
                 await rm(dir, { recursive: true, force: true })

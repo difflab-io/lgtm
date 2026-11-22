@@ -1,4 +1,4 @@
-import { invoke, isTauri } from '@tauri-apps/api/core'
+import { Channel, invoke, isTauri } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { ThemeWindowBridge } from 'lgtm-ui'
@@ -8,6 +8,7 @@ import {
   type AppearanceSettingsPatch,
   type CommandStyle,
   type ConfigScope,
+  type DetectedAgent,
   type EditorSettings,
   type EditorSettingsPatch,
   type FileContent,
@@ -35,9 +36,18 @@ import {
   type PersistedTab,
   type Project,
   type ResolvedConfigSnapshot,
+  type RightDockWidget,
   type Session,
   type SidebarWidget,
   type TabCandidate,
+  type TerminalAgentMatcher,
+  type TerminalAgentStatus,
+  type TerminalExitEvent,
+  type TerminalSession,
+  type TerminalSettings,
+  type TerminalSettingsPatch,
+  type TerminalStreamEvent,
+  type TerminalStreamPush,
   type ThemeMode,
   type WorkspaceError,
   type WorkspaceListing,
@@ -53,6 +63,7 @@ export type {
   AppearanceSettingsPatch,
   CommandStyle,
   ConfigScope,
+  DetectedAgent,
   EditorSettings,
   EditorSettingsPatch,
   FileContent,
@@ -80,9 +91,18 @@ export type {
   PersistedTab,
   Project,
   ResolvedConfigSnapshot,
+  RightDockWidget,
   Session,
   SidebarWidget,
   TabCandidate,
+  TerminalAgentMatcher,
+  TerminalAgentStatus,
+  TerminalExitEvent,
+  TerminalSession,
+  TerminalSettings,
+  TerminalSettingsPatch,
+  TerminalStreamEvent,
+  TerminalStreamPush,
   ThemeMode,
   WorkspaceError,
   WorkspaceListing,
@@ -145,6 +165,23 @@ export interface WorkspaceClient {
   projectRemoveWorktree?(projectId: string, worktreePath: string, force?: boolean): Promise<Session>
   projectRemove?(projectId: string): Promise<Session>
   projectCheckoutBranch?(workspaceRoot: string, branch: string, create?: boolean): Promise<Session>
+  terminalList?(workspaceRoot?: string | null): Promise<TerminalSession[]>
+  terminalCreate?(workspaceRoot: string, cols: number, rows: number): Promise<TerminalSession>
+  terminalAttach?(
+    sessionId: string,
+    cols: number,
+    rows: number,
+    onEvent: (event: TerminalStreamEvent) => void,
+  ): Promise<TerminalSession>
+  terminalDetach?(sessionId: string): Promise<void>
+  terminalMarkSeen?(sessionId: string): Promise<TerminalSession | null>
+  terminalWrite?(sessionId: string, data: number[]): Promise<void>
+  terminalResize?(sessionId: string, cols: number, rows: number): Promise<void>
+  terminalClose?(sessionId: string): Promise<void>
+  registerTerminalHandlers?(handlers: {
+    onSessionUpdated: (session: TerminalSession) => void
+    onExited: (event: TerminalExitEvent) => void
+  }): Promise<(() => void)[]>
   registerSessionHandlers?(handlers: {
     onSessionUpdated: (session: Session) => void
   }): Promise<(() => void)[]>
@@ -157,6 +194,8 @@ export interface WorkspaceClient {
     onDiagnostics: (event: LspFileDiagnosticsEvent) => void
   }): Promise<(() => void)[]>
 }
+
+const bridgeStreamUnlisteners = new Map<string, () => void>()
 
 export const workspaceClient: WorkspaceClient = {
   isDesktop: () => isTauri(),
@@ -238,6 +277,69 @@ export const workspaceClient: WorkspaceClient = {
   projectRemove: (projectId: string) => commands.projectRemove(projectId),
   projectCheckoutBranch: (workspaceRoot: string, branch: string, create?: boolean) =>
     commands.projectCheckoutBranch(workspaceRoot, branch, create ?? null),
+  terminalList: (workspaceRoot?: string | null) => commands.terminalList(workspaceRoot ?? null),
+  terminalCreate: (workspaceRoot: string, cols: number, rows: number) =>
+    commands.terminalCreate(workspaceRoot, cols, rows),
+  terminalAttach: async (
+    sessionId: string,
+    cols: number,
+    rows: number,
+    onEvent: (event: TerminalStreamEvent) => void,
+  ) => {
+    if (
+      typeof window !== 'undefined' &&
+      (window as unknown as { __LGTM_IPC_BRIDGE__?: boolean }).__LGTM_IPC_BRIDGE__
+    ) {
+      const stop = await listen<{ sessionId: string; event: TerminalStreamEvent }>(
+        'terminal-stream',
+        ({ payload }) => {
+          if (payload.sessionId === sessionId) {
+            onEvent(payload.event)
+          }
+        },
+      )
+      const previousStop = bridgeStreamUnlisteners.get(sessionId)
+      previousStop?.()
+      bridgeStreamUnlisteners.set(sessionId, stop)
+      return invoke<TerminalSession>('terminal_attach_events', {
+        sessionId,
+        cols,
+        rows,
+      })
+    }
+    const channel = new Channel<TerminalStreamEvent>()
+    channel.onmessage = (event) => onEvent(event)
+    return invoke<TerminalSession>('terminal_attach', {
+      sessionId,
+      cols,
+      rows,
+      onEvent: channel,
+    })
+  },
+  terminalDetach: async (sessionId: string) => {
+    bridgeStreamUnlisteners.get(sessionId)?.()
+    bridgeStreamUnlisteners.delete(sessionId)
+    await commands.terminalDetach(sessionId)
+  },
+  terminalMarkSeen: (sessionId: string) => commands.terminalMarkSeen(sessionId),
+  terminalWrite: async (sessionId: string, data: number[]) => {
+    await commands.terminalWrite(sessionId, data)
+  },
+  terminalResize: async (sessionId: string, cols: number, rows: number) => {
+    await commands.terminalResize(sessionId, cols, rows)
+  },
+  terminalClose: async (sessionId: string) => {
+    await commands.terminalClose(sessionId)
+  },
+  registerTerminalHandlers: (handlers) =>
+    Promise.all([
+      listen<TerminalSession>('terminal-session-updated', (event) => {
+        handlers.onSessionUpdated(event.payload)
+      }),
+      listen<TerminalExitEvent>('terminal-exited', (event) => {
+        handlers.onExited(event.payload)
+      }),
+    ]),
   registerSessionHandlers: (handlers) =>
     Promise.all([
       listen<Session>('session-updated', (event) => {

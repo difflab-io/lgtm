@@ -28,6 +28,9 @@
     "@codemirror/state": "6.7.6",
     "@codemirror/view": "6.43.15",
     "@lezer/highlight": "1.2.3",
+    "@wterm/core": "0.6.0",
+    "@wterm/dom": "0.6.0",
+    "@wterm/ghostty": "0.6.0",
     "class-variance-authority": "0.7.1",
     "codemirror": "6.0.2",
     "lucide-svelte": "0.577.0"

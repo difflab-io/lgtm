@@ -9,6 +9,7 @@ export default defineConfig({
     'workspace-lsp.spec.ts',
     'workspace-projects.spec.ts',
     'workspace-settings.spec.ts',
+    'workspace-terminals.spec.ts',
   ],
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
