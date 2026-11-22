@@ -314,6 +314,10 @@ mod given_a_project_exists_in_session {
                             ],
                             expanded_dirs: vec!["src".to_owned()],
                             sidebar_widget: Some(SidebarWidget::Projects),
+                            right_dock_open: Some(true),
+                            right_dock_widget: Some(lgtm_workspace::RightDockWidget::Terminal),
+                            right_dock_width: Some(420),
+                            agents_pane_height: Some(180),
                         },
                     )
                     .unwrap();
@@ -324,6 +328,13 @@ mod given_a_project_exists_in_session {
 
             // Assert
             assert_eq!(reloaded.sidebar_widget, SidebarWidget::Projects);
+            assert!(reloaded.right_dock_open);
+            assert_eq!(
+                reloaded.right_dock_widget,
+                lgtm_workspace::RightDockWidget::Terminal
+            );
+            assert_eq!(reloaded.right_dock_width, Some(420));
+            assert_eq!(reloaded.agents_pane_height, Some(180));
             let ws_state = reloaded.workspaces.get(&wt_path_str).unwrap();
             assert_eq!(ws_state.expanded_dirs, vec!["src".to_owned()]);
             assert_eq!(

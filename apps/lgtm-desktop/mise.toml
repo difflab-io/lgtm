@@ -15,8 +15,112 @@ rust = { version = "1.94.0", components = "rustfmt,clippy,rust-analyzer" }
 "apt:wget" = "latest"
 "apt:file" = "latest"
 
+[tasks."hc:stage"]
+description = "Fetch and stage the pinned herdr-core (hc) Tauri sidecar binary"
+run = '''
+set -eu
+HC_VERSION="0.1.21"
+os="$(uname -s)"
+arch="$(uname -m)"
+case "$os:$arch" in
+  Darwin:arm64|Darwin:aarch64)
+    triple="aarch64-apple-darwin"
+    url="https://releases.herdr.dev/core/${HC_VERSION}/herdr-core-macos-aarch64.tar.gz"
+    want="1ab38dd9270f63a8f794d6d60e8702eb0d1c85a72bda85d735e5eea43f05ffed"
+    ;;
+  Darwin:x86_64)
+    triple="x86_64-apple-darwin"
+    url="https://releases.herdr.dev/core/${HC_VERSION}/herdr-core-macos-x86_64.tar.gz"
+    want="e377e1d342cddce0346da5b2f3c281b9701e4731c00024c7c5028265e77a217f"
+    ;;
+  Linux:aarch64|Linux:arm64)
+    triple="aarch64-unknown-linux-gnu"
+    url="https://releases.herdr.dev/core/${HC_VERSION}/herdr-core-linux-aarch64.tar.gz"
+    want="e844a2bfab48a226097679d076bc83042fe57fccef5387ef802e5b24e78b529a"
+    ;;
+  Linux:x86_64|Linux:amd64)
+    triple="x86_64-unknown-linux-gnu"
+    url="https://releases.herdr.dev/core/${HC_VERSION}/herdr-core-linux-x86_64.tar.gz"
+    want="78424755c10a40dde38a0bdb55c20ac19706e9ae05ed68fc2acf1fcff0d941c1"
+    ;;
+  *)
+    echo "hc:stage: unsupported host ${os}:${arch}" >&2
+    exit 1
+    ;;
+esac
+
+dest="binaries/hc-${triple}"
+stamp="binaries/hc-${triple}.version"
+if [ -x "$dest" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$HC_VERSION" ]; then
+  echo "hc:stage: ${dest} (${HC_VERSION}) already staged"
+  exit 0
+fi
+
+mkdir -p binaries
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+curl -fsSL "$url" -o "$tmp/herdr-core.tar.gz"
+if command -v sha256sum >/dev/null 2>&1; then
+  got="$(sha256sum "$tmp/herdr-core.tar.gz" | cut -d' ' -f1)"
+else
+  got="$(shasum -a 256 "$tmp/herdr-core.tar.gz" | cut -d' ' -f1)"
+fi
+if [ "$got" != "$want" ]; then
+  echo "hc:stage: sha256 mismatch (got ${got}, want ${want})" >&2
+  exit 1
+fi
+tar -xzf "$tmp/herdr-core.tar.gz" -C "$tmp"
+src_bin="$(find "$tmp" -type f \( -name 'herdr-core' -o -name 'hc' \) | head -n 1)"
+if [ -z "$src_bin" ]; then
+  echo "hc:stage: herdr-core binary not found in archive" >&2
+  exit 1
+fi
+cp "$src_bin" "$dest"
+chmod +x "$dest"
+printf '%s' "$HC_VERSION" > "$stamp"
+echo "hc:stage: staged ${dest} (${HC_VERSION})"
+'''
+run_windows = '''#!/usr/bin/env pwsh
+$ErrorActionPreference = 'Stop'
+$hcVersion = '0.1.21'
+$triple = 'x86_64-pc-windows-msvc'
+$url = "https://releases.herdr.dev/core/$hcVersion/herdr-core-windows-x86_64.zip"
+$want = 'a8984634c35b58ba82d0aec078d5a5e6004da01d5a25b3daf822ab5e31c7312b'
+$dest = "binaries/hc-$triple.exe"
+$stamp = "binaries/hc-$triple.version"
+if ((Test-Path -LiteralPath $dest) -and (Test-Path -LiteralPath $stamp) -and ((Get-Content -Raw $stamp).Trim() -eq $hcVersion)) {
+  Write-Output "hc:stage: $dest ($hcVersion) already staged"
+  exit 0
+}
+New-Item -ItemType Directory -Force -Path binaries | Out-Null
+$tmp = Join-Path ([IO.Path]::GetTempPath()) "lgtm-hc-$PID"
+New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+try {
+  $zip = Join-Path $tmp 'herdr-core.zip'
+  curl.exe -fsSL $url -o $zip
+  if ($LASTEXITCODE -ne 0) { throw "download failed: $url" }
+  $stream = [IO.File]::OpenRead($zip)
+  try {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $got = ([BitConverter]::ToString($sha.ComputeHash($stream)) -replace '-', '').ToLowerInvariant()
+  } finally {
+    $stream.Dispose()
+  }
+  if ($got -ne $want) { throw "sha256 mismatch (got $got, want $want)" }
+  & (Join-Path $env:SystemRoot 'System32\tar.exe') -xf $zip -C $tmp
+  $srcBin = Get-ChildItem -LiteralPath $tmp -Recurse -File | Where-Object { $_.Name -in @('herdr-core.exe', 'hc.exe') } | Select-Object -First 1
+  if (-not $srcBin) { throw 'herdr-core.exe not found in archive' }
+  Copy-Item -LiteralPath $srcBin.FullName -Destination $dest -Force
+  Set-Content -LiteralPath $stamp -Value $hcVersion -NoNewline
+  Write-Output "hc:stage: staged $dest ($hcVersion)"
+} finally {
+  Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+}
+'''
+
 [tasks.install]
-description = "Install native packages and fetch Cargo dependencies"
+description = "Install native packages, stage hc sidecar, and fetch Cargo dependencies"
+depends = ["hc:stage"]
 run = '''
 set -eu
 if command -v apt-get >/dev/null 2>&1; then

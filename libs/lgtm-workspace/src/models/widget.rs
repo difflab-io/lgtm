@@ -1,4 +1,4 @@
-//! Domain model representing active left-dock sidebar widgets in a desktop workspace.
+//! Domain models representing active left-dock and right-dock widgets in a desktop workspace.
 
 use serde::{Deserialize, Serialize};
 
@@ -11,4 +11,13 @@ pub enum SidebarWidget {
     Explorer,
     /// Open projects and collapsible worktrees tree (`ProjectsPane.svelte`).
     Projects,
+}
+
+/// Extensible right-dock widget mode persisted at the session level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum RightDockWidget {
+    /// Multi-tab integrated terminal widget (`TerminalPane.svelte`).
+    #[default]
+    Terminal,
 }

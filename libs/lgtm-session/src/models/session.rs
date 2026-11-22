@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use lgtm_project::Project;
-use lgtm_workspace::{SidebarWidget, WorkspaceSessionState};
+use lgtm_workspace::{RightDockWidget, SidebarWidget, WorkspaceSessionState};
 use serde::{Deserialize, Serialize};
 
 /// Top-level persisted session snapshot stored at `~/.lgtm/sessions/<id>.json`.
@@ -15,6 +15,18 @@ pub struct Session {
     /// Active left-sidebar widget (`Explorer` or `Projects`).
     #[serde(default)]
     pub sidebar_widget: SidebarWidget,
+    /// Whether the right dock is open across workspaces and on app launch.
+    #[serde(default)]
+    pub right_dock_open: bool,
+    /// Active widget hosted inside `RightDock` (`Terminal` by default).
+    #[serde(default)]
+    pub right_dock_widget: RightDockWidget,
+    /// Persisted pixel width of `RightDock`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub right_dock_width: Option<u32>,
+    /// Persisted pixel height of `AgentsPane` in the bottom section of `#projects-dock-pane`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agents_pane_height: Option<u32>,
     /// Canonical path of the currently active workspace checkout.
     pub active_workspace_root: String,
     /// Ordered list of open projects and their linked worktrees.
@@ -31,6 +43,10 @@ impl Session {
         Self {
             id: id.trim().to_owned(),
             sidebar_widget: SidebarWidget::Explorer,
+            right_dock_open: false,
+            right_dock_widget: RightDockWidget::Terminal,
+            right_dock_width: None,
+            agents_pane_height: None,
             active_workspace_root: String::new(),
             projects: Vec::new(),
             workspaces: BTreeMap::new(),

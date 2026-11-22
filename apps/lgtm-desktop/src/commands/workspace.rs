@@ -236,13 +236,14 @@ pub fn workspace_frontend_ready(state: State<'_, AppState>) {
     state.frontend_ready.store(true, Ordering::Relaxed);
 }
 
-/// Shuts down all language servers and exits the Tauri application.
+/// Shuts down all language servers, detaches active terminal streams, and exits the Tauri application.
 #[tauri::command]
 pub fn workspace_finish_quit<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, AppState>,
 ) {
     state.lsp.shutdown_all();
+    state.terminal.detach_all();
     #[cfg(any(test, feature = "e2e-bridge"))]
     if std::env::var_os("LGTM_IPC_BRIDGE").is_some() {
         return;

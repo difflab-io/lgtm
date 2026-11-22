@@ -15,6 +15,7 @@ lgtm-config = { path = "../../libs/lgtm-config" }
 lgtm-lsp = { path = "../../libs/lgtm-lsp" }
 lgtm-project = { path = "../../libs/lgtm-project" }
 lgtm-session = { path = "../../libs/lgtm-session" }
+lgtm-terminal = { path = "../../libs/lgtm-terminal" }
 lgtm-workspace = { path = "../../libs/lgtm-workspace" }
 rfd = "0.15"
 serde = { version = "1", features = ["derive"] }

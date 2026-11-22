@@ -220,6 +220,76 @@ pub struct LanguageConfig {
     pub default_tasks: BTreeMap<String, MiseTaskConfig>,
 }
 
+/// User-extensible fallback matcher registering CLI coding agents that do not emit OSC 7501 yet.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Type)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TerminalAgentMatcher {
+    /// Dynamic application identifier (e.g., `"claude"`, `"codex"`).
+    pub app_id: String,
+    /// Display label shown in `AgentsPane` and worktree notifications.
+    pub label: String,
+    /// Case-insensitive substrings matched against foreground process name or argv.
+    #[serde(default)]
+    pub command_patterns: Vec<String>,
+    /// Case-insensitive substrings matched against the terminal OSC title.
+    #[serde(default)]
+    pub title_patterns: Vec<String>,
+}
+
+/// Resolved terminal integration settings section (`terminal.*`).
+#[optfield(
+    pub TerminalSettingsPatch,
+    doc,
+    attrs = add(derive(Default)),
+    field_doc,
+    field_attrs = (serde(skip_serializing_if = "Option::is_none")),
+)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Type)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct TerminalSettings {
+    /// Fallback agent matchers for coding agents that do not emit OSC 7501 yet.
+    pub agent_matchers: Vec<TerminalAgentMatcher>,
+}
+
+impl Default for TerminalSettings {
+    fn default() -> Self {
+        Self {
+            agent_matchers: vec![
+                TerminalAgentMatcher {
+                    app_id: "claude".to_string(),
+                    label: "Claude".to_string(),
+                    command_patterns: vec!["claude".to_string(), "claude-code".to_string()],
+                    title_patterns: vec!["claude".to_string()],
+                },
+                TerminalAgentMatcher {
+                    app_id: "codex".to_string(),
+                    label: "Codex".to_string(),
+                    command_patterns: vec!["codex".to_string()],
+                    title_patterns: vec!["codex".to_string()],
+                },
+                TerminalAgentMatcher {
+                    app_id: "pi".to_string(),
+                    label: "Pi".to_string(),
+                    command_patterns: vec!["pi".to_string()],
+                    title_patterns: vec!["π -".to_string(), "pi -".to_string()],
+                },
+                TerminalAgentMatcher {
+                    app_id: "agy".to_string(),
+                    label: "Antigravity".to_string(),
+                    command_patterns: vec!["agy".to_string(), "antigravity".to_string()],
+                    title_patterns: vec!["agy".to_string(), "antigravity".to_string()],
+                },
+                TerminalAgentMatcher {
+                    app_id: "opencode".to_string(),
+                    label: "OpenCode".to_string(),
+                    command_patterns: vec!["opencode".to_string()],
+                    title_patterns: vec!["opencode".to_string()],
+                },
+            ],
+        }
+    }
+}
+
 /// Complete resolved LGTM configuration combining built-in presets, global `~/.lgtm/config.json`, and project `<workspace>/.lgtm/config.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Type)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
@@ -237,6 +307,8 @@ pub struct LgtmConfig {
     pub keybindings: KeybindingSettings,
     /// Global LSP lifecycle and timeout settings (`lsp.*`).
     pub lsp: LspSettings,
+    /// Integrated terminal and dynamic agent matcher settings (`terminal.*`).
+    pub terminal: TerminalSettings,
     /// Per-language LSP server and Mise toolchain definitions keyed by language ID (`languages.*`).
     pub languages: BTreeMap<String, LanguageConfig>,
 }
@@ -263,6 +335,9 @@ pub struct LgtmConfigPatch {
     /// Partial LSP lifecycle and timeout overrides (`lsp.*`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lsp: Option<LspSettingsPatch>,
+    /// Partial terminal settings overrides (`terminal.*`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<TerminalSettingsPatch>,
     /// Per-language LSP server and Mise toolchain overrides keyed by language ID (`languages.*`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub languages: Option<BTreeMap<String, LanguageConfig>>,
@@ -507,6 +582,7 @@ impl LgtmConfig {
             editor: EditorSettings::default(),
             keybindings: KeybindingSettings::default(),
             lsp: LspSettings::default(),
+            terminal: TerminalSettings::default(),
             languages,
         }
     }
@@ -564,6 +640,11 @@ impl LgtmConfig {
                 self.lsp.request_timeout_ms = timeout;
             }
         }
+        if let Some(terminal) = &patch.terminal
+            && let Some(matchers) = &terminal.agent_matchers
+        {
+            self.terminal.agent_matchers = matchers.clone();
+        }
         if let Some(languages) = &patch.languages {
             for (language_id, language_config) in languages {
                 self.languages
@@ -601,6 +682,7 @@ impl LgtmConfigPatch {
             }),
             keybindings: None,
             lsp: None,
+            terminal: None,
             languages: None,
         };
         let mut text =
@@ -632,6 +714,10 @@ impl LgtmConfigPatch {
                 .lsp
                 .as_ref()
                 .is_none_or(|v| v == &LspSettingsPatch::default())
+            && self
+                .terminal
+                .as_ref()
+                .is_none_or(|v| v == &TerminalSettingsPatch::default())
             && self.languages.as_ref().is_none_or(BTreeMap::is_empty)
     }
 
@@ -781,6 +867,11 @@ impl LgtmConfigPatch {
                     .and_then(|v| serde_json::from_value::<u64>(v.clone()).ok()),
             });
 
+        let terminal = root
+            .get("terminal")
+            .and_then(|v| serde_json::from_value::<TerminalSettingsPatch>(v.clone()).ok())
+            .filter(|v| v != &TerminalSettingsPatch::default());
+
         let languages = root
             .get("languages")
             .and_then(serde_json::Value::as_object)
@@ -802,6 +893,7 @@ impl LgtmConfigPatch {
             editor,
             keybindings,
             lsp,
+            terminal,
             languages,
         }
     }

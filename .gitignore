@@ -99,3 +99,6 @@ target/
 /e2e/outputs/
 /test-outputs/
 **/test-outputs/
+
+# Staged Tauri sidecar binaries (fetched by apps/lgtm-desktop/mise.toml)
+/apps/lgtm-desktop/binaries/hc-*

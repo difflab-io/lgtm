@@ -9,6 +9,10 @@ use lgtm_config::ConfigService;
 use lgtm_lsp::LspEvent;
 use lgtm_project::ProjectService;
 use lgtm_session::SessionService;
+use lgtm_terminal::{
+    AgentMatcherConfig, LgtmTerminalError, TerminalExitEvent, TerminalHostEvent, TerminalService,
+    TerminalStreamEvent,
+};
 use lgtm_workspace::WorkspaceService;
 use tauri::Manager;
 
@@ -32,6 +36,8 @@ pub struct AppState {
     pub config: ConfigService,
     /// Shared desktop LSP orchestration service.
     pub lsp: Arc<LspService>,
+    /// Shared persistent `herdr-core` terminal session service.
+    pub terminal: TerminalService,
     /// In-process backend event bus and webview notification publisher.
     pub events: AppEvents,
     /// Tracks whether the frontend has registered its quit lifecycle listener.
@@ -128,6 +134,17 @@ impl AppState {
             other => lgtm_workspace::error("session", other.to_string()),
         }
     }
+
+    /// Maps a [`lgtm_terminal::LgtmTerminalError`] into a stable transport [`lgtm_workspace::WorkspaceError`].
+    pub fn map_terminal_error(err: LgtmTerminalError) -> lgtm_workspace::WorkspaceError {
+        match err {
+            LgtmTerminalError::NotFound(msg) => lgtm_workspace::error("notFound", msg),
+            LgtmTerminalError::InvalidWorkspace(msg) => {
+                lgtm_workspace::error("invalidWorkspace", msg)
+            }
+            other => lgtm_workspace::error("terminal", other.to_string()),
+        }
+    }
 }
 
 /// Construct the app; an explicit home is used by the isolated desktop smoke harness.
@@ -178,11 +195,39 @@ pub(crate) fn init_app_state<R: tauri::Runtime>(
         LspEvent::Status(payload) => lsp_events.dispatch(AppEvent::LspStatus(payload)),
         LspEvent::Diagnostics(payload) => lsp_events.dispatch(AppEvent::LspDiagnostics(payload)),
     }));
+    let initial_matchers = config
+        .get_config_snapshot(None)
+        .ok()
+        .map(|snap| map_config_matchers(&snap.effective.terminal.agent_matchers));
+    let terminal_events = events.clone();
+    let hc_session_override = std::env::var("HC_SESSION")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+    let terminal = TerminalService::new(
+        None,
+        hc_session_override,
+        initial_matchers,
+        Some(Arc::new(move |event| match event {
+            TerminalHostEvent::SessionUpdated(session) => {
+                terminal_events.dispatch(AppEvent::TerminalSessionUpdated(session));
+            }
+            TerminalHostEvent::Exited(exit) => {
+                terminal_events.dispatch(AppEvent::TerminalExited(exit));
+            }
+        })),
+    );
     let handler_events = events.clone();
     let handler_lsp = lsp.clone();
     let handler_config = config.clone();
+    let handler_terminal = terminal.clone();
     events.set_handler(move |event| {
-        handle_app_event(&handler_events, &handler_lsp, &handler_config, event);
+        handle_app_event(
+            &handler_events,
+            &handler_lsp,
+            &handler_config,
+            &handler_terminal,
+            event,
+        );
     });
     let workspace_path = ConfigService::resolve_desktop_workspace();
     app_handle.manage(AppState {
@@ -191,13 +236,32 @@ pub(crate) fn init_app_state<R: tauri::Runtime>(
         session,
         config,
         lsp,
+        terminal,
         events,
         frontend_ready: Arc::new(AtomicBool::new(false)),
     });
     Ok(())
 }
 
-fn handle_app_event(events: &AppEvents, lsp: &LspService, config: &ConfigService, event: AppEvent) {
+fn map_config_matchers(matchers: &[lgtm_config::TerminalAgentMatcher]) -> Vec<AgentMatcherConfig> {
+    matchers
+        .iter()
+        .map(|m| AgentMatcherConfig {
+            app_id: m.app_id.clone(),
+            label: m.label.clone(),
+            command_patterns: m.command_patterns.clone(),
+            title_patterns: m.title_patterns.clone(),
+        })
+        .collect()
+}
+
+fn handle_app_event(
+    events: &AppEvents,
+    lsp: &LspService,
+    config: &ConfigService,
+    terminal: &TerminalService,
+    event: AppEvent,
+) {
     match event {
         AppEvent::WorkspaceOpened {
             previous_root,
@@ -217,6 +281,9 @@ fn handle_app_event(events: &AppEvents, lsp: &LspService, config: &ConfigService
             let _ = lsp.did_save(&root, &path, &content);
             if is_config && let Ok(snapshot) = config.get_config_snapshot(Some(&root)) {
                 lsp.reload_workspace_config(&root);
+                terminal.set_agent_matchers(map_config_matchers(
+                    &snapshot.effective.terminal.agent_matchers,
+                ));
                 events.emit_to_webview("config-updated", &snapshot);
             }
         }
@@ -231,6 +298,12 @@ fn handle_app_event(events: &AppEvents, lsp: &LspService, config: &ConfigService
         }
         AppEvent::SessionUpdated(payload) => {
             events.emit_to_webview("session-updated", &payload);
+        }
+        AppEvent::TerminalSessionUpdated(payload) => {
+            events.emit_to_webview("terminal-session-updated", &payload);
+        }
+        AppEvent::TerminalExited(payload) => {
+            events.emit_to_webview("terminal-exited", &payload);
         }
         AppEvent::QuitRequested => {
             events.emit_to_webview("workspace-quit-requested", &());
@@ -271,6 +344,15 @@ pub fn commands<R: tauri::Runtime>(invoke: tauri::ipc::Invoke<R>) -> bool {
         project_remove_worktree,
         project_remove,
         project_checkout_branch,
+        terminal_list,
+        terminal_create,
+        terminal_attach,
+        terminal_attach_events,
+        terminal_detach,
+        terminal_mark_seen,
+        terminal_write,
+        terminal_resize,
+        terminal_close,
     ];
     handler(invoke)
 }
@@ -282,6 +364,9 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         .disable_serde_phases()
         .dangerously_cast_bigints_to_number()
         .typ::<FileOpenedEvent>()
+        .typ::<TerminalStreamEvent>()
+        .typ::<TerminalExitEvent>()
+        .typ::<TerminalStreamPush>()
         .commands(tauri_specta::collect_commands![
             workspace_open,
             workspace_pick_folder,
@@ -312,6 +397,14 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             project_remove_worktree,
             project_remove,
             project_checkout_branch,
+            terminal_list,
+            terminal_create,
+            terminal_attach_events,
+            terminal_detach,
+            terminal_mark_seen,
+            terminal_write,
+            terminal_resize,
+            terminal_close,
         ])
 }
 

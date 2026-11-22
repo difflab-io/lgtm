@@ -5,6 +5,7 @@
   import { GitBranch } from 'lucide-svelte'
   import { resolveColorHex, resolveIconComponent } from '../constants'
   import { useService } from '../services/context'
+  import { terminalStatusDotClass } from '../services/terminalService.svelte'
   import BranchNewDialog from './BranchNewDialog.svelte'
   import ProjectEditDialog from './ProjectEditDialog.svelte'
   import WorktreeNewDialog from './WorktreeNewDialog.svelte'
@@ -13,6 +14,7 @@
   // State ---------------------------------------------------------------------
   const project = useService('project')
   const workspace = useService('workspace')
+  const terminal = useService('terminal')
 
   // Lifecycle -----------------------------------------------------------------
   useKeymap(
@@ -99,6 +101,18 @@
         </span>
       {:else}
         <GitBranch size={13} strokeWidth={1.5} />
+      {/if}
+    {/snippet}
+    {#snippet trailing(node)}
+      {@const status = terminal.getWorkspaceStatus(node.value)}
+      {#if status}
+        <span
+          data-testid="workspace-status-dot"
+          data-workspace-path={node.value}
+          data-status={status}
+          class={['inline-block size-2 rounded-full', terminalStatusDotClass(status)].join(' ')}
+          title={`Terminal status: ${status}`}
+        ></span>
       {/if}
     {/snippet}
   </TreeView>

@@ -10,4 +10,6 @@ pub use error::Result;
 pub use models::mise::GeneratedMiseFile;
 pub use models::mise::MiseTaskEntry;
 pub use models::mise::MiseTaskSummary;
+pub use services::hc::HcBinaryService;
+pub use services::hc::LGTM_HC_BIN_ENV;
 pub use services::mise::MiseService;

@@ -234,6 +234,111 @@
       ],
       "description": "A default Mise task definition for a language preset, represented as either a shell string or a detailed record."
     },
+    "TerminalAgentMatcher": {
+      "additionalProperties": false,
+      "description": "User-extensible fallback matcher registering CLI coding agents that do not emit OSC 7501 yet.",
+      "properties": {
+        "appId": {
+          "description": "Dynamic application identifier (e.g., `\"claude\"`, `\"codex\"`).",
+          "type": "string"
+        },
+        "commandPatterns": {
+          "default": [],
+          "description": "Case-insensitive substrings matched against foreground process name or argv.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "label": {
+          "description": "Display label shown in `AgentsPane` and worktree notifications.",
+          "type": "string"
+        },
+        "titlePatterns": {
+          "default": [],
+          "description": "Case-insensitive substrings matched against the terminal OSC title.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "appId",
+        "label"
+      ],
+      "type": "object"
+    },
+    "TerminalSettings": {
+      "additionalProperties": false,
+      "description": "Resolved terminal integration settings section (`terminal.*`).",
+      "properties": {
+        "agentMatchers": {
+          "default": [
+            {
+              "appId": "claude",
+              "commandPatterns": [
+                "claude",
+                "claude-code"
+              ],
+              "label": "Claude",
+              "titlePatterns": [
+                "claude"
+              ]
+            },
+            {
+              "appId": "codex",
+              "commandPatterns": [
+                "codex"
+              ],
+              "label": "Codex",
+              "titlePatterns": [
+                "codex"
+              ]
+            },
+            {
+              "appId": "pi",
+              "commandPatterns": [
+                "pi"
+              ],
+              "label": "Pi",
+              "titlePatterns": [
+                "π -",
+                "pi -"
+              ]
+            },
+            {
+              "appId": "agy",
+              "commandPatterns": [
+                "agy",
+                "antigravity"
+              ],
+              "label": "Antigravity",
+              "titlePatterns": [
+                "agy",
+                "antigravity"
+              ]
+            },
+            {
+              "appId": "opencode",
+              "commandPatterns": [
+                "opencode"
+              ],
+              "label": "OpenCode",
+              "titlePatterns": [
+                "opencode"
+              ]
+            }
+          ],
+          "description": "Fallback agent matchers for coding agents that do not emit OSC 7501 yet.",
+          "items": {
+            "$ref": "#/$defs/TerminalAgentMatcher"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "ThemeMode": {
       "description": "Supported color theme preferences persisted under `appearance.theme`.",
       "oneOf": [
@@ -499,6 +604,68 @@
         "requestTimeoutMs": 15000
       },
       "description": "Global LSP lifecycle and timeout settings (`lsp.*`)."
+    },
+    "terminal": {
+      "$ref": "#/$defs/TerminalSettings",
+      "default": {
+        "agentMatchers": [
+          {
+            "appId": "claude",
+            "commandPatterns": [
+              "claude",
+              "claude-code"
+            ],
+            "label": "Claude",
+            "titlePatterns": [
+              "claude"
+            ]
+          },
+          {
+            "appId": "codex",
+            "commandPatterns": [
+              "codex"
+            ],
+            "label": "Codex",
+            "titlePatterns": [
+              "codex"
+            ]
+          },
+          {
+            "appId": "pi",
+            "commandPatterns": [
+              "pi"
+            ],
+            "label": "Pi",
+            "titlePatterns": [
+              "π -",
+              "pi -"
+            ]
+          },
+          {
+            "appId": "agy",
+            "commandPatterns": [
+              "agy",
+              "antigravity"
+            ],
+            "label": "Antigravity",
+            "titlePatterns": [
+              "agy",
+              "antigravity"
+            ]
+          },
+          {
+            "appId": "opencode",
+            "commandPatterns": [
+              "opencode"
+            ],
+            "label": "OpenCode",
+            "titlePatterns": [
+              "opencode"
+            ]
+          }
+        ]
+      },
+      "description": "Integrated terminal and dynamic agent matcher settings (`terminal.*`)."
     },
     "workspace": {
       "$ref": "#/$defs/WorkspaceSettings",

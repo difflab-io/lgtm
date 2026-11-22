@@ -65,6 +65,22 @@ export const commands = {
 	projectRemove: (projectId: string) => __TAURI_INVOKE<Session>("project_remove", { projectId }),
 	/**  Switches `workspace_root` to `branch` (or creates `-b <branch>` when `create` is `true`) and returns the refreshed session. */
 	projectCheckoutBranch: (workspaceRoot: string, branch: string, create: boolean | null) => __TAURI_INVOKE<Session>("project_checkout_branch", { workspaceRoot, branch, create }),
+	/**  Lists live `herdr-core` terminal sessions, optionally filtered to `workspace_root`. */
+	terminalList: (workspaceRoot: string | null) => __TAURI_INVOKE<TerminalSession[]>("terminal_list", { workspaceRoot }),
+	/**  Spawns a new persistent shell session inside `workspace_root`. */
+	terminalCreate: (workspaceRoot: string, cols: number, rows: number) => __TAURI_INVOKE<TerminalSession>("terminal_create", { workspaceRoot, cols, rows }),
+	/**  Attaches a live push stream to `session_id` forwarded via `"terminal-stream"` webview events (used by headless E2E IPC bridge). */
+	terminalAttachEvents: (sessionId: string, cols: number, rows: number) => __TAURI_INVOKE<TerminalSession>("terminal_attach_events", { sessionId, cols, rows }),
+	/**  Detaches the active UI stream from `session_id` while leaving the `herdr-core` session running in the background. */
+	terminalDetach: (sessionId: string) => __TAURI_INVOKE<null>("terminal_detach", { sessionId }),
+	/**  Marks any unseen `Done` completion on `session_id` as seen, clearing its blue status dot back to green. */
+	terminalMarkSeen: (sessionId: string) => __TAURI_INVOKE<TerminalSession | null>("terminal_mark_seen", { sessionId }),
+	/**  Writes raw keyboard or paste bytes to the currently attached `session_id`. */
+	terminalWrite: (sessionId: string, data: number[]) => __TAURI_INVOKE<null>("terminal_write", { sessionId, data }),
+	/**  Resizes the currently attached `session_id`. */
+	terminalResize: (sessionId: string, cols: number, rows: number) => __TAURI_INVOKE<null>("terminal_resize", { sessionId, cols, rows }),
+	/**  Closes and terminates `session_id` inside `herdr-core`. */
+	terminalClose: (sessionId: string) => __TAURI_INVOKE<null>("terminal_close", { sessionId }),
 };
 
 /* Types */
@@ -93,6 +109,20 @@ export type ConfigScope =
 "global" | 
 /**  Workspace-specific configuration stored in `<workspace>/.lgtm/config.json`. */
 "project";
+
+/**  Dynamically detected coding agent running inside a terminal session. */
+export type DetectedAgent = {
+	/**  Dynamic machine-readable application ID (from OSC 7501 `app=` or config matcher). */
+	appId: string,
+	/**  Human-friendly display label shown in `AgentsPane` and notifications. */
+	label: string,
+	/**  Optional status message reported by the agent (e.g., OSC 7501 `msg=`). */
+	message?: string | null,
+	/**  Current lifecycle status of the agent. */
+	status: TerminalAgentStatus,
+	/**  Whether a `Done` transition has not yet been viewed by the user. */
+	unseenDone: boolean,
+};
 
 /**  Resolved code editor settings section (`editor.*`). */
 export type EditorSettings = {
@@ -197,6 +227,8 @@ export type LgtmConfig = {
 	keybindings?: KeybindingSettings,
 	/**  Global LSP lifecycle and timeout settings (`lsp.*`). */
 	lsp?: LspSettings,
+	/**  Integrated terminal and dynamic agent matcher settings (`terminal.*`). */
+	terminal?: TerminalSettings,
 	/**  Per-language LSP server and Mise toolchain definitions keyed by language ID (`languages.*`). */
 	languages?: { [key in string]: LanguageConfig },
 };
@@ -215,6 +247,8 @@ export type LgtmConfigPatch = {
 	keybindings?: KeybindingSettingsPatch | null,
 	/**  Partial LSP lifecycle and timeout overrides (`lsp.*`). */
 	lsp?: LspSettingsPatch | null,
+	/**  Partial terminal settings overrides (`terminal.*`). */
+	terminal?: TerminalSettingsPatch | null,
 	/**  Per-language LSP server and Mise toolchain overrides keyed by language ID (`languages.*`). */
 	languages?: { [key in string]: LanguageConfig } | null,
 };
@@ -473,12 +507,25 @@ export type ResolvedConfigSnapshot = {
 	projectPath: string,
 };
 
+/**  Extensible right-dock widget mode persisted at the session level. */
+export type RightDockWidget = 
+/**  Multi-tab integrated terminal widget (`TerminalPane.svelte`). */
+"terminal";
+
 /**  Top-level persisted session snapshot stored at `~/.lgtm/sessions/<id>.json`. */
 export type Session = {
 	/**  Session identifier (`"default"` by default). */
 	id: string,
 	/**  Active left-sidebar widget (`Explorer` or `Projects`). */
 	sidebarWidget?: SidebarWidget,
+	/**  Whether the right dock is open across workspaces and on app launch. */
+	rightDockOpen?: boolean,
+	/**  Active widget hosted inside `RightDock` (`Terminal` by default). */
+	rightDockWidget?: RightDockWidget,
+	/**  Persisted pixel width of `RightDock`. */
+	rightDockWidth?: number | null,
+	/**  Persisted pixel height of `AgentsPane` in the bottom section of `#projects-dock-pane`. */
+	agentsPaneHeight?: number | null,
 	/**  Canonical path of the currently active workspace checkout. */
 	activeWorkspaceRoot: string,
 	/**  Ordered list of open projects and their linked worktrees. */
@@ -504,6 +551,96 @@ export type TabCandidate = {
 	edited: boolean,
 	/**  Whether the tab was the active focused tab when the workspace was saved or switched. */
 	lastOpened: boolean,
+};
+
+/**  User-extensible fallback matcher registering CLI coding agents that do not emit OSC 7501 yet. */
+export type TerminalAgentMatcher = {
+	/**  Dynamic application identifier (e.g., `"claude"`, `"codex"`). */
+	appId: string,
+	/**  Display label shown in `AgentsPane` and worktree notifications. */
+	label: string,
+	/**  Case-insensitive substrings matched against foreground process name or argv. */
+	commandPatterns?: string[],
+	/**  Case-insensitive substrings matched against the terminal OSC title. */
+	titlePatterns?: string[],
+};
+
+/**  Herdr-style lifecycle status for a terminal session or detected coding agent. */
+export type TerminalAgentStatus = 
+/**  Running in the background with no action needed (green dot). */
+"idle" | 
+/**  Actively executing a turn or command (yellow dot). */
+"working" | 
+/**  Waiting on user approval or interactive input (orange/red dot). */
+"blocked" | 
+/**  Completed and not yet viewed by the user (blue dot). */
+"done";
+
+/**  Host-level event emitted when a background or foreground terminal process exits. */
+export type TerminalExitEvent = {
+	/**  Stable `herdr-core` terminal address. */
+	sessionId: string,
+	/**  Canonical workspace root associated with the exited terminal. */
+	workspaceRoot: string,
+	/**  Process exit code if available. */
+	exitCode: number | null,
+};
+
+/**  Snapshot of a persistent `herdr-core` terminal session owned by or attached to a workspace. */
+export type TerminalSession = {
+	/**  Stable `herdr-core` terminal address (e.g., `"t1"`). */
+	id: string,
+	/**  Canonical workspace checkout directory associated with this terminal. */
+	workspaceRoot: string,
+	/**  Display title for the terminal tab (shell name, OSC title, or agent label). */
+	title: string,
+	/**  Dynamically detected coding agent occupying this terminal, if any. */
+	agent?: DetectedAgent | null,
+	/**  Current lifecycle status dot for the terminal tab and worktree aggregation. */
+	status: TerminalAgentStatus,
+	/**  Monotonic counter incremented on every status or agent change for priority sorting. */
+	stateChangeSeq: number,
+	/**  Whether the underlying `herdr-core` terminal process is still alive. */
+	alive: boolean,
+};
+
+/**  Resolved terminal integration settings section (`terminal.*`). */
+export type TerminalSettings = {
+	/**  Fallback agent matchers for coding agents that do not emit OSC 7501 yet. */
+	agentMatchers?: TerminalAgentMatcher[],
+};
+
+/**  Resolved terminal integration settings section (`terminal.*`). */
+export type TerminalSettingsPatch = {
+	/**  Fallback agent matchers for coding agents that do not emit OSC 7501 yet. */
+	agentMatchers?: TerminalAgentMatcher[] | null,
+};
+
+/**  Push event emitted over an attached terminal stream (Tauri IPC `Channel`). */
+export type TerminalStreamEvent = 
+/**  Bounded scrollback replay chunk sent immediately after attaching (`<= 256 KB`). */
+{ kind: "replay"; 
+/**  Raw terminal bytes ready for `@wterm/ghostty` ingestion. */
+data: number[] } | 
+/**  Coalesced live output chunk streamed from `herdr-core`. */
+{ kind: "output"; 
+/**  Raw terminal bytes ready for `@wterm/ghostty` ingestion. */
+data: number[] } | 
+/**  Updated session metadata (title, detected agent, or status dot change). */
+{ kind: "sessionUpdated"; 
+/**  Latest terminal session snapshot. */
+session: TerminalSession } | 
+/**  Notification that the underlying terminal process exited. */
+{ kind: "exited"; 
+/**  Process exit code if available. */
+exit_code: number | null };
+
+/**  Envelope emitted on `"terminal-stream"` when attaching without a Tauri `Channel` (such as headless E2E IPC bridge). */
+export type TerminalStreamPush = {
+	/**  Target `herdr-core` terminal session ID. */
+	sessionId: string,
+	/**  Streamed replay, output, session update, or exit event. */
+	event: TerminalStreamEvent,
 };
 
 /**  Supported color theme preferences persisted under `appearance.theme`. */
@@ -579,6 +716,14 @@ export type WorkspaceStatePatch = {
 	expandedDirs: string[],
 	/**  Optional updated sidebar widget selection (`Explorer` or `Projects`). */
 	sidebarWidget: SidebarWidget | null,
+	/**  Optional updated right-dock open state persisted at the session level. */
+	rightDockOpen?: boolean | null,
+	/**  Optional updated right-dock active widget persisted at the session level. */
+	rightDockWidget?: RightDockWidget | null,
+	/**  Optional updated right-dock pixel width persisted at the session level. */
+	rightDockWidth?: number | null,
+	/**  Optional updated vertical split height for `AgentsPane` inside `#projects-dock-pane`. */
+	agentsPaneHeight?: number | null,
 };
 
 /**  Managed Git worktree checkout grouped underneath a parent [`crate::Project`]. */

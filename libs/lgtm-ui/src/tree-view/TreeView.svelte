@@ -33,6 +33,7 @@
     loadChildren,
     label = 'Files',
     icon,
+    trailing,
     getLabel = (node) => node.label,
     class: className = '',
   }: TreeViewProps = $props()
@@ -609,6 +610,7 @@
           {errors}
           {renameErrors}
           {icon}
+          {trailing}
           {selectableBranches}
           onedit={(value) => {
             delete renameErrors[value]
