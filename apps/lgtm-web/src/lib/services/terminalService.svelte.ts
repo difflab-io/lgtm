@@ -323,7 +323,7 @@ export class TerminalService {
     this.activeSurfaceHandle?.fit()
   }
 
-  /** Jumps to `sessionId`: switches workspace if needed, opens `RightDock`, activates its tab, marks seen, and focuses the surface. */
+  /** Jumps to `sessionId`: switches workspace first if needed, opens `RightDock`, activates its tab, marks seen, and focuses the surface. */
   async jumpToSession(sessionId: string): Promise<void> {
     const target = this.sessions.find((s) => s.id === sessionId)
     if (!target) return
@@ -331,10 +331,10 @@ export class TerminalService {
       ...this.activeTabByWorkspace,
       [target.workspaceRoot]: target.id,
     }
-    this.peers.openRightDock()
     if (this.peers.getRoot() !== target.workspaceRoot) {
       await this.peers.selectWorkspace(target.workspaceRoot)
     }
+    this.peers.openRightDock()
     await this.markSeen(target.id)
     requestAnimationFrame(() => {
       this.focusActiveSurface()

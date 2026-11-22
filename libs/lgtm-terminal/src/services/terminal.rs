@@ -46,6 +46,7 @@ pub enum TerminalHostEvent {
 struct SessionTracking {
     session: TerminalSession,
     last_term: HcTerminal,
+    observed_osc_status: Option<HcStatus>,
     idle_guard: PendingIdleConfirmation,
     observer_channel: Option<u32>,
 }
@@ -498,11 +499,12 @@ impl TerminalService {
                         let Ok(mut guard) = inner.lock() else {
                             return;
                         };
-                        let Some(mut term) = guard.tracked.get(&sid).map(|t| t.last_term.clone())
-                        else {
+                        let Some(tracking) = guard.tracked.get_mut(&sid) else {
                             return;
                         };
+                        let mut term = tracking.last_term.clone();
                         if latest.clear {
+                            tracking.observed_osc_status = None;
                             term.status = None;
                         } else {
                             let state_str = match latest.status {
@@ -511,15 +513,21 @@ impl TerminalService {
                                 TerminalAgentStatus::Blocked => "blocked",
                                 TerminalAgentStatus::Done => "done",
                             };
-                            let prev_app = term.status.as_ref().and_then(|s| s.app.clone());
-                            term.status = Some(HcStatus {
+                            let prev_app = tracking
+                                .observed_osc_status
+                                .as_ref()
+                                .or(term.status.as_ref())
+                                .and_then(|s| s.app.clone());
+                            let next_status = HcStatus {
                                 state: state_str.to_string(),
                                 app: latest.app.or(prev_app),
                                 msg: latest.msg,
                                 title: latest.title,
                                 kind: None,
                                 progress: None,
-                            });
+                            };
+                            tracking.observed_osc_status = Some(next_status.clone());
+                            term.status = Some(next_status);
                         }
                         let session = Self::reconcile_terminal(&mut guard, &term);
                         guard
@@ -640,7 +648,7 @@ impl TerminalService {
             .unwrap_or_else(|| term.cwd.clone());
         let alive = term.state != "finished";
 
-        let (prev_status, prev_unseen_done, prev_seq) = inner
+        let (prev_status, prev_unseen_done, prev_seq, observed_osc) = inner
             .tracked
             .get(&term.address)
             .map(|t| {
@@ -648,12 +656,18 @@ impl TerminalService {
                     t.session.status,
                     t.session.agent.as_ref().is_some_and(|a| a.unseen_done),
                     t.session.state_change_seq,
+                    t.observed_osc_status.clone(),
                 )
             })
-            .unwrap_or((TerminalAgentStatus::Idle, false, 0));
+            .unwrap_or((TerminalAgentStatus::Idle, false, 0, None));
+
+        let mut effective_term = term.clone();
+        if effective_term.status.is_none() {
+            effective_term.status = observed_osc.clone();
+        }
 
         let (mut agent, mut status, explicit_protocol) =
-            inner.detector.evaluate(term, prev_unseen_done);
+            inner.detector.evaluate(&effective_term, prev_unseen_done);
 
         let is_active = inner
             .active_attachment
@@ -668,17 +682,18 @@ impl TerminalService {
                 session: TerminalSession {
                     id: term.address.clone(),
                     workspace_root: workspace_root.clone(),
-                    title: Self::resolve_title(term, None),
+                    title: Self::resolve_title(&effective_term, None),
                     agent: None,
                     status: TerminalAgentStatus::Idle,
                     state_change_seq: 0,
                     alive,
                 },
-                last_term: term.clone(),
+                last_term: effective_term.clone(),
+                observed_osc_status: observed_osc,
                 idle_guard: PendingIdleConfirmation::default(),
                 observer_channel: None,
             });
-        entry.last_term = term.clone();
+        entry.last_term = effective_term;
 
         if entry
             .idle_guard

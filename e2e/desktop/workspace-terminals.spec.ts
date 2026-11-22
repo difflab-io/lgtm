@@ -61,9 +61,31 @@ test.describe('Given a workspace with integrated terminals', () => {
     page.on('pageerror', (err) => consoleErrors.push(err.message))
     await openRightDock(page)
 
-    // Act
+    // Act: render visible ANSI output in Tab 1, then open Tab 2 and resize dock
+    const firstSessionId = await page
+      .getByTestId('terminal-surface')
+      .getAttribute('data-terminal-session-id')
+    expect(firstSessionId).toBeTruthy()
+    await writeToTerminal(
+      page,
+      firstSessionId!,
+      "printf '\\033[1;32mLGTM Terminal Ready\\033[0m — multi-tab shell\\n'\n",
+    )
+    await page.waitForTimeout(300)
+
     await page.getByTestId('terminal-new-button').click()
     await expect(page.getByTestId('terminal-tab')).toHaveCount(2, { timeout: 15000 })
+    const secondSessionId = await page
+      .getByTestId('terminal-surface')
+      .getAttribute('data-terminal-session-id')
+    if (secondSessionId) {
+      await writeToTerminal(
+        page,
+        secondSessionId,
+        "printf '\\033[1;36mTab 2 active\\033[0m — persistent herdr-core session\\n'\n",
+      )
+      await page.waitForTimeout(300)
+    }
 
     const dockPane = page.getByTestId('right-dock-pane')
     const initialBox = await dockPane.boundingBox()
@@ -291,5 +313,116 @@ test.describe('Given a workspace with integrated terminals', () => {
       body: await page.screenshot(),
       contentType: 'image/png',
     })
+  })
+
+  test('should navigate to the exact project and terminal tab when clicking agents across multiple projects with multiple terminals', async ({
+    page,
+    workspace,
+  }, testInfo) => {
+    // Arrange: two projects, each with 2 terminal tabs (Tab 1 plain shell, Tab 2 running a named agent)
+    const repoBase = await workspace.createExternalDir()
+    const alphaDir = await createGitRepo(join(repoBase, 'alpha-proj'), {
+      'alpha.txt': 'Alpha project file\n',
+    })
+    const betaDir = await createGitRepo(join(repoBase, 'beta-proj'), {
+      'beta.txt': 'Beta project file\n',
+    })
+
+    await page.getByRole('button', { name: 'Projects view', exact: true }).click()
+
+    workspace.pickedFolder = alphaDir
+    await page.getByRole('button', { name: 'Add project', exact: true }).click()
+    await expect(page.locator(`[data-tree-node-value=${JSON.stringify(alphaDir)}]`)).toBeVisible({
+      timeout: 15000,
+    })
+    await openRightDock(page)
+    await page.getByTestId('terminal-new-button').click()
+    await expect(page.getByTestId('terminal-tab')).toHaveCount(2, { timeout: 15000 })
+    const alphaAgentSessionId = await page
+      .getByTestId('terminal-surface')
+      .getAttribute('data-terminal-session-id')
+    expect(alphaAgentSessionId).toBeTruthy()
+    await writeToTerminal(
+      page,
+      alphaAgentSessionId!,
+      "printf '\\033]7501;app=alpha-agent;state=working;msg=Building alpha\\007\\033[1;33m[alpha-agent]\\033[0m building...\\n'\n",
+    )
+    const alphaAgentRow = page.locator(
+      `[data-testid="agent-row"][data-agent-session-id=${JSON.stringify(alphaAgentSessionId)}]`,
+    )
+    await expect(alphaAgentRow).toBeVisible({ timeout: 15000 })
+
+    workspace.pickedFolder = betaDir
+    await page.getByRole('button', { name: 'Add project', exact: true }).click()
+    await expect(page.locator(`[data-tree-node-value=${JSON.stringify(betaDir)}]`)).toBeVisible({
+      timeout: 15000,
+    })
+    await expect(page.getByTestId('terminal-tab')).toHaveCount(1, { timeout: 15000 })
+    const betaShellSessionId = await page
+      .getByTestId('terminal-surface')
+      .getAttribute('data-terminal-session-id')
+    await page.getByTestId('terminal-new-button').click()
+    await expect(page.getByTestId('terminal-tab')).toHaveCount(2, { timeout: 15000 })
+    await expect
+      .poll(() => page.getByTestId('terminal-surface').getAttribute('data-terminal-session-id'))
+      .not.toBe(betaShellSessionId)
+    const betaAgentSessionId = await page
+      .getByTestId('terminal-surface')
+      .getAttribute('data-terminal-session-id')
+    expect(betaAgentSessionId).toBeTruthy()
+    expect(betaAgentSessionId).not.toBe(betaShellSessionId)
+    await writeToTerminal(
+      page,
+      betaAgentSessionId!,
+      "printf '\\033]7501;app=beta-agent;state=working;msg=Testing beta\\007\\033[1;35m[beta-agent]\\033[0m testing...\\n'\n",
+    )
+    const betaAgentRow = page.locator(
+      `[data-testid="agent-row"][data-agent-session-id=${JSON.stringify(betaAgentSessionId)}]`,
+    )
+    await expect(betaAgentRow).toBeVisible({ timeout: 15000 })
+
+    // Select Tab 1 (plain shell) in betaDir and collapse RightDock
+    await page
+      .locator(
+        `[data-testid="terminal-tab"][data-terminal-tab-id=${JSON.stringify(betaShellSessionId)}]`,
+      )
+      .click()
+    await page.getByTestId('right-dock-toggle-terminal').click()
+    await expect(page.getByTestId('terminal-pane')).toHaveCount(0)
+
+    // Act 1: click alpha-agent in AgentsPane (in the Projects sidebar)
+    await alphaAgentRow.click()
+
+    // Assert 1: switches to alphaDir, opens RightDock, selects Tab 2 (alphaAgentSessionId)
+    await expect(
+      page.locator(`[data-tree-node-value=${JSON.stringify(alphaDir)}]`),
+    ).toHaveAttribute('data-selected', '', { timeout: 15000 })
+    await expect(page.getByTestId('terminal-pane')).toBeVisible({ timeout: 15000 })
+    await expect(page.getByTestId('terminal-tab')).toHaveCount(2, { timeout: 15000 })
+    await expect(page.getByTestId('terminal-surface')).toHaveAttribute(
+      'data-terminal-session-id',
+      alphaAgentSessionId!,
+      { timeout: 15000 },
+    )
+    await testInfo.attach('06-multi-project-agent-jump.png', {
+      body: await page.screenshot(),
+      contentType: 'image/png',
+    })
+
+    // Act 2: click beta-agent in AgentsPane
+    await betaAgentRow.click()
+
+    // Assert 2: switches to betaDir and selects Tab 2 (betaAgentSessionId, not Tab 1)
+    await expect(page.locator(`[data-tree-node-value=${JSON.stringify(betaDir)}]`)).toHaveAttribute(
+      'data-selected',
+      '',
+      { timeout: 15000 },
+    )
+    await expect(page.getByTestId('terminal-tab')).toHaveCount(2, { timeout: 15000 })
+    await expect(page.getByTestId('terminal-surface')).toHaveAttribute(
+      'data-terminal-session-id',
+      betaAgentSessionId!,
+      { timeout: 15000 },
+    )
   })
 })
